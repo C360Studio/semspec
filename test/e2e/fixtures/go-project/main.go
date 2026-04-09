@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-func healthHandler(w http.ResponseWriter, _ *http.Request) {
+func healthCheckHandler(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "OK")
 }
@@ -25,7 +25,7 @@ func main() {
 		fmt.Fprint(w, "Hello, World!")
 	})
 
-	mux.HandleFunc("/health", healthHandler)
+	mux.HandleFunc("/health", healthCheckHandler)
 
 	log.Println("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

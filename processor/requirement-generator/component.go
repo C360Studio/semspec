@@ -553,6 +553,7 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for requirement-generation)")
 
 	replayDone := false
+	processedLoops := make(map[string]bool)
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
@@ -591,6 +592,16 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 				"slug", slug, "loop_id", loop.ID)
 			continue
 		}
+
+		// Dedup: skip loops we have already processed in this session.
+		// Prevents double-processing if the KV entry is updated again
+		// (e.g., completion metadata) or on watcher reconnection.
+		if processedLoops[loop.ID] {
+			c.logger.Debug("Skipping already-processed loop",
+				"loop_id", loop.ID, "slug", slug)
+			continue
+		}
+		processedLoops[loop.ID] = true
 
 		dp := c.resolveDispatchContext(ctx, loop.TaskID, slug)
 		if dp == nil {
@@ -659,6 +670,21 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	// Successful parse — clear any retry state for this slug.
 	c.retryCount.Delete(slug)
 
+	// Check if the plan has moved past generating_requirements while we were working.
+	// If so, our result is stale — discard it without rejecting the plan.
+	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
+		status := kvPlan.EffectiveStatus()
+		if status != workflow.StatusGeneratingRequirements {
+			c.logger.Warn("Plan advanced past generating_requirements, discarding stale result",
+				"slug", slug,
+				"current_status", status,
+				"loop_id", loop.ID)
+			c.retryCount.Delete(slug)
+			return
+		}
+	}
+	// If KV read fails, proceed with the mutation — plan-manager will validate.
+
 	// For partial regen, new requirement IDs must not collide with existing ones.
 	// Determine the starting sequence offset from the current requirements count.
 	seqOffset := 0
@@ -683,6 +709,16 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	if err := c.publishResults(ctx, trigger, requirements); err != nil {
+		// If the plan advanced past generating_requirements, this is NOT a generation
+		// failure — our result is simply stale. Discard without rejecting.
+		if strings.Contains(err.Error(), "invalid transition") {
+			c.logger.Warn("Requirements mutation rejected (plan advanced), discarding stale result",
+				"slug", slug,
+				"error", err,
+				"loop_id", loop.ID)
+			c.retryCount.Delete(slug)
+			return
+		}
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to publish requirements from loop completion, rejecting plan",
 			"slug", slug,
@@ -758,6 +794,28 @@ func (c *Component) recoverDispatchFromKV(ctx context.Context, slug string) (*pe
 			// because the mutation replaces all requirements anyway.
 		},
 	}, nil
+}
+
+// loadPlanFromKV reads a plan from the PLAN_STATES KV bucket. Used to check
+// whether the plan has advanced past our phase before publishing stale results.
+func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.Plan, error) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("no JetStream: %w", err)
+	}
+	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	if err != nil {
+		return nil, fmt.Errorf("PLAN_STATES bucket: %w", err)
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("get plan %q: %w", slug, err)
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan %q: %w", slug, err)
+	}
+	return &plan, nil
 }
 
 // sendGenerationFailed publishes a plan.mutation.generation.failed mutation to

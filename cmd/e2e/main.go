@@ -205,6 +205,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewOpenSpecIngestScenario(cfg),
 		// Tier 1: State machine guard clauses
 		scenarios.NewPlanStateMachineScenario(cfg),
+		scenarios.NewStaleMutationScenario(cfg),
 		// Tier 2: Pipeline tests (mock LLM)
 		scenarios.NewPlanPhaseScenario(cfg),
 		scenarios.NewExecutionPhaseScenario(cfg),

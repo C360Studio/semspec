@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -458,6 +459,8 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for architecture-generation)")
 
 	replayDone := false
+	processedLoops := make(map[string]bool)
+
 	for entry := range watcher.Updates() {
 		if entry == nil {
 			// End of initial KV replay. Subsequent entries are live updates.
@@ -496,6 +499,14 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 			continue
 		}
 
+		// Dedup: skip loops we have already processed in this session.
+		if processedLoops[loop.ID] {
+			c.logger.Debug("Skipping already-processed loop",
+				"loop_id", loop.ID, "slug", slug)
+			continue
+		}
+		processedLoops[loop.ID] = true
+
 		c.handleLoopCompletion(ctx, &loop, slug)
 	}
 }
@@ -533,7 +544,31 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
+	// Check if the plan has moved past generating_architecture while we were working.
+	// If so, our result is stale — discard it without rejecting the plan.
+	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
+		status := kvPlan.EffectiveStatus()
+		if status != workflow.StatusGeneratingArchitecture {
+			c.logger.Warn("Plan advanced past generating_architecture, discarding stale result",
+				"slug", slug,
+				"current_status", status,
+				"loop_id", loop.ID)
+			c.retryState.Delete(slug)
+			return
+		}
+	}
+
 	if err := c.publishArchitectureGenerated(ctx, slug, architecture); err != nil {
+		// If the plan advanced past generating_architecture, this is NOT a generation
+		// failure — our result is simply stale. Discard without rejecting.
+		if strings.Contains(err.Error(), "invalid transition") {
+			c.logger.Warn("Architecture mutation rejected (plan advanced), discarding stale result",
+				"slug", slug,
+				"error", err,
+				"loop_id", loop.ID)
+			c.retryState.Delete(slug)
+			return
+		}
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to publish architecture mutation, rejecting plan",
 			"slug", slug, "loop_id", loop.ID, "error", err)
