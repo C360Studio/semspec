@@ -264,6 +264,10 @@
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
+        "consumer": {
+          "ack_wait": "5m",
+          "heartbeat_interval": "2m"
+        },
         "context": {
           "summarization_model": "fast"
         }

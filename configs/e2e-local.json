@@ -18,13 +18,23 @@
   },
   "model_registry": {
     "endpoints": {
+      "qwen3-coder-30b": {
+        "provider": "ollama",
+        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
+        "model": "qwen3-coder:30b",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "stream": true,
+        "request_timeout": "900s"
+      },
       "qwen-coder": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
         "model": "qwen2.5-coder:7b",
         "max_tokens": 32768,
         "supports_tools": true,
-        "stream": true
+        "stream": true,
+        "request_timeout": "900s"
       },
       "qwen3": {
         "provider": "ollama",
@@ -32,7 +42,8 @@
         "model": "qwen3:14b",
         "max_tokens": 40960,
         "supports_tools": true,
-        "stream": true
+        "stream": true,
+        "request_timeout": "900s"
       },
       "qwen3-fast": {
         "provider": "ollama",
@@ -40,16 +51,18 @@
         "model": "qwen3:1.7b",
         "max_tokens": 32768,
         "supports_tools": true,
-        "stream": true
+        "stream": true,
+        "request_timeout": "300s"
       }
     },
     "capabilities": {
       "planning": {
         "description": "Plan generation and architecture",
         "preferred": [
-          "qwen3"
+          "qwen3-coder-30b"
         ],
         "fallback": [
+          "qwen3",
           "qwen-coder"
         ]
       },
@@ -83,6 +96,9 @@
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
+          "qwen3-coder-30b"
+        ],
+        "fallback": [
           "qwen-coder"
         ]
       },
@@ -174,10 +190,15 @@
       "enabled": true,
       "config": {
         "max_iterations": 50,
-        "timeout": "120s",
+        "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "content_bucket": "AGENT_CONTENT"
+        "content_bucket": "AGENT_CONTENT",
+        "consumer": {
+          "ack_wait": "5m",
+          "heartbeat_interval": "2m",
+          "max_deliver": 2
+        }
       }
     },
     "agentic-model": {
@@ -186,7 +207,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s"
+        "timeout": "900s"
       }
     },
     "agentic-tools": {
@@ -426,7 +447,7 @@
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
         "workflow_trigger_subject": "workflow.trigger.requirement-execution-loop",
-        "execution_timeout": "120s"
+        "execution_timeout": "900s"
       }
     },
     "question-manager": {
@@ -440,7 +461,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout_seconds": 600,
+        "timeout_seconds": 900,
         "model": "qwen-coder",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
@@ -465,7 +486,7 @@
       "enabled": true,
       "config": {
         "max_tdd_cycles": 3,
-        "timeout_seconds": 300,
+        "timeout_seconds": 900,
         "model": "qwen-coder",
         "sandbox_url": "http://sandbox:8090"
       }
