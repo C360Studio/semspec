@@ -1,0 +1,97 @@
+# Epic scenario overlay for UI E2E tests with real LLM.
+#
+# Adds 3 external semsource instances (OSH, Meshtastic, OGC) to the UI LLM stack
+# so the planner can draw on federated knowledge for the Meshtastic driver epic.
+# Also swaps the workspace from go-project to osh-driver-meshtastic (Java/Maven).
+#
+# Usage:
+#   task e2e:ui:test:llm -- claude hard
+#
+# Or manually:
+#   docker compose -f ui/docker-compose.e2e.yml \
+#     -f ui/docker-compose.e2e-llm.yml \
+#     -f ui/docker-compose.e2e-epic.yml up -d --wait
+#
+# Workspace semsource and sandbox are overridden to mount the Java fixture.
+# GRAPH_SOURCES is overridden to include all 4 sources (workspace + 3 externals).
+
+services:
+  # Workspace semsource: swap to Java project fixture.
+  semsource:
+    volumes:
+      - ../docker/semsource.json:/etc/semsource/semsource.json:ro
+      - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace:ro
+
+  # Sandbox: swap to Java project fixture.
+  sandbox:
+    volumes:
+      - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace
+
+  # External semsource: OpenSensorHub core (Java)
+  semsource-osh:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      # NOTE: 'version' only confirms the binary runs, not that indexing is complete.
+      # Graph readiness is asserted by the 'federated graph reaches readiness' test.
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s  # OSH repo is large — cloning takes time
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+
+  # External semsource: Meshtastic documentation
+  semsource-meshtastic:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      # See semsource-osh note — version ≠ indexing complete.
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # External semsource: OGC Connected Systems spec
+  semsource-ogc:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      # See semsource-osh note — version ≠ indexing complete.
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Override semspec to federate all 4 graph sources.
+  semspec:
+    environment:
+      - GRAPH_SOURCES=[{"name":"workspace","graphql_url":"http://semsource:8080/graph-gateway/graphql","status_url":"http://semsource:8080/source-manifest/status","type":"semsource","entity_prefix":"semspec.semsource."},{"name":"osh","graphql_url":"http://semsource-osh:8080/graph-gateway/graphql","status_url":"http://semsource-osh:8080/source-manifest/status","type":"semsource","entity_prefix":"semspec.osh."},{"name":"meshtastic","graphql_url":"http://semsource-meshtastic:8080/graph-gateway/graphql","status_url":"http://semsource-meshtastic:8080/source-manifest/status","type":"semsource","entity_prefix":"semspec.meshtastic."},{"name":"ogc","graphql_url":"http://semsource-ogc:8080/graph-gateway/graphql","status_url":"http://semsource-ogc:8080/source-manifest/status","type":"semsource","entity_prefix":"semspec.ogc."}]
+      - SEMSOURCE_READINESS_BUDGET=180s

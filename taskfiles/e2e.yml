@@ -476,6 +476,12 @@ tasks:
       TIER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
+      # Hard tier uses the Meshtastic/OSH Java fixture + 3 external semsources.
+      # Other tiers use the default go-project fixture.
+      FIXTURE_DIR:
+        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
+      EPIC_OVERLAY:
+        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
@@ -484,15 +490,15 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Debug=${DEBUG:-off}"
+      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Debug=${DEBUG:-off}"
       - echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
-      - cmd: cd test/e2e/fixtures/go-project && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
+      - cmd: cd test/e2e/fixtures/{{.FIXTURE_DIR}} && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
         ignore_error: true
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
-      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 10 2>/dev/null
+      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} down -v --timeout 10 2>/dev/null
         ignore_error: true
-      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
-      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} build
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} up -d --wait
       - echo "[UI:TEST:LLM] Running @{{.TIER}} Playwright tests..."
       - cmd: |
           cd ui
@@ -575,6 +581,8 @@ tasks:
       - echo "[UI:DOWN] Stopping UI E2E stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null
         ignore_error: true
+      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml -f ui/docker-compose.e2e-epic.yml down -v --timeout 15 2>/dev/null
+        ignore_error: true
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 15 2>/dev/null
         ignore_error: true
       - cmd: docker compose -f ui/docker-compose.e2e.yml down -v --timeout 15 2>/dev/null
@@ -633,7 +641,11 @@ tasks:
           echo "  Stop:            task e2e:ui:down"
           echo ""
         else
-          docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+          # Tear down with the epic overlay too — harmless when it wasn't used.
+          docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml -f ui/docker-compose.e2e-epic.yml down -v --timeout 15 2>/dev/null || true
+          # Reset fixture dirs to avoid dirty working tree between runs.
+          (cd test/e2e/fixtures/go-project && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null) || true
+          (cd test/e2e/fixtures/osh-driver-meshtastic && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null) || true
         fi
 
   stacks:

@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/test/e2e/client"
@@ -48,7 +49,13 @@ func (s *StaleMutationScenario) Description() string {
 }
 
 // Teardown is a no-op for this Tier 1 scenario.
-func (s *StaleMutationScenario) Teardown(_ context.Context) error { return nil }
+// Teardown closes the NATS client.
+func (s *StaleMutationScenario) Teardown(ctx context.Context) error {
+	if s.nats != nil {
+		return s.nats.Close(ctx)
+	}
+	return nil
+}
 
 // Setup prepares HTTP and NATS clients.
 func (s *StaleMutationScenario) Setup(ctx context.Context) error {
@@ -242,8 +249,8 @@ func (s *StaleMutationScenario) stageStaleRequirementsRejected(ctx context.Conte
 	if resp.Success {
 		return fmt.Errorf("stale mutation was accepted — state machine did not guard")
 	}
-	if resp.Error == "" {
-		return fmt.Errorf("expected 'invalid transition' error, got empty error")
+	if !strings.Contains(resp.Error, "invalid transition") {
+		return fmt.Errorf("expected 'invalid transition' error, got: %s", resp.Error)
 	}
 
 	result.SetDetail("stale_mutation_error", resp.Error)
