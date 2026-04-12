@@ -115,7 +115,7 @@ func TestTaskExecutionEntity_Triples_OptionalPredicatesIncludedWhenSet(t *testin
 		TaskID:           "task-1",
 		Phase:            "reviewing",
 		TraceID:          "trace-abc",
-		FilesModified:    `["main.go","config.go"]`,
+		FilesModified:    []string{"main.go", "config.go"},
 		ValidationPassed: true,
 		Verdict:          "approved",
 		RejectionType:    "fixable",

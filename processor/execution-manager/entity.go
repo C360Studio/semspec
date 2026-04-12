@@ -24,7 +24,7 @@ type TaskExecutionEntity struct {
 	ErrorReason  string
 
 	// Developer output
-	FilesModified string // JSON array of file paths
+	FilesModified []string
 
 	// Validation output
 	ValidationPassed bool
@@ -67,8 +67,7 @@ func NewTaskExecutionEntity(exec *taskExecution) *TaskExecutionEntity {
 	}
 
 	if len(exec.FilesModified) > 0 {
-		// Store as a simple joined representation; callers can marshal to JSON before setting.
-		e.FilesModified = fmt.Sprintf("%v", exec.FilesModified)
+		e.FilesModified = append([]string{}, exec.FilesModified...)
 	}
 
 	return e
@@ -84,12 +83,6 @@ func (e *TaskExecutionEntity) EntityID() string {
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.
 func (e *TaskExecutionEntity) WithPhase(phase string) *TaskExecutionEntity {
 	e.Phase = phase
-	return e
-}
-
-// WithFilesModifiedJSON sets the files modified as a JSON array string.
-func (e *TaskExecutionEntity) WithFilesModifiedJSON(filesJSON string) *TaskExecutionEntity {
-	e.FilesModified = filesJSON
 	return e
 }
 
@@ -143,8 +136,8 @@ func (e *TaskExecutionEntity) Triples() []message.Triple {
 	if e.TraceID != "" {
 		triples = append(triples, message.Triple{Subject: id, Predicate: wf.TraceID, Object: e.TraceID, Source: componentName, Timestamp: now, Confidence: 1.0})
 	}
-	if e.FilesModified != "" {
-		triples = append(triples, message.Triple{Subject: id, Predicate: wf.FilesModified, Object: e.FilesModified, Source: componentName, Timestamp: now, Confidence: 1.0})
+	for _, f := range e.FilesModified {
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.FilesModified, Object: f, Source: componentName, Timestamp: now, Confidence: 1.0})
 	}
 	if e.ValidationPassed {
 		triples = append(triples, message.Triple{Subject: id, Predicate: wf.ValidationPassed, Object: "true", Source: componentName, Timestamp: now, Confidence: 1.0})
