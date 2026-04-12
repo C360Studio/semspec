@@ -43,6 +43,13 @@ const (
 	subjectReviewTask = "agent.task.reviewer"
 )
 
+// reviewRetryEntry holds the context needed to re-dispatch a review on failure.
+type reviewRetryEntry struct {
+	count       int
+	planContent string
+	round       reviewRound
+}
+
 // Component implements the plan-reviewer processor.
 type Component struct {
 	name       string
@@ -54,6 +61,9 @@ type Component struct {
 	assembler       *prompt.Assembler
 	lessonWriter    *lessons.Writer
 	errorCategories *workflow.ErrorCategoryRegistry
+
+	// Retry state: slug → *reviewRetryEntry
+	retryState sync.Map
 
 	// Lifecycle
 	running   bool
@@ -99,6 +109,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.PlanStateBucket == "" {
 		config.PlanStateBucket = defaults.PlanStateBucket
+	}
+	if config.MaxReviewRetries == 0 {
+		config.MaxReviewRetries = defaults.MaxReviewRetries
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -324,29 +337,51 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		round = reviewRound(int(r))
 	}
 
+	// Stale completion guard: if the plan has moved past reviewing state,
+	// our result is stale — discard without sending mutations.
+	if planJSON, loadErr := c.loadPlanContentFromKV(ctx, slug); loadErr == nil {
+		var plan workflow.Plan
+		if json.Unmarshal([]byte(planJSON), &plan) == nil {
+			status := plan.EffectiveStatus()
+			if status != workflow.StatusReviewingDraft && status != workflow.StatusReviewingScenarios {
+				c.logger.Warn("Plan not in reviewing state, discarding stale review result",
+					"slug", slug,
+					"current_status", status,
+					"loop_id", loop.ID)
+				c.retryState.Delete(slug)
+				return
+			}
+		}
+	}
+
 	if loop.Outcome != agentic.OutcomeSuccess {
-		c.reviewsFailed.Add(1)
+		errMsg := loop.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("review agent loop ended with outcome %q", loop.Outcome)
+		}
 		c.logger.Error("Review agent loop failed",
 			"slug", slug,
 			"loop_id", loop.ID,
 			"round", round,
 			"outcome", loop.Outcome,
-			"error", loop.Error)
-		c.sendGenerationFailed(ctx, slug, round, loop.Error)
+			"error", errMsg)
+		c.retryOrFail(ctx, slug, round, errMsg)
 		return
 	}
 
 	result, err := parseReviewFromResult(loop.Result)
 	if err != nil {
-		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to parse review from agent result",
+		c.logger.Warn("Failed to parse review from agent result, retrying",
 			"slug", slug,
 			"loop_id", loop.ID,
 			"round", round,
 			"error", err)
-		c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("failed to parse review result: %v", err))
+		c.retryOrFail(ctx, slug, round, fmt.Sprintf("failed to parse review result: %v", err))
 		return
 	}
+
+	// Successful parse — clear retry state.
+	c.retryState.Delete(slug)
 
 	c.logger.Info("Review agent complete",
 		"slug", slug,
@@ -371,6 +406,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // dispatchReviewer dispatches a plan-reviewer agent loop via agentic-dispatch.
 func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent string, round reviewRound) {
 	c.updateLastActivity()
+
+	// Seed retry state so retryOrFail can re-dispatch with the same params.
+	// Use LoadOrStore to avoid resetting the counter on retry re-dispatches.
+	c.retryState.LoadOrStore(slug, &reviewRetryEntry{count: 0, planContent: planContent, round: round})
 
 	taskID := fmt.Sprintf("review-%s-r%d-%s", slug, round, uuid.New().String())
 
@@ -466,6 +505,70 @@ func (c *Component) availableToolNames() []string {
 		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
 	}
+}
+
+// retryOrFail attempts to re-dispatch the review with the error appended to the
+// prompt as context. When MaxReviewRetries is exhausted it falls through to
+// sendGenerationFailed which rejects the plan.
+func (c *Component) retryOrFail(ctx context.Context, slug string, round reviewRound, errorMsg string) {
+	var entry *reviewRetryEntry
+	if v, ok := c.retryState.Load(slug); ok {
+		entry = v.(*reviewRetryEntry)
+	} else {
+		// Restart recovery: reload plan from PLAN_STATES.
+		planContent, err := c.loadPlanContentFromKV(ctx, slug)
+		if err != nil {
+			c.logger.Warn("retryOrFail: no retry state and PLAN_STATES recovery failed, failing immediately",
+				"slug", slug, "error", err)
+			c.reviewsFailed.Add(1)
+			c.sendGenerationFailed(ctx, slug, round, errorMsg)
+			return
+		}
+		c.logger.Info("Recovered plan from PLAN_STATES after restart", "slug", slug)
+		entry = &reviewRetryEntry{count: 0, planContent: planContent, round: round}
+		c.retryState.Store(slug, entry)
+	}
+
+	entry.count++
+	if entry.count > c.config.MaxReviewRetries {
+		c.logger.Warn("Review exhausted retries",
+			"slug", slug,
+			"round", round,
+			"attempts", entry.count,
+			"max", c.config.MaxReviewRetries,
+			"last_error", errorMsg)
+		c.retryState.Delete(slug)
+		c.reviewsFailed.Add(1)
+		c.sendGenerationFailed(ctx, slug, round, errorMsg)
+		return
+	}
+
+	c.logger.Info("Retrying review",
+		"slug", slug,
+		"round", round,
+		"attempt", entry.count,
+		"max", c.config.MaxReviewRetries,
+		"previous_error", errorMsg)
+
+	c.dispatchReviewer(ctx, slug, entry.planContent, entry.round)
+}
+
+// loadPlanContentFromKV reads a plan from PLAN_STATES and returns its JSON
+// representation for re-dispatch. Used for crash recovery when retryState is lost.
+func (c *Component) loadPlanContentFromKV(ctx context.Context, slug string) (string, error) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return "", fmt.Errorf("no JetStream: %w", err)
+	}
+	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	if err != nil {
+		return "", fmt.Errorf("PLAN_STATES bucket: %w", err)
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return "", fmt.Errorf("get plan %q: %w", slug, err)
+	}
+	return string(entry.Value()), nil
 }
 
 // parseReviewFromResult extracts a PlanReviewResult from the agent's submit_work deliverable.

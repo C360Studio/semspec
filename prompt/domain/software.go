@@ -118,10 +118,34 @@ Environment Setup (if build/test fails with import errors):
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `When your changes are complete, call the submit_work tool with these JSON fields:
 
-{"summary": "Implemented /goodbye endpoint with tests", "files_modified": ["api/app.py", "api/test_goodbye.py"]}
+{
+  "summary": "Implemented /goodbye endpoint with tests",
+  "files_modified": ["api/app.py", "api/test_goodbye.py"]
+}
 
 Required: summary (string), files_modified (array of file paths you created or changed).
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+		},
+
+		// =====================================================================
+		// Shared submit_work directive (all non-developer generator/reviewer roles)
+		// =====================================================================
+		{
+			ID:       "software.shared.submit-work-directive",
+			Category: prompt.CategoryToolDirective,
+			Priority: 0,
+			Roles: []prompt.Role{
+				prompt.RolePlanner, prompt.RolePlanReviewer, prompt.RoleTaskReviewer,
+				prompt.RoleReviewer, prompt.RoleRequirementGenerator,
+				prompt.RoleScenarioGenerator, prompt.RoleArchitect,
+				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
+			},
+			Content: `CRITICAL: You MUST call the submit_work function to deliver your output.
+
+DO NOT output JSON as plain text. DO NOT wrap your answer in a code block.
+Your output MUST be a submit_work tool call with your results as the named arguments.
+
+If you respond with text instead of calling submit_work, your work is LOST and the task FAILS.`,
 		},
 
 		// =====================================================================
@@ -243,7 +267,15 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			Roles:    []prompt.Role{prompt.RolePlanner},
 			Content: `When your plan is ready, call the submit_work tool with these JSON fields:
 
-{"goal": "Add /goodbye endpoint with JSON response and tests", "context": "Flask API with /hello endpoint. Need parallel /goodbye.", "scope": {"include": ["api/app.py", "api/test_goodbye.py"], "exclude": ["node_modules"], "do_not_touch": ["README.md"]}}
+{
+  "goal": "Add /goodbye endpoint with JSON response and tests",
+  "context": "Flask API with /hello endpoint. Need parallel /goodbye.",
+  "scope": {
+    "include": ["api/app.py", "api/test_goodbye.py"],
+    "exclude": ["node_modules"],
+    "do_not_touch": ["README.md"]
+  }
+}
 
 Required: goal (string), context (string). Optional: scope (object with include/exclude/do_not_touch arrays).
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -347,7 +379,19 @@ Guidelines:
 			Roles:    []prompt.Role{prompt.RolePlanReviewer},
 			Content: `When your review is complete, call the submit_work tool with these JSON fields:
 
-{"verdict": "approved", "summary": "Plan is well-structured.", "findings": [{"sop_id": "api-testing", "sop_title": "API Testing", "severity": "info", "status": "compliant", "evidence": "Plan includes test requirements"}]}
+{
+  "verdict": "approved",
+  "summary": "Plan is well-structured.",
+  "findings": [
+    {
+      "sop_id": "api-testing",
+      "sop_title": "API Testing",
+      "severity": "info",
+      "status": "compliant",
+      "evidence": "Plan includes test requirements"
+    }
+  ]
+}
 
 For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -403,7 +447,11 @@ Guidelines:
 			Roles:    []prompt.Role{prompt.RoleTaskReviewer},
 			Content: `When your review is complete, call the submit_work tool with these JSON fields:
 
-{"verdict": "approved", "summary": "Implementation meets all acceptance criteria.", "findings": []}
+{
+  "verdict": "approved",
+  "summary": "Implementation meets all acceptance criteria.",
+  "findings": []
+}
 
 For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -464,7 +512,10 @@ Integrity Rules:
 			Roles:    []prompt.Role{prompt.RoleReviewer},
 			Content: `When your review is complete, call the submit_work tool with these JSON fields:
 
-{"verdict": "approved", "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."}
+{
+  "verdict": "approved",
+  "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."
+}
 
 Required: verdict ("approved", "rejected", or "needs_changes"), feedback (string).
 On rejection: add "rejection_type" ("fixable" or "restructure") and specific feedback with line numbers.
@@ -537,7 +588,14 @@ Each requirement must:
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
 			Content: `When your requirements are ready, call the submit_work tool with these JSON fields:
 
-{"requirements": [{"title": "Goodbye endpoint returns JSON", "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field"}]}
+{
+  "requirements": [
+    {
+      "title": "Goodbye endpoint returns JSON",
+      "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field"
+    }
+  ]
+}
 
 Required: requirements (array of objects, each with title and description strings).
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -573,7 +631,19 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
 			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
 			Content: `When your scenarios are ready, call the submit_work tool with these JSON fields:
 
-{"scenarios": [{"title": "Goodbye endpoint returns correct JSON", "given": "the API server is running", "when": "a GET request is sent to /goodbye", "then": ["a 200 status code is returned", "the response contains JSON with message Goodbye World"]}]}
+{
+  "scenarios": [
+    {
+      "title": "Goodbye endpoint returns correct JSON",
+      "given": "the API server is running",
+      "when": "a GET request is sent to /goodbye",
+      "then": [
+        "a 200 status code is returned",
+        "the response contains JSON with message Goodbye World"
+      ]
+    }
+  ]
+}
 
 Required: scenarios (array of objects, each with title, given, when strings and then array of strings).
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -609,7 +679,24 @@ Guidelines:
 			Roles:    []prompt.Role{prompt.RoleArchitect},
 			Content: `When your architecture analysis is ready, call the submit_work tool with these JSON fields:
 
-{"technology_choices": [{"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}], "component_boundaries": [{"name": "api", "responsibility": "REST API serving JSON endpoints", "dependencies": []}], "data_flow": "Browser sends GET to Flask API, API returns JSON response", "decisions": [{"id": "ARCH-001", "title": "Extend existing app", "decision": "Add route to api/app.py", "rationale": "Single-file API, no need for new service"}], "actors": [{"name": "User", "type": "human", "triggers": ["HTTP request"]}], "integrations": [{"name": "Flask API", "direction": "inbound", "protocol": "HTTP/REST"}]}
+{
+  "technology_choices": [
+    {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}
+  ],
+  "component_boundaries": [
+    {"name": "api", "responsibility": "REST API serving JSON endpoints", "dependencies": []}
+  ],
+  "data_flow": "Browser sends GET to Flask API, API returns JSON response",
+  "decisions": [
+    {"id": "ARCH-001", "title": "Extend existing app", "decision": "Add route to api/app.py", "rationale": "Single-file API, no need for new service"}
+  ],
+  "actors": [
+    {"name": "User", "type": "human", "triggers": ["HTTP request"]}
+  ],
+  "integrations": [
+    {"name": "Flask API", "direction": "inbound", "protocol": "HTTP/REST"}
+  ]
+}
 
 Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string).
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -770,7 +857,9 @@ INTEGRATION TEST CONVENTIONS:
 			Roles:    []prompt.Role{prompt.RoleValidator},
 			Content: `When validation is complete, call the submit_work tool with these JSON fields:
 
-{"summary": "Validation passed: checklist clean, 4 integration tests passing"}
+{
+  "summary": "Validation passed: checklist clean, 4 integration tests passing"
+}
 
 Required: summary (string).
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
@@ -1035,6 +1124,16 @@ Other agents may be working on the same codebase simultaneously.
 				return len(ctx.AvailableTools) > 0
 			},
 			Content: `When instructed to call a specific tool, call that tool as your FIRST action. Do NOT provide a text response before calling the tool. Do NOT describe what you plan to do — just call it.`,
+		},
+		// Ollama-specific: small local models frequently output JSON text instead of tool calls
+		{
+			ID:        "software.provider.ollama-tool-enforcement",
+			Category:  prompt.CategoryProviderHints,
+			Providers: []prompt.Provider{prompt.ProviderOllama},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.HasTool("submit_work")
+			},
+			Content: `You have function-calling tools available. When your task is complete, you MUST use the submit_work function call — pass your results as the function arguments. Do NOT write JSON in your text response. A text response is NOT a tool call and your work will be lost.`,
 		},
 
 		// =====================================================================

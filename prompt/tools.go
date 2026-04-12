@@ -89,11 +89,18 @@ func buildToolGuidanceContent(ctx *AssemblyContext, guidance []ToolGuidance) str
 	if ctx.MaxTokens > 0 && ctx.MaxTokens < SmallModelTokenThreshold {
 		sb.WriteString("Tools: ")
 		names := make([]string, 0, len(filtered))
+		hasSubmitWork := false
 		for _, g := range filtered {
 			names = append(names, g.Name)
+			if g.Name == "submit_work" {
+				hasSubmitWork = true
+			}
 		}
 		sb.WriteString(strings.Join(names, ", "))
 		sb.WriteString("\n")
+		if hasSubmitWork {
+			sb.WriteString("\nIMPORTANT: Call the submit_work function to submit your work. Pass your output as the function arguments. Do NOT write JSON as text.\n")
+		}
 		return sb.String()
 	}
 

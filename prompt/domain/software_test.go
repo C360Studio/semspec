@@ -30,6 +30,7 @@ func TestSoftwareFragments(t *testing.T) {
 		"software.developer.system-base",
 		"software.developer.tool-directive",
 		"software.developer.role-context",
+		"software.shared.submit-work-directive",
 		"software.shared.prior-work-directive",
 		"software.planner.system-base",
 		"software.plan-reviewer.system-base",
@@ -37,6 +38,7 @@ func TestSoftwareFragments(t *testing.T) {
 		"software.requirement-generator.system-base",
 		"software.scenario-generator.system-base",
 		"software.task-generator.system-base",
+		"software.provider.ollama-tool-enforcement",
 	}
 	for _, id := range required {
 		if !ids[id] {
@@ -138,6 +140,60 @@ func TestSoftwareGapDetectionRemoved(t *testing.T) {
 
 	if strings.Contains(result.SystemMessage, "Knowledge Gaps") {
 		t.Error("gap detection should NOT be in prompts (removed)")
+	}
+}
+
+func TestSoftwareSubmitWorkDirective(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+
+	a := prompt.NewAssembler(r)
+
+	// Non-developer roles should get the shared submit_work directive.
+	for _, role := range []prompt.Role{
+		prompt.RolePlanReviewer,
+		prompt.RoleReviewer,
+		prompt.RoleArchitect,
+		prompt.RoleRequirementGenerator,
+		prompt.RoleScenarioGenerator,
+	} {
+		result := a.Assemble(&prompt.AssemblyContext{Role: role, Provider: prompt.ProviderOllama})
+		if !strings.Contains(result.SystemMessage, "MUST call the submit_work function") {
+			t.Errorf("role %s should have submit_work directive", role)
+		}
+	}
+
+	// Developer has its own tool directive — should NOT get the shared one.
+	result := a.Assemble(&prompt.AssemblyContext{Role: prompt.RoleDeveloper, Provider: prompt.ProviderOllama})
+	if strings.Contains(result.SystemMessage, "MUST call the submit_work function") {
+		t.Error("developer should not get shared submit_work directive (has its own)")
+	}
+}
+
+func TestSoftwareOllamaProviderHint(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+
+	a := prompt.NewAssembler(r)
+
+	// Ollama provider should get the Ollama-specific tool enforcement.
+	result := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderOllama,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if !strings.Contains(result.SystemMessage, "function-calling tools available") {
+		t.Error("Ollama reviewer should get ollama-tool-enforcement hint")
+	}
+
+	// Non-Ollama provider should not get it.
+	result = a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderAnthropic,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if strings.Contains(result.SystemMessage, "function-calling tools available") {
+		t.Error("Anthropic reviewer should not get ollama-tool-enforcement hint")
 	}
 }
 

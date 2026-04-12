@@ -41,6 +41,10 @@ type Config struct {
 	// (round 1) or "scenarios_generated" (round 2).
 	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket to watch for plan state transitions,category:advanced,default:PLAN_STATES"`
 
+	// MaxReviewRetries is the maximum number of times to retry a review when
+	// the agent loop fails or the output cannot be parsed. Default 2.
+	MaxReviewRetries int `json:"max_review_retries" schema:"type:integer,description:Max retries on review failure (parse error or loop failure),category:advanced,default:2"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -55,6 +59,7 @@ func DefaultConfig() Config {
 		LLMTimeout:          "120s",
 		DefaultCapability:   "plan_review",
 		PlanStateBucket:     "PLAN_STATES",
+		MaxReviewRetries:    2,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

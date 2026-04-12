@@ -2,6 +2,7 @@ package prompt
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -96,6 +97,52 @@ func TestFilterTools_Coordinator(t *testing.T) {
 
 	if len(tools) != 1 {
 		t.Errorf("coordinator should have exactly 1 tool, got %d: %v", len(tools), tools)
+	}
+}
+
+func TestToolGuidance_SmallModel_SubmitWorkHint(t *testing.T) {
+	r := NewRegistry()
+	r.Register(ToolGuidanceFragment(DefaultToolGuidance()))
+
+	a := NewAssembler(r)
+
+	// Small model (32k) with submit_work should get the reinforcement.
+	result := a.Assemble(&AssemblyContext{
+		Role:           RoleReviewer,
+		Provider:       ProviderOllama,
+		MaxTokens:      32768,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if result.SystemMessage == "" {
+		t.Fatal("expected non-empty system message for small model with tools")
+	}
+	if !strings.Contains(result.SystemMessage, "submit_work function") {
+		t.Error("small model should get submit_work reinforcement in tool guidance")
+	}
+	if !strings.Contains(result.SystemMessage, "Do NOT write JSON as text") {
+		t.Error("small model should get anti-text-output warning")
+	}
+
+	// Small model without submit_work should NOT get the reinforcement.
+	result = a.Assemble(&AssemblyContext{
+		Role:           RoleReviewer,
+		Provider:       ProviderOllama,
+		MaxTokens:      32768,
+		AvailableTools: []string{"bash"},
+	})
+	if strings.Contains(result.SystemMessage, "submit_work function") {
+		t.Error("small model without submit_work should NOT get submit_work reinforcement")
+	}
+
+	// Large model should get full guidance, not the compact path.
+	result = a.Assemble(&AssemblyContext{
+		Role:           RoleReviewer,
+		Provider:       ProviderOllama,
+		MaxTokens:      131072,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if strings.Contains(result.SystemMessage, "Do NOT write JSON as text") {
+		t.Error("large model should NOT get small-model submit_work reinforcement")
 	}
 }
 
