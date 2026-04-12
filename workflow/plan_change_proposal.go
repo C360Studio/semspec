@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -15,7 +14,7 @@ const ChangeProposalsJSONFile = "change_proposals.json"
 
 // SaveChangeProposals saves change proposals to ENTITY_STATES as triples.
 // Each proposal is stored as a separate entity keyed by ChangeProposalEntityID.
-// Multi-valued fields (AffectedReqIDs) are stored as JSON arrays.
+// Multi-valued fields (AffectedReqIDs) are written as individual triples.
 func SaveChangeProposals(ctx context.Context, tw *graphutil.TripleWriter, proposals []ChangeProposal, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
@@ -66,46 +65,56 @@ func writeChangeProposalTriples(ctx context.Context, tw *graphutil.TripleWriter,
 		_ = tw.WriteTriple(ctx, entityID, semspec.ChangeProposalDecidedAt, p.DecidedAt.Format(time.RFC3339))
 	}
 
-	// Store AffectedReqIDs as JSON array to avoid multi-value collapse.
-	if affectedJSON, err := json.Marshal(p.AffectedReqIDs); err == nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ChangeProposalMutates, string(affectedJSON))
+	// Write each affected requirement ID as an individual triple (proper graph edges).
+	for _, reqID := range p.AffectedReqIDs {
+		_ = tw.WriteTriple(ctx, entityID, semspec.ChangeProposalMutates, reqID)
 	}
 
 	return nil
 }
 
-// changeProposalFromTripleMap reconstructs a ChangeProposal from a predicate→value map.
-func changeProposalFromTripleMap(entityID string, triples map[string]string) ChangeProposal {
-	p := ChangeProposal{
-		ID:     extractChangeProposalID(entityID),
-		PlanID: triples[semspec.ChangeProposalPlan],
+// changeProposalFromTripleMap reconstructs a ChangeProposal from a predicate→[]values map.
+// Single-valued predicates use the first element; AffectedReqIDs collects all values.
+func changeProposalFromTripleMap(entityID string, triples map[string][]string) ChangeProposal {
+	first := func(pred string) string {
+		if vs := triples[pred]; len(vs) > 0 {
+			return vs[0]
+		}
+		return ""
 	}
 
-	if v := triples[semspec.ChangeProposalTitle]; v != "" {
+	p := ChangeProposal{
+		ID:     extractChangeProposalID(entityID),
+		PlanID: first(semspec.ChangeProposalPlan),
+	}
+
+	if v := first(semspec.ChangeProposalTitle); v != "" {
 		p.Title = v
 	}
-	if v := triples[semspec.ChangeProposalStatus]; v != "" {
+	if v := first(semspec.ChangeProposalStatus); v != "" {
 		p.Status = ChangeProposalStatus(v)
 	}
-	if v := triples[semspec.ChangeProposalProposedBy]; v != "" {
+	if v := first(semspec.ChangeProposalProposedBy); v != "" {
 		p.ProposedBy = v
 	}
-	if v := triples[semspec.ChangeProposalRationale]; v != "" {
+	if v := first(semspec.ChangeProposalRationale); v != "" {
 		p.Rationale = v
 	}
-	if v := triples[semspec.ChangeProposalCreatedAt]; v != "" {
+	if v := first(semspec.ChangeProposalCreatedAt); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			p.CreatedAt = t
 		}
 	}
-	if v := triples[semspec.ChangeProposalDecidedAt]; v != "" {
+	if v := first(semspec.ChangeProposalDecidedAt); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			p.DecidedAt = &t
 		}
 	}
-	// AffectedReqIDs stored as JSON array of raw requirement IDs.
-	if v := triples[semspec.ChangeProposalMutates]; v != "" {
-		_ = json.Unmarshal([]byte(v), &p.AffectedReqIDs)
+	// AffectedReqIDs are written as one triple per ID; collect all values.
+	for _, reqID := range triples[semspec.ChangeProposalMutates] {
+		if reqID != "" {
+			p.AffectedReqIDs = append(p.AffectedReqIDs, reqID)
+		}
 	}
 	if p.AffectedReqIDs == nil {
 		p.AffectedReqIDs = []string{}
@@ -139,7 +148,7 @@ func LoadChangeProposals(ctx context.Context, tw *graphutil.TripleWriter, slug s
 	}
 
 	prefix := EntityPrefix() + ".wf.plan.proposal."
-	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
+	entities, err := tw.ReadEntitiesByPrefixMulti(ctx, prefix, 500)
 	if err != nil {
 		return []ChangeProposal{}, nil
 	}

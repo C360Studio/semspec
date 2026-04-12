@@ -1,7 +1,6 @@
 package requirementexecutor
 
 import (
-	"encoding/json"
 	"time"
 
 	"github.com/c360studio/semspec/tools/decompose"
@@ -191,15 +190,12 @@ func (e *DAGNodeEntity) Triples() []message.Triple {
 		{Subject: id, Predicate: wf.RelRequirement, Object: e.execEntityID, Source: componentName, Timestamp: now, Confidence: 1.0},
 	}
 
-	// File scope as a JSON array string.
-	if len(e.node.FileScope) > 0 {
-		scopeJSON, err := json.Marshal(e.node.FileScope)
-		if err == nil {
-			triples = append(triples, message.Triple{
-				Subject: id, Predicate: wf.DAGNodeFileScope, Object: string(scopeJSON),
-				Source: componentName, Timestamp: now, Confidence: 1.0,
-			})
-		}
+	// File scope — one triple per path.
+	for _, f := range e.node.FileScope {
+		triples = append(triples, message.Triple{
+			Subject: id, Predicate: wf.DAGNodeFileScope, Object: f,
+			Source: componentName, Timestamp: now, Confidence: 1.0,
+		})
 	}
 
 	// Dependency edges to sibling DAG node entities.

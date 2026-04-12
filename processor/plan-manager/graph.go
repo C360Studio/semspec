@@ -113,10 +113,9 @@ func (c *Component) publishDAGNodeEntity(ctx context.Context, executionID string
 		{Subject: entityID, Predicate: wf.RelScenario, Object: execEntityID},
 	}
 
-	// File scope as JSON array
-	if len(node.FileScope) > 0 {
-		scopeJSON, _ := json.Marshal(node.FileScope)
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.DAGNodeFileScope, Object: string(scopeJSON)})
+	// File scope — one triple per path.
+	for _, f := range node.FileScope {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.DAGNodeFileScope, Object: f})
 	}
 
 	// Dependency edges to sibling DAG nodes

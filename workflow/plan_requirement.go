@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -87,7 +86,7 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 
 // SaveRequirements saves requirements to ENTITY_STATES as triples.
 // Each requirement is stored as a separate entity keyed by RequirementEntityID.
-// Multi-valued fields (DependsOn) are stored as JSON arrays.
+// Multi-valued fields (DependsOn) are written as individual triples.
 func SaveRequirements(ctx context.Context, tw *graphutil.TripleWriter, requirements []Requirement, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
@@ -133,47 +132,55 @@ func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, re
 		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDescription, req.Description)
 	}
 
-	// Store DependsOn as JSON array to avoid multi-value collapse.
-	if dependsJSON, err := json.Marshal(req.DependsOn); err == nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, string(dependsJSON))
+	// Write each dependency as an individual triple (proper graph edges).
+	// Hash each dep ID so the stored value is the entity-ID suffix, matching
+	// the ID space returned by extractRequirementID on load.
+	for _, dep := range req.DependsOn {
+		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, HashInstanceID(dep))
 	}
 
 	return nil
 }
 
-// requirementFromTripleMap reconstructs a Requirement from a predicate→value map.
-func requirementFromTripleMap(entityID string, triples map[string]string) Requirement {
-	req := Requirement{
-		ID:     extractRequirementID(entityID),
-		PlanID: triples[semspec.RequirementPlan],
+// requirementFromTripleMap reconstructs a Requirement from a predicate→[]values map.
+// Single-valued predicates use the first element; DependsOn collects all values.
+func requirementFromTripleMap(entityID string, triples map[string][]string) Requirement {
+	first := func(pred string) string {
+		if vs := triples[pred]; len(vs) > 0 {
+			return vs[0]
+		}
+		return ""
 	}
 
-	if v := triples[semspec.RequirementTitle]; v != "" {
+	req := Requirement{
+		ID:     extractRequirementID(entityID),
+		PlanID: first(semspec.RequirementPlan),
+	}
+
+	if v := first(semspec.RequirementTitle); v != "" {
 		req.Title = v
 	}
-	if v := triples[semspec.RequirementStatus]; v != "" {
+	if v := first(semspec.RequirementStatus); v != "" {
 		req.Status = RequirementStatus(v)
 	}
-	if v := triples[semspec.RequirementDescription]; v != "" {
+	if v := first(semspec.RequirementDescription); v != "" {
 		req.Description = v
 	}
-	if v := triples[semspec.RequirementCreatedAt]; v != "" {
+	if v := first(semspec.RequirementCreatedAt); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			req.CreatedAt = t
 		}
 	}
-	if v := triples[semspec.RequirementUpdatedAt]; v != "" {
+	if v := first(semspec.RequirementUpdatedAt); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			req.UpdatedAt = t
 		}
 	}
-	if v := triples[semspec.RequirementDependsOn]; v != "" {
-		var rawDeps []string
-		_ = json.Unmarshal([]byte(v), &rawDeps)
-		// DependsOn stores original IDs but req.ID is a hashed entity suffix.
-		// Hash each dependency so comparisons are in the same ID space.
-		for _, d := range rawDeps {
-			req.DependsOn = append(req.DependsOn, HashInstanceID(d))
+	// DependsOn is written as one triple per dependency; collect all values.
+	// Each value is already the hashed entity-ID suffix (written by writeRequirementTriples).
+	for _, dep := range triples[semspec.RequirementDependsOn] {
+		if dep != "" {
+			req.DependsOn = append(req.DependsOn, dep)
 		}
 	}
 	if req.DependsOn == nil {
@@ -209,7 +216,7 @@ func LoadRequirements(ctx context.Context, tw *graphutil.TripleWriter, slug stri
 	}
 
 	prefix := EntityPrefix() + ".wf.plan.req."
-	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
+	entities, err := tw.ReadEntitiesByPrefixMulti(ctx, prefix, 500)
 	if err != nil {
 		return []Requirement{}, nil
 	}

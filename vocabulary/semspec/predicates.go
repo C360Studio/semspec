@@ -110,6 +110,9 @@ const (
 	// PlanExecutionTraceIDs is the JSON-encoded array of execution trace IDs.
 	PlanExecutionTraceIDs = "semspec.plan.execution_trace_ids"
 
+	// PlanExecutionTraceID is a single execution trace ID (one triple per trace).
+	PlanExecutionTraceID = "semspec.plan.execution_trace_id"
+
 	// PlanLLMCallHistory is the JSON-encoded LLM call history for review iterations.
 	PlanLLMCallHistory = "semspec.plan.llm_call_history"
 )
@@ -1099,6 +1102,11 @@ func registerTaskPredicates() {
 		vocabulary.WithDescription("Execution trace IDs (JSON array)"),
 		vocabulary.WithDataType("json"),
 		vocabulary.WithIRI(Namespace+"planExecutionTraceIds"))
+
+	vocabulary.Register(PlanExecutionTraceID,
+		vocabulary.WithDescription("A single execution trace ID (one triple per trace)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planExecutionTraceId"))
 
 	vocabulary.Register(PlanLLMCallHistory,
 		vocabulary.WithDescription("Per-iteration LLM call history (JSON)"),

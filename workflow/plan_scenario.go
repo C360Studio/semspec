@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -15,7 +14,7 @@ const ScenariosJSONFile = "scenarios.json"
 
 // SaveScenarios saves scenarios to ENTITY_STATES as triples.
 // Each scenario is stored as a separate entity keyed by ScenarioEntityID.
-// Multi-valued fields (Then) are stored as JSON arrays.
+// Multi-valued fields (Then) are written as individual triples.
 func SaveScenarios(ctx context.Context, tw *graphutil.TripleWriter, scenarios []Scenario, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
@@ -55,40 +54,51 @@ func writeScenarioTriples(ctx context.Context, tw *graphutil.TripleWriter, s *Sc
 	}
 	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, title)
 
-	// Store Then as JSON array to avoid multi-value collapse.
-	if thenJSON, err := json.Marshal(s.Then); err == nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioThen, string(thenJSON))
+	// Write each Then clause as an individual triple (proper graph edges).
+	for _, clause := range s.Then {
+		_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioThen, clause)
 	}
 
 	return nil
 }
 
-// scenarioFromTripleMap reconstructs a Scenario from a predicate→value map.
-func scenarioFromTripleMap(entityID string, triples map[string]string) Scenario {
+// scenarioFromTripleMap reconstructs a Scenario from a predicate→[]values map.
+// Single-valued predicates use the first element; Then collects all values.
+func scenarioFromTripleMap(entityID string, triples map[string][]string) Scenario {
+	first := func(pred string) string {
+		if vs := triples[pred]; len(vs) > 0 {
+			return vs[0]
+		}
+		return ""
+	}
+
 	s := Scenario{
 		ID: extractScenarioID(entityID),
 	}
 
-	if v := triples[semspec.ScenarioGiven]; v != "" {
+	if v := first(semspec.ScenarioGiven); v != "" {
 		s.Given = v
 	}
-	if v := triples[semspec.ScenarioWhen]; v != "" {
+	if v := first(semspec.ScenarioWhen); v != "" {
 		s.When = v
 	}
-	if v := triples[semspec.ScenarioStatus]; v != "" {
+	if v := first(semspec.ScenarioStatus); v != "" {
 		s.Status = ScenarioStatus(v)
 	}
-	if v := triples[semspec.ScenarioCreatedAt]; v != "" {
+	if v := first(semspec.ScenarioCreatedAt); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			s.CreatedAt = t
 		}
 	}
 	// RequirementID stored as full entity ID; extract raw ID.
-	if v := triples[semspec.ScenarioRequirement]; v != "" {
+	if v := first(semspec.ScenarioRequirement); v != "" {
 		s.RequirementID = extractRequirementID(v)
 	}
-	if v := triples[semspec.ScenarioThen]; v != "" {
-		_ = json.Unmarshal([]byte(v), &s.Then)
+	// Then is written as one triple per clause; collect all values.
+	for _, clause := range triples[semspec.ScenarioThen] {
+		if clause != "" {
+			s.Then = append(s.Then, clause)
+		}
 	}
 	if s.Then == nil {
 		s.Then = []string{}
@@ -134,7 +144,7 @@ func LoadScenarios(ctx context.Context, tw *graphutil.TripleWriter, slug string)
 	}
 
 	prefix := EntityPrefix() + ".wf.plan.scenario."
-	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
+	entities, err := tw.ReadEntitiesByPrefixMulti(ctx, prefix, 500)
 	if err != nil {
 		return []Scenario{}, nil
 	}

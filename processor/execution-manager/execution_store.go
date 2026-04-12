@@ -403,10 +403,9 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 	if exec.WorktreeBranch != "" {
 		_ = tw.WriteTriple(ctx, entityID, wf.WorktreeBranch, exec.WorktreeBranch)
 	}
-	if len(exec.FilesModified) > 0 {
-		if data, err := json.Marshal(exec.FilesModified); err == nil {
-			_ = tw.WriteTriple(ctx, entityID, wf.FilesModified, string(data))
-		}
+	// Files modified — one triple per path.
+	for _, f := range exec.FilesModified {
+		_ = tw.WriteTriple(ctx, entityID, wf.FilesModified, f)
 	}
 	if exec.ValidationPassed {
 		_ = tw.WriteTriple(ctx, entityID, wf.ValidationPassed, "true")

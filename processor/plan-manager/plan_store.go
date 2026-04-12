@@ -319,9 +319,6 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	if plan.ReviewedAt != nil {
 		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewedAt, plan.ReviewedAt.Format(time.RFC3339))
 	}
-	if len(plan.ReviewFindings) > 0 {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewFindings, string(plan.ReviewFindings))
-	}
 	if plan.ReviewFormattedFindings != "" {
 		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewFormattedFindings, plan.ReviewFormattedFindings)
 	}
@@ -337,23 +334,20 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 		_ = tw.WriteTriple(ctx, entityID, semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339))
 	}
 
-	// Scope (JSON string)
-	if scopeJSON, err := json.Marshal(plan.Scope); err == nil && string(scopeJSON) != "{}" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScope, string(scopeJSON))
+	// Scope (atomic triples — one per entry to avoid JSON objects as KV keys)
+	for _, inc := range plan.Scope.Include {
+		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeInclude, inc)
+	}
+	for _, exc := range plan.Scope.Exclude {
+		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeExclude, exc)
+	}
+	for _, dnt := range plan.Scope.DoNotTouch {
+		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeProtected, dnt)
 	}
 
-	// Execution trace IDs (JSON array)
-	if len(plan.ExecutionTraceIDs) > 0 {
-		if traceJSON, err := json.Marshal(plan.ExecutionTraceIDs); err == nil {
-			_ = tw.WriteTriple(ctx, entityID, semspec.PlanExecutionTraceIDs, string(traceJSON))
-		}
-	}
-
-	// LLM call history (JSON)
-	if plan.LLMCallHistory != nil {
-		if historyJSON, err := json.Marshal(plan.LLMCallHistory); err == nil {
-			_ = tw.WriteTriple(ctx, entityID, semspec.PlanLLMCallHistory, string(historyJSON))
-		}
+	// Execution trace IDs (one triple per ID — avoid JSON arrays as KV keys)
+	for _, traceID := range plan.ExecutionTraceIDs {
+		_ = tw.WriteTriple(ctx, entityID, semspec.PlanExecutionTraceID, traceID)
 	}
 
 	// Requirements and Scenarios — write individual entity triples so the graph

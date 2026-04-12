@@ -49,18 +49,8 @@ func startMockGraphIngest(t *testing.T, nc *natsclient.Client) *mockGraphIngest 
 			m.entities[req.Triple.Subject] = entity
 		}
 
-		// Upsert triple — replace existing predicate or append.
-		found := false
-		for i, tr := range entity.Triples {
-			if tr.Predicate == req.Triple.Predicate {
-				entity.Triples[i] = req.Triple
-				found = true
-				break
-			}
-		}
-		if !found {
-			entity.Triples = append(entity.Triples, req.Triple)
-		}
+		// Append all triples — graph-ingest preserves multi-valued predicates.
+		entity.Triples = append(entity.Triples, req.Triple)
 		entity.Version++
 		entity.UpdatedAt = time.Now()
 

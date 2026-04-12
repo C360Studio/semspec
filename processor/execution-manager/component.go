@@ -768,10 +768,9 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		exec.DeveloperLLMRequestIDs = result.LLMRequestIDs
 	}
 
-	// Write developer output triples.
-	if len(exec.FilesModified) > 0 {
-		filesJSON, _ := json.Marshal(exec.FilesModified)
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FilesModified, string(filesJSON))
+	// Write developer output triples — one triple per modified file.
+	for _, f := range exec.FilesModified {
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FilesModified, f)
 	}
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidating); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseValidating, "error", err)

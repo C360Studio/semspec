@@ -136,6 +136,8 @@ func (tw *TripleWriter) ReadEntity(ctx context.Context, entityID string) (map[st
 
 // ReadEntitiesByPrefix fetches all entities matching an ID prefix from
 // ENTITY_STATES via graph-ingest. Returns a map of entityID → predicate map.
+// Each predicate maps to the last observed value; for multi-valued predicates
+// use ReadEntitiesByPrefixMulti.
 func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string, limit int) (map[string]map[string]string, error) {
 	if tw.NATSClient == nil {
 		return nil, fmt.Errorf("NATS client not configured")
@@ -183,6 +185,64 @@ func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string,
 			}
 		}
 		result[entity.ID] = triples
+	}
+
+	return result, nil
+}
+
+// ReadEntitiesByPrefixMulti fetches all entities matching an ID prefix from
+// ENTITY_STATES via graph-ingest. Returns a map of entityID → predicate →
+// []values, preserving every value written for multi-valued predicates (e.g.
+// RequirementDependsOn, ScenarioThen, ChangeProposalMutates).
+func (tw *TripleWriter) ReadEntitiesByPrefixMulti(ctx context.Context, prefix string, limit int) (map[string]map[string][]string, error) {
+	if tw.NATSClient == nil {
+		return nil, fmt.Errorf("NATS client not configured")
+	}
+
+	if limit <= 0 {
+		limit = 100
+	}
+
+	reqData, err := json.Marshal(map[string]any{"prefix": prefix, "limit": limit})
+	if err != nil {
+		return nil, fmt.Errorf("marshal prefix query: %w", err)
+	}
+
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, "graph.ingest.query.prefix", reqData, 10*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		return nil, fmt.Errorf("query prefix %s: %w", prefix, err)
+	}
+
+	var resp struct {
+		Entities []graph.EntityState `json:"entities"`
+	}
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return nil, fmt.Errorf("unmarshal prefix response: %w", err)
+	}
+
+	result := make(map[string]map[string][]string, len(resp.Entities))
+	for _, entity := range resp.Entities {
+		multi := make(map[string][]string, len(entity.Triples))
+		for _, t := range entity.Triples {
+			var s string
+			switch v := t.Object.(type) {
+			case string:
+				s = v
+			case float64:
+				if v == float64(int64(v)) {
+					s = fmt.Sprintf("%d", int64(v))
+				} else {
+					s = fmt.Sprintf("%g", v)
+				}
+			case bool:
+				s = fmt.Sprintf("%t", v)
+			default:
+				data, _ := json.Marshal(v)
+				s = string(data)
+			}
+			multi[t.Predicate] = append(multi[t.Predicate], s)
+		}
+		result[entity.ID] = multi
 	}
 
 	return result, nil
