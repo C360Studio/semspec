@@ -14,8 +14,14 @@ export const createPlanButton = (page: Page) =>
 export const approvePlanButton = (page: Page) =>
 	page.getByRole('button', { name: /Create Requirements/i });
 
+export const approveAndContinueButton = (page: Page) =>
+	page.getByRole('button', { name: /Approve & Continue/i });
+
 export const startExecutionButton = (page: Page) =>
 	page.getByRole('button', { name: /Start Execution/i });
+
+export const editPlanButton = (page: Page) =>
+	page.getByRole('button', { name: /Edit/i });
 
 export const replayButton = (page: Page) => page.getByRole('button', { name: /Replay/i });
 

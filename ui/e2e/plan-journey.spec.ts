@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { createPlan, deletePlan, getPlan, waitForGoal } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
-import { startExecutionButton, planListItem } from './helpers/selectors';
+import { startExecutionButton, planListItem, editPlanButton, cascadeStatus } from './helpers/selectors';
 
 /**
  * T1 happy-path plan journey: full lifecycle with mock LLM (hello-world scenario).
@@ -77,6 +77,20 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		expect(plan.stage).toBe('scenarios_reviewed');
 	});
 
+	test('editing is locked at scenarios_reviewed gate', async ({ page }) => {
+		// At this point the plan is at scenarios_reviewed — generation is done,
+		// but the plan is in a review hold. Editing should be locked because
+		// scenarios_reviewed is a processing stage (reviewer may request changes).
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		const plan = await getPlan(slug);
+		expect(plan.stage).toBe('scenarios_reviewed');
+
+		// Edit button should NOT be visible during review stages.
+		await expect(editPlanButton(page).first()).not.toBeVisible({ timeout: 5000 });
+	});
+
 	test('requirements panel shows active requirements', async ({ page }) => {
 		// Fresh SSR navigation — load function fetches current data
 		await page.goto(`/plans/${slug}`);
@@ -108,6 +122,20 @@ test.describe('@t1 @happy-path plan-journey', () => {
 
 		const plan = await getPlan(slug);
 		expect(plan.stage).toBe('ready_for_execution');
+	});
+
+	test('editing is available at ready_for_execution', async ({ page }) => {
+		// After round 2 approval, the plan is at ready_for_execution — a human
+		// decision point. Editing should be enabled here so users can review
+		// before committing to execution.
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		const plan = await getPlan(slug);
+		expect(plan.stage).toBe('ready_for_execution');
+
+		// Edit button should be visible at decision gates.
+		await expect(editPlanButton(page).first()).toBeVisible({ timeout: 5000 });
 	});
 
 	test('execute plan triggers execution pipeline', async ({ page }) => {

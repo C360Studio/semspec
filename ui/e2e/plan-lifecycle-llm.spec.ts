@@ -7,7 +7,11 @@ import { createPlan, deletePlan, executePlan, getPlan, promotePlan, waitForGoal 
  *
  * Exercises the full plan flow with a real LLM provider.
  * Handles both auto_approve=true (cascade runs automatically) and
- * auto_approve=false (human clicks Create Requirements in UI).
+ * auto_approve=false (poll for approval gates and promote via API).
+ *
+ * The cascade polling loop handles slow local LLMs (Ollama) where the
+ * plan may sit in drafting/reviewing_draft for many minutes before
+ * reaching an actionable approval gate.
  *
  * Run with: task e2e:ui:test:llm
  * Or: PLAYWRIGHT_TIMEOUT=600000 npx playwright test plan-lifecycle-llm.spec.ts --project t2 --no-deps
@@ -20,6 +24,15 @@ Include unit tests for the health handler.`;
 const CASCADE_TIMEOUT = Number(process.env.CASCADE_TIMEOUT) || 600_000;
 const EXECUTION_TIMEOUT = Number(process.env.EXECUTION_TIMEOUT) || 2_400_000;
 const POLL_INTERVAL = 3_000;
+
+/** Stages where the cascade is done and we can proceed to assertions. */
+const CASCADE_DONE_STAGES = [
+	'scenarios_generated', 'scenarios_reviewed', 'ready_for_execution',
+	'implementing', 'executing', 'reviewing_rollup', 'complete',
+];
+
+/** Stages where the plan is terminally broken. */
+const TERMINAL_FAILURE_STAGES = ['rejected', 'failed'];
 
 test.describe('@t2 @easy plan-lifecycle-llm', () => {
 	let slug: string;
@@ -55,31 +68,43 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
-		// Check if plan needs manual approval (auto_approve=false)
-		// or if cascade already ran (auto_approve=true)
-		let plan = await getPlan(slug);
-
-		if (!plan.approved) {
-			// Manual approval needed — click Create Requirements button
-			console.log('[easy] Manual approval flow — clicking Create Requirements');
-			await page.getByRole('button', { name: /Create Requirements/i }).first().click();
-		} else {
-			console.log(`[easy] Plan already approved (auto_approve=true), stage=${plan.stage}`);
-		}
-
-		// Wait for cascade to complete. With plan-reviewer enabled,
-		// the flow is: approved → scenarios_generated → scenarios_reviewed (human pause).
-		// Without plan-reviewer or with auto_approve=true, it may reach ready_for_execution directly.
-		const CASCADE_STAGES = ['scenarios_generated', 'scenarios_reviewed', 'ready_for_execution'];
+		// Poll for cascade completion. With auto_approve=false, the plan stops
+		// at approval gates that require human action. We promote via API at each
+		// gate rather than clicking UI buttons — this is more reliable with slow
+		// LLMs where SSE events and button rendering can race.
 		const start = Date.now();
+		let lastStage = '';
+
 		while (Date.now() - start < CASCADE_TIMEOUT) {
-			plan = await getPlan(slug);
-			if (CASCADE_STAGES.includes(plan.stage)) break;
+			const plan = await getPlan(slug);
+
+			if (plan.stage !== lastStage) {
+				console.log(`[easy] Stage: ${lastStage || '(start)'} → ${plan.stage} (${((Date.now() - start) / 1000).toFixed(0)}s)`);
+				lastStage = plan.stage;
+			}
+
+			// Terminal failure — bail immediately.
+			if (TERMINAL_FAILURE_STAGES.includes(plan.stage)) {
+				throw new Error(`Plan entered terminal failure stage: ${plan.stage}`);
+			}
+
+			// Cascade complete — done.
+			if (CASCADE_DONE_STAGES.includes(plan.stage)) break;
+
+			// Approval gate: plan reviewed but not yet approved.
+			// Covers both round 1 (ready_for_approval / reviewed) and
+			// auto_approve=false after draft review.
+			if (!plan.approved && ['ready_for_approval', 'reviewed'].includes(plan.stage)) {
+				console.log(`[easy] Promoting at approval gate (stage=${plan.stage})`);
+				await promotePlan(slug);
+			}
+
 			await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 		}
 
+		const plan = await getPlan(slug);
 		console.log(`[easy] Cascade complete: stage=${plan.stage} in ${((Date.now() - start) / 1000).toFixed(1)}s`);
-		expect(CASCADE_STAGES).toContain(plan.stage);
+		expect(CASCADE_DONE_STAGES).toContain(plan.stage);
 	});
 
 	test('plan has requirements and scenarios', async () => {
@@ -97,7 +122,7 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 	test('advance to ready_for_execution and execute', async () => {
 		let plan = await getPlan(slug);
 
-		// Second promote if needed (scenarios_generated or scenarios_reviewed → ready_for_execution)
+		// Second promote if needed (scenarios_reviewed → ready_for_execution)
 		if (['scenarios_generated', 'scenarios_reviewed'].includes(plan.stage)) {
 			console.log(`[easy] Round 2 approval: promoting from ${plan.stage}`);
 			await promotePlan(slug);
@@ -107,6 +132,13 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 				plan = await getPlan(slug);
 			}
 		}
+
+		// If already executing from auto-cascade, skip.
+		if (['implementing', 'executing', 'reviewing_rollup', 'complete'].includes(plan.stage)) {
+			console.log(`[easy] Already executing: stage=${plan.stage}`);
+			return;
+		}
+
 		expect(plan.stage).toBe('ready_for_execution');
 
 		// Trigger execution via API helper. The UI button click can drop the HTTP

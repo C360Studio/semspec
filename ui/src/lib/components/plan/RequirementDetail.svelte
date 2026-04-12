@@ -10,6 +10,7 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ScenarioDetail from './ScenarioDetail.svelte';
 	import { api } from '$lib/api/client';
+	import { LOCKED_STAGES } from '$lib/types/plan';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Requirement } from '$lib/types/requirement';
 	import { getRequirementStatusInfo } from '$lib/types/requirement';
@@ -41,8 +42,7 @@
 
 	const statusInfo = $derived(getRequirementStatusInfo(requirement.status));
 	const canEdit = $derived(
-		requirement.status === 'active' &&
-			!['implementing', 'executing', 'complete', 'failed'].includes(plan.stage)
+		requirement.status === 'active' && !LOCKED_STAGES.includes(plan.stage)
 	);
 
 	function startEdit(): void {

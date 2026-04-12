@@ -12,6 +12,7 @@
 	import { api } from '$lib/api/client';
 	import { promotePlan } from '$lib/actions/plans';
 	import { feedStore } from '$lib/stores/feed.svelte';
+	import { LOCKED_STAGES } from '$lib/types/plan';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Phase } from '$lib/types/phase';
 	import type { Requirement } from '$lib/types/requirement';
@@ -102,9 +103,7 @@
 		};
 	});
 
-	const canEdit = $derived(
-		!['implementing', 'executing', 'complete', 'failed', 'archived'].includes(plan.stage)
-	);
+	const canEdit = $derived(!LOCKED_STAGES.includes(plan.stage));
 
 	const hasScope = $derived(
 		plan.scope &&

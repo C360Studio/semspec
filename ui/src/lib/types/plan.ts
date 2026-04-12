@@ -205,6 +205,14 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 	};
 }
 
+/** Stages where the plan is being processed and editing should be locked. */
+export const LOCKED_STAGES: readonly string[] = [
+	'drafting', 'reviewing_draft', 'approved',
+	'generating_requirements', 'generating_architecture', 'generating_scenarios',
+	'reviewing_scenarios', 'implementing', 'executing',
+	'reviewing_rollup', 'complete', 'failed', 'archived',
+] as const;
+
 /**
  * Human-readable label for a plan stage.
  */
