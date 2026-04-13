@@ -3,6 +3,7 @@ package planmanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
@@ -207,6 +208,9 @@ func (c *Component) countTerminalRequirements(ctx context.Context, bucket jetstr
 	prefix := "req." + slug + "."
 	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
 	if err != nil {
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
+			return 0, 0, nil
+		}
 		return 0, 0, err
 	}
 
