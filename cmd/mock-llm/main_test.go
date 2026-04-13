@@ -288,8 +288,8 @@ func TestToolCallFixture(t *testing.T) {
 	}
 
 	tc := choice.Message.ToolCalls[0]
-	if tc.ID != "call_123" {
-		t.Errorf("tool_call.id: expected 'call_123', got %q", tc.ID)
+	if !strings.HasPrefix(tc.ID, "call_") {
+		t.Errorf("tool_call.id: expected 'call_' prefix (unique), got %q", tc.ID)
 	}
 	if tc.Type != "function" {
 		t.Errorf("tool_call.type: expected 'function', got %q", tc.Type)

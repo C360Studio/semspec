@@ -41,6 +41,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // --- OpenAI-compatible types ---
@@ -291,6 +293,14 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// Parse fixture to determine if it's structured (with tool_calls) or plain text
 	message, finishReason := parseFixture(fixtureContent)
+
+	// Generate unique call IDs for tool calls. Fixtures use static IDs
+	// (e.g., "call_submit_1") which collide when the same model is called
+	// concurrently by multiple loops. The agentic-loop's toolCallToLoop
+	// map is keyed by call ID, so duplicates cause misrouted results.
+	for i := range message.ToolCalls {
+		message.ToolCalls[i].ID = "call_" + uuid.New().String()
+	}
 
 	// Build response
 	resp := chatResponse{

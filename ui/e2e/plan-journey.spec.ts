@@ -77,18 +77,17 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		expect(plan.stage).toBe('scenarios_reviewed');
 	});
 
-	test('editing is locked at scenarios_reviewed gate', async ({ page }) => {
-		// At this point the plan is at scenarios_reviewed — generation is done,
-		// but the plan is in a review hold. Editing should be locked because
-		// scenarios_reviewed is a processing stage (reviewer may request changes).
+	test('editing is available at scenarios_reviewed gate', async ({ page }) => {
+		// At this point the plan is at scenarios_reviewed — a human decision gate.
+		// The user can edit before approving, so editing should be enabled.
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
 		const plan = await getPlan(slug);
 		expect(plan.stage).toBe('scenarios_reviewed');
 
-		// Edit button should NOT be visible during review stages.
-		await expect(editPlanButton(page).first()).not.toBeVisible({ timeout: 5000 });
+		// Edit button should be visible at human decision gates.
+		await expect(editPlanButton(page).first()).toBeVisible({ timeout: 5000 });
 	});
 
 	test('requirements panel shows active requirements', async ({ page }) => {
