@@ -168,15 +168,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults
 	defaults := DefaultConfig()
-	if config.StreamName == "" {
-		config.StreamName = defaults.StreamName
-	}
-	if config.ConsumerName == "" {
-		config.ConsumerName = defaults.ConsumerName
-	}
-	if config.TriggerSubject == "" {
-		config.TriggerSubject = defaults.TriggerSubject
-	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
@@ -224,9 +215,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized requirement-generator",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 	return nil
 }
 
@@ -249,21 +238,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Push-based consumption — messages arrive via callback, no polling delay.
-	cfg := natsclient.StreamConsumerConfig{
-		StreamName:    c.config.StreamName,
-		ConsumerName:  c.config.ConsumerName,
-		FilterSubject: c.config.TriggerSubject,
-		DeliverPolicy: "all",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       180 * time.Second,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("consume requirement triggers: %w", err)
-	}
-
 	// Watch PLAN_STATES for plans reaching "approved" status.
 	// This is the KV twofer — the write IS the trigger.
 	js, err := c.natsClient.JetStream()
@@ -277,76 +251,9 @@ func (c *Component) Start(ctx context.Context) error {
 	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("requirement-generator started",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 
 	return nil
-}
-
-func (c *Component) rollbackStart(cancel context.CancelFunc) {
-	c.mu.Lock()
-	c.running = false
-	c.cancel = nil
-	c.mu.Unlock()
-	cancel()
-}
-
-// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
-// Messages arrive immediately when published — no polling delay.
-func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
-	c.handleMessage(ctx, msg)
-}
-
-// handleMessage processes a single requirement-generator trigger.
-// ACKs immediately and dispatches an agent loop — retries are handled by the loop.
-func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
-	if ctx.Err() != nil {
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message during shutdown", "error", err)
-		}
-		return
-	}
-
-	trigger, ok := c.parseTrigger(msg)
-	if !ok {
-		return
-	}
-
-	c.logger.Info("Processing requirement-generator trigger",
-		"slug", trigger.Slug,
-		"trace_id", trigger.TraceID)
-
-	// ACK immediately — the agent loop handles retries internally.
-	if err := msg.Ack(); err != nil {
-		c.logger.Warn("Failed to ACK message", "error", err)
-	}
-
-	c.dispatchRequirementGenerator(ctx, trigger, "")
-}
-
-// parseTrigger deserialises and validates the NATS message payload. It NAKs or
-// ACKs the message on failure and returns false so the caller can return early.
-func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementGeneratorRequest, bool) {
-	trigger, err := payloads.ParseReactivePayload[payloads.RequirementGeneratorRequest](msg.Data())
-	if err != nil {
-		c.logger.Error("Failed to parse trigger", "error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return nil, false
-	}
-
-	if err := trigger.Validate(); err != nil {
-		c.logger.Error("Invalid trigger payload", "error", err)
-		// ACK invalid requests — they will not succeed on retry.
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
-		}
-		return nil, false
-	}
-
-	return trigger, true
 }
 
 // dispatchRequirementGenerator dispatches a requirement-generator agent loop via

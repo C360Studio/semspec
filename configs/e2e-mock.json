@@ -425,9 +425,6 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "requirement-generator",
-        "trigger_subject": "workflow.async.requirement-generator",
         "default_capability": "requirement_generation"
       }
     },
@@ -436,9 +433,6 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "scenario-generator",
-        "trigger_subject": "workflow.async.scenario-generator",
         "default_capability": "scenario_generation"
       }
     },
@@ -459,10 +453,6 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "plan-reviewer",
-        "trigger_subject": "workflow.async.plan-reviewer",
-        "result_subject_prefix": "workflow.result.plan-reviewer",
         "default_capability": "plan_review"
       }
     },
@@ -471,9 +461,6 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "architecture-generator",
-        "trigger_subject": "workflow.async.architecture-generator",
         "default_capability": "architecture"
       }
     },
@@ -593,8 +580,6 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "rollup-reviewer",
         "default_capability": "qa",
         "skip_review": true
       }

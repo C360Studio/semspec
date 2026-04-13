@@ -149,15 +149,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults for any zero-value fields.
 	defaults := DefaultConfig()
-	if config.StreamName == "" {
-		config.StreamName = defaults.StreamName
-	}
-	if config.ConsumerName == "" {
-		config.ConsumerName = defaults.ConsumerName
-	}
-	if config.TriggerSubject == "" {
-		config.TriggerSubject = defaults.TriggerSubject
-	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
@@ -208,9 +199,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized scenario-generator",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 	return nil
 }
 
@@ -233,21 +222,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Push-based consumption — messages arrive via callback, no polling delay.
-	cfg := natsclient.StreamConsumerConfig{
-		StreamName:    c.config.StreamName,
-		ConsumerName:  c.config.ConsumerName,
-		FilterSubject: c.config.TriggerSubject,
-		DeliverPolicy: "all",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       180 * time.Second,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("consume scenario triggers: %w", err)
-	}
-
 	// Watch PLAN_STATES for plans reaching "requirements_generated" status.
 	// This is the KV twofer — the write IS the trigger.
 	js, err := c.natsClient.JetStream()
@@ -261,19 +235,9 @@ func (c *Component) Start(ctx context.Context) error {
 	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("scenario-generator started",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 
 	return nil
-}
-
-func (c *Component) rollbackStart(cancel context.CancelFunc) {
-	c.mu.Lock()
-	c.running = false
-	c.cancel = nil
-	c.mu.Unlock()
-	cancel()
 }
 
 // Stop gracefully stops the component.
@@ -299,117 +263,6 @@ func (c *Component) Stop(_ time.Duration) error {
 		"generations_failed", c.generationsFailed.Load())
 
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Message consumption
-// ---------------------------------------------------------------------------
-
-// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
-// Messages arrive immediately when published — no polling delay.
-func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
-	c.handleMessage(ctx, msg)
-}
-
-// handleMessage processes a single scenario generation trigger by dispatching
-// an agent task. ACK is immediate — the agent loop handles retries internally.
-func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
-	if ctx.Err() != nil {
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message during shutdown", "error", err)
-		}
-		return
-	}
-
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-
-	trigger, err := payloads.ParseReactivePayload[payloads.ScenarioGeneratorRequest](msg.Data())
-	if err != nil {
-		c.logger.Error("Failed to parse trigger", "error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	if err := trigger.Validate(); err != nil {
-		c.logger.Error("Invalid trigger payload", "error", err)
-		// ACK invalid requests — they will not succeed on retry.
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
-		}
-		return
-	}
-
-	c.logger.Info("Processing scenario generation trigger",
-		"slug", trigger.Slug,
-		"requirement_id", trigger.RequirementID,
-		"trace_id", trigger.TraceID)
-
-	// On replay (DeliverPolicy "all"), stale triggers arrive for plans that
-	// have already moved past scenario generation. Check before dispatch to
-	// prevent duplicate LLM calls.
-	if c.isPlanPastScenarioGeneration(ctx, trigger.Slug) {
-		c.logger.Info("Plan already past scenario generation, skipping stale trigger",
-			"slug", trigger.Slug, "requirement_id", trigger.RequirementID)
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK stale message", "error", ackErr)
-		}
-		return
-	}
-
-	// ACK immediately — the agent loop handles retries internally.
-	if err := msg.Ack(); err != nil {
-		c.logger.Warn("Failed to ACK message", "error", err)
-	}
-
-	// Seed the retry state so retryOrFail can re-dispatch with the same params.
-	key := trigger.Slug + "/" + trigger.RequirementID
-	c.retryState.Store(key, &retryEntry{count: 0, req: trigger})
-
-	c.dispatchScenarioGenerator(ctx, trigger, "")
-}
-
-// isPlanPastScenarioGeneration checks PLAN_STATES to determine if a plan has
-// already moved past the scenario generation phase. Returns true if the plan's
-// status is scenarios_generated or later. Returns false on any error (safe
-// default: proceed with dispatch).
-func (c *Component) isPlanPastScenarioGeneration(ctx context.Context, slug string) bool {
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return false
-	}
-
-	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
-	if err != nil {
-		return false
-	}
-
-	entry, err := bucket.Get(ctx, slug)
-	if err != nil {
-		return false
-	}
-
-	var plan workflow.Plan
-	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-		return false
-	}
-
-	switch plan.EffectiveStatus() {
-	case workflow.StatusScenariosGenerated,
-		workflow.StatusReviewingScenarios,
-		workflow.StatusScenariosReviewed,
-		workflow.StatusReadyForExecution,
-		workflow.StatusImplementing,
-		workflow.StatusReviewingRollup,
-		workflow.StatusComplete,
-		workflow.StatusArchived,
-		workflow.StatusRejected:
-		return true
-	default:
-		return false
-	}
 }
 
 // ---------------------------------------------------------------------------

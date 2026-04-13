@@ -1,7 +1,6 @@
 package planreviewer
 
 import (
-	"fmt"
 	"reflect"
 
 	"github.com/c360studio/semstreams/component"
@@ -12,18 +11,6 @@ var planReviewerSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{})
 
 // Config holds configuration for the plan reviewer component.
 type Config struct {
-	// StreamName is the JetStream stream for consuming triggers and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOW"`
-
-	// ConsumerName is the durable consumer name for trigger consumption.
-	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:plan-reviewer"`
-
-	// TriggerSubject is the subject pattern for plan review triggers.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for plan review triggers,category:basic,default:workflow.async.plan-reviewer"`
-
-	// ResultSubjectPrefix is the prefix for result subjects.
-	ResultSubjectPrefix string `json:"result_subject_prefix" schema:"type:string,description:Subject prefix for plan review results,category:basic,default:workflow.result.plan-reviewer"`
-
 	// LLMTimeout is the timeout for LLM calls.
 	LLMTimeout string `json:"llm_timeout" schema:"type:string,description:Timeout for LLM calls (duration string),category:advanced,default:120s"`
 
@@ -52,25 +39,12 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:          "WORKFLOW",
-		ConsumerName:        "plan-reviewer",
-		TriggerSubject:      "workflow.async.plan-reviewer",
-		ResultSubjectPrefix: "workflow.result.plan-reviewer",
-		LLMTimeout:          "120s",
-		DefaultCapability:   "plan_review",
-		PlanStateBucket:     "PLAN_STATES",
-		MaxReviewRetries:    2,
+		LLMTimeout:        "120s",
+		DefaultCapability: "plan_review",
+		PlanStateBucket:   "PLAN_STATES",
+		MaxReviewRetries:  2,
 		Ports: &component.PortConfig{
-			Inputs: []component.PortDefinition{
-				{
-					Name:        "review-triggers",
-					Type:        "jetstream",
-					Subject:     "workflow.async.plan-reviewer",
-					StreamName:  "WORKFLOW",
-					Description: "Receive plan review triggers",
-					Required:    true,
-				},
-			},
+			Inputs: []component.PortDefinition{},
 			Outputs: []component.PortDefinition{
 				{
 					Name:        "review-results",
@@ -95,14 +69,5 @@ func (c *Config) IsAutoApprove() bool {
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
-	if c.StreamName == "" {
-		return fmt.Errorf("stream_name is required")
-	}
-	if c.ConsumerName == "" {
-		return fmt.Errorf("consumer_name is required")
-	}
-	if c.TriggerSubject == "" {
-		return fmt.Errorf("trigger_subject is required")
-	}
 	return nil
 }

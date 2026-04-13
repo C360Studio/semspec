@@ -165,31 +165,17 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "missing stream name",
-			config: Config{
-				StreamName:     "",
-				ConsumerName:   "test",
-				TriggerSubject: "test",
-			},
-			wantErr: true,
+			name:    "empty capability is valid (defaults applied at construction)",
+			config:  Config{},
+			wantErr: false,
 		},
 		{
-			name: "missing consumer name",
+			name: "zero retries is valid",
 			config: Config{
-				StreamName:     "test",
-				ConsumerName:   "",
-				TriggerSubject: "test",
+				MaxGenerationRetries: 0,
+				DefaultCapability:    "planning",
 			},
-			wantErr: true,
-		},
-		{
-			name: "missing trigger subject",
-			config: Config{
-				StreamName:     "test",
-				ConsumerName:   "test",
-				TriggerSubject: "",
-			},
-			wantErr: true,
+			wantErr: false,
 		},
 	}
 
@@ -299,25 +285,10 @@ func TestRevisionDetection(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	if config.StreamName != "WORKFLOW" {
-		t.Errorf("StreamName = %q, want %q", config.StreamName, "WORKFLOW")
-	}
-	if config.ConsumerName != "planner" {
-		t.Errorf("ConsumerName = %q, want %q", config.ConsumerName, "planner")
-	}
-	if config.TriggerSubject != "workflow.async.planner" {
-		t.Errorf("TriggerSubject = %q, want %q", config.TriggerSubject, "workflow.async.planner")
-	}
 	if config.DefaultCapability != "planning" {
 		t.Errorf("DefaultCapability = %q, want %q", config.DefaultCapability, "planning")
 	}
-	if config.Ports == nil {
-		t.Error("Ports should not be nil")
-	}
-	if len(config.Ports.Inputs) != 1 {
-		t.Errorf("Ports.Inputs length = %d, want 1", len(config.Ports.Inputs))
-	}
-	if len(config.Ports.Outputs) != 1 {
-		t.Errorf("Ports.Outputs length = %d, want 1", len(config.Ports.Outputs))
+	if config.MaxGenerationRetries != 2 {
+		t.Errorf("MaxGenerationRetries = %d, want 2", config.MaxGenerationRetries)
 	}
 }

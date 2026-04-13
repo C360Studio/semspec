@@ -100,15 +100,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults for any zero-value fields.
 	defaults := DefaultConfig()
-	if config.StreamName == "" {
-		config.StreamName = defaults.StreamName
-	}
-	if config.ConsumerName == "" {
-		config.ConsumerName = defaults.ConsumerName
-	}
-	if config.TriggerSubject == "" {
-		config.TriggerSubject = defaults.TriggerSubject
-	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
@@ -159,9 +150,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized architecture-generator",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 	return nil
 }
 
@@ -198,8 +187,7 @@ func (c *Component) Start(ctx context.Context) error {
 	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("architecture-generator started",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName)
+		"plan_state_bucket", c.config.PlanStateBucket)
 
 	return nil
 }

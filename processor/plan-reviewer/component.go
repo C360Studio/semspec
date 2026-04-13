@@ -26,7 +26,6 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
-	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -89,18 +88,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults
 	defaults := DefaultConfig()
-	if config.StreamName == "" {
-		config.StreamName = defaults.StreamName
-	}
-	if config.ConsumerName == "" {
-		config.ConsumerName = defaults.ConsumerName
-	}
-	if config.TriggerSubject == "" {
-		config.TriggerSubject = defaults.TriggerSubject
-	}
-	if config.ResultSubjectPrefix == "" {
-		config.ResultSubjectPrefix = defaults.ResultSubjectPrefix
-	}
 	if config.LLMTimeout == "" {
 		config.LLMTimeout = defaults.LLMTimeout
 	}
@@ -161,13 +148,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized plan-reviewer",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 	return nil
 }
 
-// Start begins processing plan review triggers.
+// Start begins watching for plan state transitions that require a review pass.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -186,21 +171,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Push-based consumption — messages arrive via callback, no polling delay.
-	cfg := natsclient.StreamConsumerConfig{
-		StreamName:    c.config.StreamName,
-		ConsumerName:  c.config.ConsumerName,
-		FilterSubject: c.config.TriggerSubject,
-		DeliverPolicy: "all",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       180 * time.Second,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("consume plan-review triggers: %w", err)
-	}
-
 	// Watch PLAN_STATES for plans reaching "drafted" or "scenarios_generated".
 	js, err := c.natsClient.JetStream()
 	if err != nil {
@@ -213,61 +183,9 @@ func (c *Component) Start(ctx context.Context) error {
 	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("plan-reviewer started",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"subject", c.config.TriggerSubject)
+		"plan_state_bucket", c.config.PlanStateBucket)
 
 	return nil
-}
-
-func (c *Component) rollbackStart(cancel context.CancelFunc) {
-	c.mu.Lock()
-	c.running = false
-	c.cancel = nil
-	c.mu.Unlock()
-	cancel()
-}
-
-// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
-func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
-	c.handleMessage(ctx, msg)
-}
-
-// handleMessage processes a single plan review trigger from JetStream.
-func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
-	c.reviewsProcessed.Add(1)
-	c.updateLastActivity()
-
-	trigger, err := payloads.ParseReactivePayload[payloads.PlanReviewRequest](msg.Data())
-	if err != nil {
-		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to parse trigger", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	if err := trigger.Validate(); err != nil {
-		c.logger.Error("Invalid trigger", "error", err)
-		if err := msg.Ack(); err != nil {
-			c.logger.Warn("Failed to ACK message", "error", err)
-		}
-		return
-	}
-
-	c.logger.Info("Processing plan review trigger",
-		"request_id", trigger.RequestID,
-		"slug", trigger.Slug,
-		"trace_id", trigger.TraceID)
-
-	// ACK immediately — the agent loop handles retries internally.
-	if err := msg.Ack(); err != nil {
-		c.logger.Warn("Failed to ACK message", "error", err)
-	}
-
-	// Dispatch reviewer agent with plan content + SOP context.
-	c.dispatchReviewer(ctx, trigger.Slug, string(trigger.PlanContent), roundDraftReview)
 }
 
 // watchLoopCompletions watches the AGENT_LOOPS KV bucket for review agent

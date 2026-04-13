@@ -78,9 +78,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.PlanStateBucket == "" {
 		config.PlanStateBucket = defaults.PlanStateBucket
 	}
-	if config.StreamName == "" {
-		config.StreamName = defaults.StreamName
-	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)

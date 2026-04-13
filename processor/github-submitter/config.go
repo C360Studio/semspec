@@ -42,9 +42,6 @@ type Config struct {
 
 	// PlanStateBucket is the KV bucket for plan state.
 	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket for plan state,category:advanced,default:PLAN_STATES"`
-
-	// StreamName is the JetStream stream for publishing events.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for events,category:advanced,default:WORKFLOW"`
 }
 
 // GetReviewPollInterval returns the parsed review poll interval.
@@ -76,7 +73,6 @@ func DefaultConfig() Config {
 		MaxPRRevisions:       3,
 		AutoAcceptFeedback:   &defaultTrue,
 		PlanStateBucket:      "PLAN_STATES",
-		StreamName:           "WORKFLOW",
 	}
 }
 

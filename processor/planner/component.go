@@ -28,7 +28,6 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
-	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -93,15 +92,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults
 	defaults := DefaultConfig()
-	if config.StreamName == "" {
-		config.StreamName = defaults.StreamName
-	}
-	if config.ConsumerName == "" {
-		config.ConsumerName = defaults.ConsumerName
-	}
-	if config.TriggerSubject == "" {
-		config.TriggerSubject = defaults.TriggerSubject
-	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
@@ -144,10 +134,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
-	c.logger.Debug("Initialized planner",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject)
+	c.logger.Debug("Initialized planner", "capability", c.config.DefaultCapability)
 	return nil
 }
 
@@ -170,41 +157,15 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Push-based consumption — messages arrive via callback, no polling delay.
-	cfg := natsclient.StreamConsumerConfig{
-		StreamName:    c.config.StreamName,
-		ConsumerName:  c.config.ConsumerName,
-		FilterSubject: c.config.TriggerSubject,
-		DeliverPolicy: "all",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       180 * time.Second,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("consume planner triggers: %w", err)
-	}
-
 	// KV watcher — self-triggers on new plan creation (status == "created", revision == 1).
 	go c.watchPlanStates(subCtx)
 
 	// Loop completion watcher — picks up agentic-dispatch results from AGENT_LOOPS KV.
 	go c.watchLoopCompletions(subCtx)
 
-	c.logger.Info("planner started",
-		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"subject", c.config.TriggerSubject)
+	c.logger.Info("planner started", "capability", c.config.DefaultCapability)
 
 	return nil
-}
-
-func (c *Component) rollbackStart(cancel context.CancelFunc) {
-	c.mu.Lock()
-	c.running = false
-	c.cancel = nil
-	c.mu.Unlock()
-	cancel()
 }
 
 // watchPlanStates watches the PLAN_STATES KV bucket and self-triggers the planner
@@ -640,63 +601,6 @@ type draftedMutationRequest struct {
 	Context string          `json:"context"`
 	Scope   *workflow.Scope `json:"scope,omitempty"`
 	TraceID string          `json:"trace_id,omitempty"`
-}
-
-// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
-func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
-	c.handleMessage(ctx, msg)
-}
-
-// handleMessage processes a single planner trigger from the JetStream consumer.
-// This is the backward-compatible trigger path (alongside the KV self-trigger).
-func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
-	if ctx.Err() != nil {
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message during shutdown", "error", err)
-		}
-		return
-	}
-
-	trigger, ok := c.parseTrigger(msg)
-	if !ok {
-		return
-	}
-
-	c.logger.Info("Processing planner trigger",
-		"request_id", trigger.RequestID,
-		"slug", trigger.Slug,
-		"trace_id", trigger.TraceID)
-
-	// ACK immediately — the agent loop handles retries internally.
-	if err := msg.Ack(); err != nil {
-		c.logger.Warn("Failed to ACK message", "error", err)
-	}
-
-	// Dispatch coordinator agent.
-	c.dispatchPlanner(ctx, trigger.Slug, trigger.Title,
-		trigger.Revision, trigger.PreviousPlanJSON, trigger.Prompt, "")
-}
-
-// parseTrigger deserialises and validates the NATS message payload.
-func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.PlannerRequest, bool) {
-	trigger, err := payloads.ParseReactivePayload[payloads.PlannerRequest](msg.Data())
-	if err != nil {
-		c.logger.Error("Failed to parse trigger", "error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return nil, false
-	}
-
-	if err := trigger.Validate(); err != nil {
-		c.logger.Error("Invalid trigger payload", "error", err)
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
-		}
-		return nil, false
-	}
-
-	return trigger, true
 }
 
 // PlanContent holds the LLM-generated plan fields.
