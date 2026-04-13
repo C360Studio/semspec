@@ -325,18 +325,20 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
 	}
 
+	if len(allScenarios) == 0 {
+		return fmt.Errorf("plan %s has %d requirements but 0 scenarios — cannot dispatch without verification criteria", trigger.PlanSlug, len(requirements))
+	}
+
 	// Apply DAG gating — only dispatch requirements whose upstream deps are satisfied.
 	toDispatch := filterReadyRequirements(requirements, allScenarios)
 
-	blocked := len(requirements) - len(toDispatch)
 	c.logger.Info("requirement DAG gating applied",
 		"plan_slug", trigger.PlanSlug,
 		"total_requirements", len(requirements),
 		"ready_count", len(toDispatch),
-		"blocked_count", blocked)
+		"blocked_count", len(requirements)-len(toDispatch))
 
 	if len(toDispatch) == 0 {
-		c.logger.Info("all requirements blocked by upstream dependencies", "plan_slug", trigger.PlanSlug)
 		return nil
 	}
 

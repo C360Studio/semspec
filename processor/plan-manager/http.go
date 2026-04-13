@@ -832,6 +832,15 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
+	if len(plan.Requirements) == 0 {
+		http.Error(w, "Plan has no requirements — cannot execute", http.StatusBadRequest)
+		return
+	}
+	if len(plan.Scenarios) == 0 {
+		http.Error(w, "Plan has no scenarios — cannot execute. Scenarios are required so the reviewer can verify each requirement.", http.StatusBadRequest)
+		return
+	}
+
 	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusImplementing); err != nil {
 		c.logger.Error("Failed to set plan status to implementing", "slug", slug, "error", err)
 		http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
