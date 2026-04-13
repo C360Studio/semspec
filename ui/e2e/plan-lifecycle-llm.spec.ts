@@ -92,9 +92,9 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 			if (CASCADE_DONE_STAGES.includes(plan.stage)) break;
 
 			// Approval gate: plan reviewed but not yet approved.
-			// Covers both round 1 (ready_for_approval / reviewed) and
-			// auto_approve=false after draft review.
-			if (!plan.approved && ['ready_for_approval', 'reviewed'].includes(plan.stage)) {
+			// Only promote at 'reviewed' — 'ready_for_approval' includes
+			// 'reviewing_draft' (reviewer still running), which 409s on promote.
+			if (!plan.approved && plan.stage === 'reviewed') {
 				console.log(`[easy] Promoting at approval gate (stage=${plan.stage})`);
 				await promotePlan(slug);
 			}
