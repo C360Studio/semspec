@@ -46,6 +46,7 @@ type TaskCreateRequest struct {
 	WorktreePath   string            `json:"worktree_path,omitempty"`
 	WorktreeBranch string            `json:"worktree_branch,omitempty"`
 	ScenarioBranch string            `json:"scenario_branch,omitempty"`
+	FileScope      []string          `json:"file_scope,omitempty"`
 }
 
 // TaskPhaseRequest transitions a task execution to a new phase.
@@ -81,18 +82,22 @@ type TaskCompleteRequest struct {
 
 // ReqCreateRequest creates a new requirement execution entry.
 type ReqCreateRequest struct {
-	Slug          string              `json:"slug"`
-	RequirementID string              `json:"requirement_id"`
-	Title         string              `json:"title"`
-	Description   string              `json:"description,omitempty"`
-	ProjectID     string              `json:"project_id,omitempty"`
-	TraceID       string              `json:"trace_id,omitempty"`
-	LoopID        string              `json:"loop_id,omitempty"`
-	RequestID     string              `json:"request_id,omitempty"`
-	Model         string              `json:"model,omitempty"`
-	Scenarios     []workflow.Scenario `json:"scenarios,omitempty"`
-	BlueTeamID    string              `json:"blue_team_id,omitempty"`
-	RedTeamID     string              `json:"red_team_id,omitempty"`
+	Slug          string                   `json:"slug"`
+	RequirementID string                   `json:"requirement_id"`
+	Title         string                   `json:"title"`
+	Description   string                   `json:"description,omitempty"`
+	ProjectID     string                   `json:"project_id,omitempty"`
+	TraceID       string                   `json:"trace_id,omitempty"`
+	LoopID        string                   `json:"loop_id,omitempty"`
+	RequestID     string                   `json:"request_id,omitempty"`
+	Model         string                   `json:"model,omitempty"`
+	Scenarios     []workflow.Scenario      `json:"scenarios,omitempty"`
+	DependsOn     []workflow.PrereqContext `json:"depends_on,omitempty"`
+	Prompt        string                   `json:"prompt,omitempty"`
+	Role          string                   `json:"role,omitempty"`
+	PlanBranch    string                   `json:"plan_branch,omitempty"`
+	BlueTeamID    string                   `json:"blue_team_id,omitempty"`
+	RedTeamID     string                   `json:"red_team_id,omitempty"`
 }
 
 // ReqPhaseRequest transitions a requirement execution to a new phase.
@@ -213,7 +218,7 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		EntityID:       workflow.TaskExecutionEntityID(req.Slug, req.TaskID),
 		Slug:           req.Slug,
 		TaskID:         req.TaskID,
-		Stage:          phaseDeveloping, // initial phase
+		Stage:          "pending", // KV self-trigger: watcher claims → developing
 		TDDCycle:       0,
 		MaxTDDCycles:   maxCycles,
 		Title:          req.Title,
@@ -231,6 +236,7 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		WorktreePath:   req.WorktreePath,
 		WorktreeBranch: req.WorktreeBranch,
 		ScenarioBranch: req.ScenarioBranch,
+		FileScope:      req.FileScope,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -371,7 +377,7 @@ func (c *Component) handleReqCreateMutation(ctx context.Context, data []byte) Ex
 		EntityID:       workflow.RequirementExecutionEntityID(req.Slug, req.RequirementID),
 		Slug:           req.Slug,
 		RequirementID:  req.RequirementID,
-		Stage:          "decomposing", // initial phase
+		Stage:          "pending", // KV self-trigger: watcher claims → decomposing
 		Title:          req.Title,
 		Description:    req.Description,
 		ProjectID:      req.ProjectID,
@@ -380,6 +386,10 @@ func (c *Component) handleReqCreateMutation(ctx context.Context, data []byte) Ex
 		RequestID:      req.RequestID,
 		Model:          req.Model,
 		Scenarios:      req.Scenarios,
+		DependsOn:      req.DependsOn,
+		Prompt:         req.Prompt,
+		Role:           req.Role,
+		PlanBranch:     req.PlanBranch,
 		BlueTeamID:     req.BlueTeamID,
 		RedTeamID:      req.RedTeamID,
 		CurrentNodeIdx: -1,

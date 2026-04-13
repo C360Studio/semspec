@@ -29,7 +29,7 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 		natsclient.WithStreams(
 			natsclient.TestStreamConfig{
 				Name:     "WORKFLOW",
-				Subjects: []string{"workflow.trigger.task-execution-loop", "workflow.async.>"},
+				Subjects: []string{"workflow.async.>"},
 			},
 			natsclient.TestStreamConfig{
 				Name:     "AGENT",
@@ -121,7 +121,7 @@ func TestIntegration_ReconcileSkipsTerminal(t *testing.T) {
 		natsclient.WithStreams(
 			natsclient.TestStreamConfig{
 				Name:     "WORKFLOW",
-				Subjects: []string{"workflow.trigger.task-execution-loop", "workflow.async.>"},
+				Subjects: []string{"workflow.async.>"},
 			},
 			natsclient.TestStreamConfig{
 				Name:     "AGENT",

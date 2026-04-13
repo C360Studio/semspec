@@ -23,9 +23,6 @@ type Config struct {
 	// Supports wildcards: scenario.orchestrate.* to handle per-plan orchestration.
 	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for orchestration triggers,category:basic,default:scenario.orchestrate.*"`
 
-	// WorkflowTriggerSubject is the subject for triggering requirement-execution-loop workflows.
-	WorkflowTriggerSubject string `json:"workflow_trigger_subject" schema:"type:string,description:Subject for triggering requirement execution workflows,category:advanced,default:workflow.trigger.requirement-execution-loop"`
-
 	// ExecutionTimeout is the maximum time allowed for a single orchestration cycle.
 	ExecutionTimeout string `json:"execution_timeout" schema:"type:string,description:Timeout for a single orchestration cycle,category:advanced,default:120s"`
 
@@ -39,12 +36,11 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:             "WORKFLOW",
-		ConsumerName:           "scenario-orchestrator",
-		TriggerSubject:         "scenario.orchestrate.*",
-		WorkflowTriggerSubject: "workflow.trigger.requirement-execution-loop",
-		ExecutionTimeout:       "120s",
-		MaxConcurrent:          5,
+		StreamName:       "WORKFLOW",
+		ConsumerName:     "scenario-orchestrator",
+		TriggerSubject:   "scenario.orchestrate.*",
+		ExecutionTimeout: "120s",
+		MaxConcurrent:    5,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -58,10 +54,10 @@ func DefaultConfig() Config {
 			},
 			Outputs: []component.PortDefinition{
 				{
-					Name:        "requirement-execution-triggers",
+					Name:        "execution-mutations",
 					Type:        "nats",
-					Subject:     "workflow.trigger.requirement-execution-loop",
-					Description: "Trigger requirement-execution-loop for each ready requirement",
+					Subject:     "execution.mutation.req.create",
+					Description: "Trigger requirement execution via mutation (KV self-trigger pipeline)",
 					Required:    false,
 				},
 			},

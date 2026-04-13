@@ -112,7 +112,7 @@ func testCtx(t *testing.T) context.Context {
 }
 
 // ---------------------------------------------------------------------------
-// makeNATSMsg wraps raw bytes in a *mockMsg for handleTrigger / handleLoopCompleted.
+// makeNATSMsg wraps raw bytes in a *mockMsg for handleLoopCompleted tests.
 // ---------------------------------------------------------------------------
 
 func makeNATSMsg(t *testing.T, data []byte) *mockMsg {
@@ -121,26 +121,35 @@ func makeNATSMsg(t *testing.T, data []byte) *mockMsg {
 }
 
 // ---------------------------------------------------------------------------
-// makeTriggerMsg builds a valid BaseMessage-wrapped TriggerPayload from a
-// map of payload fields, suitable for feeding into handleTrigger.
+// mockKVEntry implements jetstream.KeyValueEntry for handleTaskPending tests.
 // ---------------------------------------------------------------------------
 
-func makeTriggerMsg(t *testing.T, payloadFields map[string]any) *mockMsg {
-	t.Helper()
-	payloadBytes, err := json.Marshal(payloadFields)
-	if err != nil {
-		t.Fatalf("makeTriggerMsg: marshal payload: %v", err)
-	}
+type mockKVEntry struct {
+	key   string
+	value []byte
+	op    jetstream.KeyValueOp
+}
 
-	// Wrap in the BaseMessage envelope that ParseReactivePayload expects.
-	envelope := map[string]any{
-		"payload": json.RawMessage(payloadBytes),
-	}
-	data, err := json.Marshal(envelope)
+func (e *mockKVEntry) Bucket() string                  { return "EXECUTION_STATES" }
+func (e *mockKVEntry) Key() string                     { return e.key }
+func (e *mockKVEntry) Value() []byte                   { return e.value }
+func (e *mockKVEntry) Revision() uint64                { return 1 }
+func (e *mockKVEntry) Created() time.Time              { return time.Time{} }
+func (e *mockKVEntry) Delta() uint64                   { return 0 }
+func (e *mockKVEntry) Operation() jetstream.KeyValueOp { return e.op }
+
+// makeKVEntry builds a mockKVEntry for handleTaskPending unit tests.
+func makeKVEntry(t *testing.T, key string, fields map[string]any) *mockKVEntry {
+	t.Helper()
+	data, err := json.Marshal(fields)
 	if err != nil {
-		t.Fatalf("makeTriggerMsg: marshal envelope: %v", err)
+		t.Fatalf("makeKVEntry: marshal fields: %v", err)
 	}
-	return makeNATSMsg(t, data)
+	return &mockKVEntry{
+		key:   key,
+		value: data,
+		op:    jetstream.KeyValuePut,
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -82,9 +82,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.TriggerSubject == "" {
 		config.TriggerSubject = defaults.TriggerSubject
 	}
-	if config.WorkflowTriggerSubject == "" {
-		config.WorkflowTriggerSubject = defaults.WorkflowTriggerSubject
-	}
 	if config.ExecutionTimeout == "" {
 		config.ExecutionTimeout = defaults.ExecutionTimeout
 	}
@@ -190,21 +187,9 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("consume orchestration triggers: %w", err)
 	}
 
-	// Consumer 2: requirement execution completions — cache results for prereq context.
-	completionCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "WORKFLOW",
-		ConsumerName:  "scenario-orchestrator-completions",
-		FilterSubject: workflow.RequirementExecutionComplete.Pattern,
-		DeliverPolicy: "all",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, completionCfg, c.handleRequirementComplete); err != nil {
-		c.logger.Warn("failed to subscribe to requirement completions — prereq context will use fallback",
-			"error", err)
-		// Non-fatal: orchestrator can still dispatch without cached prereq context.
-	}
+	// KV watcher: EXECUTION_STATES req.> for completion caching.
+	// Supplements the stream consumer with durable, replay-safe delivery.
+	go c.watchReqCompletions(subCtx)
 
 	c.logger.Info("scenario-orchestrator started",
 		"stream", c.config.StreamName,
@@ -429,8 +414,10 @@ func (c *Component) buildPrereqContext(req workflow.Requirement, allReqs []workf
 	return prereqs
 }
 
-// triggerRequirementExecution publishes a RequirementExecutionRequest as a BaseMessage
-// to the requirement-executor component via the configured workflow trigger subject.
+// triggerRequirementExecution sends a req.create mutation to execution-manager,
+// which writes the requirement execution to EXECUTION_STATES with stage=pending.
+// The requirement-executor's KV watcher picks up the pending entry and starts
+// decomposition.
 func (c *Component) triggerRequirementExecution(
 	ctx context.Context,
 	planSlug, traceID, planBranch string,
@@ -438,38 +425,43 @@ func (c *Component) triggerRequirementExecution(
 	scenarios []workflow.Scenario,
 	prereqs []payloads.PrereqContext,
 ) error {
-	execReq := &payloads.RequirementExecutionRequest{
-		RequirementID: req.ID,
-		Slug:          planSlug,
-		Title:         req.Title,
-		Description:   req.Description,
-		Scenarios:     scenarios,
-		DependsOn:     prereqs,
-		TraceID:       traceID,
-		PlanBranch:    planBranch,
+	mutReq := map[string]any{
+		"slug":           planSlug,
+		"requirement_id": req.ID,
+		"title":          req.Title,
+		"description":    req.Description,
+		"scenarios":      scenarios,
+		"depends_on":     prereqs,
+		"trace_id":       traceID,
+		"plan_branch":    planBranch,
 	}
 
-	baseMsg := message.NewBaseMessage(execReq.Schema(), execReq, "scenario-orchestrator")
-	data, err := json.Marshal(baseMsg)
+	data, err := json.Marshal(mutReq)
 	if err != nil {
-		return fmt.Errorf("marshal requirement execution trigger: %w", err)
+		return fmt.Errorf("marshal req.create mutation: %w", err)
 	}
 
-	js, err := c.natsClient.JetStream()
+	respData, err := c.natsClient.RequestWithRetry(ctx, "execution.mutation.req.create", data, 5*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
+		return fmt.Errorf("req.create mutation failed: %w", err)
 	}
 
-	if _, err := js.Publish(ctx, c.config.WorkflowTriggerSubject, data); err != nil {
-		return fmt.Errorf("publish to %s: %w", c.config.WorkflowTriggerSubject, err)
+	var resp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return fmt.Errorf("unmarshal req.create response: %w", err)
+	}
+	if !resp.Success {
+		return fmt.Errorf("req.create rejected: %s", resp.Error)
 	}
 
-	c.logger.Info("Triggered requirement execution",
+	c.logger.Info("Triggered requirement execution via mutation",
 		"requirement_id", req.ID,
 		"plan_slug", planSlug,
 		"scenario_count", len(scenarios),
 		"prereq_count", len(prereqs),
-		"subject", c.config.WorkflowTriggerSubject,
 	)
 	return nil
 }
@@ -548,24 +540,6 @@ func (c *Component) reconcileCompletedRequirements(ctx context.Context) {
 		c.logger.Info("Reconciled completed requirements from EXECUTION_STATES",
 			"recovered", recovered)
 	}
-}
-
-// handleRequirementComplete caches completion events for prereq context enrichment.
-func (c *Component) handleRequirementComplete(_ context.Context, msg jetstream.Msg) {
-	var event workflow.RequirementExecutionCompleteEvent
-	if err := json.Unmarshal(msg.Data(), &event); err != nil {
-		c.logger.Warn("failed to parse requirement completion event", "error", err)
-		_ = msg.Ack()
-		return
-	}
-
-	c.completedReqs.Set(event.RequirementID, &event) //nolint:errcheck
-	c.logger.Debug("cached requirement completion",
-		"requirement_id", event.RequirementID,
-		"slug", event.Slug,
-		"outcome", event.Outcome)
-
-	_ = msg.Ack()
 }
 
 // Stop gracefully stops the component.

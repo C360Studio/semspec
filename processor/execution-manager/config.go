@@ -97,11 +97,11 @@ func DefaultConfig() Config {
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
-					Name:        "execution-trigger",
-					Type:        "jetstream",
-					Subject:     "workflow.trigger.task-execution-loop",
-					StreamName:  "WORKFLOW",
-					Description: "Receive task execution triggers from task-dispatcher",
+					Name:        "execution-states",
+					Type:        "kv",
+					Subject:     "task.>",
+					StreamName:  "EXECUTION_STATES",
+					Description: "Watch task execution states for pending triggers (KV self-trigger)",
 					Required:    true,
 				},
 				{

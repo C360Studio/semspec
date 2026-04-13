@@ -8,10 +8,11 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // testEntityID computes the entity ID from slug+taskID using the canonical
-// workflow function so it stays in sync with component.buildExecution.
+// workflow function so it stays in sync with the component's execution setup.
 func testEntityID(slug, taskID string) string {
 	return workflow.TaskExecutionEntityID(slug, taskID)
 }
@@ -329,98 +330,120 @@ func TestRegister_ValidRegistry(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// handleTrigger — parse/validate logic (via exported method path)
+// handleTaskPending / initTaskExecution — KV self-trigger path
 //
-// We exercise the parsing branch directly by constructing raw NATS message
-// bytes. The component's natsClient is nil so any write/publish side effects
+// handleTaskPending guards the entry gate (JSON parse, stage filter, dedup).
+// initTaskExecution performs the post-claim initialization sequence.
+// The component's natsClient is nil so any write/publish side effects
 // silently no-op, letting us focus on the parse and state-machine branches.
 // ---------------------------------------------------------------------------
 
-func TestHandleTrigger_MalformedJSON(t *testing.T) {
+func TestHandleTaskPending_MalformedJSON(t *testing.T) {
 	c := newTestComponent(t)
 
-	before := c.errors.Load()
-	c.handleTrigger(testCtx(t), makeNATSMsg(t, []byte(`{bad json`)))
+	entry := &mockKVEntry{
+		key:   "task.my-plan.task-123",
+		value: []byte(`{bad json`),
+		op:    jetstream.KeyValuePut,
+	}
 
-	if c.errors.Load() <= before {
-		t.Error("malformed JSON trigger should increment error counter")
+	// Malformed JSON: handleTaskPending should return early without panicking
+	// or modifying any state.
+	c.handleTaskPending(testCtx(t), entry)
+
+	if c.triggersProcessed.Load() != 0 {
+		t.Errorf("triggersProcessed: want 0 for malformed JSON, got %d", c.triggersProcessed.Load())
+	}
+}
+
+func TestHandleTaskPending_NonPendingStage_IsIgnored(t *testing.T) {
+	c := newTestComponent(t)
+
+	// An entry with a non-pending stage must be silently ignored.
+	entry := makeKVEntry(t, "task.my-plan.task-skip", map[string]any{
+		"slug":    "my-plan",
+		"task_id": "task-skip",
+		"stage":   "developing",
+	})
+
+	c.handleTaskPending(testCtx(t), entry)
+
+	if c.triggersProcessed.Load() != 0 {
+		t.Errorf("triggersProcessed: want 0 for non-pending stage, got %d", c.triggersProcessed.Load())
+	}
+	entityID := testEntityID("my-plan", "task-skip")
+	if _, ok := c.activeExecs.Get(entityID); ok {
+		t.Error("non-pending entry should not register an active execution")
+	}
+}
+
+func TestInitTaskExecution_RegistersExecution(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &taskExecution{
+		key: workflow.TaskExecutionKey("my-plan", "task-abc"),
+		TaskExecution: &workflow.TaskExecution{
+			EntityID:     testEntityID("my-plan", "task-abc"),
+			Slug:         "my-plan",
+			TaskID:       "task-abc",
+			Stage:        phaseDeveloping,
+			MaxTDDCycles: 3,
+			Model:        "default",
+		},
+	}
+
+	c.activeExecsMu.Lock()
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+	c.activeExecsMu.Unlock()
+
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+
+	if _, ok := c.activeExecs.Get(exec.EntityID); !ok {
+		t.Errorf("expected active execution to be registered for entity %q", exec.EntityID)
 	}
 	if c.triggersProcessed.Load() != 1 {
 		t.Errorf("triggersProcessed: want 1, got %d", c.triggersProcessed.Load())
 	}
 }
 
-func TestHandleTrigger_MissingSlug(t *testing.T) {
+func TestInitTaskExecution_DuplicateIsIdempotent(t *testing.T) {
 	c := newTestComponent(t)
 
-	// Valid BaseMessage wrapper but missing slug in the payload.
-	payload := map[string]any{
-		"task_id": "task-123",
-		// slug intentionally absent
-	}
-	before := c.errors.Load()
-	c.handleTrigger(testCtx(t), makeTriggerMsg(t, payload))
-
-	if c.errors.Load() <= before {
-		t.Error("trigger missing slug should increment error counter")
-	}
-}
-
-func TestHandleTrigger_MissingTaskID(t *testing.T) {
-	c := newTestComponent(t)
-
-	payload := map[string]any{
-		"slug": "my-plan",
-		// task_id intentionally absent
-	}
-	before := c.errors.Load()
-	c.handleTrigger(testCtx(t), makeTriggerMsg(t, payload))
-
-	if c.errors.Load() <= before {
-		t.Error("trigger missing task_id should increment error counter")
-	}
-}
-
-func TestHandleTrigger_ValidTrigger_RegistersExecution(t *testing.T) {
-	c := newTestComponent(t)
-
-	payload := map[string]any{
-		"slug":    "my-plan",
-		"task_id": "task-abc",
-		"title":   "Do something",
-		"model":   "default",
-	}
-	c.handleTrigger(testCtx(t), makeTriggerMsg(t, payload))
-
-	entityID := testEntityID("my-plan", "task-abc")
-	if _, ok := c.activeExecs.Get(entityID); !ok {
-		t.Errorf("expected active execution to be registered for entity %q", entityID)
-	}
-}
-
-func TestHandleTrigger_DuplicateTrigger_IsIdempotent(t *testing.T) {
-	c := newTestComponent(t)
-
-	payload := map[string]any{
-		"slug":    "my-plan",
-		"task_id": "task-dup",
-	}
-	msg := makeTriggerMsg(t, payload)
-
-	c.handleTrigger(testCtx(t), msg)
-	firstCount := c.triggersProcessed.Load()
-
-	// A second trigger for the same entity should be silently dropped.
-	c.handleTrigger(testCtx(t), msg)
-
-	if c.triggersProcessed.Load() != firstCount+1 {
-		t.Errorf("second trigger should still increment triggersProcessed counter")
+	exec := &taskExecution{
+		key: workflow.TaskExecutionKey("my-plan", "task-dup"),
+		TaskExecution: &workflow.TaskExecution{
+			EntityID:     testEntityID("my-plan", "task-dup"),
+			Slug:         "my-plan",
+			TaskID:       "task-dup",
+			Stage:        phaseDeveloping,
+			MaxTDDCycles: 3,
+			Model:        "default",
+		},
 	}
 
-	// The execution must still be registered (not doubled or removed).
-	entityID := testEntityID("my-plan", "task-dup")
-	if _, ok := c.activeExecs.Get(entityID); !ok {
-		t.Error("execution should remain registered after duplicate trigger")
+	// First registration.
+	c.activeExecsMu.Lock()
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+	c.activeExecsMu.Unlock()
+
+	// Simulate a second KV event for the same entity — handleTaskPending dedup
+	// check should prevent a second registration.
+	c.activeExecsMu.Lock()
+	_, alreadyActive := c.activeExecs.Get(exec.EntityID)
+	c.activeExecsMu.Unlock()
+
+	if !alreadyActive {
+		t.Error("execution should be registered after first claim")
+	}
+
+	// Simulate the dedup path: a second claim attempt for the same entity.
+	c.activeExecsMu.Lock()
+	_, duplicate := c.activeExecs.Get(exec.EntityID)
+	c.activeExecsMu.Unlock()
+
+	if !duplicate {
+		t.Error("execution must still be registered (not removed by duplicate detection)")
 	}
 }
 

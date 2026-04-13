@@ -406,11 +406,11 @@
         "ports": {
           "inputs": [
             {
-              "name": "execution-trigger",
-              "subject": "workflow.trigger.task-execution-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive task execution triggers from task-dispatcher",
+              "name": "execution-states",
+              "subject": "task.>",
+              "type": "kv",
+              "stream_name": "EXECUTION_STATES",
+              "description": "Watch task execution states for pending triggers (KV self-trigger)",
               "required": true
             },
             {
@@ -458,7 +458,6 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
-        "workflow_trigger_subject": "workflow.trigger.requirement-execution-loop",
         "execution_timeout": "3600s",
         "max_concurrent": 5,
         "ports": {
@@ -474,10 +473,10 @@
           ],
           "outputs": [
             {
-              "name": "requirement-execution-triggers",
-              "subject": "workflow.trigger.requirement-execution-loop",
+              "name": "execution-mutations",
+              "subject": "execution.mutation.req.create",
               "type": "nats",
-              "description": "Trigger requirement-executor for each ready requirement"
+              "description": "Trigger requirement execution via mutation (KV self-trigger pipeline)"
             }
           ]
         }
@@ -495,19 +494,11 @@
         "ports": {
           "inputs": [
             {
-              "name": "requirement-trigger",
-              "subject": "workflow.trigger.requirement-execution-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive requirement execution triggers from scenario-orchestrator",
-              "required": true
-            },
-            {
-              "name": "loop-completions",
-              "subject": "agentic.loop_completed.v1",
-              "type": "jetstream",
-              "stream_name": "AGENT",
-              "description": "Receive agentic loop completion events",
+              "name": "execution-states",
+              "subject": "req.>",
+              "type": "kv",
+              "stream_name": "EXECUTION_STATES",
+              "description": "Watch requirement executions for pending triggers and completion signals (KV self-trigger)",
               "required": true
             }
           ],
@@ -523,6 +514,13 @@
               "subject": "agent.task.>",
               "type": "nats",
               "description": "Dispatch agent tasks for decomposition and node execution"
+            },
+            {
+              "name": "execution-states",
+              "subject": "task.>",
+              "type": "kv",
+              "stream_name": "EXECUTION_STATES",
+              "description": "Write task execution states to trigger execution-manager via KV watcher"
             }
           ]
         }

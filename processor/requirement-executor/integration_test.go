@@ -8,9 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -122,14 +120,17 @@ func TestComponentStartStop_IdempotentStart(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Stop(5 * time.Second) })
 
-	// Second Start() should be a no-op — subscriptions should not be doubled.
+	// Second Start() should be a no-op and not return an error.
 	if err := c.Start(ctx); err != nil {
 		t.Fatalf("second Start() error = %v", err)
 	}
 
-	// Should still have the original consumer count, not double.
-	if len(c.consumerInfos) > 2 {
-		t.Errorf("consumerInfos len = %d after double Start(), want ≤ 2 (idempotent)", len(c.consumerInfos))
+	// Component must still report running after the idempotent second Start().
+	c.mu.RLock()
+	running := c.running
+	c.mu.RUnlock()
+	if !running {
+		t.Error("component should still be running after idempotent second Start()")
 	}
 }
 
@@ -178,18 +179,16 @@ func TestComponentStartStop_IdempotentStop(t *testing.T) {
 	}
 }
 
-// TestTriggerReceived verifies that publishing a RequirementExecutionRequest to
-// the trigger subject causes the component to consume the message and record
-// it in triggersProcessed. Because there is no real agent running, the
-// component will attempt to dispatch to the decomposer subject (which has no
-// consumer) and the publish will silently be queued. We only assert the
-// trigger counter advances.
-func TestTriggerReceived(t *testing.T) {
+// TestComponentStartStop_KVWatchersStart verifies that the component starts its
+// KV watchers cleanly. The KV self-trigger path (EXECUTION_STATES req.> watcher)
+// replaced the old JetStream stream consumer. This test confirms Start() succeeds
+// with an EXECUTION_STATES KV bucket in place.
+func TestComponentStartStop_KVWatchersStart(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(
 			natsclient.TestStreamConfig{
 				Name:     "WORKFLOW",
-				Subjects: []string{"workflow.trigger.requirement-execution-loop", "workflow.async.>", "workflow.events.>"},
+				Subjects: []string{"workflow.async.>", "workflow.events.>"},
 			},
 			natsclient.TestStreamConfig{
 				Name:     "AGENT",
@@ -200,6 +199,7 @@ func TestTriggerReceived(t *testing.T) {
 				Subjects: []string{"graph.mutation.triple.add"},
 			},
 		),
+		natsclient.WithKVBuckets("EXECUTION_STATES", "AGENT_LOOPS"),
 	)
 
 	raw, _ := json.Marshal(DefaultConfig())
@@ -219,37 +219,11 @@ func TestTriggerReceived(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Stop(5 * time.Second) })
 
-	// Build and publish a valid RequirementExecutionRequest via JetStream.
-	req := &payloads.RequirementExecutionRequest{
-		RequirementID: "integ-req-001",
-		Slug:          "integ-plan",
-		Title:         "Integration test requirement",
-		Model:         "default",
-	}
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "integration-test")
-	data, err2 := json.Marshal(baseMsg)
-	if err2 != nil {
-		t.Fatalf("marshal BaseMessage: %v", err2)
-	}
+	c.mu.RLock()
+	running := c.running
+	c.mu.RUnlock()
 
-	js, err2 := tc.Client.JetStream()
-	if err2 != nil {
-		t.Fatalf("JetStream() error = %v", err2)
-	}
-	if _, err2 := js.Publish(ctx, subjectRequirementTrigger, data); err2 != nil {
-		t.Fatalf("JetStream Publish() error = %v", err2)
-	}
-
-	// Wait for the component to process the trigger (up to 5 seconds).
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if c.triggersProcessed.Load() >= 1 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-
-	if c.triggersProcessed.Load() < 1 {
-		t.Errorf("triggersProcessed = %d, want ≥ 1 after publishing trigger", c.triggersProcessed.Load())
+	if !running {
+		t.Error("component should be running after Start() with KV buckets available")
 	}
 }

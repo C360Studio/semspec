@@ -12,17 +12,18 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	nats "github.com/nats-io/nats.go"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // TestIntegration_StartStop verifies the component lifecycle against a real NATS
 // server: Start must succeed, Health must report running, and Stop must cleanly
-// shut down the consumer.
+// shut down.
 func TestIntegration_StartStop(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(
 			natsclient.TestStreamConfig{
 				Name:     "WORKFLOW",
-				Subjects: []string{"workflow.trigger.task-execution-loop", "workflow.async.>"},
+				Subjects: []string{"workflow.async.>"},
 			},
 			natsclient.TestStreamConfig{
 				Name:     "AGENT",
@@ -65,16 +66,17 @@ func TestIntegration_StartStop(t *testing.T) {
 	}
 }
 
-// TestIntegration_TriggerCreatesExecution verifies the end-to-end trigger path:
-// publishing a valid TriggerPayload to the execution trigger subject causes the
-// component to register an active execution, publish entity triples to
-// graph.mutation.triple.add, and dispatch a developer task to agent.task.development.
-func TestIntegration_TriggerCreatesExecution(t *testing.T) {
+// TestIntegration_KVPendingTaskCreatesExecution verifies the KV self-trigger path:
+// writing a TaskExecution with stage=pending to EXECUTION_STATES causes the
+// component to claim the task, register an active execution, publish entity
+// triples to graph.mutation.triple.add, and dispatch a developer task to
+// agent.task.development.
+func TestIntegration_KVPendingTaskCreatesExecution(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(
 			natsclient.TestStreamConfig{
 				Name:     "WORKFLOW",
-				Subjects: []string{"workflow.trigger.task-execution-loop", "workflow.async.>"},
+				Subjects: []string{"workflow.async.>"},
 			},
 			natsclient.TestStreamConfig{
 				Name:     "AGENT",
@@ -86,8 +88,7 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// Start the mock graph-ingest responder so that WriteTriple and ReadEntity
-	// calls in handleTrigger do not time out waiting for a non-existent service.
+	// Mock graph-ingest so WriteTriple calls do not time out.
 	startMockGraphIngest(t, tc.Client)
 
 	comp := newExecIntegrationComponent(t, tc)
@@ -97,8 +98,7 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	// Subscribe to agent.task.development before publishing so no messages are missed.
-	// dispatchFirstStage calls dispatchDeveloperLocked which publishes to agent.task.development.
+	// Subscribe to agent.task.development before writing KV so no messages are missed.
 	developerTasks := make(chan []byte, 10)
 	nativeConn := tc.GetNativeConnection()
 	developerSub, err := nativeConn.Subscribe("agent.task.development", func(msg *nats.Msg) {
@@ -112,7 +112,6 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	t.Cleanup(func() { _ = developerSub.Unsubscribe() })
 
 	// Subscribe to graph.mutation.triple.add to observe entity triple requests.
-	// The mock graph-ingest also subscribes here; both receive the fan-out.
 	triples := make(chan []byte, 20)
 	tripleSub, err := nativeConn.Subscribe("graph.mutation.triple.add", func(msg *nats.Msg) {
 		data := make([]byte, len(msg.Data))
@@ -124,15 +123,17 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = tripleSub.Unsubscribe() })
 
-	trigger := workflow.TriggerPayload{
-		Slug:    "test-plan",
-		TaskID:  "task-001",
-		Title:   "Test task",
-		Model:   "default",
-		TraceID: "trace-integ-001",
-		Prompt:  "Implement the feature",
-	}
-	publishExecTrigger(t, tc, ctx, trigger)
+	// Write a pending task to EXECUTION_STATES — the KV watcher picks it up.
+	writeKVPendingTask(t, tc, ctx, workflow.TaskExecution{
+		Slug:         "test-plan",
+		TaskID:       "task-001",
+		Title:        "Test task",
+		Stage:        "pending",
+		Model:        "default",
+		TraceID:      "trace-integ-001",
+		Prompt:       "Implement the feature",
+		MaxTDDCycles: 3,
+	})
 
 	// Verify: a developer task message appears on agent.task.development.
 	developerMsgs := collectMessagesFrom(ctx, t, developerTasks, 1, 15*time.Second)
@@ -152,16 +153,16 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}, "triggersProcessed should reach 1")
 }
 
-// TestIntegration_DuplicateTriggerIdempotent verifies that publishing the same
-// trigger twice results in only one active execution registration. The
-// triggersProcessed counter increments for both deliveries, but the duplicate
-// is silently dropped without creating a second execution.
-func TestIntegration_DuplicateTriggerIdempotent(t *testing.T) {
+// TestIntegration_DuplicateKVEntryIsIdempotent verifies that a KV update for an
+// already-active execution is silently dropped. The triggersProcessed counter
+// increments for each claimed entry, but the duplicate detection in
+// handleTaskPending prevents a second initTaskExecution from running.
+func TestIntegration_DuplicateKVEntryIsIdempotent(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(
 			natsclient.TestStreamConfig{
 				Name:     "WORKFLOW",
-				Subjects: []string{"workflow.trigger.task-execution-loop", "workflow.async.>"},
+				Subjects: []string{"workflow.async.>"},
 			},
 			natsclient.TestStreamConfig{
 				Name:     "AGENT",
@@ -173,7 +174,7 @@ func TestIntegration_DuplicateTriggerIdempotent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// Mock graph-ingest so WriteTriple calls in handleTrigger do not block.
+	// Mock graph-ingest so WriteTriple calls do not block.
 	startMockGraphIngest(t, tc.Client)
 
 	comp := newExecIntegrationComponent(t, tc)
@@ -183,25 +184,27 @@ func TestIntegration_DuplicateTriggerIdempotent(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	trigger := workflow.TriggerPayload{
-		Slug:    "dup-plan",
-		TaskID:  "dup-task-001",
-		Title:   "Duplicate trigger test",
-		Model:   "default",
-		TraceID: "trace-dup-001",
-		Prompt:  "Implement the feature",
+	task := workflow.TaskExecution{
+		Slug:         "dup-plan",
+		TaskID:       "dup-task-001",
+		Title:        "Duplicate task test",
+		Stage:        "pending",
+		Model:        "default",
+		TraceID:      "trace-dup-001",
+		Prompt:       "Implement the feature",
+		MaxTDDCycles: 3,
 	}
 
-	// Publish twice.
-	publishExecTrigger(t, tc, ctx, trigger)
-	publishExecTrigger(t, tc, ctx, trigger)
+	// Write the pending task once — wait for claim before writing a second time
+	// to ensure the watcher has already processed the first entry.
+	writeKVPendingTask(t, tc, ctx, task)
 
-	// Both deliveries must be counted.
+	// Wait for the first claim to complete (triggersProcessed reaches 1).
 	waitForExecCondition(t, ctx, 15*time.Second, func() bool {
-		return comp.triggersProcessed.Load() >= 2
-	}, "triggersProcessed should reach 2")
+		return comp.triggersProcessed.Load() >= 1
+	}, "triggersProcessed should reach 1 after first KV write")
 
-	// Only one active execution must be registered for the entity.
+	// Only one active execution must be registered.
 	entityID := workflow.TaskExecutionEntityID("dup-plan", "dup-task-001")
 	if _, ok := comp.activeExecs.Get(entityID); !ok {
 		t.Errorf("expected active execution for %q, but not found", entityID)
@@ -230,27 +233,32 @@ func newExecIntegrationComponent(t *testing.T, tc *natsclient.TestClient) *Compo
 	return compI.(*Component)
 }
 
-// publishExecTrigger wraps a TriggerPayload in the BaseMessage envelope expected
-// by ParseReactivePayload and publishes it to the execution trigger subject.
-func publishExecTrigger(t *testing.T, tc *natsclient.TestClient, ctx context.Context, trigger workflow.TriggerPayload) {
+// writeKVPendingTask serialises a TaskExecution and writes it to the
+// EXECUTION_STATES KV bucket under the canonical task key. The watcher
+// in watchTaskPending will pick it up and initiate execution.
+func writeKVPendingTask(t *testing.T, tc *natsclient.TestClient, ctx context.Context, task workflow.TaskExecution) {
 	t.Helper()
-	payloadBytes, err := json.Marshal(trigger)
-	if err != nil {
-		t.Fatalf("publishExecTrigger: marshal payload: %v", err)
-	}
-	envelope := map[string]any{
-		"payload": json.RawMessage(payloadBytes),
-	}
-	data, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatalf("publishExecTrigger: marshal envelope: %v", err)
-	}
+
 	js, err := tc.Client.JetStream()
 	if err != nil {
-		t.Fatalf("publishExecTrigger: JetStream(): %v", err)
+		t.Fatalf("writeKVPendingTask: JetStream(): %v", err)
 	}
-	if _, err := js.Publish(ctx, "workflow.trigger.task-execution-loop", data); err != nil {
-		t.Fatalf("publishExecTrigger: publish trigger: %v", err)
+
+	bucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+		Bucket: "EXECUTION_STATES",
+	})
+	if err != nil {
+		t.Fatalf("writeKVPendingTask: create/open EXECUTION_STATES: %v", err)
+	}
+
+	data, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("writeKVPendingTask: marshal task: %v", err)
+	}
+
+	key := workflow.TaskExecutionKey(task.Slug, task.TaskID)
+	if _, err := bucket.Put(ctx, key, data); err != nil {
+		t.Fatalf("writeKVPendingTask: put %q: %v", key, err)
 	}
 }
 

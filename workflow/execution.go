@@ -41,9 +41,10 @@ type TaskExecution struct {
 	RedTeamID  string `json:"red_team_id,omitempty"`
 
 	// Sandbox worktree (persists across retries)
-	WorktreePath   string `json:"worktree_path,omitempty"`
-	WorktreeBranch string `json:"worktree_branch,omitempty"`
-	ScenarioBranch string `json:"scenario_branch,omitempty"`
+	WorktreePath   string   `json:"worktree_path,omitempty"`
+	WorktreeBranch string   `json:"worktree_branch,omitempty"`
+	ScenarioBranch string   `json:"scenario_branch,omitempty"`
+	FileScope      []string `json:"file_scope,omitempty"`
 
 	// Pipeline outputs
 	FilesModified    []string `json:"files_modified,omitempty"`
@@ -120,6 +121,12 @@ type RequirementExecution struct {
 	Model       string     `json:"model,omitempty"`
 	Scenarios   []Scenario `json:"scenarios,omitempty"`
 
+	// Dispatch context (carried from trigger for KV self-trigger)
+	DependsOn  []PrereqContext `json:"depends_on,omitempty"`
+	Prompt     string          `json:"prompt,omitempty"`
+	Role       string          `json:"role,omitempty"`
+	PlanBranch string          `json:"plan_branch,omitempty"`
+
 	// Agent
 	BlueTeamID string `json:"blue_team_id,omitempty"`
 	RedTeamID  string `json:"red_team_id,omitempty"`
@@ -163,6 +170,16 @@ func RequirementExecutionKey(slug, requirementID string) string {
 // Instance is hashed to guarantee 6-part format and compact length.
 func RequirementExecutionEntityID(slug, requirementID string) string {
 	return EntityPrefix() + ".exec.req.run." + HashInstanceID(slug, requirementID)
+}
+
+// PrereqContext carries the completed work from a prerequisite requirement
+// so downstream agents can reference prior decisions, files, and patterns.
+type PrereqContext struct {
+	RequirementID string   `json:"requirement_id"`
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	FilesModified []string `json:"files_modified,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
 }
 
 // IsTerminalReqStage returns true if the stage is a terminal state.

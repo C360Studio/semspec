@@ -825,15 +825,9 @@ var ScenarioOrchestrationTriggerType = message.Type{
 // Requirement execution payloads
 // ---------------------------------------------------------------------------
 
-// PrereqContext carries the completed work from a prerequisite requirement
-// so downstream agents can reference prior decisions, files, and patterns.
-type PrereqContext struct {
-	RequirementID string   `json:"requirement_id"`
-	Title         string   `json:"title"`
-	Description   string   `json:"description"`
-	FilesModified []string `json:"files_modified,omitempty"`
-	Summary       string   `json:"summary,omitempty"`
-}
+// PrereqContext is an alias for workflow.PrereqContext.
+// Kept for backward compatibility with existing callers.
+type PrereqContext = workflow.PrereqContext
 
 // RequirementExecutionRequest is the typed payload sent to the requirement-executor
 // component to trigger execution of a single Requirement and its scenarios.

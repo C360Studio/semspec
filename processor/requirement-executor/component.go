@@ -43,7 +43,6 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 	"github.com/google/uuid"
-	"github.com/nats-io/nats.go/jetstream"
 )
 
 const (
@@ -68,17 +67,8 @@ const (
 	phaseReviewing   = "reviewing"
 
 	// NATS subjects.
-	subjectRequirementTrigger = "workflow.trigger.requirement-execution-loop"
-	subjectDecomposer         = "agent.task.development"
-	subjectExecutionTrigger   = "workflow.trigger.task-execution-loop"
+	subjectDecomposer = "agent.task.development"
 )
-
-// consumerInfo tracks a JetStream consumer created during Start so it can be
-// stopped cleanly via StopConsumer rather than context cancellation.
-type consumerInfo struct {
-	streamName   string
-	consumerName string
-}
 
 // Component orchestrates per-requirement execution.
 type Component struct {
@@ -100,12 +90,11 @@ type Component struct {
 	activeExecsMu sync.Mutex // guards get-or-set for duplicate trigger detection
 
 	// Lifecycle
-	wg            sync.WaitGroup
-	replayGate    sync.WaitGroup // tracks watcher replay completion; resumption waits on this
-	consumerInfos []consumerInfo
-	running       bool
-	mu            sync.RWMutex
-	lifecycleMu   sync.Mutex
+	wg          sync.WaitGroup
+	replayGate  sync.WaitGroup // tracks watcher replay completion; resumption waits on this
+	running     bool
+	mu          sync.RWMutex
+	lifecycleMu sync.Mutex
 
 	// Metrics
 	triggersProcessed     atomic.Int64
@@ -197,35 +186,17 @@ func (c *Component) Start(ctx context.Context) error {
 	// Reconcile: recover in-flight executions from graph state.
 	c.reconcileFromGraph(ctx)
 
-	// Consumer 1: requirement execution triggers from scenario-orchestrator.
-	triggerCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "WORKFLOW",
-		ConsumerName:  "requirement-executor-requirement-trigger",
-		FilterSubject: subjectRequirementTrigger,
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-		MaxAckPending: 1,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
-		return fmt.Errorf("consume requirement triggers: %w", err)
-	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
-		streamName:   triggerCfg.StreamName,
-		consumerName: triggerCfg.ConsumerName,
-	})
-
-	// KV watchers for durable completion delivery. Two buckets, two domains:
+	// KV watchers for durable completion delivery and self-triggering:
 	// - AGENT_LOOPS: decomposer, reviewer, red-team (direct agentic loops)
 	// - EXECUTION_STATES task.>: TDD node completions (execution-manager pipeline)
+	// - EXECUTION_STATES req.>: pending requirement executions (KV self-trigger)
 	//
-	// Both watchers replay historical entries on startup. The replayGate
+	// All watchers replay historical entries on startup. The replayGate
 	// tracks when all watchers have finished replay (nil sentinel received).
 	// Resumption of interrupted executions is deferred until after all replay
 	// is complete to avoid re-dispatching work that completed during downtime.
-	c.replayGate.Add(2)
-	c.wg.Add(3) // 2 watchers + 1 resumption goroutine
+	c.replayGate.Add(3)
+	c.wg.Add(4) // 3 watchers + 1 resumption goroutine
 	go func() {
 		defer c.wg.Done()
 		c.watchLoopCompletions(ctx)
@@ -233,6 +204,10 @@ func (c *Component) Start(ctx context.Context) error {
 	go func() {
 		defer c.wg.Done()
 		c.watchTaskCompletions(ctx)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.watchReqPending(ctx)
 	}()
 	go func() {
 		defer c.wg.Done()
@@ -264,11 +239,6 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"requirements_completed", c.requirementsCompleted.Load(),
 		"requirements_failed", c.requirementsFailed.Load(),
 	)
-
-	for _, info := range c.consumerInfos {
-		c.natsClient.StopConsumer(info.streamName, info.consumerName)
-	}
-	c.consumerInfos = nil
 
 	// Drain in-flight timeout goroutines.
 	done := make(chan struct{})
@@ -504,139 +474,6 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 	}
 
 	return exec
-}
-
-// ---------------------------------------------------------------------------
-// Trigger handler
-// ---------------------------------------------------------------------------
-
-// parseTrigger validates and returns the trigger payload, NAKing the message on failure.
-func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementExecutionRequest, error) {
-	trigger, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](msg.Data())
-	if err != nil {
-		c.logger.Error("Failed to parse requirement execution trigger", "error", err)
-		c.errors.Add(1)
-		_ = msg.Nak()
-		return nil, err
-	}
-	if trigger.RequirementID == "" || trigger.Slug == "" {
-		c.logger.Error("Trigger missing requirement_id or slug")
-		c.errors.Add(1)
-		_ = msg.Nak()
-		return nil, fmt.Errorf("missing requirement_id or slug")
-	}
-	return trigger, nil
-}
-
-func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-
-	trigger, err := c.parseTrigger(msg)
-	if err != nil {
-		return
-	}
-
-	instance := strings.ReplaceAll(trigger.Slug+"-"+trigger.RequirementID, ".", "-")
-	entityID := fmt.Sprintf("%s.exec.req.run.%s", workflow.EntityPrefix(), instance)
-
-	c.logger.Info("Requirement execution trigger received",
-		"slug", trigger.Slug,
-		"requirement_id", trigger.RequirementID,
-		"entity_id", entityID,
-		"trace_id", trigger.TraceID,
-	)
-
-	model := trigger.Model
-	if model == "" {
-		model = c.config.Model
-	}
-
-	exec := &requirementExecution{
-		EntityID:       entityID,
-		Slug:           trigger.Slug,
-		RequirementID:  trigger.RequirementID,
-		Title:          trigger.Title,
-		Description:    trigger.Description,
-		Scenarios:      trigger.Scenarios,
-		DependsOn:      trigger.DependsOn,
-		Prompt:         trigger.Prompt,
-		Role:           trigger.Role,
-		Model:          model,
-		ProjectID:      trigger.ProjectID,
-		TraceID:        trigger.TraceID,
-		LoopID:         trigger.LoopID,
-		RequestID:      trigger.RequestID,
-		CurrentNodeIdx: -1,
-		VisitedNodes:   make(map[string]bool),
-		MaxRetries:     c.config.MaxRequirementRetries,
-	}
-
-	c.activeExecsMu.Lock()
-	if _, exists := c.activeExecs.Get(entityID); exists {
-		c.activeExecsMu.Unlock()
-		c.logger.Debug("Duplicate trigger for active requirement, skipping", "entity_id", entityID)
-		_ = msg.Ack()
-		return
-	}
-	c.activeExecs.Set(entityID, exec) //nolint:errcheck // cache set is best-effort
-	c.activeExecsMu.Unlock()
-
-	// Persist to EXECUTION_STATES before ACK — crash recovery breadcrumb.
-	// A crash between ACK and this write would lose the trigger entirely;
-	// writing first means the execution can be recovered on restart.
-	// When natsClient is available, failure to persist causes the trigger to
-	// be not-ACKed so NATS redelivers. Without natsClient (tests, no-NATS
-	// mode), proceed with at-most-once delivery.
-	if c.natsClient != nil {
-		storeKey, mutErr := c.sendReqCreate(ctx, exec, trigger)
-		if mutErr != nil {
-			c.logger.Error("Failed to persist requirement execution — trigger will be redelivered",
-				"entity_id", entityID, "error", mutErr)
-			c.activeExecsMu.Lock()
-			c.activeExecs.Delete(entityID)
-			c.activeExecsMu.Unlock()
-			return // Don't ACK — NATS redelivers.
-		}
-		exec.storeKey = storeKey
-	}
-
-	// Acknowledge the trigger — execution is now durably registered.
-	_ = msg.Ack()
-
-	// Create per-requirement branch for worktree isolation.
-	// For GitHub plans, use the plan branch as the base instead of HEAD.
-	if c.sandbox != nil {
-		branchName := "semspec/requirement-" + trigger.RequirementID
-		baseBranch := "HEAD"
-		if trigger.PlanBranch != "" {
-			baseBranch = trigger.PlanBranch
-		}
-		if err := c.sandbox.CreateBranch(ctx, branchName, baseBranch); err != nil {
-			c.logger.Warn("Failed to create requirement branch; worktrees will branch from HEAD",
-				"branch", branchName, "base", baseBranch, "error", err)
-		} else {
-			exec.RequirementBranch = branchName
-			c.logger.Info("Requirement branch created", "branch", branchName, "base", baseBranch)
-		}
-	}
-
-	// Load plan scope from PLAN_STATES so decomposer and downstream agents
-	// know which files are in play. Best-effort — missing scope degrades
-	// decomposer accuracy but doesn't block execution.
-	if scope := c.loadPlanScope(ctx, trigger.Slug); scope != nil {
-		exec.Scope = scope
-	}
-
-	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewRequirementExecutionEntity(exec).WithPhase(phaseDecomposing))
-
-	// Lock for timeout + dispatch.
-	exec.mu.Lock()
-	defer exec.mu.Unlock()
-
-	c.startExecutionTimeoutLocked(exec)
-	c.dispatchDecomposerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -1066,23 +903,6 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		nodePrompt += "\n\nYour workspace contains files from the previous attempt. Review what exists before making changes."
 	}
 
-	// Dispatch to execution-orchestrator for TDD pipeline processing
-	// (test → build → validate → review) instead of direct agent dispatch.
-	trigger := &workflow.TriggerPayload{
-		WorkflowID:     "task-execution-loop",
-		Slug:           exec.Slug,
-		TaskID:         taskID,
-		Title:          node.Prompt,
-		Prompt:         nodePrompt,
-		Model:          exec.Model,
-		ProjectID:      exec.ProjectID,
-		TraceID:        exec.TraceID,
-		LoopID:         exec.LoopID,
-		RequestID:      fmt.Sprintf("node-%s-%s", exec.RequirementID, nodeID),
-		ScenarioBranch: exec.RequirementBranch,
-		FileScope:      node.FileScope,
-	}
-
 	// Send node dispatch mutation to execution-manager.
 	if err := c.sendReqNode(ctx, exec.storeKey, exec.CurrentNodeIdx, taskID, nil); err != nil {
 		c.logger.Warn("Failed to send req.node mutation", "node_id", nodeID, "error", err)
@@ -1091,7 +911,22 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 	// Update the DAG node graph entity to reflect that execution has started.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "executing")
 
-	if err := c.publishTrigger(ctx, subjectExecutionTrigger, trigger); err != nil {
+	// Dispatch to execution-manager for TDD pipeline processing via mutation.
+	// execution-manager's KV watcher picks up the pending task entry.
+	taskReq := map[string]any{
+		"slug":            exec.Slug,
+		"task_id":         taskID,
+		"title":           node.Prompt,
+		"prompt":          nodePrompt,
+		"model":           exec.Model,
+		"project_id":      exec.ProjectID,
+		"trace_id":        exec.TraceID,
+		"loop_id":         exec.LoopID,
+		"request_id":      fmt.Sprintf("node-%s-%s", exec.RequirementID, nodeID),
+		"scenario_branch": exec.RequirementBranch,
+		"file_scope":      node.FileScope,
+	}
+	if err := c.sendTaskCreate(ctx, taskReq); err != nil {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch node %q failed: %v", nodeID, err))
 		return
 	}
@@ -1811,23 +1646,6 @@ func (c *Component) publishDAGNodeStatus(ctx context.Context, exec *requirementE
 	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.RequirementID)
 	entity := newDAGNodeEntity(executionID, node, exec.EntityID).withStatus(status)
 	c.publishEntity(ctx, entity)
-}
-
-// publishTrigger wraps a TriggerPayload in a BaseMessage and publishes to JetStream.
-// Used for dispatching nodes to the execution-orchestrator.
-func (c *Component) publishTrigger(ctx context.Context, subject string, trigger *workflow.TriggerPayload) error {
-	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, componentName)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal trigger payload: %w", err)
-	}
-
-	if c.natsClient != nil {
-		if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-			return fmt.Errorf("publish to %s: %w", subject, err)
-		}
-	}
-	return nil
 }
 
 // publishTask wraps a TaskMessage in a BaseMessage and publishes to JetStream.

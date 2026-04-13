@@ -366,7 +366,6 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
-        "workflow_trigger_subject": "workflow.trigger.requirement-execution-loop",
         "execution_timeout": "3600s",
         "max_concurrent": 1
       }

@@ -63,9 +63,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.TriggerSubject != "scenario.orchestrate.*" {
 		t.Errorf("TriggerSubject = %q, want %q", cfg.TriggerSubject, "scenario.orchestrate.*")
 	}
-	if cfg.WorkflowTriggerSubject != "workflow.trigger.requirement-execution-loop" {
-		t.Errorf("WorkflowTriggerSubject = %q, want %q", cfg.WorkflowTriggerSubject, "workflow.trigger.requirement-execution-loop")
-	}
 	if cfg.ExecutionTimeout != "120s" {
 		t.Errorf("ExecutionTimeout = %q, want %q", cfg.ExecutionTimeout, "120s")
 	}

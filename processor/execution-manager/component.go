@@ -85,9 +85,6 @@ const (
 	// subjectRedTeamTask is the dispatch subject for red team challenge tasks.
 	subjectRedTeamTask = "agent.task.red-team"
 
-	// Trigger subject.
-	subjectExecutionTrigger = "workflow.trigger.task-execution-loop"
-
 	// Error category IDs that signal a test-coverage gap. Even though the developer
 	// handles the full TDD cycle, these categories are kept for feedback classification
 	// and guidance enrichment in retry prompts.
@@ -115,13 +112,6 @@ func newWorktreeManager(url string) worktreeManager {
 		return nil
 	}
 	return sandbox.NewClient(url)
-}
-
-// consumerInfo tracks a JetStream consumer created during Start so it can be
-// stopped cleanly via StopConsumer rather than context cancellation.
-type consumerInfo struct {
-	streamName   string
-	consumerName string
 }
 
 // Component orchestrates the task execution pipeline.
@@ -171,7 +161,6 @@ type Component struct {
 	replayLoops map[string]agentic.LoopEntity
 
 	// Lifecycle
-	consumerInfos []consumerInfo
 	// shutdownCancel is cancelled in Stop() to unblock awaitIndexing goroutines.
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -296,33 +285,17 @@ func (c *Component) Start(ctx context.Context) error {
 	c.shutdownCtx = shutdownCtx
 	c.shutdownCancel = shutdownCancel
 
-	// Consumer 1: task execution triggers from task-dispatcher.
-	triggerCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "WORKFLOW",
-		ConsumerName:  "execution-orchestrator-execution-trigger",
-		FilterSubject: subjectExecutionTrigger,
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-		MaxAckPending: 1,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
-		shutdownCancel()
-		return fmt.Errorf("consume execution triggers: %w", err)
-	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
-		streamName:   triggerCfg.StreamName,
-		consumerName: triggerCfg.ConsumerName,
-	})
-
-	// KV watcher: AGENT_LOOPS for TDD pipeline loop completions.
-	// Replaces agent.complete.> JetStream consumer. AGENT_LOOPS is written by
-	// agentic-dispatch with full replay — no messages lost on startup races.
-	c.wg.Add(1)
+	// KV watchers:
+	// - AGENT_LOOPS: TDD pipeline loop completions (from agentic-dispatch)
+	// - EXECUTION_STATES task.>: pending task executions (KV self-trigger)
+	c.wg.Add(2)
 	go func() {
 		defer c.wg.Done()
 		c.watchLoopCompletions(ctx)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.watchTaskPending(ctx)
 	}()
 
 	c.mu.Lock()
@@ -349,11 +322,6 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"executions_approved", c.executionsApproved.Load(),
 		"executions_escalated", c.executionsEscalated.Load(),
 	)
-
-	for _, info := range c.consumerInfos {
-		c.natsClient.StopConsumer(info.streamName, info.consumerName)
-	}
-	c.consumerInfos = nil
 
 	if c.shutdownCancel != nil {
 		c.shutdownCancel()
@@ -555,106 +523,6 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Trigger handler
-// ---------------------------------------------------------------------------
-
-func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-
-	trigger, err := payloads.ParseReactivePayload[workflow.TriggerPayload](msg.Data())
-	if err != nil {
-		c.logger.Error("Failed to parse execution trigger", "error", err)
-		c.errors.Add(1)
-		_ = msg.Nak()
-		return
-	}
-
-	if trigger.Slug == "" || trigger.TaskID == "" {
-		c.logger.Error("Trigger missing slug or task_id")
-		c.errors.Add(1)
-		_ = msg.Nak()
-		return
-	}
-
-	exec := c.buildExecution(ctx, trigger)
-
-	c.activeExecsMu.Lock()
-	if _, exists := c.activeExecs.Get(exec.EntityID); exists {
-		c.activeExecsMu.Unlock()
-		c.logger.Debug("Duplicate trigger for active execution, skipping", "entity_id", exec.EntityID)
-		_ = msg.Ack()
-		return
-	}
-	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck // cache set is best-effort
-	c.activeExecsMu.Unlock()
-
-	// Persist to EXECUTION_STATES before ACK — crash recovery breadcrumb.
-	// A crash between ACK and this write would lose the trigger entirely;
-	// writing first means reconcile() can recover on restart.
-	// Failure is non-fatal: in-memory state is sufficient for this run.
-	exec.Stage = phaseDeveloping
-	c.syncToStore(ctx, exec)
-
-	// Ack the trigger now that execution is registered and will make forward progress.
-	_ = msg.Ack()
-
-	c.writeInitialTriples(ctx, exec, trigger)
-	c.maybeCreateWorktree(ctx, exec)
-
-	// Select pipeline based on task type.
-	initialPhase := c.initialPhaseForType(exec.TaskType)
-
-	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(initialPhase))
-
-	// Lock before timeout and dispatch to prevent race where timeout fires
-	// before we finish initializing the execution.
-	exec.mu.Lock()
-	defer exec.mu.Unlock()
-	c.startExecutionTimeout(exec)
-	c.dispatchFirstStage(ctx, exec)
-}
-
-// buildExecution constructs a taskExecution from a trigger payload, resolving
-// the persistent agent and team assignments.
-func (c *Component) buildExecution(_ context.Context, trigger *workflow.TriggerPayload) *taskExecution {
-	entityID := workflow.TaskExecutionEntityID(trigger.Slug, trigger.TaskID)
-
-	c.logger.Info("Task execution trigger received",
-		"slug", trigger.Slug,
-		"task_id", trigger.TaskID,
-		"entity_id", entityID,
-		"trace_id", trigger.TraceID,
-	)
-
-	exec := &taskExecution{
-		key: workflow.TaskExecutionKey(trigger.Slug, trigger.TaskID),
-		TaskExecution: &workflow.TaskExecution{
-			EntityID:       entityID,
-			Slug:           trigger.Slug,
-			TaskID:         trigger.TaskID,
-			TDDCycle:       0,
-			MaxTDDCycles:   c.config.MaxTDDCycles,
-			Title:          trigger.Title,
-			Description:    trigger.Description,
-			ProjectID:      trigger.ProjectID,
-			Prompt:         trigger.Prompt,
-			Model:          trigger.Model,
-			TraceID:        trigger.TraceID,
-			LoopID:         trigger.LoopID,
-			RequestID:      trigger.RequestID,
-			ScenarioBranch: trigger.ScenarioBranch,
-			TaskType:       trigger.TaskType,
-		},
-		ContextRequestID: trigger.ContextRequestID,
-	}
-
-	// Model selection is config-driven — no agent identity or team selection.
-	return exec
-}
-
 // syncToStore writes the current execution state to the EXECUTION_STATES KV bucket.
 // This provides observable state for downstream watchers and restart recovery.
 // Caller must hold exec.mu (or ensure exclusive access).
@@ -666,31 +534,6 @@ func (c *Component) syncToStore(ctx context.Context, exec *taskExecution) {
 		c.logger.Warn("Failed to sync execution to store",
 			"key", exec.key, "stage", exec.Stage, "error", err)
 	}
-}
-
-// writeInitialTriples writes the execution entity triples for durability and
-// restart recovery. Called once immediately after the trigger is acked.
-func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution, trigger *workflow.TriggerPayload) {
-	entityID := exec.EntityID
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "task-execution")
-	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseDeveloping); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseDeveloping, "error", err)
-	}
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TaskID, trigger.TaskID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Title, trigger.Title)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TDDCycle, 0)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxTDDCycles, c.config.MaxTDDCycles)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Model, exec.Model)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CurrentStage, phaseDeveloping)
-	if exec.Prompt != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Prompt, exec.Prompt)
-	}
-	// Also write to EXECUTION_STATES KV for observability.
-	exec.Stage = phaseDeveloping
-	c.syncToStore(ctx, exec)
 }
 
 // maybeCreateWorktree creates a sandbox worktree when the sandbox is configured.
@@ -736,7 +579,7 @@ func (c *Component) initialPhaseForType(_ workflow.TaskType) string {
 }
 
 // dispatchFirstStage dispatches the developer as the first (and only pre-validation)
-// pipeline stage. Called from handleTrigger after exec is initialized.
+// pipeline stage. Called from initTaskExecution after exec is initialized.
 func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution) {
 	c.dispatchDeveloperLocked(ctx, exec)
 }

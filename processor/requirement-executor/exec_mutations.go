@@ -17,9 +17,10 @@ import (
 
 // Mutation subjects — must match execution-manager/mutations.go constants.
 const (
-	mutReqCreate = "execution.mutation.req.create"
-	mutReqPhase  = "execution.mutation.req.phase"
-	mutReqNode   = "execution.mutation.req.node"
+	mutReqCreate  = "execution.mutation.req.create"
+	mutReqPhase   = "execution.mutation.req.phase"
+	mutReqNode    = "execution.mutation.req.node"
+	mutTaskCreate = "execution.mutation.task.create"
 )
 
 // execMutationResponse mirrors ExecMutationResponse from execution-manager.
@@ -82,6 +83,17 @@ func (c *Component) sendReqNode(ctx context.Context, key string, nodeIdx int, no
 		req["node_result"] = result
 	}
 	_, err := c.sendMutation(ctx, mutReqNode, req)
+	return err
+}
+
+// sendTaskCreate sends a task execution creation mutation to execution-manager.
+// This replaces the previous JetStream publish to workflow.trigger.task-execution-loop.
+// Returns nil when natsClient is nil (unit test / no-NATS mode).
+func (c *Component) sendTaskCreate(ctx context.Context, req map[string]any) error {
+	if c.natsClient == nil {
+		return nil
+	}
+	_, err := c.sendMutation(ctx, mutTaskCreate, req)
 	return err
 }
 

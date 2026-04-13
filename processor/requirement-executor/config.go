@@ -57,19 +57,11 @@ func DefaultConfig() Config {
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
-					Name:        "requirement-trigger",
-					Type:        "jetstream",
-					Subject:     subjectRequirementTrigger,
-					StreamName:  "WORKFLOW",
-					Description: "Receive requirement execution triggers from scenario-orchestrator",
-					Required:    true,
-				},
-				{
 					Name:        "execution-states",
 					Type:        "kv",
 					Subject:     "req.>",
 					StreamName:  "EXECUTION_STATES",
-					Description: "Watch requirement executions for completion signals (KV Twofer)",
+					Description: "Watch requirement executions for pending triggers and completion signals (KV self-trigger)",
 					Required:    true,
 				},
 			},
@@ -88,11 +80,11 @@ func DefaultConfig() Config {
 					Description: "Dispatch decomposer agent tasks",
 				},
 				{
-					Name:        "execution-trigger",
-					Type:        "jetstream",
-					Subject:     "workflow.trigger.task-execution-loop",
-					StreamName:  "WORKFLOW",
-					Description: "Dispatch DAG nodes to execution-orchestrator for TDD pipeline",
+					Name:        "execution-states",
+					Type:        "kv",
+					Subject:     "task.>",
+					StreamName:  "EXECUTION_STATES",
+					Description: "Write task execution states to trigger execution-manager via KV watcher",
 				},
 			},
 		},

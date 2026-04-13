@@ -60,7 +60,7 @@ func buildTriggerMsg(req payloads.RequirementExecutionRequest) *mockMsg {
 	if err != nil {
 		panic("buildTriggerMsg: marshal envelope: " + err.Error())
 	}
-	return &mockMsg{data: data, subject: subjectRequirementTrigger}
+	return &mockMsg{data: data, subject: "workflow.trigger.requirement-execution-loop"}
 }
 
 // buildLoopCompletedMsg builds a *mockMsg that handleLoopCompleted can parse.
@@ -193,15 +193,17 @@ func TestConfig_WithDefaults_NilPortsFilledByDefault(t *testing.T) {
 		t.Fatal("withDefaults() should fill nil Ports")
 	}
 
+	// Default inputs should include the KV watcher for EXECUTION_STATES.
+	const wantSubject = "req.>"
 	subjectFound := false
 	for _, p := range got.Ports.Inputs {
-		if p.Subject == subjectRequirementTrigger {
+		if p.Subject == wantSubject {
 			subjectFound = true
 			break
 		}
 	}
 	if !subjectFound {
-		t.Errorf("default Ports.Inputs should contain subject %q", subjectRequirementTrigger)
+		t.Errorf("default Ports.Inputs should contain subject %q", wantSubject)
 	}
 }
 
@@ -443,10 +445,6 @@ func TestDataFlow_LastActivityUpdates(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// handleTrigger — parse/validate tests (nil NATS client, metrics verified)
-// ---------------------------------------------------------------------------
-
 // newTestComponent creates a Component with no NATS client suitable for
 // unit-testing handler logic without I/O.
 func newTestComponent(t *testing.T) *Component {
@@ -465,234 +463,6 @@ func newTestComponent(t *testing.T) *Component {
 	}
 	c.activeExecs = ae
 	return c
-}
-
-func TestHandleTrigger_MalformedPayload_IncrementsErrors(t *testing.T) {
-	c := newTestComponent(t)
-
-	msg := &mockMsg{data: []byte(`not json at all`)}
-	c.handleTrigger(context.Background(), msg)
-
-	if c.errors.Load() != 1 {
-		t.Errorf("errors = %d, want 1 after malformed message", c.errors.Load())
-	}
-	if c.triggersProcessed.Load() != 1 {
-		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
-	}
-}
-
-func TestHandleTrigger_MissingRequirementID_IncrementsErrors(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{
-		Slug: "my-plan",
-		// RequirementID intentionally omitted
-	}
-	msg := buildTriggerMsg(req)
-	c.handleTrigger(context.Background(), msg)
-
-	if c.errors.Load() != 1 {
-		t.Errorf("errors = %d, want 1 for missing requirement_id", c.errors.Load())
-	}
-}
-
-func TestHandleTrigger_MissingSlug_IncrementsErrors(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{
-		RequirementID: "req-123",
-		// Slug intentionally omitted
-	}
-	msg := buildTriggerMsg(req)
-	c.handleTrigger(context.Background(), msg)
-
-	if c.errors.Load() != 1 {
-		t.Errorf("errors = %d, want 1 for missing slug", c.errors.Load())
-	}
-}
-
-func TestHandleTrigger_BothMissing_IncrementsErrors(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{}
-	msg := buildTriggerMsg(req)
-	c.handleTrigger(context.Background(), msg)
-
-	if c.errors.Load() != 1 {
-		t.Errorf("errors = %d, want 1 for missing both fields", c.errors.Load())
-	}
-}
-
-func TestHandleTrigger_ValidPayload_CreatesActiveExecution(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{
-		RequirementID: "req-abc",
-		Slug:          "my-plan",
-		Prompt:        "Build it",
-		Model:         "test-model",
-	}
-	msg := buildTriggerMsg(req)
-	c.handleTrigger(context.Background(), msg)
-
-	expectedEntityID := workflow.EntityPrefix() + ".exec.req.run.my-plan-req-abc"
-	exec, ok := c.activeExecs.Get(expectedEntityID)
-	if !ok {
-		t.Fatalf("expected active execution to be stored for entity %q", expectedEntityID)
-	}
-
-	exec.mu.Lock()
-	requirementID := exec.RequirementID
-	slug := exec.Slug
-	prompt := exec.Prompt
-	model := exec.Model
-	idx := exec.CurrentNodeIdx
-	exec.mu.Unlock()
-
-	if requirementID != "req-abc" {
-		t.Errorf("exec.RequirementID = %q, want req-abc", requirementID)
-	}
-	if slug != "my-plan" {
-		t.Errorf("exec.Slug = %q, want my-plan", slug)
-	}
-	if prompt != "Build it" {
-		t.Errorf("exec.Prompt = %q, want 'Build it'", prompt)
-	}
-	if model != "test-model" {
-		t.Errorf("exec.Model = %q, want test-model", model)
-	}
-	if idx != -1 {
-		t.Errorf("exec.CurrentNodeIdx = %d, want -1 (before execution)", idx)
-	}
-}
-
-func TestHandleTrigger_ValidPayload_SetsEntityIDCorrectly(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{
-		RequirementID: "req-001",
-		Slug:          "plan-xyz",
-		Prompt:        "Build something",
-		Model:         "test-model",
-	}
-	c.handleTrigger(context.Background(), buildTriggerMsg(req))
-
-	if c.triggersProcessed.Load() != 1 {
-		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
-	}
-	// The entityID format: {prefix}.exec.req.run.<slug>-<requirementID>
-	_ = workflow.EntityPrefix() + ".exec.req.run.plan-xyz-req-001"
-}
-
-func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
-	c := newTestComponent(t)
-
-	entityID := workflow.EntityPrefix() + ".exec.req.run.dup-plan-req-dup"
-	existing := &requirementExecution{
-		EntityID:       entityID,
-		Slug:           "dup-plan",
-		RequirementID:  "req-dup",
-		CurrentNodeIdx: -1,
-		VisitedNodes:   make(map[string]bool),
-	}
-	c.activeExecs.Set(entityID, existing)
-
-	req := payloads.RequirementExecutionRequest{
-		RequirementID: "req-dup",
-		Slug:          "dup-plan",
-	}
-	msg := buildTriggerMsg(req)
-
-	// Trigger — should detect the existing active execution and skip silently.
-	c.handleTrigger(context.Background(), msg)
-
-	if c.errors.Load() != 0 {
-		t.Errorf("errors = %d, want 0 — duplicate trigger should be silently skipped", c.errors.Load())
-	}
-	if c.triggersProcessed.Load() != 1 {
-		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
-	}
-
-	if _, ok := c.activeExecs.Get(entityID); !ok {
-		t.Error("original execution should still be active after duplicate trigger")
-	}
-}
-
-func TestHandleTrigger_FieldsPropagated(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{
-		RequirementID: "req-fields",
-		Slug:          "fields-plan",
-		Prompt:        "implement the feature",
-		Role:          "developer",
-		Model:         "my-model",
-		ProjectID:     "proj-42",
-		TraceID:       "trace-xyz",
-		LoopID:        "loop-1",
-		RequestID:     "req-99",
-	}
-	msg := buildTriggerMsg(req)
-	c.handleTrigger(context.Background(), msg)
-
-	entityID := workflow.EntityPrefix() + ".exec.req.run.fields-plan-req-fields"
-
-	exec, ok := c.activeExecs.Get(entityID)
-	if !ok {
-		t.Fatalf("active execution for %q should still be present (model+prompt set, nil NATS is no-op)", entityID)
-	}
-
-	exec.mu.Lock()
-	role := exec.Role
-	projectID := exec.ProjectID
-	traceID := exec.TraceID
-	loopID := exec.LoopID
-	requestID := exec.RequestID
-	exec.mu.Unlock()
-
-	if role != "developer" {
-		t.Errorf("Role = %q, want developer", role)
-	}
-	if projectID != "proj-42" {
-		t.Errorf("ProjectID = %q, want proj-42", projectID)
-	}
-	if traceID != "trace-xyz" {
-		t.Errorf("TraceID = %q, want trace-xyz", traceID)
-	}
-	if loopID != "loop-1" {
-		t.Errorf("LoopID = %q, want loop-1", loopID)
-	}
-	if requestID != "req-99" {
-		t.Errorf("RequestID = %q, want req-99", requestID)
-	}
-}
-
-func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{
-		RequirementID: "req-idx",
-		Slug:          "idx-plan",
-		Prompt:        "some prompt",
-		Model:         "some-model",
-	}
-	msg := buildTriggerMsg(req)
-	c.handleTrigger(context.Background(), msg)
-
-	entityID := workflow.EntityPrefix() + ".exec.req.run.idx-plan-req-idx"
-	exec, ok := c.activeExecs.Get(entityID)
-	if !ok {
-		t.Fatalf("active execution for %q not found after trigger", entityID)
-	}
-
-	exec.mu.Lock()
-	decomposerTaskID := exec.DecomposerTaskID
-	exec.mu.Unlock()
-
-	if decomposerTaskID == "" {
-		t.Error("DecomposerTaskID should be set after trigger dispatch")
-	}
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1661,28 +1431,6 @@ func TestRegister_NilRegistry_ReturnsError(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Metrics consistency tests
 // ---------------------------------------------------------------------------
-
-func TestMetrics_TriggersProcessedIncrements(t *testing.T) {
-	c := newTestComponent(t)
-
-	req := payloads.RequirementExecutionRequest{RequirementID: "req-1", Slug: "p1"}
-	c.handleTrigger(context.Background(), buildTriggerMsg(req))
-
-	if c.triggersProcessed.Load() != 1 {
-		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
-	}
-}
-
-func TestMetrics_ErrorsIncrementOnMalformedMessage(t *testing.T) {
-	c := newTestComponent(t)
-
-	c.handleTrigger(context.Background(), &mockMsg{data: []byte(`bad`)})
-	c.handleTrigger(context.Background(), &mockMsg{data: []byte(`also bad`)})
-
-	if c.errors.Load() != 2 {
-		t.Errorf("errors = %d, want 2", c.errors.Load())
-	}
-}
 
 func TestMetrics_SeparateCountersForCompletedAndFailed(t *testing.T) {
 	c := newTestComponent(t)
