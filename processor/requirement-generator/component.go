@@ -410,7 +410,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
-		Tools:        terminal.ToolsForDeliverable("requirements"),
+		Tools:        terminal.ToolsForDeliverable("requirements", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepRequirementGeneration,
@@ -511,7 +511,7 @@ func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorReques
 		}
 		sb.WriteString("\nGenerate ONLY replacement requirements for the rejected IDs above.\n")
 	} else {
-		sb.WriteString("Decompose the above plan into a JSON array of requirements. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
+		sb.WriteString("Extract testable requirements from the above plan. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
 	}
 
 	if previousError != "" {

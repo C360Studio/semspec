@@ -485,7 +485,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
-		Tools:        terminal.ToolsForDeliverable("scenarios"),
+		Tools:        terminal.ToolsForDeliverable("scenarios", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepScenarioGeneration,

@@ -459,7 +459,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		Role:         agentic.RoleReviewer,
 		Model:        modelName,
 		Prompt:       userPrompt,
-		Tools:        terminal.ToolsForDeliverable("review"),
+		Tools:        terminal.ToolsForDeliverable("review", c.availableToolNames()...),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepReviewing,
 		Context: &agentic.ConstructedContext{

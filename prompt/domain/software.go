@@ -1172,9 +1172,11 @@ func scenarioReviewerFragments() []*prompt.Fragment {
 			ID:       "software.scenario-reviewer.system-base",
 			Category: prompt.CategorySystemBase,
 			Roles:    []prompt.Role{prompt.RoleScenarioReviewer},
-			Content: `You are reviewing the complete implementation of a behavioral scenario.
+			Content: `You are reviewing the complete implementation against its acceptance scenarios.
 
-Your Objective: Determine whether ALL acceptance criteria (Given/When/Then) are satisfied by the combined implementation across all tasks. You see the full changeset — not individual file diffs.
+Scenarios define what "done" looks like — they are the contract between the plan and the implementation. Each scenario specifies a Given/When/Then that must be demonstrably satisfied by the code changes.
+
+Your Objective: Determine whether ALL acceptance criteria are satisfied by the combined implementation across all tasks. You see the full changeset — not individual file diffs. A scenario passes only when the code makes every Then assertion true under the Given/When conditions.
 
 You optimize for CORRECTNESS against the scenario specification.`,
 		},
