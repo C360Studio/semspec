@@ -83,8 +83,8 @@ COPY --from=builder /sandbox /usr/local/bin/sandbox
 USER sandbox
 RUN git config --global user.email "sandbox@semspec.dev" \
     && git config --global user.name "Semspec Sandbox"
-WORKDIR /repo
+WORKDIR /workspace
 EXPOSE 8090
 
 ENTRYPOINT ["sandbox"]
-CMD ["--addr", ":8090", "--repo", "/repo"]
+CMD ["--addr", ":8090", "--repo", "/workspace"]

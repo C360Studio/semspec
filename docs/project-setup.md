@@ -67,9 +67,9 @@ The project-manager provides endpoints for automated setup. See the
 [API Reference](api.md#project-setup--apiproject) or the Swagger UI at `/docs`.
 
 ```bash
-curl -X POST http://localhost:8080/api/project/detect          # Auto-detect stack
-curl -X POST http://localhost:8080/api/project/generate-standards  # Generate from detected stack
-curl -X POST http://localhost:8080/api/project/init \           # Write all three files
+curl -X POST http://localhost:8080/project-manager/detect          # Auto-detect stack
+curl -X POST http://localhost:8080/project-manager/generate-standards  # Generate from detected stack
+curl -X POST http://localhost:8080/project-manager/init \           # Write all three files
   -H "Content-Type: application/json" \
   -d '{"name": "my-project", "description": "..."}'
 ```
@@ -77,7 +77,7 @@ curl -X POST http://localhost:8080/api/project/init \           # Write all thre
 ## project.json
 
 Project metadata used for context assembly and prompt generation. Detected automatically
-via `POST /api/project/detect` or created manually.
+via `POST /project-manager/detect` or created manually.
 
 ```json
 {
@@ -157,7 +157,7 @@ empty and add rules as you discover what agents get wrong.
 | `text` | The rule, stated as a requirement |
 | `severity` | `must` (blocks approval), `should` (flagged), `may` (informational) — RFC 2119 |
 | `category` | Grouping: `code-quality`, `testing`, `security`, `documentation`, etc. |
-| `origin` | `manual` (human-written) or `generated` (from `POST /api/project/generate-standards`) |
+| `origin` | `manual` (human-written) or `generated` (from `POST /project-manager/generate-standards`) |
 | `roles` | Optional array restricting which agent roles see the rule |
 
 Start empty and add rules as you discover what agents get wrong. The `roles` field lets

@@ -6,7 +6,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// GenerateStandardsRequest is the request body for POST /api/project/generate-standards.
+// GenerateStandardsRequest is the request body for POST /project-manager/generate-standards.
 type GenerateStandardsRequest struct {
 	// Detection is the full workflow.DetectionResult from /detect.
 	Detection workflow.DetectionResult `json:"detection"`
@@ -16,7 +16,7 @@ type GenerateStandardsRequest struct {
 	ExistingDocsContent map[string]string `json:"existing_docs_content"`
 }
 
-// GenerateStandardsResponse is the response body for POST /api/project/generate-standards.
+// GenerateStandardsResponse is the response body for POST /project-manager/generate-standards.
 type GenerateStandardsResponse struct {
 	// Items is the generated set of project standards.
 	// Empty in the stub implementation — LLM integration is Phase 3.
@@ -26,12 +26,12 @@ type GenerateStandardsResponse struct {
 	TokenEstimate int `json:"token_estimate"`
 }
 
-// ApproveRequest is the request body for POST /api/project/approve.
+// ApproveRequest is the request body for POST /project-manager/approve.
 type ApproveRequest struct {
 	File string `json:"file"`
 }
 
-// ApproveResponse is the response from POST /api/project/approve.
+// ApproveResponse is the response from POST /project-manager/approve.
 type ApproveResponse struct {
 	File        string    `json:"file"`
 	ApprovedAt  time.Time `json:"approved_at"`

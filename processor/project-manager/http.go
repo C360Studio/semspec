@@ -53,7 +53,7 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 }
 
 // ----------------------------------------------------------------------------
-// GET /api/project/status
+// GET /project-manager/status
 // ----------------------------------------------------------------------------
 
 // handleStatus returns the project initialization state.
@@ -131,7 +131,7 @@ func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// POST /api/project/detect
+// POST /project-manager/detect
 // ----------------------------------------------------------------------------
 
 // handleDetect runs the stack detector and returns the result.
@@ -154,7 +154,7 @@ func (c *Component) handleDetect(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// POST /api/project/generate-standards
+// POST /project-manager/generate-standards
 // ----------------------------------------------------------------------------
 
 // handleGenerateStandards is a stub endpoint that returns empty rules.
@@ -182,7 +182,7 @@ func (c *Component) handleGenerateStandards(w http.ResponseWriter, r *http.Reque
 }
 
 // ----------------------------------------------------------------------------
-// POST /api/project/init
+// POST /project-manager/init
 // ----------------------------------------------------------------------------
 
 // ProjectInitInput is the project metadata section of the init request.
@@ -220,7 +220,7 @@ type StandardsInput struct {
 	Items []workflow.Standard `json:"items"`
 }
 
-// InitRequest is the request body for POST /api/project/init.
+// InitRequest is the request body for POST /project-manager/init.
 type InitRequest struct {
 	// Project contains the confirmed project metadata.
 	Project ProjectInitInput `json:"project"`
@@ -232,7 +232,7 @@ type InitRequest struct {
 	Standards StandardsInput `json:"standards"`
 }
 
-// InitResponse is the response body for POST /api/project/init.
+// InitResponse is the response body for POST /project-manager/init.
 type InitResponse struct {
 	// Success is true when all files were written without error.
 	Success bool `json:"success"`
@@ -383,7 +383,7 @@ func (c *Component) persistViaStore(
 }
 
 // ----------------------------------------------------------------------------
-// GET /api/project/wizard
+// GET /project-manager/wizard
 // ----------------------------------------------------------------------------
 
 // WizardLanguage describes a supported language for the setup wizard.
@@ -399,7 +399,7 @@ type WizardFramework struct {
 	Language string `json:"language"`
 }
 
-// WizardResponse is the response from GET /api/project/wizard.
+// WizardResponse is the response from GET /project-manager/wizard.
 type WizardResponse struct {
 	Languages  []WizardLanguage  `json:"languages"`
 	Frameworks []WizardFramework `json:"frameworks"`
@@ -437,16 +437,16 @@ func (c *Component) handleWizard(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// POST /api/project/scaffold
+// POST /project-manager/scaffold
 // ----------------------------------------------------------------------------
 
-// ScaffoldRequest is the request body for POST /api/project/scaffold.
+// ScaffoldRequest is the request body for POST /project-manager/scaffold.
 type ScaffoldRequest struct {
 	Languages  []string `json:"languages"`
 	Frameworks []string `json:"frameworks"`
 }
 
-// ScaffoldResponse is the response from POST /api/project/scaffold.
+// ScaffoldResponse is the response from POST /project-manager/scaffold.
 type ScaffoldResponse struct {
 	FilesCreated []string `json:"files_created"`
 	SemspecDir   string   `json:"semspec_dir"`
@@ -593,7 +593,7 @@ func (c *Component) writeMarkerFiles(languages, frameworks []string) []string {
 }
 
 // ----------------------------------------------------------------------------
-// POST /api/project/approve
+// POST /project-manager/approve
 // ----------------------------------------------------------------------------
 
 // handleApprove sets the approved_at timestamp on a config file and writes
@@ -698,10 +698,10 @@ func (c *Component) checkAllApproved(s *projectStore) bool {
 }
 
 // ----------------------------------------------------------------------------
-// PATCH /api/project/config
+// PATCH /project-manager/config
 // ----------------------------------------------------------------------------
 
-// handleConfig handles PATCH /api/project/config.
+// handleConfig handles PATCH /project-manager/config.
 // Updates project.json fields. Org and platform changes are only allowed
 // before the first plan is created (no entities in graph = safe to rename).
 func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
@@ -767,7 +767,7 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// GET/PATCH /api/project/checklist
+// GET/PATCH /project-manager/checklist
 // ----------------------------------------------------------------------------
 
 // handleChecklist handles GET and PATCH for .semspec/checklist.json.
@@ -812,7 +812,7 @@ func (c *Component) handleChecklist(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// GET/PATCH /api/project/standards
+// GET/PATCH /project-manager/standards
 // ----------------------------------------------------------------------------
 
 // handleStandards handles GET and PATCH for .semspec/standards.json.
@@ -864,7 +864,7 @@ func (c *Component) handleStandards(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
-// POST /api/project/test-check
+// POST /project-manager/test-check
 // ----------------------------------------------------------------------------
 
 // handleTestCheck runs a single checklist command in the sandbox and returns

@@ -23,7 +23,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 			{Name: "Project", Description: "Project initialization and setup wizard endpoints"},
 		},
 		Paths: map[string]service.PathSpec{
-			"/api/project/status": {
+			"/project-manager/status": {
 				GET: &service.OperationSpec{
 					Summary:     "Get project status",
 					Description: "Returns the current project initialization status, including which config files exist and their approval state",
@@ -37,7 +37,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/wizard": {
+			"/project-manager/wizard": {
 				GET: &service.OperationSpec{
 					Summary:     "Get wizard options",
 					Description: "Returns the supported languages and frameworks available in the setup wizard",
@@ -51,7 +51,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/detect": {
+			"/project-manager/detect": {
 				POST: &service.OperationSpec{
 					Summary:     "Detect project stack",
 					Description: "Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files",
@@ -66,7 +66,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/scaffold": {
+			"/project-manager/scaffold": {
 				POST: &service.OperationSpec{
 					Summary:     "Scaffold project files",
 					Description: "Creates marker files for the selected languages and frameworks",
@@ -87,7 +87,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/generate-standards": {
+			"/project-manager/generate-standards": {
 				POST: &service.OperationSpec{
 					Summary:     "Generate project standards",
 					Description: "Generates a set of project standards rules based on the detected stack and existing documentation",
@@ -107,7 +107,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/init": {
+			"/project-manager/init": {
 				POST: &service.OperationSpec{
 					Summary:     "Initialize project",
 					Description: "Writes confirmed project metadata, checklist, and standards to disk under .semspec/",
@@ -129,7 +129,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/approve": {
+			"/project-manager/approve": {
 				POST: &service.OperationSpec{
 					Summary:     "Approve configuration file",
 					Description: "Sets the approved_at timestamp on the specified configuration file",
@@ -151,7 +151,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/config": {
+			"/project-manager/config": {
 				PATCH: &service.OperationSpec{
 					Summary:     "Update project config",
 					Description: "Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.",
@@ -174,7 +174,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/checklist": {
+			"/project-manager/checklist": {
 				GET: &service.OperationSpec{
 					Summary:     "Get checklist",
 					Description: "Returns the current checklist.json with quality gate checks",
@@ -209,7 +209,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/api/project/standards": {
+			"/project-manager/standards": {
 				GET: &service.OperationSpec{
 					Summary:     "Get standards",
 					Description: "Returns the current standards.json with project rules",

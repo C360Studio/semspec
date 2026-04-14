@@ -51,22 +51,22 @@ SSE stream at `/execution-manager/plans/{slug}/stream` for task and requirement 
 | `GET /execution-manager/lessons` | Lessons learned (filter by `?role=`) |
 | `GET /execution-manager/lessons/counts` | Per-category error counts by role |
 
-### Project Setup — `/api/project`
+### Project Setup — `/project-manager`
 
 Project initialization wizard and configuration management.
 
 | Endpoint | What it does |
 |----------|-------------|
-| `GET /api/project/status` | Initialization state (which config files exist) |
-| `GET /api/project/wizard` | Supported languages and frameworks |
-| `POST /api/project/detect` | Auto-detect stack from filesystem |
-| `POST /api/project/scaffold` | Create marker files for selected stack |
-| `POST /api/project/generate-standards` | Generate standards from detected stack |
-| `POST /api/project/init` | Write all config files to `.semspec/` |
-| `POST /api/project/approve` | Approve a config file |
-| `PATCH /api/project/config` | Update project.json fields |
-| `GET/PATCH /api/project/checklist` | Read or update quality gate checks |
-| `GET/PATCH /api/project/standards` | Read or update project standards |
+| `GET /project-manager/status` | Initialization state (which config files exist) |
+| `GET /project-manager/wizard` | Supported languages and frameworks |
+| `POST /project-manager/detect` | Auto-detect stack from filesystem |
+| `POST /project-manager/scaffold` | Create marker files for selected stack |
+| `POST /project-manager/generate-standards` | Generate standards from detected stack |
+| `POST /project-manager/init` | Write all config files to `.semspec/` |
+| `POST /project-manager/approve` | Approve a config file |
+| `PATCH /project-manager/config` | Update project.json fields |
+| `GET/PATCH /project-manager/checklist` | Read or update quality gate checks |
+| `GET/PATCH /project-manager/standards` | Read or update project standards |
 
 ### Agent Activity — `/agentic-dispatch`
 

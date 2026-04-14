@@ -11,238 +11,6 @@ servers:
     - url: http://localhost:8080
       description: Development server
 paths:
-    /api/project/approve:
-        post:
-            summary: Approve configuration file
-            description: Sets the approved_at timestamp on the specified configuration file
-            tags:
-                - Project
-            requestBody:
-                description: Name of the configuration file to approve
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ApproveRequest'
-            responses:
-                "200":
-                    description: Approval result with timestamp and overall approval state
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ApproveResponse'
-                "400":
-                    description: Invalid file name
-                "404":
-                    description: Configuration file not found
-    /api/project/checklist:
-        get:
-            summary: Get checklist
-            description: Returns the current checklist.json with quality gate checks
-            tags:
-                - Project
-            responses:
-                "200":
-                    description: Current checklist
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Checklist'
-                "404":
-                    description: checklist.json not found
-        patch:
-            summary: Update checklist
-            description: Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.
-            tags:
-                - Project
-            requestBody:
-                description: New checks array
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ChecklistUpdateRequest'
-            responses:
-                "200":
-                    description: Updated checklist
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Checklist'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: checklist.json not found — run init first
-    /api/project/config:
-        patch:
-            summary: Update project config
-            description: Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.
-            tags:
-                - Project
-            requestBody:
-                description: Fields to update (all optional)
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ConfigUpdateRequest'
-            responses:
-                "200":
-                    description: Updated project config
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ProjectConfig'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: project.json not found — run init first
-                "409":
-                    description: Cannot change org/platform after plans exist
-    /api/project/detect:
-        post:
-            summary: Detect project stack
-            description: Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files
-            tags:
-                - Project
-            responses:
-                "200":
-                    description: Detected project stack
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/DetectionResult'
-                "500":
-                    description: Detection failed
-    /api/project/generate-standards:
-        post:
-            summary: Generate project standards
-            description: Generates a set of project standards rules based on the detected stack and existing documentation
-            tags:
-                - Project
-            requestBody:
-                description: Detection result and existing documentation content
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/GenerateStandardsRequest'
-            responses:
-                "200":
-                    description: Generated standards rules with token estimate
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/GenerateStandardsResponse'
-    /api/project/init:
-        post:
-            summary: Initialize project
-            description: Writes confirmed project metadata, checklist, and standards to disk under .semspec/
-            tags:
-                - Project
-            requestBody:
-                description: Confirmed project metadata, checklist, and standards
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/InitRequest'
-            responses:
-                "200":
-                    description: List of files written during initialization
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/InitResponse'
-                "400":
-                    description: Invalid request (missing required fields)
-                "500":
-                    description: Failed to write configuration files
-    /api/project/scaffold:
-        post:
-            summary: Scaffold project files
-            description: Creates marker files for the selected languages and frameworks
-            tags:
-                - Project
-            requestBody:
-                description: Selected languages and frameworks to scaffold
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/ScaffoldRequest'
-            responses:
-                "200":
-                    description: List of files created during scaffolding
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/ScaffoldResponse'
-                "400":
-                    description: Missing languages in request
-    /api/project/standards:
-        get:
-            summary: Get standards
-            description: Returns the current standards.json with project rules
-            tags:
-                - Project
-            responses:
-                "200":
-                    description: Current standards
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Standards'
-                "404":
-                    description: standards.json not found
-        patch:
-            summary: Update standards
-            description: Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.
-            tags:
-                - Project
-            requestBody:
-                description: New rules array
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/StandardsUpdateRequest'
-            responses:
-                "200":
-                    description: Updated standards
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/Standards'
-                "400":
-                    description: Invalid request body
-                "404":
-                    description: standards.json not found — run init first
-    /api/project/status:
-        get:
-            summary: Get project status
-            description: Returns the current project initialization status, including which config files exist and their approval state
-            tags:
-                - Project
-            responses:
-                "200":
-                    description: Current project initialization status
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/InitStatus'
-    /api/project/wizard:
-        get:
-            summary: Get wizard options
-            description: Returns the supported languages and frameworks available in the setup wizard
-            tags:
-                - Project
-            responses:
-                "200":
-                    description: Supported languages and frameworks for the wizard
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/WizardResponse'
     /config/{name}:
         get:
             summary: Get component configuration
@@ -840,6 +608,238 @@ paths:
                     description: Plan not found
                 "409":
                     description: Plan is not archived
+    /project-manager/approve:
+        post:
+            summary: Approve configuration file
+            description: Sets the approved_at timestamp on the specified configuration file
+            tags:
+                - Project
+            requestBody:
+                description: Name of the configuration file to approve
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ApproveRequest'
+            responses:
+                "200":
+                    description: Approval result with timestamp and overall approval state
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ApproveResponse'
+                "400":
+                    description: Invalid file name
+                "404":
+                    description: Configuration file not found
+    /project-manager/checklist:
+        get:
+            summary: Get checklist
+            description: Returns the current checklist.json with quality gate checks
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Current checklist
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Checklist'
+                "404":
+                    description: checklist.json not found
+        patch:
+            summary: Update checklist
+            description: Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.
+            tags:
+                - Project
+            requestBody:
+                description: New checks array
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ChecklistUpdateRequest'
+            responses:
+                "200":
+                    description: Updated checklist
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Checklist'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: checklist.json not found — run init first
+    /project-manager/config:
+        patch:
+            summary: Update project config
+            description: Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.
+            tags:
+                - Project
+            requestBody:
+                description: Fields to update (all optional)
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConfigUpdateRequest'
+            responses:
+                "200":
+                    description: Updated project config
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ProjectConfig'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: project.json not found — run init first
+                "409":
+                    description: Cannot change org/platform after plans exist
+    /project-manager/detect:
+        post:
+            summary: Detect project stack
+            description: Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Detected project stack
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/DetectionResult'
+                "500":
+                    description: Detection failed
+    /project-manager/generate-standards:
+        post:
+            summary: Generate project standards
+            description: Generates a set of project standards rules based on the detected stack and existing documentation
+            tags:
+                - Project
+            requestBody:
+                description: Detection result and existing documentation content
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/GenerateStandardsRequest'
+            responses:
+                "200":
+                    description: Generated standards rules with token estimate
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/GenerateStandardsResponse'
+    /project-manager/init:
+        post:
+            summary: Initialize project
+            description: Writes confirmed project metadata, checklist, and standards to disk under .semspec/
+            tags:
+                - Project
+            requestBody:
+                description: Confirmed project metadata, checklist, and standards
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/InitRequest'
+            responses:
+                "200":
+                    description: List of files written during initialization
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InitResponse'
+                "400":
+                    description: Invalid request (missing required fields)
+                "500":
+                    description: Failed to write configuration files
+    /project-manager/scaffold:
+        post:
+            summary: Scaffold project files
+            description: Creates marker files for the selected languages and frameworks
+            tags:
+                - Project
+            requestBody:
+                description: Selected languages and frameworks to scaffold
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ScaffoldRequest'
+            responses:
+                "200":
+                    description: List of files created during scaffolding
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ScaffoldResponse'
+                "400":
+                    description: Missing languages in request
+    /project-manager/standards:
+        get:
+            summary: Get standards
+            description: Returns the current standards.json with project rules
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Current standards
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Standards'
+                "404":
+                    description: standards.json not found
+        patch:
+            summary: Update standards
+            description: Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.
+            tags:
+                - Project
+            requestBody:
+                description: New rules array
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/StandardsUpdateRequest'
+            responses:
+                "200":
+                    description: Updated standards
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Standards'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: standards.json not found — run init first
+    /project-manager/status:
+        get:
+            summary: Get project status
+            description: Returns the current project initialization status, including which config files exist and their approval state
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Current project initialization status
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/InitStatus'
+    /project-manager/wizard:
+        get:
+            summary: Get wizard options
+            description: Returns the supported languages and frameworks available in the setup wizard
+            tags:
+                - Project
+            responses:
+                "200":
+                    description: Supported languages and frameworks for the wizard
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WizardResponse'
     /stats:
         get:
             summary: Get message statistics

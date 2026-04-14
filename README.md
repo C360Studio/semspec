@@ -33,8 +33,16 @@ SEMSPEC_REPO=/path/to/your/project docker compose up -d
 Open **http://localhost:8080**. See [Model Configuration](docs/model-configuration.md) for
 larger models and capability tuning.
 
-> **`SEMSPEC_REPO`** is the project you want agents to work on. It gets mounted into the
-> sandbox (read-write) and semsource (read-only). Omit it to use the semspec repo itself.
+> **`SEMSPEC_REPO`** is the project you want agents to work on. It gets mounted at
+> `/workspace` in the semspec (read-write), sandbox (read-write), and semsource (read-only)
+> containers. Omit it to use the semspec repo itself.
+>
+> Expect two subdirectories to appear under `.semspec/` inside this path:
+> - `.semspec/worktrees/task-<id>/` — git worktrees the sandbox creates for isolated agent execution
+> - `.semspec/plans/<slug>/` — plan artifacts (plan.md, plan.json) written by semspec
+>
+> For stricter isolation, point `SEMSPEC_REPO` at a clone or copy of your repo rather than
+> your active working tree.
 
 > **File permissions:** The sandbox container defaults to UID 1000. If that doesn't match your
 > host user, add your UID to `.env` so files created by agents have correct ownership:
@@ -88,8 +96,8 @@ Semspec requires a `.semspec/` directory with three config files: `project.json`
 See [Project Setup](docs/project-setup.md) for the full configuration guide, or use the API:
 
 ```bash
-curl -X POST http://localhost:8080/api/project/detect    # Auto-detect stack
-curl -X POST http://localhost:8080/api/project/init \    # Generate all three files
+curl -X POST http://localhost:8080/project-manager/detect    # Auto-detect stack
+curl -X POST http://localhost:8080/project-manager/init \    # Generate all three files
   -H "Content-Type: application/json" \
   -d '{"name": "my-project", "description": "..."}'
 ```
