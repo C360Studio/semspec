@@ -65,8 +65,13 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 // ListTools returns the single tool definition for decompose_task.
 func (e *Executor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{{
-		Name:        toolName,
-		Description: "Decompose a complex goal into a DAG of subtasks. CRITICAL: Each node's prompt MUST include CONCRETE FILE PATHS (e.g., 'Create pkg/auth/middleware.go' not 'Create auth middleware'). Agents share a workspace — without explicit paths they waste iterations exploring. The file_scope array MUST list every file the node may modify.",
+		Name: toolName,
+		Description: `Decompose a complex goal into a DAG of subtasks. You MUST provide at least one node.
+
+CRITICAL: Each node's prompt MUST include CONCRETE FILE PATHS (e.g., 'Create pkg/auth/middleware.go' not 'Create auth middleware'). Agents share a workspace — without explicit paths they waste iterations exploring. The file_scope array MUST list every file the node may modify.
+
+Example call:
+{"goal":"Add health endpoint","nodes":[{"id":"health-handler","prompt":"Create cmd/server/health.go with a HealthHandler that returns JSON {\"status\":\"ok\"}. Register it on GET /health in cmd/server/main.go.","role":"developer","file_scope":["cmd/server/health.go","cmd/server/main.go"],"depends_on":[]},{"id":"health-test","prompt":"Create cmd/server/health_test.go with table-driven tests for the health endpoint: verify 200 status, JSON content-type, and response body.","role":"developer","file_scope":["cmd/server/health_test.go"],"depends_on":["health-handler"]}]}`,
 		Parameters: map[string]any{
 			"type":     "object",
 			"required": []string{"goal", "nodes"},
