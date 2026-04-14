@@ -489,6 +489,7 @@
       "config": {
         "timeout_seconds": 900,
         "model": "qwen-coder",
+        "decomposer_model": "qwen3",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
