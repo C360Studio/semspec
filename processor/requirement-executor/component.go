@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
@@ -489,11 +490,17 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 
 	// Parse the DAG from decomposer result.
 	// The decompose_task tool returns {"goal": "...", "dag": {"nodes": [...]}}.
+	// Small models (qwen3, etc.) may wrap output in markdown code fences.
+	dagJSON := llm.ExtractJSON(event.Result)
+	if dagJSON == "" {
+		c.markFailedLocked(ctx, exec, "failed to parse decomposer result: no JSON found in result")
+		return
+	}
 	var dagResponse struct {
 		Goal string            `json:"goal"`
 		DAG  decompose.TaskDAG `json:"dag"`
 	}
-	if err := json.Unmarshal([]byte(event.Result), &dagResponse); err != nil {
+	if err := json.Unmarshal([]byte(dagJSON), &dagResponse); err != nil {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("failed to parse decomposer result: %v", err))
 		return
 	}
