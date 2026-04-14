@@ -257,12 +257,12 @@ func StandardOriginSOP(filename string) string {
 }
 
 // BaselineStandards returns the default standards seeded during project
-// initialization. Covers OWASP security fundamentals and general engineering
-// hygiene. Scoped to developer + reviewer roles so they appear in both
-// behavioral gates and structural checklists.
+// initialization. Covers OWASP security fundamentals and language-agnostic
+// engineering hygiene. Scoped to developer + reviewer roles so they appear
+// in both behavioral gates and structural checklists.
 func BaselineStandards() []Standard {
 	return []Standard{
-		// Security baseline
+		// Security baseline (universal)
 		{
 			ID:       "sec-no-secrets",
 			Text:     "Source code must not contain hardcoded credentials, API keys, passwords, or tokens. Use environment variables or a secrets manager.",
@@ -305,11 +305,11 @@ func BaselineStandards() []Standard {
 			Roles:     []string{"developer", "reviewer", "scenario-reviewer"},
 			Origin:    StandardOriginInit,
 		},
-		// Engineering baseline
+		// Engineering baseline (language-agnostic)
 		{
 			ID:       "eng-test-coverage",
-			Text:     "All new or modified behavior must have corresponding tests. Untested code is unfinished code.",
-			Severity: StandardSeverityShould,
+			Text:     "All new or modified behavior must have corresponding tests, and each test must trace back to a specific scenario or requirement (referenced by ID in a comment, test name, or description). Untested code is unfinished code; untraceable tests are unverifiable claims.",
+			Severity: StandardSeverityMust,
 			Category: "engineering",
 			Roles:    []string{"developer", "reviewer"},
 			Origin:   StandardOriginInit,
@@ -323,17 +323,81 @@ func BaselineStandards() []Standard {
 			Origin:   StandardOriginInit,
 		},
 		{
-			ID:       "eng-no-dead-code",
-			Text:     "Remove dead code, unused imports, and commented-out blocks. Do not leave TODO hacks or debug prints in committed code.",
-			Severity: StandardSeverityMay,
+			ID:       "eng-control-flow-depth",
+			Text:     "Functions must not exceed two levels of nesting. Flatten conditional chains — if you need a diagram to follow the logic, it has failed.",
+			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-loop-bounds",
+			Text:     "Every loop must have an explicit, enforced upper bound. Unbounded retry loops, polling loops, and recursive crawlers are not permitted.",
+			Severity: StandardSeverityMust,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-function-single-responsibility",
+			Text:     "Each function must do exactly one thing, describable in a single sentence without the word 'and'. If a function requires the word 'and' to describe, decompose it.",
+			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-assertion-density",
+			Text:     "Non-trivial functions must validate their preconditions explicitly at the entry point. Implicit assumptions are not acceptable — make them checkable.",
+			Severity: StandardSeverityShould,
 			Category: "engineering",
 			Roles:    []string{"developer", "reviewer"},
 			Origin:   StandardOriginInit,
 		},
 		{
 			ID:       "eng-error-handling",
-			Text:     "Errors must be handled or explicitly propagated with context. Do not silently swallow errors or use bare panic in library code.",
+			Text:     "All errors must be handled, logged, or explicitly propagated. Empty catch blocks, ignored return values, and bare error discards are not permitted.",
+			Severity: StandardSeverityMust,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-state-scope",
+			Text:     "Declare all variables at the narrowest possible scope. Package-level, module-level, and class-level state requires architectural justification. Pass dependencies explicitly at call sites.",
 			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-side-effect-visibility",
+			Text:     "Functions that perform I/O, mutations, or network calls must make this obvious from their name and call site. Pure computation must be structurally separate from side-effectful operations. Never bury writes or network calls inside helpers with innocent-looking names.",
+			Severity: StandardSeverityMust,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-abstraction-depth",
+			Text:     "Prefer direct, linearly readable code over elegant abstractions that require decoding. Every layer of indirection must be justified. If something breaks, you must be able to trace execution by reading the code.",
+			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-resource-lifecycle",
+			Text:     "Every resource acquired (file handle, lock, connection, allocation, subscription) must be explicitly released, including on all error paths. Use the language's idiomatic scoped-cleanup pattern (defer, with, try-with-resources, RAII, using). Resource lifetime must be declared, not assumed.",
+			Severity: StandardSeverityMust,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-warnings-as-errors",
+			Text:     "All compiler warnings and linter violations are treated as errors. Zero-warning policy with no exceptions.",
+			Severity: StandardSeverityMust,
 			Category: "engineering",
 			Roles:    []string{"developer", "reviewer"},
 			Origin:   StandardOriginInit,

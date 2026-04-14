@@ -477,11 +477,12 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 		t.Error("checklist created_at should be set")
 	}
 
-	// Verify standards.json — 1 user-provided + 9 baseline = 10 total.
+	// Verify standards.json — 1 user-provided + N baseline.
 	var standards workflow.Standards
 	readJSONFile(t, filepath.Join(repoRoot, ".semspec", "standards.json"), &standards)
-	if len(standards.Items) != 10 {
-		t.Errorf("expected 10 standards (1 user + 9 baseline), got %d", len(standards.Items))
+	expectedCount := 1 + len(workflow.BaselineStandards())
+	if len(standards.Items) != expectedCount {
+		t.Errorf("expected %d standards (1 user + %d baseline), got %d", expectedCount, len(workflow.BaselineStandards()), len(standards.Items))
 	}
 	if standards.Items[0].ID != "test-coverage" {
 		t.Errorf("first standard should be test-coverage, got %q", standards.Items[0].ID)
@@ -495,7 +496,10 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 	}
 	for _, wantID := range []string{
 		"sec-no-secrets", "sec-input-validation", "sec-safe-errors", "sec-parameterized-queries", "sec-auth-checks",
-		"eng-test-coverage", "eng-clean-diffs", "eng-no-dead-code", "eng-error-handling",
+		"eng-test-coverage", "eng-clean-diffs", "eng-control-flow-depth", "eng-loop-bounds",
+		"eng-function-single-responsibility", "eng-assertion-density", "eng-error-handling",
+		"eng-state-scope", "eng-side-effect-visibility", "eng-abstraction-depth",
+		"eng-resource-lifecycle", "eng-warnings-as-errors",
 	} {
 		if !baselineIDs[wantID] {
 			t.Errorf("baseline standard %q missing from init output", wantID)
