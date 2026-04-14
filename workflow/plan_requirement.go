@@ -133,107 +133,10 @@ func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, re
 	}
 
 	// Write each dependency as an individual triple (proper graph edges).
-	// Hash each dep ID so the stored value is the entity-ID suffix, matching
-	// the ID space returned by extractRequirementID on load.
+	// Hash each dep ID so the stored value is the entity-ID suffix.
 	for _, dep := range req.DependsOn {
 		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, HashInstanceID(dep))
 	}
 
 	return nil
-}
-
-// requirementFromTripleMap reconstructs a Requirement from a predicate→[]values map.
-// Single-valued predicates use the first element; DependsOn collects all values.
-func requirementFromTripleMap(entityID string, triples map[string][]string) Requirement {
-	first := func(pred string) string {
-		if vs := triples[pred]; len(vs) > 0 {
-			return vs[0]
-		}
-		return ""
-	}
-
-	req := Requirement{
-		ID:     extractRequirementID(entityID),
-		PlanID: first(semspec.RequirementPlan),
-	}
-
-	if v := first(semspec.RequirementTitle); v != "" {
-		req.Title = v
-	}
-	if v := first(semspec.RequirementStatus); v != "" {
-		req.Status = RequirementStatus(v)
-	}
-	if v := first(semspec.RequirementDescription); v != "" {
-		req.Description = v
-	}
-	if v := first(semspec.RequirementCreatedAt); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			req.CreatedAt = t
-		}
-	}
-	if v := first(semspec.RequirementUpdatedAt); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			req.UpdatedAt = t
-		}
-	}
-	// DependsOn is written as one triple per dependency; collect all values.
-	// Each value is already the hashed entity-ID suffix (written by writeRequirementTriples).
-	for _, dep := range triples[semspec.RequirementDependsOn] {
-		if dep != "" {
-			req.DependsOn = append(req.DependsOn, dep)
-		}
-	}
-	if req.DependsOn == nil {
-		req.DependsOn = []string{}
-	}
-
-	return req
-}
-
-// extractRequirementID extracts the raw requirement ID from the entity ID.
-// Entity ID format: {prefix}.wf.plan.req.{id}
-func extractRequirementID(entityID string) string {
-	prefix := EntityPrefix() + ".wf.plan.req."
-	if len(entityID) > len(prefix) {
-		return entityID[len(prefix):]
-	}
-	return entityID
-}
-
-// LoadRequirements loads requirements for a plan from ENTITY_STATES triples.
-// Scans all requirement entities by prefix and filters by plan.
-func LoadRequirements(ctx context.Context, tw *graphutil.TripleWriter, slug string) ([]Requirement, error) {
-	if err := ValidateSlug(slug); err != nil {
-		return nil, err
-	}
-
-	if tw == nil {
-		return []Requirement{}, nil
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	prefix := EntityPrefix() + ".wf.plan.req."
-	entities, err := tw.ReadEntitiesByPrefixMulti(ctx, prefix, 500)
-	if err != nil {
-		return []Requirement{}, nil
-	}
-
-	planEntityID := PlanEntityID(slug)
-	var requirements []Requirement
-
-	for entityID, triples := range entities {
-		req := requirementFromTripleMap(entityID, triples)
-		if req.PlanID == planEntityID {
-			requirements = append(requirements, req)
-		}
-	}
-
-	if requirements == nil {
-		requirements = []Requirement{}
-	}
-
-	return requirements, nil
 }

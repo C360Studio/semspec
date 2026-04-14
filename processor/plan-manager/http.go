@@ -854,6 +854,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		PlanSlug:     plan.Slug,
 		TraceID:      tc.TraceID,
 		Requirements: plan.Requirements,
+		Scenarios:    plan.Scenarios,
 	}
 	if plan.GitHub != nil {
 		trigger.PlanBranch = plan.GitHub.PlanBranch
@@ -1301,6 +1302,7 @@ func (c *Component) triggerScenarioOrchestrator(ctx context.Context, plan *workf
 		PlanSlug:     plan.Slug,
 		TraceID:      tc.TraceID,
 		Requirements: plan.Requirements,
+		Scenarios:    plan.Scenarios,
 	}
 	if plan.GitHub != nil {
 		trigger.PlanBranch = plan.GitHub.PlanBranch

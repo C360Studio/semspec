@@ -109,44 +109,9 @@ func CreateProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectS
 		},
 	}
 
-	if err := SaveProjectPlan(ctx, tw, projectSlug, plan); err != nil {
+	if err := writePlanTriples(ctx, tw, plan); err != nil {
 		return nil, err
 	}
 
 	return plan, nil
-}
-
-// LoadProjectPlan loads a plan from ENTITY_STATES triples.
-func LoadProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, _ string, planSlug string) (*Plan, error) {
-	if err := ValidateSlug(planSlug); err != nil {
-		return nil, err
-	}
-
-	if tw == nil {
-		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
-	}
-
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	triples, err := tw.ReadEntity(ctx, PlanEntityID(planSlug))
-	if err != nil || len(triples) == 0 {
-		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
-	}
-
-	return PlanFromTripleMap(PlanEntityID(planSlug), triples), nil
-}
-
-// SaveProjectPlan saves a plan as triples in ENTITY_STATES.
-func SaveProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, _ string, plan *Plan) error {
-	if err := ValidateSlug(plan.Slug); err != nil {
-		return err
-	}
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	return writePlanTriples(ctx, tw, plan)
 }

@@ -8,27 +8,10 @@ import (
 	"testing"
 )
 
-func TestLoadRequirements_NilTripleWriter_ReturnsEmpty(t *testing.T) {
-	got, err := LoadRequirements(context.Background(), nil, "any-plan")
-	if err != nil {
-		t.Fatalf("LoadRequirements() with nil tw should not error, got: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("LoadRequirements() = %d items, want 0", len(got))
-	}
-}
-
 func TestSaveRequirements_InvalidSlug(t *testing.T) {
 	err := SaveRequirements(context.Background(), nil, []Requirement{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveRequirements() with invalid slug should return error")
-	}
-}
-
-func TestLoadRequirements_InvalidSlug(t *testing.T) {
-	_, err := LoadRequirements(context.Background(), nil, "invalid slug!")
-	if err == nil {
-		t.Error("LoadRequirements() with invalid slug should return error")
 	}
 }
 

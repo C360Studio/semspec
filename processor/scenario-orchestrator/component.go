@@ -290,28 +290,16 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		c.logger.Info("no KV store configured, skipping requirement dispatch", "plan_slug", trigger.PlanSlug)
 		return nil
 	}
-	// Use requirements from trigger payload (populated by plan-manager from cache).
-	// Fall back to graph read for backward compat with older triggers.
+	// Requirements and scenarios are populated by plan-manager from its cache.
+	// No graph fallback — if the trigger doesn't carry the data, that's a bug.
 	requirements := trigger.Requirements
 	if len(requirements) == 0 {
-		var err error
-		requirements, err = workflow.LoadRequirements(ctx, c.tripleWriter, trigger.PlanSlug)
-		if err != nil {
-			return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
-		}
-	}
-	if len(requirements) == 0 {
-		c.logger.Info("no requirements found for plan", "plan_slug", trigger.PlanSlug)
-		return nil
+		return fmt.Errorf("plan %s trigger has 0 requirements — plan-manager must populate the trigger payload", trigger.PlanSlug)
 	}
 
-	allScenarios, err := workflow.LoadScenarios(ctx, c.tripleWriter, trigger.PlanSlug)
-	if err != nil {
-		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
-	}
-
+	allScenarios := trigger.Scenarios
 	if len(allScenarios) == 0 {
-		return fmt.Errorf("plan %s has %d requirements but 0 scenarios — cannot dispatch without verification criteria", trigger.PlanSlug, len(requirements))
+		return fmt.Errorf("plan %s has %d requirements but 0 scenarios — plan-manager must populate the trigger payload", trigger.PlanSlug, len(requirements))
 	}
 
 	// Apply DAG gating — only dispatch requirements whose upstream deps are satisfied.

@@ -49,12 +49,6 @@ func CreatePlan(ctx context.Context, tw *graphutil.TripleWriter, slug, title str
 	return CreateProjectPlan(ctx, tw, DefaultProjectSlug, slug, title)
 }
 
-// LoadPlan loads a plan from ENTITY_STATES triples (default project).
-func LoadPlan(ctx context.Context, tw *graphutil.TripleWriter, slug string) (*Plan, error) {
-	// Delegate to project-based function with default project
-	return LoadProjectPlan(ctx, tw, DefaultProjectSlug, slug)
-}
-
 // ListPlansResult contains the results of listing plans, including any
 // non-fatal errors encountered while loading individual plans.
 type ListPlansResult struct {

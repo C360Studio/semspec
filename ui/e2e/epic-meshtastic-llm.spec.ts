@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createPlan, deletePlan, executePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
+import type { PlanResponse } from './helpers/api';
 
 /**
  * @hard tier: Alpha epic scenario — Meshtastic driver for OpenSensorHub.
@@ -25,15 +26,14 @@ import { createPlan, deletePlan, executePlan, getPlan, promotePlan, waitForGoal 
 
 const EPIC_PROMPT = `Design and implement a Meshtastic driver for OpenSensorHub (OSH). The driver must use the Connected Systems API to send and receive messages over the Meshtastic mesh network. Deliver working Java source files, unit tests, and a README with usage examples.`;
 
-// Timeouts tuned for federated graph indexing + real LLM execution.
-// Overridable via env from taskfiles/e2e.yml.
-const GRAPH_READY_TIMEOUT = Number(process.env.GRAPH_READY_TIMEOUT) || 600_000; // 10 min
-const GOAL_TIMEOUT = Number(process.env.GOAL_TIMEOUT) || 300_000; // 5 min
-const CASCADE_TIMEOUT = Number(process.env.CASCADE_TIMEOUT) || 900_000; // 15 min
-const EXECUTION_TIMEOUT = Number(process.env.EXECUTION_TIMEOUT) || 3_600_000; // 60 min
+const GRAPH_READY_TIMEOUT = Number(process.env.GRAPH_READY_TIMEOUT) || 600_000;
+const GOAL_TIMEOUT = Number(process.env.GOAL_TIMEOUT) || 300_000;
+const CASCADE_TIMEOUT = Number(process.env.CASCADE_TIMEOUT) || 900_000;
+const EXECUTION_TIMEOUT = Number(process.env.EXECUTION_TIMEOUT) || 3_600_000;
 const POLL_INTERVAL = 5_000;
 
 const GRAPH_MANIFEST_URL = 'http://localhost:3000/graph-gateway/manifest';
+const TERMINAL_FAILURE_STAGES = ['rejected', 'failed'];
 
 interface ManifestResponse {
 	sources?: Array<{ name: string; entity_count?: number; phase?: string }>;
@@ -60,6 +60,54 @@ function totalEntities(m: ManifestResponse | null): number {
 	return 0;
 }
 
+/** Poll until target stage or terminal failure. Auto-promotes at gates. */
+async function waitForStage(
+	slug: string,
+	targetStages: string[],
+	timeoutMs: number,
+	label: string
+): Promise<PlanResponse> {
+	const start = Date.now();
+	let lastStage = '';
+
+	while (Date.now() - start < timeoutMs) {
+		const plan = await getPlan(slug);
+
+		if (plan.stage !== lastStage) {
+			console.log(`[hard:${label}] Stage: ${lastStage || '(start)'} -> ${plan.stage} (${((Date.now() - start) / 1000).toFixed(0)}s)`);
+			lastStage = plan.stage;
+		}
+
+		if (TERMINAL_FAILURE_STAGES.includes(plan.stage)) {
+			const diag = JSON.stringify({
+				stage: plan.stage,
+				review_verdict: plan.review_verdict,
+				execution_summary: plan.execution_summary,
+			});
+			throw new Error(`Plan entered terminal failure stage '${plan.stage}' while waiting for [${targetStages}]. Diagnostics: ${diag}`);
+		}
+
+		if (targetStages.includes(plan.stage)) {
+			console.log(`[hard:${label}] Reached ${plan.stage} in ${((Date.now() - start) / 1000).toFixed(1)}s`);
+			return plan;
+		}
+
+		if (!plan.approved && plan.stage === 'reviewed') {
+			console.log(`[hard:${label}] Promoting at reviewed gate`);
+			await promotePlan(slug);
+		}
+		if (plan.stage === 'scenarios_reviewed') {
+			console.log(`[hard:${label}] Promoting at scenarios_reviewed gate`);
+			await promotePlan(slug);
+		}
+
+		await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+	}
+
+	const plan = await getPlan(slug);
+	throw new Error(`Timed out waiting for [${targetStages}] after ${timeoutMs}ms. Current stage: ${plan.stage}`);
+}
+
 test.describe('@t2 @hard epic-meshtastic-llm', () => {
 	let slug: string;
 
@@ -67,10 +115,6 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 	test.setTimeout(EXECUTION_TIMEOUT);
 
 	test.beforeAll(async () => {
-		// Wait for federated graph to have meaningful entity coverage before
-		// creating the plan — the planner draws on graph data at creation time.
-		// Without this, OSH/OGC entities may not be indexed yet and the planner
-		// produces a generic design that misses the Connected Systems API contract.
 		console.log('[hard] Waiting for federated graph readiness (>100 entities)...');
 		const gStart = Date.now();
 		let lastTotal = 0;
@@ -95,19 +139,20 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 	});
 
 	test.afterAll(async () => {
-		// Keep plan and artifacts when DEBUG=1 for post-run inspection.
 		if (process.env.DEBUG) return;
 		if (slug) await deletePlan(slug).catch(() => {});
 	});
 
+	// ── Pre-flight: federated graph ─────────────────────────────────────
+
 	test('federated graph has sufficient entities', async () => {
-		// Graph readiness was already asserted in beforeAll (blocking createPlan).
-		// This test records the final count for the report.
 		const manifest = await fetchGraphManifest();
 		const total = totalEntities(manifest);
 		console.log(`[hard] Graph entity count: ${total}`);
 		expect(total).toBeGreaterThan(100);
 	});
+
+	// ── Stage 1: Plan goal synthesized ──────────────────────────────────
 
 	test('plan created with goal', async () => {
 		const plan = await getPlan(slug);
@@ -115,51 +160,83 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 		console.log(`[hard] Goal: ${String(plan.goal).slice(0, 120)}...`);
 	});
 
-	test('plan reaches scenarios_generated or later', async () => {
-		// With plan-reviewer enabled the flow is:
-		//   approved → requirements_generated → architecture_generated
-		//   → scenarios_generated → scenarios_reviewed (human pause).
-		// With auto_approve=true the cascade runs without human action.
-		let plan = await getPlan(slug);
+	// ── Stage 2: Plan reviewed and approved ─────────────────────────────
 
-		if (!plan.approved) {
-			console.log(`[hard] Manual approval required at stage=${plan.stage}, promoting via API`);
-			await promotePlan(slug);
-		}
-
-		const TARGET_STAGES = ['scenarios_generated', 'scenarios_reviewed', 'ready_for_execution', 'implementing', 'reviewing_rollup', 'complete'];
-		const start = Date.now();
-		while (Date.now() - start < CASCADE_TIMEOUT) {
-			plan = await getPlan(slug);
-			if (plan.stage === 'rejected' || plan.stage === 'failed') {
-				throw new Error(`Plan entered terminal failure stage: ${plan.stage}`);
-			}
-			if (TARGET_STAGES.includes(plan.stage)) break;
-			await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-		}
-
-		console.log(`[hard] Cascade complete: stage=${plan.stage} in ${((Date.now() - start) / 1000).toFixed(1)}s`);
-		expect(TARGET_STAGES).toContain(plan.stage);
+	test('plan reviewed and approved', async () => {
+		const plan = await waitForStage(
+			slug,
+			['approved', 'generating_requirements', 'requirements_generated',
+			 'generating_architecture', 'architecture_generated',
+			 'generating_scenarios', 'scenarios_generated', 'scenarios_reviewed',
+			 'ready_for_execution', 'implementing'],
+			CASCADE_TIMEOUT,
+			'review'
+		);
+		expect(plan.approved).toBe(true);
+		console.log(`[hard] Review verdict: ${plan.review_verdict || 'auto-approved'}`);
 	});
 
-	test('at least 3 requirements and 3 scenarios generated', async () => {
-		const reqRes = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/requirements`);
-		const requirements = (await reqRes.json()) as unknown[];
-		console.log(`[hard] ${requirements.length} requirements generated`);
+	// ── Stage 3: Requirements generated ─────────────────────────────────
+
+	test('at least 3 requirements generated', async () => {
+		await waitForStage(
+			slug,
+			['requirements_generated', 'generating_architecture', 'architecture_generated',
+			 'generating_scenarios', 'scenarios_generated', 'scenarios_reviewed',
+			 'ready_for_execution', 'implementing'],
+			CASCADE_TIMEOUT,
+			'requirements'
+		);
+
+		const res = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/requirements`);
+		const requirements = (await res.json()) as unknown[];
 		expect(requirements.length).toBeGreaterThanOrEqual(3);
-
-		const scenRes = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/scenarios`);
-		const scenarios = (await scenRes.json()) as unknown[];
-		console.log(`[hard] ${scenarios.length} scenarios generated`);
-		expect(scenarios.length).toBeGreaterThanOrEqual(3);
+		console.log(`[hard] ${requirements.length} requirements generated`);
 	});
 
-	test('advance to ready_for_execution and trigger execution', async () => {
+	// ── Stage 4: Architecture generated ─────────────────────────────────
+
+	test('architecture generated', async () => {
+		await waitForStage(
+			slug,
+			['architecture_generated', 'generating_scenarios', 'scenarios_generated',
+			 'scenarios_reviewed', 'ready_for_execution', 'implementing'],
+			CASCADE_TIMEOUT,
+			'architecture'
+		);
+
+		const plan = await getPlan(slug);
+		expect(plan.architecture).toBeDefined();
+		expect(plan.architecture).not.toBeNull();
+
+		const techChoices = plan.architecture?.technology_choices;
+		expect(Array.isArray(techChoices)).toBe(true);
+		expect(techChoices!.length).toBeGreaterThan(0);
+		console.log(`[hard] Architecture: ${techChoices!.length} technology choices`);
+	});
+
+	// ── Stage 5: Scenarios generated and reviewed ───────────────────────
+
+	test('at least 3 scenarios generated and reviewed', async () => {
+		await waitForStage(
+			slug,
+			['scenarios_reviewed', 'ready_for_execution', 'implementing'],
+			CASCADE_TIMEOUT,
+			'scenarios'
+		);
+
+		const res = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/scenarios`);
+		const scenarios = (await res.json()) as unknown[];
+		expect(scenarios.length).toBeGreaterThanOrEqual(3);
+		console.log(`[hard] ${scenarios.length} scenarios generated`);
+	});
+
+	// ── Stage 6: Execution triggered ────────────────────────────────────
+
+	test('execution triggered', async () => {
 		let plan = await getPlan(slug);
 
-		// Round 2 approval if still in scenarios_generated/reviewed.
 		if (['scenarios_generated', 'scenarios_reviewed'].includes(plan.stage)) {
-			console.log(`[hard] Round 2 approval: promoting from ${plan.stage}`);
 			await promotePlan(slug);
 			const start = Date.now();
 			while (plan.stage !== 'ready_for_execution' && Date.now() - start < 60_000) {
@@ -168,7 +245,6 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 			}
 		}
 
-		// If execution already started from the cascade, skip the trigger.
 		if (['implementing', 'executing', 'reviewing_rollup', 'complete'].includes(plan.stage)) {
 			console.log(`[hard] Execution already in progress: stage=${plan.stage}`);
 			return;
@@ -176,87 +252,50 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 
 		expect(plan.stage).toBe('ready_for_execution');
 		console.log('[hard] Triggering execution via API');
-		plan = await executePlan(slug);
+		await executePlan(slug);
 
-		// Wait for first execution stage transition.
-		const start = Date.now();
-		while (
-			!['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed'].includes(plan.stage) &&
-			Date.now() - start < 60_000
-		) {
-			await new Promise((r) => setTimeout(r, POLL_INTERVAL));
-			plan = await getPlan(slug);
-		}
+		plan = await waitForStage(
+			slug,
+			['implementing', 'executing', 'reviewing_rollup', 'complete'],
+			60_000,
+			'exec-start'
+		);
 		console.log(`[hard] Execution started: stage=${plan.stage}`);
 	});
 
-	test('execution progresses to terminal state', async () => {
-		const start = Date.now();
-		let plan = await getPlan(slug);
-		let lastStage = plan.stage;
+	// ── Stage 7: Execution completes ────────────────────────────────────
 
-		while (
-			!['complete', 'failed', 'rejected'].includes(plan.stage) &&
-			Date.now() - start < EXECUTION_TIMEOUT
-		) {
-			await new Promise((r) => setTimeout(r, POLL_INTERVAL * 2));
-			plan = await getPlan(slug);
-			if (plan.stage !== lastStage) {
-				console.log(`[hard] Stage: ${lastStage} → ${plan.stage} (${((Date.now() - start) / 1000).toFixed(0)}s)`);
-				lastStage = plan.stage;
-			}
+	test('execution completes', async () => {
+		const plan = await waitForStage(
+			slug,
+			['complete'],
+			EXECUTION_TIMEOUT,
+			'execution'
+		);
+
+		expect(plan.stage).toBe('complete');
+
+		if (plan.execution_summary) {
+			expect(plan.execution_summary.failed).toBe(0);
+			expect(plan.execution_summary.completed).toBe(plan.execution_summary.total);
+			console.log(`[hard] Execution: ${plan.execution_summary.completed}/${plan.execution_summary.total} completed`);
 		}
 
-		console.log(`[hard] Final stage: ${plan.stage} in ${((Date.now() - start) / 1000).toFixed(1)}s`);
-		// Real-LLM execution may legitimately fail — assert the pipeline ran,
-		// not that the generated code is perfect.
-		expect(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed', 'rejected']).toContain(plan.stage);
+		console.log(`[hard] Pipeline complete`);
 	});
 
-	test('rollup review ran (did not skip from implementing to complete)', async () => {
-		// The plan must have passed through reviewing_rollup before complete.
-		// A direct implementing → complete jump means the rollup reviewer was
-		// bypassed, which is a pipeline bug.
-		// We cannot re-inspect historical stages without a ledger, so we only
-		// assert the current stage is terminal or still rolling up.
-		const plan = await getPlan(slug);
-		if (plan.stage === 'complete') {
-			// Best-effort: fetch the plan's review history if available.
-			try {
-				const reviewsRes = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/reviews`);
-				if (reviewsRes.ok) {
-					const reviews = (await reviewsRes.json()) as Array<{ round?: string }>;
-					const hasRollup = reviews.some((r) => r.round === 'rollup' || String(r.round).includes('rollup'));
-					console.log(`[hard] Rollup review present: ${hasRollup} (${reviews.length} total reviews)`);
-				}
-			} catch {
-				// Endpoint optional — don't fail the test on this soft check.
-			}
-		}
-		expect(['complete', 'failed', 'rejected', 'reviewing_rollup']).toContain(plan.stage);
-	});
+	// ── Stage 8: Trajectories prove agents ran ──────────────────────────
 
-	test('deliverables contain java source files', async () => {
-		const plan = await getPlan(slug);
-		if (plan.stage !== 'complete') {
-			console.log(`[hard] Skipping deliverables check — plan not complete (stage=${plan.stage})`);
-			return;
-		}
+	test('trajectories exist after execution', async () => {
+		const loopsRes = await fetch('http://localhost:3000/agentic-dispatch/loops');
+		const loops = await loopsRes.json();
+		expect(loops.length).toBeGreaterThan(0);
+		console.log(`[hard] ${loops.length} agent loops after execution`);
 
-		// Check sandbox workspace for generated .java files.
-		// The sandbox exposes a file listing via its API.
-		try {
-			const res = await fetch('http://localhost:3000/sandbox/files?path=src/main/java');
-			if (!res.ok) {
-				console.log(`[hard] Sandbox files endpoint returned ${res.status} — skipping deliverables check`);
-				return;
-			}
-			const files = (await res.json()) as Array<{ path: string; name: string }>;
-			const javaFiles = files.filter((f) => f.name.endsWith('.java'));
-			console.log(`[hard] Java deliverables: ${javaFiles.length} files`);
-			expect(javaFiles.length).toBeGreaterThan(0);
-		} catch {
-			console.log('[hard] Could not reach sandbox files endpoint — skipping deliverables check');
-		}
+		const loopId = loops[0].loop_id;
+		const trajRes = await fetch(`http://localhost:3000/agentic-loop/trajectories/${loopId}`);
+		const traj = await trajRes.json();
+		expect(traj.steps?.length).toBeGreaterThan(0);
+		console.log(`[hard] Loop ${loopId.slice(0, 8)} has ${traj.steps.length} steps`);
 	});
 });

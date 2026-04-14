@@ -69,22 +69,6 @@ func TestCreatePlan_Validation(t *testing.T) {
 	}
 }
 
-// TestLoadPlan_NotFound tests that loading a nonexistent plan returns ErrPlanNotFound.
-func TestLoadPlan_NotFound(t *testing.T) {
-	_, err := LoadPlan(context.Background(), nil, "nonexistent")
-	if !errors.Is(err, ErrPlanNotFound) {
-		t.Errorf("expected ErrPlanNotFound, got %v", err)
-	}
-}
-
-// TestLoadPlan_PathTraversal tests slug validation rejects path traversal.
-func TestLoadPlan_PathTraversal(t *testing.T) {
-	_, err := LoadPlan(context.Background(), nil, "../../../etc/passwd")
-	if !errors.Is(err, ErrInvalidSlug) {
-		t.Errorf("expected ErrInvalidSlug for path traversal, got %v", err)
-	}
-}
-
 func TestPlan_EffectiveStatus(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -260,15 +244,9 @@ func TestContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	// All context-aware operations should fail
+	// CreatePlan should fail with a cancelled context.
 	_, err := CreatePlan(ctx, nil, "test", "Test")
 	if err == nil {
 		t.Error("CreatePlan should fail with cancelled context")
 	}
-
-	_, err = LoadPlan(ctx, nil, "test")
-	if err == nil {
-		t.Error("LoadPlan should fail with cancelled context")
-	}
-
 }

@@ -774,19 +774,11 @@ var ScenarioExecutionRequestType = message.Type{
 // ScenarioOrchestrationTrigger is the typed payload published to
 // scenario.orchestrate.<planSlug> to start execution of pending scenarios.
 type ScenarioOrchestrationTrigger struct {
-	PlanSlug     string                     `json:"plan_slug"`
-	Requirements []workflow.Requirement     `json:"requirements,omitempty"`
-	Scenarios    []ScenarioOrchestrationRef `json:"scenarios,omitempty"`
-	TraceID      string                     `json:"trace_id,omitempty"`
-	PlanBranch   string                     `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)
-}
-
-// ScenarioOrchestrationRef is a lightweight reference to a Scenario.
-type ScenarioOrchestrationRef struct {
-	ScenarioID string `json:"scenario_id"`
-	Prompt     string `json:"prompt"`
-	Role       string `json:"role,omitempty"`
-	Model      string `json:"model,omitempty"`
+	PlanSlug     string                 `json:"plan_slug"`
+	Requirements []workflow.Requirement `json:"requirements,omitempty"`
+	Scenarios    []workflow.Scenario    `json:"scenarios,omitempty"`
+	TraceID      string                 `json:"trace_id,omitempty"`
+	PlanBranch   string                 `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)
 }
 
 // Schema implements message.Payload.

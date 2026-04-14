@@ -15,11 +15,14 @@ func (c *Component) handleExportSpecs(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load plan for export", "slug", slug, "error", err)
+		writeJSONError(w, "Plan not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
 
-	files, err := workflow.ExportSpecFiles(r.Context(), tw, repoRoot, slug)
+	files, err := workflow.ExportSpecFiles(r.Context(), plan, repoRoot)
 	if err != nil {
 		c.logger.Error("Failed to export specs", "slug", slug, "error", err)
 		writeJSONError(w, "Failed to export specs: "+err.Error(), http.StatusInternalServerError)
@@ -44,11 +47,14 @@ func (c *Component) handleGenerateArchive(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		c.logger.Error("Failed to load plan for archive", "slug", slug, "error", err)
+		writeJSONError(w, "Plan not found: "+err.Error(), http.StatusNotFound)
+		return
+	}
 
-	filePath, err := workflow.GenerateArchive(r.Context(), tw, repoRoot, slug)
+	filePath, err := workflow.GenerateArchive(r.Context(), plan, repoRoot)
 	if err != nil {
 		c.logger.Error("Failed to generate archive", "slug", slug, "error", err)
 		writeJSONError(w, "Failed to generate archive: "+err.Error(), http.StatusInternalServerError)

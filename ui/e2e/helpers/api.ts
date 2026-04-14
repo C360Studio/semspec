@@ -5,6 +5,13 @@
 
 const API_BASE = 'http://localhost:3000';
 
+export interface ExecutionSummary {
+	completed: number;
+	failed: number;
+	pending: number;
+	total: number;
+}
+
 export interface PlanResponse {
 	slug: string;
 	title: string;
@@ -12,6 +19,10 @@ export interface PlanResponse {
 	stage: string;
 	approved: boolean;
 	created_at: string;
+	review_verdict?: string;
+	review_summary?: string;
+	architecture?: { technology_choices?: unknown[]; component_boundaries?: unknown[]; [key: string]: unknown };
+	execution_summary?: ExecutionSummary;
 	[key: string]: unknown;
 }
 

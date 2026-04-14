@@ -4,7 +4,7 @@
 //   - Config defaults and validation
 //   - Config.GetTimeout fallback behaviour
 //   - handleMessage: malformed envelope, malformed payload, missing required fields
-//   - handleCascadeRequest: valid cascade, missing proposal, empty AffectedReqIDs
+//   - handleCascadeRequest: nil NATS client guard
 //   - Component metadata, health, and port definitions
 package changeproposalhandler
 
@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 	nats "github.com/nats-io/nats.go"
@@ -297,11 +296,9 @@ func TestHandleMessage_MissingSlug(t *testing.T) {
 }
 
 func TestHandleMessage_ProposalNotFound_Naks(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	c := newTestComponent(tmpDir)
+	c := newTestComponent(t.TempDir())
+	// natsClient is nil — handleCascadeRequest returns an error immediately.
 
-	// A valid request but the slug / proposal don't exist on disk — cascade fails.
 	req := &payloads.ChangeProposalCascadeRequest{
 		ProposalID: "cp-nonexistent",
 		Slug:       "no-such-plan",
@@ -311,9 +308,9 @@ func TestHandleMessage_ProposalNotFound_Naks(t *testing.T) {
 
 	c.handleMessage(context.Background(), msg)
 
-	// Proposal not found → cascade error → Nak (retriable, not a permanent failure).
+	// NATS client unavailable → cascade error → Nak (retriable, not a permanent failure).
 	if !msg.naked {
-		t.Errorf("expected Nak() for proposal-not-found, acked=%v naked=%v termed=%v",
+		t.Errorf("expected Nak() for cascade error, acked=%v naked=%v termed=%v",
 			msg.acked, msg.naked, msg.termed)
 	}
 }
@@ -322,31 +319,19 @@ func TestHandleMessage_ProposalNotFound_Naks(t *testing.T) {
 // handleCascadeRequest — business logic path (filesystem only)
 // ---------------------------------------------------------------------------
 
-// TestHandleCascadeRequest_ProposalNotFound verifies that handleCascadeRequest
-// returns an error when the proposal ID cannot be found in the plan's proposals file.
-func TestHandleCascadeRequest_ProposalNotFound(t *testing.T) {
-	repoRoot := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+// TestHandleCascadeRequest_NilNATSClient verifies that handleCascadeRequest
+// returns an error immediately when the NATS client is nil.
+func TestHandleCascadeRequest_NilNATSClient(t *testing.T) {
+	c := newTestComponent(t.TempDir())
+	// natsClient is nil — set by newTestComponent intentionally.
 
-	ctx := context.Background()
-	slug := "no-proposal-plan"
-
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "No Proposal Plan"); err != nil {
-		t.Fatalf("CreatePlan: %v", err)
-	}
-	// Save an empty proposals list — proposal "cp-missing" does not exist.
-	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{}, slug); err != nil {
-		t.Fatalf("SaveChangeProposals: %v", err)
-	}
-
-	c := newTestComponent(repoRoot)
 	req := &payloads.ChangeProposalCascadeRequest{
 		ProposalID: "cp-missing",
-		Slug:       slug,
+		Slug:       "no-such-plan",
 	}
-	_, err := c.handleCascadeRequest(ctx, req)
+	_, err := c.handleCascadeRequest(context.Background(), req)
 	if err == nil {
-		t.Fatal("handleCascadeRequest() expected error for missing proposal, got nil")
+		t.Fatal("handleCascadeRequest() expected error when NATS client is nil, got nil")
 	}
 }
 

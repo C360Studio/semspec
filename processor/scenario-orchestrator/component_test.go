@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	nats "github.com/nats-io/nats.go"
@@ -420,7 +421,7 @@ func TestHandleTrigger_MissingPlanSlug(t *testing.T) {
 	comp := newTestComponent(t)
 
 	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
-		Scenarios: []payloads.ScenarioOrchestrationRef{{ScenarioID: "sc-1", Prompt: "test"}},
+		Scenarios: []workflow.Scenario{{ID: "sc-1", Given: "test"}},
 	})
 	msg := &mockMsg{data: raw}
 	comp.handleTrigger(context.Background(), msg)
@@ -477,7 +478,7 @@ func TestHandleTrigger_IncrementsTriggerCounter(t *testing.T) {
 
 	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug:  "my-plan",
-		Scenarios: []payloads.ScenarioOrchestrationRef{},
+		Scenarios: []workflow.Scenario{},
 	})
 	msg := &mockMsg{data: raw}
 

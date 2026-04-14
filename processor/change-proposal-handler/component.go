@@ -246,19 +246,31 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // handleCascadeRequest executes the cascade and returns the result.
 // The caller is responsible for publishing the accepted event and ACK ordering.
 func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) (*cascade.Result, error) {
-	// Load all proposals for the plan and find the one we need.
-	proposals, err := workflow.LoadChangeProposals(ctx, c.tripleWriter, req.Slug)
-	if err != nil {
-		return nil, fmt.Errorf("load change proposals for slug %q: %w", req.Slug, err)
+	if c.natsClient == nil {
+		return nil, fmt.Errorf("NATS client not available")
 	}
 
-	// Proposal IDs from the triple store are hashed entity ID suffixes.
-	// Hash the incoming ID to match.
-	hashedID := workflow.HashInstanceID(req.ProposalID)
+	// Read the authoritative plan from PLAN_STATES KV — graph writes may not
+	// have propagated yet, so we never rely on triple-store reads here.
+	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "PLAN_STATES")
+	if err != nil {
+		return nil, fmt.Errorf("get PLAN_STATES bucket: %w", err)
+	}
+	kvStore := c.natsClient.NewKVStore(bucket)
+	entry, err := kvStore.Get(ctx, req.Slug)
+	if err != nil {
+		return nil, fmt.Errorf("load plan %q from PLAN_STATES: %w", req.Slug, err)
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value, &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan %q: %w", req.Slug, err)
+	}
+
+	// Locate the target proposal by its raw ID (KV stores raw IDs, not hashed).
 	var target *workflow.ChangeProposal
-	for i := range proposals {
-		if proposals[i].ID == hashedID {
-			target = &proposals[i]
+	for i := range plan.ChangeProposals {
+		if plan.ChangeProposals[i].ID == req.ProposalID {
+			target = &plan.ChangeProposals[i]
 			break
 		}
 	}
@@ -266,8 +278,8 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 		return nil, fmt.Errorf("proposal %q not found in slug %q", req.ProposalID, req.Slug)
 	}
 
-	// Run the cascade: dirty-mark scenarios and tasks.
-	result, err := cascade.ChangeProposal(ctx, c.tripleWriter, req.Slug, target)
+	// Run the cascade: pure business logic, no I/O.
+	result, err := cascade.ChangeProposal(target, plan.Scenarios)
 	if err != nil {
 		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}

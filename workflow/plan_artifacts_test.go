@@ -13,14 +13,8 @@ import (
 
 func TestExportSpecFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	tw := newTestTripleWriter(t)
 	ctx := context.Background()
 	slug := "test-plan"
-
-	// Create plan with requirements and scenarios.
-	if _, err := CreatePlan(ctx, tw, slug, "Test Plan"); err != nil {
-		t.Fatalf("create plan: %v", err)
-	}
 
 	requirements := []Requirement{
 		{
@@ -42,9 +36,6 @@ func TestExportSpecFiles(t *testing.T) {
 			CreatedAt:   time.Now(),
 			UpdatedAt:   time.Now(),
 		},
-	}
-	if err := SaveRequirements(ctx, tw, requirements, slug); err != nil {
-		t.Fatalf("save requirements: %v", err)
 	}
 
 	scenarios := []Scenario{
@@ -69,12 +60,18 @@ func TestExportSpecFiles(t *testing.T) {
 			UpdatedAt:     time.Now(),
 		},
 	}
-	if err := SaveScenarios(ctx, tw, scenarios, slug); err != nil {
-		t.Fatalf("save scenarios: %v", err)
+
+	plan := &Plan{
+		ID:           PlanEntityID(slug),
+		Slug:         slug,
+		Title:        "Test Plan",
+		CreatedAt:    time.Now(),
+		Requirements: requirements,
+		Scenarios:    scenarios,
 	}
 
 	// Export specs.
-	files, err := ExportSpecFiles(ctx, tw, tmpDir, slug)
+	files, err := ExportSpecFiles(ctx, plan, tmpDir)
 	if err != nil {
 		t.Fatalf("export spec files: %v", err)
 	}
@@ -115,23 +112,24 @@ func TestExportSpecFiles(t *testing.T) {
 	if !strings.Contains(corpus, "## Dependencies") {
 		t.Error("spec files missing dependencies section")
 	}
-	// DependsOn IDs are hashed when round-tripping through triples.
-	if !strings.Contains(corpus, HashInstanceID("req-1")) {
+	if !strings.Contains(corpus, "req-1") {
 		t.Error("spec files missing dependency reference")
 	}
 }
 
 func TestExportSpecFiles_NoRequirements(t *testing.T) {
 	tmpDir := t.TempDir()
-	tw := newTestTripleWriter(t)
 	ctx := context.Background()
 	slug := "empty-plan"
 
-	if _, err := CreatePlan(ctx, tw, slug, "Empty Plan"); err != nil {
-		t.Fatalf("create plan: %v", err)
+	plan := &Plan{
+		ID:        PlanEntityID(slug),
+		Slug:      slug,
+		Title:     "Empty Plan",
+		CreatedAt: time.Now(),
 	}
 
-	files, err := ExportSpecFiles(ctx, tw, tmpDir, slug)
+	files, err := ExportSpecFiles(ctx, plan, tmpDir)
 	if err != nil {
 		t.Fatalf("export spec files: %v", err)
 	}
@@ -142,13 +140,8 @@ func TestExportSpecFiles_NoRequirements(t *testing.T) {
 
 func TestGenerateArchive(t *testing.T) {
 	tmpDir := t.TempDir()
-	tw := newTestTripleWriter(t)
 	ctx := context.Background()
 	slug := "archive-plan"
-
-	if _, err := CreatePlan(ctx, tw, slug, "Archive Plan"); err != nil {
-		t.Fatalf("create plan: %v", err)
-	}
 
 	requirements := []Requirement{
 		{
@@ -159,9 +152,6 @@ func TestGenerateArchive(t *testing.T) {
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		},
-	}
-	if err := SaveRequirements(ctx, tw, requirements, slug); err != nil {
-		t.Fatalf("save requirements: %v", err)
 	}
 
 	scenarios := []Scenario{
@@ -186,9 +176,6 @@ func TestGenerateArchive(t *testing.T) {
 			UpdatedAt:     time.Now(),
 		},
 	}
-	if err := SaveScenarios(ctx, tw, scenarios, slug); err != nil {
-		t.Fatalf("save scenarios: %v", err)
-	}
 
 	changeProposals := []ChangeProposal{
 		{
@@ -202,12 +189,19 @@ func TestGenerateArchive(t *testing.T) {
 			CreatedAt:      time.Now(),
 		},
 	}
-	if err := SaveChangeProposals(ctx, tw, changeProposals, slug); err != nil {
-		t.Fatalf("save change proposals: %v", err)
+
+	plan := &Plan{
+		ID:              PlanEntityID(slug),
+		Slug:            slug,
+		Title:           "Archive Plan",
+		CreatedAt:       time.Now(),
+		Requirements:    requirements,
+		Scenarios:       scenarios,
+		ChangeProposals: changeProposals,
 	}
 
 	// Generate archive.
-	filePath, err := GenerateArchive(ctx, tw, tmpDir, slug)
+	filePath, err := GenerateArchive(ctx, plan, tmpDir)
 	if err != nil {
 		t.Fatalf("generate archive: %v", err)
 	}
@@ -252,7 +246,8 @@ func TestGenerateArchive_InvalidSlug(t *testing.T) {
 	tmpDir := t.TempDir()
 	ctx := context.Background()
 
-	_, err := GenerateArchive(ctx, nil, tmpDir, "../escape")
+	plan := &Plan{Slug: "../escape"}
+	_, err := GenerateArchive(ctx, plan, tmpDir)
 	if err == nil {
 		t.Error("expected error for invalid slug")
 	}

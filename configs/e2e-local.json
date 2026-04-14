@@ -57,17 +57,16 @@
     },
     "capabilities": {
       "planning": {
-        "description": "Plan generation and architecture",
+        "description": "High-level reasoning, architecture decisions",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3"
         ],
         "fallback": [
-          "qwen3",
           "qwen-coder"
         ]
       },
       "writing": {
-        "description": "Documentation, plans, specifications",
+        "description": "Documentation, proposals, specifications",
         "preferred": [
           "qwen3"
         ],
@@ -81,7 +80,7 @@
           "qwen-coder"
         ],
         "fallback": [
-          "qwen3"
+          "qwen-coder"
         ]
       },
       "reviewing": {
@@ -90,26 +89,56 @@
           "qwen3"
         ],
         "fallback": [
+          "qwen3"
+        ]
+      },
+      "plan_review": {
+        "description": "Strategic plan assessment, SOP compliance, completeness validation",
+        "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
+          "qwen-coder"
+        ]
+      },
+      "architecture": {
+        "description": "Technology choices, component boundaries, deployment topology",
+        "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
           "qwen-coder"
         ]
       },
       "requirement_generation": {
-        "description": "Requirement decomposition",
+        "description": "Requirement decomposition from plans",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3"
         ],
         "fallback": [
           "qwen-coder"
         ]
       },
       "scenario_generation": {
-        "description": "BDD scenario generation",
+        "description": "BDD scenario generation from requirements",
         "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
+          "qwen-coder"
+        ]
+      },
+      "qa": {
+        "description": "QA rollup review, integration validation, cross-requirement testing",
+        "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
           "qwen-coder"
         ]
       },
       "fast": {
-        "description": "Quick classification, NLQ routing, communities",
+        "description": "Quick responses, simple tasks",
         "preferred": [
           "qwen3-fast"
         ],

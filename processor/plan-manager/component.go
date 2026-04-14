@@ -64,15 +64,26 @@ func (c *Component) loadPlanCached(ctx context.Context, slug string) (*workflow.
 	}
 
 	// Cache + KV miss — fall back to graph (startup race or external mutation).
-	plan, err := workflow.LoadPlan(ctx, tw, slug)
+	if tw == nil {
+		return nil, fmt.Errorf("%w: %s", workflow.ErrPlanNotFound, slug)
+	}
+	prefix := workflow.EntityPrefix() + ".wf.plan.plan."
+	entities, err := tw.ReadEntitiesByPrefix(ctx, prefix, 500)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("graph fallback failed: %w", err)
 	}
-	// Backfill all three layers. Graph write is idempotent since we just read from it.
-	if saveErr := ps.save(ctx, plan); saveErr != nil {
-		c.logger.Warn("Failed to backfill plan from graph", "slug", slug, "error", saveErr)
+	for entityID, triples := range entities {
+		plan := workflow.PlanFromTripleMap(entityID, triples)
+		if plan.Slug != slug {
+			continue
+		}
+		// Backfill all three layers. Graph write is idempotent since we just read from it.
+		if saveErr := ps.save(ctx, plan); saveErr != nil {
+			c.logger.Warn("Failed to backfill plan from graph", "slug", slug, "error", saveErr)
+		}
+		return plan, nil
 	}
-	return plan, nil
+	return nil, fmt.Errorf("%w: %s", workflow.ErrPlanNotFound, slug)
 }
 
 // savePlanCached saves a plan through all three layers (cache → KV → graph).

@@ -8,39 +8,23 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // ExportSpecFiles generates per-requirement spec Markdown files in .semspec/specs/.
 // Each file contains the requirement description and its scenarios in Given/When/Then format.
+// The plan must include inline Requirements and Scenarios (as stored in the plan cache).
 // Returns the list of file paths written.
-func ExportSpecFiles(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, slug string) ([]string, error) {
-	if err := ValidateSlug(slug); err != nil {
+func ExportSpecFiles(ctx context.Context, plan *Plan, repoRoot string) ([]string, error) {
+	if err := ValidateSlug(plan.Slug); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	plan, err := LoadPlan(ctx, tw, slug)
-	if err != nil {
-		return nil, fmt.Errorf("load plan: %w", err)
-	}
-
-	requirements, err := LoadRequirements(ctx, tw, slug)
-	if err != nil {
-		return nil, fmt.Errorf("load requirements: %w", err)
-	}
-
-	scenarios, err := LoadScenarios(ctx, tw, slug)
-	if err != nil {
-		return nil, fmt.Errorf("load scenarios: %w", err)
-	}
-
 	// Index scenarios by requirement ID.
-	scenariosByReq := make(map[string][]Scenario, len(requirements))
-	for _, s := range scenarios {
+	scenariosByReq := make(map[string][]Scenario, len(plan.Requirements))
+	for _, s := range plan.Scenarios {
 		scenariosByReq[s.RequirementID] = append(scenariosByReq[s.RequirementID], s)
 	}
 
@@ -50,7 +34,7 @@ func ExportSpecFiles(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, 
 	}
 
 	var written []string
-	for _, req := range requirements {
+	for _, req := range plan.Requirements {
 		content := renderSpecFile(plan, &req, scenariosByReq[req.ID])
 		reqSlug := paths.Slugify(req.Title)
 		if reqSlug == "" {
@@ -128,43 +112,25 @@ func renderSpecFile(plan *Plan, req *Requirement, scenarios []Scenario) string {
 
 // GenerateArchive generates an archive Markdown document summarising a completed plan.
 // The document is written to .semspec/archive/{slug}.md.
+// The plan must include inline Requirements, Scenarios, and ChangeProposals (as stored
+// in the plan cache).
 // Returns the file path written.
-func GenerateArchive(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, slug string) (string, error) {
-	if err := ValidateSlug(slug); err != nil {
+func GenerateArchive(ctx context.Context, plan *Plan, repoRoot string) (string, error) {
+	if err := ValidateSlug(plan.Slug); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 
-	plan, err := LoadPlan(ctx, tw, slug)
-	if err != nil {
-		return "", fmt.Errorf("load plan: %w", err)
-	}
-
-	requirements, err := LoadRequirements(ctx, tw, slug)
-	if err != nil {
-		return "", fmt.Errorf("load requirements: %w", err)
-	}
-
-	scenarios, err := LoadScenarios(ctx, tw, slug)
-	if err != nil {
-		return "", fmt.Errorf("load scenarios: %w", err)
-	}
-
-	changeProposals, err := LoadChangeProposals(ctx, tw, slug)
-	if err != nil {
-		return "", fmt.Errorf("load change proposals: %w", err)
-	}
-
-	content := renderArchive(plan, requirements, scenarios, changeProposals)
+	content := renderArchive(plan, plan.Requirements, plan.Scenarios, plan.ChangeProposals)
 
 	archiveDir := paths.ArchivePath(repoRoot)
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return "", fmt.Errorf("create archive dir: %w", err)
 	}
 
-	filePath := filepath.Join(archiveDir, slug+".md")
+	filePath := filepath.Join(archiveDir, plan.Slug+".md")
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		return "", fmt.Errorf("write archive: %w", err)
 	}
