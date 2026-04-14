@@ -86,7 +86,7 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 	test.beforeAll(async () => {
 		const plan = await createPlan(`${PLAN_PROMPT}\n\nTest run: ${Date.now()}`);
 		slug = plan.slug;
-		await waitForGoal(slug, 300_000);
+		await waitForGoal(slug, CASCADE_TIMEOUT);
 	});
 
 	test.afterAll(async () => {
