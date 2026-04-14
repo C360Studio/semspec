@@ -31,10 +31,10 @@ and shows a warning banner until they're set:
 | `org` | First segment of every entity ID — can't be changed after the first plan |
 | `checklist.json` | Without quality gates, the structural-validator has nothing to run — code passes unchecked |
 
-Standards (`standards.json`) are not gated — you can start with an empty rules array and
-add rules as you learn what agents get wrong. Without standards, the plan-reviewer still
-runs but has no project-specific rules to validate against, so reviews won't be tailored
-to your codebase.
+Standards (`standards.json`) are not gated — `POST /project-manager/init` seeds 17 baseline
+standards (5 OWASP security + 12 language-agnostic engineering rules) so you have something
+useful from day one. You can append project-specific standards as you learn what agents get
+wrong, or start with `{"items": []}` if you want a clean slate.
 
 ## Quick Start (Manual)
 
@@ -54,17 +54,17 @@ cat > .semspec/project.json << 'EOF'
 }
 EOF
 
-# Empty standards — add rules as you learn what matters
-echo '{"rules":[]}' > .semspec/standards.json
+# Empty standards — `POST /project-manager/init` seeds the baseline; this empty form opts out
+echo '{"version":"1.0.0","items":[]}' > .semspec/standards.json
 
 # Empty checklist — add quality gates for your stack
-echo '{"checks":[]}' > .semspec/checklist.json
+echo '{"version":"1","checks":[]}' > .semspec/checklist.json
 ```
 
 ## API-Driven Setup
 
 The project-manager provides endpoints for automated setup. See the
-[API Reference](api.md#project-setup--apiproject) or the Swagger UI at `/docs`.
+[API Reference](api.md#project-setup--project-manager) or the Swagger UI at `/docs`.
 
 ```bash
 curl -X POST http://localhost:8080/project-manager/detect          # Auto-detect stack
@@ -125,43 +125,86 @@ via `POST /project-manager/detect` or created manually.
 
 ## standards.json
 
-Rules injected into every agent's context — planning, code generation, and review. Start
-empty and add rules as you discover what agents get wrong.
+Standards injected into every agent's context — planning, code generation, and review.
+`POST /project-manager/init` seeds a 17-rule baseline (5 OWASP security + 12 language-agnostic
+engineering standards). Append project-specific standards as you discover what agents get
+wrong in your codebase.
 
 ```json
 {
-  "rules": [
+  "version": "1.0.0",
+  "generated_at": "2026-04-14T10:00:00Z",
+  "updated_at": "2026-04-14T10:00:00Z",
+  "token_estimate": 480,
+  "items": [
     {
-      "id": "error-handling",
-      "text": "All errors must be handled or explicitly propagated. No silently swallowed errors.",
+      "id": "eng-test-coverage",
+      "text": "All new or modified behavior must have corresponding tests, and each test must trace back to a specific scenario or requirement (referenced by ID in a comment, test name, or description). Untested code is unfinished code; untraceable tests are unverifiable claims.",
       "severity": "must",
-      "category": "code-quality",
-      "origin": "manual"
+      "category": "engineering",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
     },
     {
-      "id": "test-coverage",
-      "text": "All new functions must have corresponding test cases.",
+      "id": "sec-parameterized-queries",
+      "text": "Database queries must use parameterized statements. Never concatenate user input into SQL or shell commands.",
+      "severity": "must",
+      "category": "security",
+      "applies_to": ["**/*repo*", "**/*store*", "**/*query*", "**/*db*"],
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "team-prefer-functional-options",
+      "text": "Public constructors with more than two parameters must use the functional options pattern (NewX(opts ...Option)).",
       "severity": "should",
-      "category": "testing",
+      "category": "engineering",
+      "roles": ["developer", "reviewer"],
       "origin": "manual"
     }
   ]
 }
 ```
 
-### Rule Fields
+### Top-Level Fields
 
 | Field | Description |
 |-------|-------------|
-| `id` | Unique identifier |
-| `text` | The rule, stated as a requirement |
-| `severity` | `must` (blocks approval), `should` (flagged), `may` (informational) — RFC 2119 |
-| `category` | Grouping: `code-quality`, `testing`, `security`, `documentation`, etc. |
-| `origin` | `manual` (human-written) or `generated` (from `POST /project-manager/generate-standards`) |
-| `roles` | Optional array restricting which agent roles see the rule |
+| `version` | Schema version (currently `"1.0.0"`) |
+| `generated_at` | RFC3339 timestamp of last full regeneration |
+| `updated_at` | RFC3339 timestamp of last mutation (used for graph reconciliation) |
+| `approved_at` | Optional RFC3339 timestamp of human approval (omitted = pending) |
+| `token_estimate` | Approximate combined token count — used by the context-builder budget |
+| `items` | Ordered list of standards |
 
-Start empty and add rules as you discover what agents get wrong. The `roles` field lets
-you restrict rules to specific agent roles (e.g., only `developer` or `reviewer`).
+### Standard Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `id` | yes | Stable unique identifier (e.g., `eng-test-coverage`) |
+| `text` | yes | The standard, stated as a single concrete requirement |
+| `severity` | yes | RFC 2119: `must` (blocks reviewer approval), `should` (flagged but not blocking), `may` (informational) |
+| `category` | yes | Grouping. Baseline uses `security` and `engineering` — add your own as needed |
+| `origin` | yes | Provenance: `init` (seeded baseline), `manual` (human-authored), `review-pattern` (promoted from recurring review feedback), or `sop:<filename>` (derived from an SOP file) |
+| `applies_to` | no | Glob patterns scoping the standard to matching files. Empty/omitted means all files |
+| `roles` | no | Restrict to specific agent roles (`developer`, `reviewer`, `scenario-reviewer`, `plan-reviewer`, `architect`). Empty means all roles |
+
+### Severity Behaviour
+
+- `must` — A violation is treated as an error. Reviewer approval is blocked.
+- `should` — A violation is surfaced as a warning. Does not block approval but is noted in the review.
+- `may` — Informational only. Does not affect approval.
+
+### Tip: Trace Tests to Specs
+
+The baseline `eng-test-coverage` standard requires every test to reference the scenario or
+requirement it verifies. Conventions that satisfy this:
+
+- Test name embeds the ID: `func TestUserLogin_scenario_user_login_3(t *testing.T)`
+- Comment block above the test: `// scenario.user-login.3 — invalid password rejected`
+- BDD framework description: `it('verifies scenario.user-login.3', ...)`
+
+Reviewers (and the rollup-reviewer) check for these references.
 
 ## checklist.json
 
@@ -204,6 +247,7 @@ Deterministic quality gates — shell commands that run after each agent task. A
 | `required` | If `true`, failure blocks the review stage |
 | `timeout` | Maximum execution time (e.g., `"120s"`) |
 | `description` | Human-readable explanation |
+| `working_dir` | Optional. Directory in which to run the command, relative to repo root. Defaults to `"."` |
 
 ## Related Documentation
 
