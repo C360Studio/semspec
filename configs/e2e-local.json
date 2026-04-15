@@ -18,29 +18,20 @@
   },
   "model_registry": {
     "endpoints": {
-      "qwen3-coder-30b": {
+      "devstral": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "qwen3-coder:30b",
+        "model": "devstral-small-2:24b",
         "max_tokens": 32768,
         "supports_tools": true,
         "stream": true,
         "request_timeout": "900s"
       },
-      "qwen-coder": {
+      "qwen-coder-14b": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "qwen2.5-coder:7b",
+        "model": "qwen2.5-coder:14b",
         "max_tokens": 32768,
-        "supports_tools": true,
-        "stream": true,
-        "request_timeout": "900s"
-      },
-      "qwen3": {
-        "provider": "ollama",
-        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "qwen3:14b",
-        "max_tokens": 40960,
         "supports_tools": true,
         "stream": true,
         "request_timeout": "900s"
@@ -59,82 +50,82 @@
       "planning": {
         "description": "High-level reasoning, architecture decisions",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "writing": {
         "description": "Documentation, proposals, specifications",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "coding": {
         "description": "Code generation, implementation",
         "preferred": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen3"
+          "qwen-coder-14b"
         ]
       },
       "plan_review": {
         "description": "Strategic plan assessment, SOP compliance, completeness validation",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "architecture": {
         "description": "Technology choices, component boundaries, deployment topology",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition from plans",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation from requirements",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "qa": {
         "description": "QA rollup review, integration validation, cross-requirement testing",
         "preferred": [
-          "qwen3"
+          "devstral"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       },
       "fast": {
@@ -143,12 +134,12 @@
           "qwen3-fast"
         ],
         "fallback": [
-          "qwen-coder"
+          "qwen-coder-14b"
         ]
       }
     },
     "defaults": {
-      "model": "qwen-coder"
+      "model": "qwen-coder-14b"
     }
   },
   "services": {
@@ -488,8 +479,8 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 900,
-        "model": "qwen-coder",
-        "decomposer_model": "qwen3",
+        "model": "qwen-coder-14b",
+        "decomposer_model": "devstral",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
