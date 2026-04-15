@@ -279,7 +279,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "1800s"
+        "timeout": "600s"
       }
     },
     "agentic-tools": {
