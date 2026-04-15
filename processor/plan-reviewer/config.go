@@ -11,9 +11,6 @@ var planReviewerSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{})
 
 // Config holds configuration for the plan reviewer component.
 type Config struct {
-	// LLMTimeout is the timeout for LLM calls.
-	LLMTimeout string `json:"llm_timeout" schema:"type:string,description:Timeout for LLM calls (duration string),category:advanced,default:120s"`
-
 	// DefaultCapability is the model capability to use for plan review.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:plan_review"`
 
@@ -39,7 +36,6 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		LLMTimeout:        "120s",
 		DefaultCapability: "plan_review",
 		PlanStateBucket:   "PLAN_STATES",
 		MaxReviewRetries:  2,

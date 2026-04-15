@@ -335,7 +335,6 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "llm_timeout": "120s",
         "default_capability": "plan_review"
       }
     },

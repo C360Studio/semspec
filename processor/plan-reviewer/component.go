@@ -88,9 +88,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Apply defaults
 	defaults := DefaultConfig()
-	if config.LLMTimeout == "" {
-		config.LLMTimeout = defaults.LLMTimeout
-	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
