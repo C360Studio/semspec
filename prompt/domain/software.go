@@ -517,8 +517,10 @@ Integrity Rules:
   "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."
 }
 
-Required: verdict ("approved", "rejected", or "needs_changes"), feedback (string).
-On rejection: add "rejection_type" ("fixable" or "restructure") and specific feedback with line numbers.
+REQUIRED fields:
+- verdict: MUST be exactly one of "approved", "rejected", or "needs_changes" (no other values accepted, MUST NOT be empty)
+- feedback: string describing what you found (REQUIRED)
+On rejection: add "rejection_type" (MUST be "fixable" or "restructure") and specific feedback with line numbers.
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.
 Note: You have READ-ONLY access via bash — you cannot modify files.`,
 		},
@@ -1262,8 +1264,11 @@ You optimize for CORRECTNESS against the scenario specification.`,
 
 When your review is complete, call the submit_work tool with these JSON fields:
 
-Required: verdict ("approved" or "rejected"), feedback (string), scenario_verdicts (array).
-On rejection: add rejection_type ("fixable" or "restructure").
+REQUIRED fields:
+- verdict: MUST be exactly "approved" or "rejected" (no other values accepted, MUST NOT be empty)
+- feedback: string (REQUIRED)
+- scenario_verdicts: array of per-scenario verdicts (REQUIRED)
+On rejection: add rejection_type (MUST be "fixable" or "restructure").
 
 {"verdict": "approved", "feedback": "All scenarios satisfied.", "scenario_verdicts": [{"scenario_id": "sc-1", "passed": true}, {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling"}]}
 

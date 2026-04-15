@@ -140,6 +140,10 @@ type requirementExecution struct {
 	// ReviewFeedback is the reviewer's feedback.
 	ReviewFeedback string
 
+	// ReviewRetryCount tracks reviewer re-dispatches on parse failure or
+	// invalid verdict. Independent of the requirement-level RetryCount.
+	ReviewRetryCount int
+
 	// BlueTeamID is the team that did the implementation (set from trigger).
 	BlueTeamID string
 

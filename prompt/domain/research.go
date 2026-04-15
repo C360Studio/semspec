@@ -143,7 +143,9 @@ Respond with JSON only:
   "confidence": 0.85,
   "feedback": "Summary with specific suggestions for improvement"
 }
-` + "```",
+` + "```" + `
+
+The verdict field MUST be exactly "approved" or "rejected" — no other values are accepted, MUST NOT be empty.`,
 		},
 	}
 }

@@ -12,6 +12,8 @@
 //	                                                    └── needs_changes (iter >= max) -> escalated
 package phases
 
+import "fmt"
+
 // Plan review workflow phases.
 //
 // Components: planner, plan-reviewer
@@ -216,3 +218,19 @@ const (
 	VerdictNeedsChanges = "needs_changes"
 	VerdictRejected     = "rejected"
 )
+
+// ValidateVerdict returns nil if verdict is a recognized value (approved,
+// rejected, needs_changes). Returns a descriptive error for empty or
+// unrecognized strings.
+func ValidateVerdict(verdict string) error {
+	switch verdict {
+	case VerdictApproved, VerdictRejected, VerdictNeedsChanges:
+		return nil
+	case "":
+		return fmt.Errorf("verdict is empty — must be %q, %q, or %q",
+			VerdictApproved, VerdictRejected, VerdictNeedsChanges)
+	default:
+		return fmt.Errorf("invalid verdict %q — must be %q, %q, or %q",
+			verdict, VerdictApproved, VerdictRejected, VerdictNeedsChanges)
+	}
+}

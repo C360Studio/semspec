@@ -100,7 +100,7 @@ func DefaultConfig() Config {
 		MaxTDDCycles:     3,
 		MaxReviewRetries: 2,
 		TimeoutSeconds:   1800,
-		Model:          "default",
+		Model:            "default",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

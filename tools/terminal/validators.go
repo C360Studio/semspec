@@ -2,6 +2,8 @@ package terminal
 
 import (
 	"fmt"
+
+	"github.com/c360studio/semspec/workflow/phases"
 )
 
 // DeliverableValidator validates a structured deliverable from submit_work.
@@ -117,12 +119,8 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 // When rejected: rejection_type is also required.
 func ValidateReviewDeliverable(d map[string]any) error {
 	verdict, _ := d["verdict"].(string)
-	if verdict == "" {
-		return fmt.Errorf("verdict is required — must be \"approved\", \"rejected\", or \"needs_changes\"")
-	}
-	validVerdicts := map[string]bool{"approved": true, "rejected": true, "needs_changes": true}
-	if !validVerdicts[verdict] {
-		return fmt.Errorf("verdict must be \"approved\", \"rejected\", or \"needs_changes\", got %q", verdict)
+	if err := phases.ValidateVerdict(verdict); err != nil {
+		return err
 	}
 	feedback, _ := d["feedback"].(string)
 	if verdict == "rejected" || verdict == "needs_changes" {

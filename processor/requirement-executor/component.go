@@ -38,6 +38,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -1180,17 +1181,59 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		Feedback         string            `json:"feedback"`
 		ScenarioVerdicts []ScenarioVerdict `json:"scenario_verdicts"`
 	}
+	parseOK := true
 	if event.Result != "" {
 		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result); err != nil {
 			c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
+			parseOK = false
 		}
+	} else {
+		parseOK = false
+	}
+
+	// Validate verdict even when JSON parsed OK — small models can return
+	// empty or unrecognized verdict strings.
+	if parseOK {
+		if err := phases.ValidateVerdict(result.Verdict); err != nil {
+			c.logger.Warn("Invalid requirement reviewer verdict",
+				"entity_id", exec.EntityID,
+				"verdict", result.Verdict,
+				"error", err,
+			)
+			parseOK = false
+		}
+	}
+
+	// On parse/validation failure, retry the reviewer if budget allows.
+	if !parseOK {
+		maxRetries := c.config.MaxReviewRetries
+		if maxRetries == 0 {
+			maxRetries = 2
+		}
+		if exec.ReviewRetryCount < maxRetries {
+			exec.ReviewRetryCount++
+			c.logger.Info("Retrying requirement reviewer after invalid result",
+				"entity_id", exec.EntityID,
+				"attempt", exec.ReviewRetryCount,
+				"max", maxRetries,
+			)
+			c.dispatchRequirementReviewerLocked(ctx, exec)
+			return
+		}
+		c.logger.Error("Requirement reviewer failed after max retries, defaulting to rejected",
+			"entity_id", exec.EntityID,
+			"attempts", exec.ReviewRetryCount,
+		)
+		result.Verdict = "rejected"
+		result.RejectionType = "fixable"
+		result.Feedback = "reviewer returned invalid verdict — treating as rejection"
 	}
 
 	exec.ReviewVerdict = result.Verdict
 	exec.ReviewFeedback = result.Feedback
 	exec.ScenarioVerdicts = result.ScenarioVerdicts
 
-	if result.Verdict == "approved" || result.Verdict == "" {
+	if result.Verdict == "approved" {
 		c.markCompletedLocked(ctx, exec)
 		return
 	}

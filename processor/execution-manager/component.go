@@ -46,6 +46,7 @@ import (
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -712,6 +713,16 @@ func (c *Component) parseCodeReviewResult(raw string, slug string) (payloads.Tas
 		result.Verdict = "rejected"
 		result.RejectionType = "fixable"
 		result.Feedback = "parse failure — could not read reviewer response"
+		return result, false
+	}
+	// Validate verdict even when JSON parsed OK — small models can return
+	// empty or unrecognized verdict strings.
+	if err := phases.ValidateVerdict(result.Verdict); err != nil {
+		c.logger.Warn("Code review result has invalid verdict",
+			"slug", slug, "verdict", result.Verdict, "error", err)
+		result.Verdict = "rejected"
+		result.RejectionType = "fixable"
+		result.Feedback = fmt.Sprintf("invalid verdict from reviewer: %s", err)
 		return result, false
 	}
 	return result, true

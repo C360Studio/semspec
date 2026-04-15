@@ -259,6 +259,7 @@ func reviewSchema() map[string]any {
 			"verdict": map[string]any{
 				"type":        "string",
 				"description": "Review verdict: approved, rejected, or needs_changes",
+				"enum":        []string{"approved", "rejected", "needs_changes"},
 			},
 			"feedback": map[string]any{
 				"type":        "string",
@@ -271,6 +272,7 @@ func reviewSchema() map[string]any {
 			"rejection_type": map[string]any{
 				"type":        "string",
 				"description": "Rejection category: fixable (specific issues, retry with feedback) or restructure (approach is wrong, start over)",
+				"enum":        []string{"fixable", "restructure"},
 			},
 			"findings": map[string]any{
 				"type":        "array",
