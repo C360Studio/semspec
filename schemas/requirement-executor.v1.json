@@ -10,6 +10,14 @@
       "description": "Model endpoint for decomposer agent",
       "category": "advanced"
     },
+    "max_decomposer_retries": {
+      "type": "number",
+      "description": "Max retries when decomposer output fails to parse or produces an invalid DAG",
+      "default": 2,
+      "minimum": 0,
+      "maximum": 5,
+      "category": "advanced"
+    },
     "max_requirement_retries": {
       "type": "number",
       "description": "Max requirement-level retries on reviewer rejection",

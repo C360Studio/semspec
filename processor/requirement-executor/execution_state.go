@@ -85,6 +85,16 @@ type requirementExecution struct {
 	// DecomposerTaskID is the agentic task ID of the decomposer agent.
 	DecomposerTaskID string
 
+	// DecomposerAttempt is the 1-based attempt counter for decomposer retries.
+	// Incremented each time the decomposer is dispatched. Gated by
+	// config.MaxDecomposerRetries.
+	DecomposerAttempt int
+
+	// DecomposerLastError carries the previous decomposer attempt's error
+	// message. Injected into the retry prompt so the LLM can correct empty
+	// DAGs, parse failures, or validation errors on the next attempt.
+	DecomposerLastError string
+
 	// --- Serial execution tracking ---
 
 	// CurrentNodeIdx is the index into SortedNodeIDs of the node currently

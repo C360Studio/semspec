@@ -40,6 +40,13 @@ type Config struct {
 	// 0 disables retries (current behavior). Default: 2.
 	MaxRequirementRetries int `json:"max_requirement_retries" schema:"type:int,description:Max requirement-level retries on reviewer rejection,category:advanced,default:2,min:0,max:5"`
 
+	// MaxDecomposerRetries is the maximum number of times to re-dispatch the
+	// decomposer agent when its output cannot be parsed or produces an invalid
+	// DAG (e.g., empty nodes array from an under-powered model). The previous
+	// error is appended to the prompt as feedback so the LLM can correct.
+	// 0 disables retries. Default: 2.
+	MaxDecomposerRetries int `json:"max_decomposer_retries" schema:"type:int,description:Max retries when decomposer output fails to parse or produces an invalid DAG,category:advanced,default:2,min:0,max:5"`
+
 	// Teams configures requirement-level team-based review. When Teams.Enabled is true
 	// and at least two teams are defined, a red team challenge runs after all DAG
 	// nodes complete before the reviewer makes a final verdict.
@@ -102,6 +109,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxRequirementRetries < 0 {
 		c.MaxRequirementRetries = 2
+	}
+	if c.MaxDecomposerRetries == 0 {
+		c.MaxDecomposerRetries = 2
 	}
 	if c.Ports == nil {
 		c.Ports = d.Ports

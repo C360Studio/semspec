@@ -484,7 +484,7 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("decomposer failed: outcome=%s", event.Outcome))
+		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("decomposer failed: outcome=%s", event.Outcome))
 		return
 	}
 
@@ -493,7 +493,7 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 	// Small models (qwen3, etc.) may wrap output in markdown code fences.
 	dagJSON := llm.ExtractJSON(event.Result)
 	if dagJSON == "" {
-		c.markFailedLocked(ctx, exec, "failed to parse decomposer result: no JSON found in result")
+		c.retryOrFailDecomposerLocked(ctx, exec, "failed to parse decomposer result: no JSON found in result")
 		return
 	}
 	var dagResponse struct {
@@ -501,14 +501,17 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 		DAG  decompose.TaskDAG `json:"dag"`
 	}
 	if err := json.Unmarshal([]byte(dagJSON), &dagResponse); err != nil {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("failed to parse decomposer result: %v", err))
+		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("failed to parse decomposer result: %v", err))
 		return
 	}
 
 	if err := dagResponse.DAG.Validate(); err != nil {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("invalid DAG from decomposer: %v", err))
+		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("invalid DAG from decomposer: %v", err))
 		return
 	}
+
+	// Successful parse — clear retry state.
+	exec.DecomposerLastError = ""
 
 	// Topological sort for serial execution order.
 	sorted, err := topoSort(&dagResponse.DAG)
@@ -675,11 +678,11 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
-		Role:         agentic.RoleDeveloper,
+		Role:         agentic.RoleGeneral,
 		Model:        decomposerModel,
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
-		Prompt:       c.buildDecomposerPrompt(exec),
+		Prompt:       c.buildDecomposerPrompt(exec, exec.DecomposerLastError),
 		ToolChoice:   &agentic.ToolChoice{Mode: "function", FunctionName: "decompose_task"},
 		Metadata: map[string]any{
 			"requirement_id": exec.RequirementID,
@@ -695,7 +698,40 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 	c.logger.Info("Dispatched decomposer",
 		"entity_id", exec.EntityID,
 		"task_id", taskID,
+		"attempt", exec.DecomposerAttempt+1,
+		"max_attempts", c.config.MaxDecomposerRetries+1,
 	)
+	exec.DecomposerAttempt++
+}
+
+// retryOrFailDecomposerLocked re-dispatches the decomposer with the previous
+// error appended to the prompt when the retry budget is not exhausted,
+// otherwise marks the requirement failed.
+//
+// Caller must hold exec.mu.
+func (c *Component) retryOrFailDecomposerLocked(ctx context.Context, exec *requirementExecution, errorMsg string) {
+	if exec.DecomposerAttempt <= c.config.MaxDecomposerRetries {
+		c.logger.Warn("Decomposer output invalid, retrying with feedback",
+			"entity_id", exec.EntityID,
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"attempt", exec.DecomposerAttempt,
+			"max_attempts", c.config.MaxDecomposerRetries+1,
+			"error", errorMsg,
+		)
+		exec.DecomposerLastError = errorMsg
+		c.dispatchDecomposerLocked(ctx, exec)
+		return
+	}
+
+	c.logger.Error("Decomposer exhausted retries",
+		"entity_id", exec.EntityID,
+		"slug", exec.Slug,
+		"requirement_id", exec.RequirementID,
+		"attempts", exec.DecomposerAttempt,
+		"last_error", errorMsg,
+	)
+	c.markFailedLocked(ctx, exec, fmt.Sprintf("decomposer exhausted %d retries: %s", c.config.MaxDecomposerRetries, errorMsg))
 }
 
 // buildDecomposerPrompt constructs the decomposer prompt from the requirement context.
@@ -770,13 +806,21 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 	return sb.String()
 }
 
-func (c *Component) buildDecomposerPrompt(exec *requirementExecution) string {
+func (c *Component) buildDecomposerPrompt(exec *requirementExecution, previousError string) string {
 	// Use the explicit prompt if provided (e.g. from legacy trigger).
 	if exec.Prompt != "" {
 		return exec.Prompt
 	}
 
 	var sb strings.Builder
+
+	// Retry feedback: prepend prior failure before the requirement text so the
+	// LLM sees it first and is primed to correct the specific problem.
+	if previousError != "" {
+		sb.WriteString("RETRY — your previous attempt failed with: ")
+		sb.WriteString(previousError)
+		sb.WriteString("\nYou MUST call the decompose_task function with a non-empty nodes array. Each node needs id, prompt (with concrete file paths), role, and file_scope. Do NOT return text; use the tool call.\n\n")
+	}
 
 	sb.WriteString("Requirement: ")
 	sb.WriteString(exec.Title)

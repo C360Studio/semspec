@@ -841,6 +841,8 @@ func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing
 		DecomposerTaskID: "decomp-d",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
+		// Exhausted retry budget — next failure terminates.
+		DecomposerAttempt: c.config.MaxDecomposerRetries + 1,
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
 
@@ -875,6 +877,8 @@ func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testi
 		DecomposerTaskID: "decomp-m",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
+		// Exhausted retry budget — next failure terminates.
+		DecomposerAttempt: c.config.MaxDecomposerRetries + 1,
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
 
@@ -910,6 +914,8 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 		DecomposerTaskID: "decomp-i",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
+		// Exhausted retry budget — next failure terminates.
+		DecomposerAttempt: c.config.MaxDecomposerRetries + 1,
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
 
@@ -943,6 +949,59 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 	}
 	if c.requirementsFailed.Load() != 1 {
 		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+}
+
+// TestHandleDecomposerCompleteLocked_EmptyDAG_RetriesWithFeedback verifies that
+// an invalid DAG (e.g., empty nodes array from an under-powered model) does NOT
+// terminate the execution while the retry budget is not exhausted. Instead the
+// previous error is stored for the next dispatch prompt.
+func TestHandleDecomposerCompleteLocked_EmptyDAG_RetriesWithFeedback(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-retry",
+		Slug:             "p",
+		RequirementID:    "retry",
+		Title:            "retry me",
+		Model:            "test-model", // required for the re-dispatch marshal path
+		DecomposerTaskID: "decomp-retry",
+		VisitedNodes:     make(map[string]bool),
+		CurrentNodeIdx:   -1,
+		// First attempt — well under the retry budget.
+		DecomposerAttempt: 1,
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	// Empty nodes array — Validate() rejects with "dag must contain at least one node".
+	emptyResult := `{"goal": "x", "dag": {"nodes": []}}`
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-decomp-retry",
+		TaskID:       "decomp-retry",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageDecompose,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       emptyResult,
+	}
+
+	exec.mu.Lock()
+	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
+	terminated := exec.terminated
+	lastError := exec.DecomposerLastError
+	exec.mu.Unlock()
+
+	if terminated {
+		t.Error("retry path should NOT terminate the execution while budget remains")
+	}
+	if c.requirementsFailed.Load() != 0 {
+		t.Errorf("requirementsFailed = %d during retry, want 0", c.requirementsFailed.Load())
+	}
+	if lastError == "" {
+		t.Error("DecomposerLastError should be populated for the retry prompt")
+	}
+	if !strings.Contains(lastError, "at least one node") {
+		t.Errorf("DecomposerLastError = %q, want it to mention the validation failure", lastError)
 	}
 }
 
@@ -1540,7 +1599,7 @@ func TestBuildDecomposerPrompt_UsesExplicitPromptWhenSet(t *testing.T) {
 		Prompt:        "explicit custom prompt",
 	}
 
-	got := c.buildDecomposerPrompt(exec)
+	got := c.buildDecomposerPrompt(exec, "")
 	if got != "explicit custom prompt" {
 		t.Errorf("buildDecomposerPrompt() = %q, want explicit prompt", got)
 	}
@@ -1555,7 +1614,7 @@ func TestBuildDecomposerPrompt_BuildsFromContext(t *testing.T) {
 		Description:   "Implement JWT-based auth",
 	}
 
-	got := c.buildDecomposerPrompt(exec)
+	got := c.buildDecomposerPrompt(exec, "")
 	if !strings.Contains(got, "Add user authentication") {
 		t.Errorf("prompt should contain title, got: %s", got)
 	}
@@ -1581,7 +1640,7 @@ func TestBuildDecomposerPrompt_IncludesPrerequisites(t *testing.T) {
 		},
 	}
 
-	got := c.buildDecomposerPrompt(exec)
+	got := c.buildDecomposerPrompt(exec, "")
 	if !strings.Contains(got, "Prerequisite Requirements") {
 		t.Errorf("prompt should mention prerequisites, got: %s", got)
 	}
