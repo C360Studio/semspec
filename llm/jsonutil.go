@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
@@ -21,25 +22,42 @@ var (
 
 // ExtractJSON extracts a JSON object from an LLM response string.
 // It handles markdown code blocks, JavaScript-style comments, and trailing commas.
+// Go 1.25+ rejects trailing content after top-level JSON value, so the output
+// is validated and trimmed to ensure clean unmarshalling.
 func ExtractJSON(content string) string {
 	raw := extractRawJSON(content)
 	if raw == "" {
 		return ""
 	}
-	return cleanJSON(raw)
+	cleaned := cleanJSON(raw)
+	// Go 1.25 rejects trailing content after JSON. Validate and trim if needed.
+	if json.Valid([]byte(cleaned)) {
+		return cleaned
+	}
+	// Try to find the balanced JSON object boundary.
+	if trimmed := trimToBalancedJSON(cleaned); trimmed != "" {
+		return trimmed
+	}
+	return cleaned
 }
 
 // ExtractJSONArray extracts a JSON array from an LLM response string.
 func ExtractJSONArray(content string) string {
+	var raw string
 	// Try markdown code block first
 	if matches := jsonArrayBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return cleanJSON(matches[1])
+		raw = matches[1]
+	} else if matches := jsonArrayPattern.FindString(content); matches != "" {
+		raw = matches
 	}
-	// Fallback to raw array
-	if matches := jsonArrayPattern.FindString(content); matches != "" {
-		return cleanJSON(matches)
+	if raw == "" {
+		return ""
 	}
-	return ""
+	cleaned := cleanJSON(raw)
+	if json.Valid([]byte(cleaned)) {
+		return cleaned
+	}
+	return cleaned
 }
 
 // extractRawJSON extracts raw JSON content before cleaning.
@@ -71,6 +89,49 @@ func cleanJSON(raw string) string {
 	result = trailingCommaPattern.ReplaceAllString(result, "$1")
 
 	return result
+}
+
+// trimToBalancedJSON finds the substring from the first { to its balanced },
+// handling nested braces and string escapes. Returns "" if no balanced object found.
+func trimToBalancedJSON(s string) string {
+	start := strings.IndexByte(s, '{')
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	inString := false
+	escaped := false
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				candidate := s[start : i+1]
+				if json.Valid([]byte(candidate)) {
+					return candidate
+				}
+				return ""
+			}
+		}
+	}
+	return ""
 }
 
 // stripLineComment removes a // comment from a JSON line, respecting string values.

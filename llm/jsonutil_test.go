@@ -53,6 +53,16 @@ func TestExtractJSON(t *testing.T) {
 			wantKey: "goal",
 		},
 		{
+			name:    "trailing backticks (Go 1.25 regression)",
+			input:   "{\"verdict\": \"approved\", \"feedback\": \"looks good\"}\n```",
+			wantKey: "verdict",
+		},
+		{
+			name:    "JSON between backticks no newline",
+			input:   "```{\"x\": 1}```",
+			wantKey: "x",
+		},
+		{
 			name:    "empty input",
 			input:   "",
 			wantErr: true,
