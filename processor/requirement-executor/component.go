@@ -616,7 +616,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 			FilesCreated  []string `json:"files_created"`
 			Summary       string   `json:"changes_summary"`
 		}
-		if err := json.Unmarshal([]byte(event.Result), &parsed); err == nil {
+		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &parsed); err == nil {
 			nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
 			nodeResult.Summary = parsed.Summary
 		}
@@ -1037,7 +1037,7 @@ func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, 
 
 	if event.Result != "" {
 		var challenge payloads.RedTeamChallengeResult
-		if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
+		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &challenge); err != nil {
 			c.logger.Warn("Failed to parse requirement red team result, proceeding to reviewer",
 				"entity_id", exec.EntityID, "error", err)
 		} else {
@@ -1137,7 +1137,7 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		ScenarioVerdicts []ScenarioVerdict `json:"scenario_verdicts"`
 	}
 	if event.Result != "" {
-		if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
+		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result); err != nil {
 			c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
 		}
 	}

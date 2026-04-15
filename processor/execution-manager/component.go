@@ -603,7 +603,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	}
 
 	var result payloads.DeveloperResult
-	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
+	if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result); err != nil {
 		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", err)
 	} else {
 		exec.FilesModified = result.FilesModified
@@ -1353,7 +1353,7 @@ func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agen
 	}
 
 	var challenge payloads.RedTeamChallengeResult
-	if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
+	if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &challenge); err != nil {
 		c.logger.Warn("Failed to parse red team challenge result, proceeding to reviewer",
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
