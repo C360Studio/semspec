@@ -491,7 +491,8 @@
         "model": "mock-coder",
         "decomposer_model": "mock-decomposer",
         "sandbox_url": "http://sandbox:8090",
-        "max_requirement_retries": 1
+        "max_requirement_retries": 1,
+        "max_decomposer_retries": 1
       }
     },
     "structural-validator": {

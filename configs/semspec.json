@@ -491,6 +491,7 @@
         "model": "default",
         "sandbox_url": "${SANDBOX_URL:-}",
         "max_requirement_retries": 2,
+        "max_decomposer_retries": 2,
         "ports": {
           "inputs": [
             {

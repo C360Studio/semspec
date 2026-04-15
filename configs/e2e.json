@@ -378,7 +378,8 @@
         "timeout_seconds": 3600,
         "model": "qwen",
         "sandbox_url": "http://sandbox:8090",
-        "max_requirement_retries": 2
+        "max_requirement_retries": 2,
+        "max_decomposer_retries": 2
       }
     },
     "execution-manager": {

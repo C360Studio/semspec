@@ -448,7 +448,8 @@
         "model": "gemini-flash",
         "decomposer_model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
-        "max_requirement_retries": 2
+        "max_requirement_retries": 2,
+        "max_decomposer_retries": 2
       }
     },
     "structural-validator": {
