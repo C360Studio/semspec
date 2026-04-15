@@ -22,7 +22,7 @@
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
         "model": "qwen3-coder:30b",
-        "max_tokens": 32768,
+        "max_tokens": 131072,
         "supports_tools": true,
         "stream": true,
         "request_timeout": "900s"
@@ -31,7 +31,7 @@
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
         "model": "qwen2.5-coder:14b",
-        "max_tokens": 32768,
+        "max_tokens": 131072,
         "supports_tools": true,
         "stream": true,
         "request_timeout": "900s"
@@ -464,7 +464,8 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
-        "execution_timeout": "900s"
+        "execution_timeout": "900s",
+        "max_concurrent": 2
       }
     },
     "question-manager": {
