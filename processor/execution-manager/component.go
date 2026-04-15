@@ -639,7 +639,33 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		return
 	}
 
-	result := c.parseCodeReviewResult(event.Result, exec.Slug)
+	result, ok := c.parseCodeReviewResult(event.Result, exec.Slug)
+	if !ok {
+		// Parse failure — retry the reviewer if budget allows. Parse failures
+		// are transient (model output quality) and should not consume TDD cycles.
+		maxRetries := c.config.MaxReviewRetries
+		if maxRetries == 0 {
+			maxRetries = 2
+		}
+		if exec.ReviewRetryCount < maxRetries {
+			exec.ReviewRetryCount++
+			c.logger.Warn("Retrying code reviewer after parse failure",
+				"slug", exec.Slug,
+				"task_id", exec.TaskID,
+				"attempt", exec.ReviewRetryCount,
+				"max", maxRetries,
+			)
+			c.syncToStore(ctx, exec)
+			c.startExecutionTimeout(exec)
+			c.dispatchReviewerLocked(ctx, exec)
+			return
+		}
+		c.logger.Error("Code reviewer parse failure after max retries, defaulting to rejected",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"attempts", exec.ReviewRetryCount,
+		)
+	}
 
 	exec.Verdict = result.Verdict
 	exec.RejectionType = result.RejectionType
@@ -673,20 +699,22 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	c.handleRejectionLocked(ctx, exec, result)
 }
 
-// parseCodeReviewResult unmarshals the reviewer JSON result, defaulting to a
-// safe rejected state on parse failure. Strips markdown code fences that some
-// LLMs (notably Gemini) wrap around JSON tool responses.
-func (c *Component) parseCodeReviewResult(raw string, slug string) payloads.TaskCodeReviewResult {
+// parseCodeReviewResult unmarshals the reviewer JSON result. Returns (result, true)
+// on success. On parse failure, returns a default rejected result and false so the
+// caller can decide whether to retry. Strips markdown code fences that some LLMs
+// wrap around JSON tool responses.
+func (c *Component) parseCodeReviewResult(raw string, slug string) (payloads.TaskCodeReviewResult, bool) {
 	var result payloads.TaskCodeReviewResult
 	cleaned := llm.ExtractJSON(raw)
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
-		c.logger.Warn("Failed to parse code review result, defaulting to rejected for safety",
+		c.logger.Warn("Failed to parse code review result",
 			"slug", slug, "error", err)
 		result.Verdict = "rejected"
 		result.RejectionType = "fixable"
 		result.Feedback = "parse failure — could not read reviewer response"
+		return result, false
 	}
-	return result
+	return result, true
 }
 
 // handleRejectionLocked processes a rejected code review: writes the phase

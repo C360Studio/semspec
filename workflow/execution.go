@@ -59,9 +59,10 @@ type TaskExecution struct {
 	RedTeamTaskID   string `json:"red_team_task_id,omitempty"`
 
 	// Review outcome
-	Verdict       string `json:"verdict,omitempty"`        // "approved" or "rejected"
-	RejectionType string `json:"rejection_type,omitempty"` // "fixable" or "restructure"
-	Feedback      string `json:"feedback,omitempty"`
+	Verdict          string `json:"verdict,omitempty"`        // "approved" or "rejected"
+	RejectionType    string `json:"rejection_type,omitempty"` // "fixable" or "restructure"
+	Feedback         string `json:"feedback,omitempty"`
+	ReviewRetryCount int    `json:"review_retry_count,omitempty"`
 
 	// Terminal annotations
 	ErrorReason      string `json:"error_reason,omitempty"`

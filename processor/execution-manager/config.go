@@ -45,6 +45,12 @@ type Config struct {
 	// NOTE: This is distinct from agentic-loop's max_iterations (tool-call ceiling per loop).
 	MaxTDDCycles int `json:"max_tdd_cycles" schema:"type:int,description:Maximum dev→validate→review cycles before escalation,category:basic,default:3"`
 
+	// MaxReviewRetries is the maximum number of times to re-dispatch the code
+	// reviewer when its result can't be parsed (malformed JSON). Independent of
+	// TDD cycle budget — parse failures are transient infrastructure issues,
+	// not code quality signals.
+	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse failure,category:advanced,default:2"`
+
 	// TimeoutSeconds is the per-execution timeout in seconds (covers the
 	// full develop→validate→review pipeline, not individual steps).
 	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per task execution in seconds,category:advanced,default:1800"`
@@ -91,8 +97,9 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxTDDCycles:   3,
-		TimeoutSeconds: 1800,
+		MaxTDDCycles:     3,
+		MaxReviewRetries: 2,
+		TimeoutSeconds:   1800,
 		Model:          "default",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
