@@ -49,8 +49,8 @@ type Config struct {
 
 	// MaxReviewRetries is the maximum number of times to re-dispatch the
 	// requirement reviewer when its verdict is empty or unparseable. Independent
-	// of requirement-level retries. Default: 2.
-	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse/verdict failure,category:advanced,default:2,min:0,max:5"`
+	// of requirement-level retries. Default: 3.
+	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse/verdict failure,category:advanced,default:3,min:0,max:5"`
 
 	// Teams configures requirement-level team-based review. When Teams.Enabled is true
 	// and at least two teams are defined, a red team challenge runs after all DAG
@@ -119,7 +119,7 @@ func (c Config) withDefaults() Config {
 		c.MaxDecomposerRetries = 2
 	}
 	if c.MaxReviewRetries == 0 {
-		c.MaxReviewRetries = 2
+		c.MaxReviewRetries = 3
 	}
 	if c.Ports == nil {
 		c.Ports = d.Ports

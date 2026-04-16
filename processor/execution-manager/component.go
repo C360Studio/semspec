@@ -646,7 +646,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		// are transient (model output quality) and should not consume TDD cycles.
 		maxRetries := c.config.MaxReviewRetries
 		if maxRetries == 0 {
-			maxRetries = 2
+			maxRetries = 3
 		}
 		if exec.ReviewRetryCount < maxRetries {
 			exec.ReviewRetryCount++
@@ -1572,9 +1572,25 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 		opts = append(opts, sandbox.WithTrailer("Trace-ID", exec.TraceID))
 	}
 
-	result, err := c.sandbox.MergeWorktree(context.Background(), exec.TaskID, opts...)
+	// Retry merge up to 3 times — concurrent node merges can conflict when
+	// the sandbox repo lock is contended.
+	var result *sandbox.MergeResult
+	var err error
+	for attempt := range 3 {
+		result, err = c.sandbox.MergeWorktree(context.Background(), exec.TaskID, opts...)
+		if err == nil {
+			break
+		}
+		c.logger.Warn("Worktree merge failed, retrying",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"attempt", attempt+1,
+			"error", err,
+		)
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+	}
 	if err != nil {
-		c.logger.Warn("Failed to merge worktree; changes may need manual merge",
+		c.logger.Warn("Worktree merge failed after retries; changes may need manual merge",
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
 			"error", err,

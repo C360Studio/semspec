@@ -1127,6 +1127,16 @@ Other agents may be working on the same codebase simultaneously.
 			},
 			Content: `When instructed to call a specific tool, call that tool as your FIRST action. Do NOT provide a text response before calling the tool. Do NOT describe what you plan to do — just call it.`,
 		},
+		// Gemini-specific: prevent concatenated tool call arguments
+		{
+			ID:        "software.provider.gemini-tool-sequencing",
+			Category:  prompt.CategoryProviderHints,
+			Providers: []prompt.Provider{prompt.ProviderGoogle},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.HasTool("bash")
+			},
+			Content: `Call one tool at a time. Each tool call must be a single, self-contained request. Do NOT combine multiple commands into separate JSON objects in one call — use && to chain commands in a single bash call instead.`,
+		},
 		// Ollama-specific: small local models frequently output JSON text instead of tool calls
 		{
 			ID:        "software.provider.ollama-tool-enforcement",

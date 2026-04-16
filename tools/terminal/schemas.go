@@ -281,6 +281,15 @@ func reviewSchema() map[string]any {
 			"scenario_verdicts": map[string]any{
 				"type":        "array",
 				"description": "Per-scenario pass/fail verdicts",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"scenario_id": map[string]any{"type": "string", "description": "Scenario identifier"},
+						"passed":      map[string]any{"type": "boolean", "description": "Whether the scenario passed"},
+						"feedback":    map[string]any{"type": "string", "description": "Per-scenario feedback"},
+					},
+					"required": []string{"scenario_id", "passed"},
+				},
 			},
 		},
 		"required": []string{"verdict", "feedback"},

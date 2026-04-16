@@ -1208,7 +1208,7 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 	if !parseOK {
 		maxRetries := c.config.MaxReviewRetries
 		if maxRetries == 0 {
-			maxRetries = 2
+			maxRetries = 3
 		}
 		if exec.ReviewRetryCount < maxRetries {
 			exec.ReviewRetryCount++

@@ -48,8 +48,8 @@ type Config struct {
 	// MaxReviewRetries is the maximum number of times to re-dispatch the code
 	// reviewer when its result can't be parsed (malformed JSON). Independent of
 	// TDD cycle budget — parse failures are transient infrastructure issues,
-	// not code quality signals.
-	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse failure,category:advanced,default:2"`
+	// not code quality signals. Default: 3.
+	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse failure,category:advanced,default:3"`
 
 	// TimeoutSeconds is the per-execution timeout in seconds (covers the
 	// full develop→validate→review pipeline, not individual steps).
@@ -98,7 +98,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		MaxTDDCycles:     3,
-		MaxReviewRetries: 2,
+		MaxReviewRetries: 3,
 		TimeoutSeconds:   1800,
 		Model:            "default",
 		Ports: &component.PortConfig{

@@ -135,6 +135,24 @@ func ValidateReviewDeliverable(d map[string]any) error {
 			return fmt.Errorf("rejection_type is required when verdict is rejected — must be one of: fixable, restructure")
 		}
 	}
+	// Validate scenario_verdicts items when present — each must be an object
+	// with scenario_id (string) and passed (bool). Gemini sends bare numbers
+	// without this guard, causing post-loop parse failures.
+	if svRaw, ok := d["scenario_verdicts"]; ok {
+		svArr, ok := svRaw.([]any)
+		if !ok {
+			return fmt.Errorf("scenario_verdicts must be an array of objects, got %T", svRaw)
+		}
+		for i, item := range svArr {
+			obj, ok := item.(map[string]any)
+			if !ok {
+				return fmt.Errorf("scenario_verdicts[%d] must be an object with scenario_id and passed, got %T", i, item)
+			}
+			if _, ok := obj["scenario_id"].(string); !ok {
+				return fmt.Errorf("scenario_verdicts[%d].scenario_id is required (string)", i)
+			}
+		}
+	}
 	return nil
 }
 
