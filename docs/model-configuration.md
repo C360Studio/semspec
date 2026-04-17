@@ -72,8 +72,26 @@ Models are configured in `configs/semspec.json` under `model_registry`:
 | `provider` | `ollama`, `anthropic`, or `openai` (OpenAI-compatible — works with Gemini, OpenRouter, vLLM) |
 | `url` | API URL (not needed for anthropic) |
 | `model` | Actual model name sent to the provider |
-| `max_tokens` | Context window size |
+| `max_tokens` | Model's context window size (see below) |
+| `max_concurrent` | Max concurrent requests to this endpoint. Set to 1-2 for local Ollama |
+| `request_timeout` | Per-request HTTP timeout (e.g., `"300s"`, `"5m"`). Leave unset for slow local models |
+| `reasoning_effort` | Thinking depth: `"low"`, `"medium"`, `"high"` (Gemini, o3, etc.) |
 | `api_key_env` | Environment variable for the API key (e.g., `GEMINI_API_KEY`) |
+| `supports_tools` | Whether the endpoint supports tool/function calling |
+
+### Understanding max_tokens
+
+`max_tokens` tells semspec how large the model's context window is. It is **not** sent to the
+LLM API — it is used internally to:
+
+- Budget system prompts (skip verbose fragments for smaller models)
+- Detect context window pressure via observability metrics
+- Trim tool descriptions when the model has limited context
+
+For Ollama models, the actual context window is controlled by `num_ctx` in the model's
+Modelfile, not by this config. Set `max_tokens` to match your model's effective `num_ctx`
+so semspec can budget prompts correctly. For cloud providers, set it to the model's
+documented context limit.
 
 ## Recommended Setups
 
