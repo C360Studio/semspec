@@ -27,7 +27,10 @@
 	const loop = $derived(data.loop);
 	const trajectory = $derived(data.trajectory);
 	const loading = false; // Load function handles fetching before render
-	const error = $derived(trajectory === null && data.loopId ? 'Failed to load trajectory' : null);
+	// trajectory is null when the API returns non-ok OR the loop has no trajectory
+	// yet. Only show an error when we have steps === undefined (API failure), not
+	// when steps is simply empty (loop in progress).
+	const hasTrajectory = $derived(trajectory !== null);
 	const entries = $derived(trajectory?.steps ?? []);
 
 	// Step type index
@@ -254,18 +257,12 @@
 				</div>
 			{/if}
 
-			<!-- Loading / error / empty states -->
-			{#if loading && !trajectory}
+			<!-- Loading / empty / timeline states -->
+			{#if loading && !hasTrajectory}
 				<div class="loading-state" data-testid="trajectory-loading">
 					<p>Loading trajectory...</p>
 				</div>
-			{:else if error}
-				<div class="error-state" data-testid="trajectory-error">
-					<Icon name="alert-triangle" size={20} />
-					<p>{error}</p>
-					<button class="btn btn-secondary btn-sm" onclick={handleRefresh}>Retry</button>
-				</div>
-			{:else if !trajectory}
+			{:else if !hasTrajectory}
 				<div class="empty-state" data-testid="trajectory-not-found">
 					<Icon name="history" size={28} />
 					<p>No trajectory data found</p>
@@ -281,11 +278,11 @@
 			{:else}
 				<!-- Timeline -->
 				<div class="timeline" data-testid="trajectory-timeline">
-					{#each visibleEntries as { e: entry, i: index } (index)}
+					{#each visibleEntries as { e: entry, i: index }, position (index)}
 						<div class="timeline-event" data-testid="timeline-event" data-step-type={entry.step_type}>
 							<div class="event-connector">
 								<div class="event-dot" data-step-type={entry.step_type}></div>
-								{#if index < entries.length - 1}
+								{#if position < visibleEntries.length - 1}
 									<div class="connector-line"></div>
 								{/if}
 							</div>
@@ -686,9 +683,8 @@
 		color: var(--color-text-muted);
 	}
 
-	/* Loading / error / empty states */
+	/* Loading / empty states */
 	.loading-state,
-	.error-state,
 	.empty-state {
 		display: flex;
 		flex-direction: column;
@@ -700,15 +696,10 @@
 	}
 
 	.loading-state p,
-	.error-state p,
 	.empty-state p {
 		margin: 0;
 		font-size: var(--font-size-sm);
 		color: var(--color-text-secondary);
-	}
-
-	.error-state {
-		color: var(--color-error);
 	}
 
 	.empty-hint {

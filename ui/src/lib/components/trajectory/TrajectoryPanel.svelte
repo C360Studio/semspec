@@ -152,7 +152,7 @@
 			</div>
 		{:else}
 			<ol class="entry-list">
-				{#each entries as entry, i (i)}
+				{#each entries as entry (entry.timestamp ?? entry.step_type)}
 					<li class="entry-item">
 						<TrajectoryEntryCard {entry} {compact} />
 					</li>
