@@ -154,7 +154,17 @@ func (c *Component) initTaskExecution(ctx context.Context, exec *taskExecution) 
 		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Prompt, exec.Prompt)
 	}
 
-	c.maybeCreateWorktree(ctx, exec)
+	if err := c.createWorktree(ctx, exec); err != nil {
+		c.logger.Error("Worktree creation failed — execution cannot proceed without sandbox isolation",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		exec.mu.Lock()
+		defer exec.mu.Unlock()
+		c.markErrorLocked(ctx, exec, "worktree_creation_failed: "+err.Error())
+		return
+	}
 
 	// Select pipeline based on task type.
 	initialPhase := c.initialPhaseForType(exec.TaskType)

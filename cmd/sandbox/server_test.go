@@ -1464,3 +1464,193 @@ func TestHandleWorkspaceDownload_InvalidTaskID(t *testing.T) {
 	}
 	resp.Body.Close()
 }
+
+// ---------------------------------------------------------------------------
+// Empty repo / HEAD validation tests
+// ---------------------------------------------------------------------------
+
+// setupEmptyTestRepo initialises a git repository with NO commits.
+// HEAD is invalid in this state, which is the root cause of the worktree bug.
+func setupEmptyTestRepo(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@semspec.test"},
+		{"git", "config", "user.name", "Test Agent"},
+	}
+	for _, args := range cmds {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("setupEmptyTestRepo %v: %s", args, out)
+		}
+	}
+
+	return dir
+}
+
+// newEmptyRepoTestServer builds a Server backed by an empty git repository
+// (no commits, invalid HEAD).
+func newEmptyRepoTestServer(t *testing.T) (*Server, *httptest.Server) {
+	t.Helper()
+
+	repoPath := setupEmptyTestRepo(t)
+	worktreeRoot := filepath.Join(repoPath, ".semspec", "worktrees")
+	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
+		t.Fatalf("create worktree root: %v", err)
+	}
+
+	srv := &Server{
+		repoPath:       repoPath,
+		worktreeRoot:   worktreeRoot,
+		defaultTimeout: 15 * time.Second,
+		maxTimeout:     60 * time.Second,
+		maxOutputBytes: 64 * 1024,
+		maxFileSize:    1 * 1024 * 1024,
+		logger:         slog.Default(),
+	}
+
+	mux := http.NewServeMux()
+	srv.RegisterRoutes(mux)
+
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	return srv, ts
+}
+
+func TestCreateWorktree_EmptyRepo(t *testing.T) {
+	_, ts := newEmptyRepoTestServer(t)
+
+	resp := doRequest(t, ts, http.MethodPost, "/worktree", worktreeCreateRequest{TaskID: "task-empty"})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty repo, got %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	errMsg := result["error"]
+	if !strings.Contains(errMsg, "does not exist") || !strings.Contains(errMsg, "commit") {
+		t.Errorf("error message should mention missing ref and commits, got: %q", errMsg)
+	}
+}
+
+func TestCreateWorktree_InvalidBaseBranch(t *testing.T) {
+	_, ts := newTestServer(t) // repo WITH commits
+
+	resp := doRequest(t, ts, http.MethodPost, "/worktree", worktreeCreateRequest{
+		TaskID:     "task-bad-branch",
+		BaseBranch: "nonexistent-branch",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid base_branch, got %d", resp.StatusCode)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if !strings.Contains(result["error"], "nonexistent-branch") {
+		t.Errorf("error message should mention the invalid branch, got: %q", result["error"])
+	}
+}
+
+func TestCreateWorktree_EmptyRepoRecovery(t *testing.T) {
+	srv, ts := newEmptyRepoTestServer(t)
+
+	// First attempt should fail — no HEAD.
+	resp := doRequest(t, ts, http.MethodPost, "/worktree", worktreeCreateRequest{TaskID: "task-recover"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("first attempt: expected 400, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Create a commit in the repo.
+	readme := filepath.Join(srv.repoPath, "README.md")
+	if err := os.WriteFile(readme, []byte("# Recovery test\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "-A")
+	run(t, srv.repoPath, "git", "commit", "-m", "feat: initial commit")
+
+	// Second attempt should succeed.
+	resp2 := doRequest(t, ts, http.MethodPost, "/worktree", worktreeCreateRequest{TaskID: "task-recover"})
+	defer resp2.Body.Close()
+
+	if resp2.StatusCode != http.StatusCreated {
+		t.Fatalf("second attempt: expected 201, got %d", resp2.StatusCode)
+	}
+
+	t.Cleanup(func() {
+		r := doRequest(t, ts, http.MethodDelete, "/worktree/task-recover", nil)
+		r.Body.Close()
+	})
+}
+
+func TestEnsureHEAD_AlreadyValid(t *testing.T) {
+	dir := setupTestRepo(t) // has a commit
+
+	if err := ensureHEAD(context.Background(), dir); err != nil {
+		t.Fatalf("ensureHEAD on valid repo: %v", err)
+	}
+
+	// Should still have exactly one commit.
+	out, err := exec.Command("git", "-C", dir, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-list: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "1" {
+		t.Errorf("expected 1 commit, got %s", strings.TrimSpace(string(out)))
+	}
+}
+
+func TestEnsureHEAD_EmptyRepoWithFiles(t *testing.T) {
+	dir := setupEmptyTestRepo(t)
+
+	// Add a file to the workspace.
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	if err := ensureHEAD(context.Background(), dir); err != nil {
+		t.Fatalf("ensureHEAD: %v", err)
+	}
+
+	// HEAD should now be valid.
+	if _, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD").Output(); err != nil {
+		t.Fatal("HEAD still invalid after ensureHEAD")
+	}
+
+	// The file should be committed.
+	out, err := exec.Command("git", "-C", dir, "show", "--name-only", "--format=", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git show: %v", err)
+	}
+	if !strings.Contains(string(out), "main.go") {
+		t.Errorf("expected main.go in initial commit, got: %s", string(out))
+	}
+}
+
+func TestEnsureHEAD_EmptyRepoNoFiles(t *testing.T) {
+	dir := setupEmptyTestRepo(t)
+
+	if err := ensureHEAD(context.Background(), dir); err != nil {
+		t.Fatalf("ensureHEAD on empty dir: %v", err)
+	}
+
+	// HEAD should now be valid (--allow-empty commit).
+	if _, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "HEAD").Output(); err != nil {
+		t.Fatal("HEAD still invalid after ensureHEAD with empty dir")
+	}
+}

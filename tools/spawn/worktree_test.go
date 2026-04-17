@@ -382,3 +382,90 @@ func TestWorktreeManager_Merge_NothingToCommit(t *testing.T) {
 		t.Errorf("worktree %s still exists after empty Merge", wt)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Empty repo tests (invalid HEAD)
+// ---------------------------------------------------------------------------
+
+// setupEmptyWorktreeRepo initialises a git repository with NO commits.
+func setupEmptyWorktreeRepo(t *testing.T) string {
+	t.Helper()
+
+	dir := t.TempDir()
+
+	cmds := [][]string{
+		{"git", "init"},
+		{"git", "config", "user.email", "test@semspec.test"},
+		{"git", "config", "user.name", "Test Agent"},
+	}
+	for _, args := range cmds {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("setupEmptyWorktreeRepo: %v: %s", args, out)
+		}
+	}
+
+	return dir
+}
+
+// TestWorktreeManager_Create_EmptyRepo verifies that Create returns a clear
+// error when the repository has no commits (HEAD is invalid).
+func TestWorktreeManager_Create_EmptyRepo(t *testing.T) {
+	t.Parallel()
+
+	repo := setupEmptyWorktreeRepo(t)
+	mgr := spawn.NewWorktreeManager(repo)
+
+	_, err := mgr.Create(context.Background(), "test-empty")
+	if err == nil {
+		t.Fatal("expected error creating worktree in empty repo, got nil")
+	}
+
+	errMsg := err.Error()
+	if !strings.Contains(errMsg, "HEAD") || !strings.Contains(errMsg, "commit") {
+		t.Errorf("error message should mention HEAD and commits, got: %q", errMsg)
+	}
+}
+
+// TestWorktreeManager_Create_EmptyRepoRecovery verifies that once a commit is
+// added to a previously empty repo, worktree creation succeeds.
+func TestWorktreeManager_Create_EmptyRepoRecovery(t *testing.T) {
+	t.Parallel()
+
+	repo := setupEmptyWorktreeRepo(t)
+	mgr := spawn.NewWorktreeManager(repo)
+
+	// First attempt fails.
+	if _, err := mgr.Create(context.Background(), "test-recover"); err == nil {
+		t.Fatal("expected error on empty repo, got nil")
+	}
+
+	// Add a commit.
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# test\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "-A"},
+		{"git", "commit", "-m", "feat: initial commit"},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = repo
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %s", args, out)
+		}
+	}
+
+	// Second attempt succeeds.
+	wt, err := mgr.Create(context.Background(), "test-recover")
+	if err != nil {
+		t.Fatalf("expected success after commit, got: %v", err)
+	}
+
+	if !isGitWorktree(t, wt) {
+		t.Errorf("created path %s is not a valid git worktree", wt)
+	}
+
+	// Cleanup.
+	_ = mgr.Discard(context.Background(), wt)
+}

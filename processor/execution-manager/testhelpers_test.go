@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
@@ -51,6 +52,23 @@ func (r *stubRegistry) RegisterWithConfig(cfg component.RegistrationConfig) erro
 	r.called = true
 	r.cfg = cfg
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// stubSandbox satisfies worktreeManager for tests that need a non-nil sandbox.
+// ---------------------------------------------------------------------------
+
+type stubSandbox struct{}
+
+func (s *stubSandbox) CreateWorktree(_ context.Context, _ string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
+	return &sandbox.WorktreeInfo{Status: "created", Path: "/tmp/test-wt", Branch: "agent/test"}, nil
+}
+func (s *stubSandbox) DeleteWorktree(_ context.Context, _ string) error { return nil }
+func (s *stubSandbox) MergeWorktree(_ context.Context, _ string, _ ...sandbox.MergeOption) (*sandbox.MergeResult, error) {
+	return &sandbox.MergeResult{}, nil
+}
+func (s *stubSandbox) ListWorktreeFiles(_ context.Context, _ string) ([]sandbox.FileEntry, error) {
+	return nil, nil
 }
 
 // ---------------------------------------------------------------------------

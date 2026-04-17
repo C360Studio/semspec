@@ -45,6 +45,12 @@ func (m *WorktreeManager) Create(ctx context.Context, id string) (string, error)
 		return "", fmt.Errorf("create worktree parent dir: %w", err)
 	}
 
+	// Validate HEAD exists before attempting worktree creation. An empty
+	// repository (no commits) will fail with "fatal: invalid reference: HEAD".
+	if err := m.run(ctx, m.repoRoot, "git", "rev-parse", "--verify", "HEAD"); err != nil {
+		return "", fmt.Errorf("cannot create worktree: HEAD is invalid (does the repository have at least one commit?): %w", err)
+	}
+
 	// Create a detached-HEAD worktree at the current HEAD. Using --detach
 	// avoids creating or checking out a branch, which would conflict with
 	// any existing branch of the same name in the main repo.

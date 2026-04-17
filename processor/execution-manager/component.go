@@ -122,7 +122,7 @@ type Component struct {
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
-	sandbox      worktreeManager        // nil when sandbox is disabled
+	sandbox      worktreeManager        // required — Start() fails if not configured
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
 	assembler    *prompt.Assembler      // composes system prompts for each pipeline stage
 
@@ -249,6 +249,10 @@ func (c *Component) Start(ctx context.Context) error {
 		return nil
 	}
 	c.mu.RUnlock()
+
+	if c.sandbox == nil {
+		return fmt.Errorf("sandbox is required: SandboxURL must be configured for execution-manager")
+	}
 
 	c.initLessonsAndConfig()
 	c.logger.Info("Starting execution-orchestrator")
@@ -537,24 +541,17 @@ func (c *Component) syncToStore(ctx context.Context, exec *taskExecution) {
 	}
 }
 
-// maybeCreateWorktree creates a sandbox worktree when the sandbox is configured.
-// Worktree path and branch are stored on exec and written as triples.
-func (c *Component) maybeCreateWorktree(ctx context.Context, exec *taskExecution) {
-	if c.sandbox == nil {
-		return
-	}
+// createWorktree creates a sandbox worktree for the given execution.
+// Sandbox isolation is mandatory — callers must treat errors as fatal for the
+// execution (mark error, do not dispatch).
+func (c *Component) createWorktree(ctx context.Context, exec *taskExecution) error {
 	var wtOpts []sandbox.WorktreeOption
 	if exec.ScenarioBranch != "" {
 		wtOpts = append(wtOpts, sandbox.WithBaseBranch(exec.ScenarioBranch))
 	}
-	wtInfo, wtErr := c.sandbox.CreateWorktree(ctx, exec.TaskID, wtOpts...)
-	if wtErr != nil {
-		c.logger.Error("Failed to create worktree, proceeding without sandbox isolation",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"error", wtErr,
-		)
-		return
+	wtInfo, err := c.sandbox.CreateWorktree(ctx, exec.TaskID, wtOpts...)
+	if err != nil {
+		return fmt.Errorf("create worktree for task %s: %w", exec.TaskID, err)
 	}
 	exec.WorktreePath = wtInfo.Path
 	exec.WorktreeBranch = wtInfo.Branch
@@ -566,6 +563,7 @@ func (c *Component) maybeCreateWorktree(ctx context.Context, exec *taskExecution
 		"path", wtInfo.Path,
 		"branch", wtInfo.Branch,
 	)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

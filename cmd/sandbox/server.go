@@ -242,6 +242,14 @@ func (s *Server) handleCreateWorktree(w http.ResponseWriter, r *http.Request) {
 		base = req.BaseBranch
 	}
 
+	// Validate the base reference exists before attempting worktree creation.
+	// This turns a cryptic git error into an actionable 400 response.
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", base); err != nil {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("base reference %q does not exist (does the repository have at least one commit?)", base))
+		return
+	}
+
 	if err := runGit(ctx, s.repoPath, "worktree", "add", "-b", branch, worktreePath, base); err != nil {
 		s.logger.Error("git worktree add failed", "task_id", req.TaskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to create worktree: "+err.Error())

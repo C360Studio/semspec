@@ -43,6 +43,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Ensure HEAD is valid. If the repo has no commits, create an initial
+	// commit so that worktree operations (which reference HEAD) always work.
+	if err := ensureHEAD(context.Background(), *repoPath); err != nil {
+		slog.Error("failed to ensure valid HEAD in repository", "path", *repoPath, "error", err)
+		os.Exit(1)
+	}
+
 	// Ensure worktree parent directory exists.
 	worktreeRoot := filepath.Join(*repoPath, ".semspec", "worktrees")
 	if err := os.MkdirAll(worktreeRoot, 0o755); err != nil {
