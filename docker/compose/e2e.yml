@@ -41,6 +41,7 @@ services:
       dockerfile: docker/Dockerfile
     ports:
       - "8180:8080"
+      - "9190:9090"   # Prometheus metrics
       # graph-gateway registers handlers with the service manager at /graph-gateway/*
       # standalone :8082 is for unit test support only, not needed in e2e
     extra_hosts:

@@ -62,7 +62,7 @@
     }
 
     handle /metrics {
-        reverse_proxy semspec:8080
+        reverse_proxy semspec:9090
     }
 
     # All other routes to UI Node SSR server

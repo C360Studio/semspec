@@ -366,7 +366,8 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		"slug", trigger.Slug,
 		"task_id", taskID,
 		"model", modelName,
-		"fragments", len(assembled.FragmentsUsed))
+		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars)
 }
 
 // buildUserPrompt constructs the user prompt for the requirement-generator agent.

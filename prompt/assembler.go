@@ -11,6 +11,9 @@ type AssembledPrompt struct {
 	// SystemMessage is the composed system prompt.
 	SystemMessage string
 
+	// SystemMessageChars is the character count of SystemMessage (for context budget monitoring).
+	SystemMessageChars int
+
 	// UserMessage is the user message (task description, plan input, etc).
 	UserMessage string
 
@@ -78,9 +81,11 @@ func (a *Assembler) Assemble(ctx *AssemblyContext) AssembledPrompt {
 		}
 	}
 
+	sysMsg := strings.Join(sections, "\n\n")
 	return AssembledPrompt{
-		SystemMessage: strings.Join(sections, "\n\n"),
-		FragmentsUsed: usedIDs,
+		SystemMessage:      sysMsg,
+		SystemMessageChars: len(sysMsg),
+		FragmentsUsed:      usedIDs,
 	}
 }
 

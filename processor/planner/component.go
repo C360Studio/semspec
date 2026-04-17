@@ -545,7 +545,8 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		"slug", slug,
 		"task_id", taskID,
 		"model", modelName,
-		"fragments", len(assembled.FragmentsUsed))
+		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars)
 }
 
 // waitForGraphReady blocks until the graph source registry has at least one

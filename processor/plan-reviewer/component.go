@@ -409,7 +409,8 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		"task_id", taskID,
 		"round", round,
 		"model", modelName,
-		"fragments", len(assembled.FragmentsUsed))
+		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars)
 }
 
 // availableToolNames returns the full list of tool names for prompt assembly.

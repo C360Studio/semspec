@@ -1172,6 +1172,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		"tdd_cycle", exec.TDDCycle,
 		"developer_task_id", taskID,
 		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars,
 	)
 }
 
@@ -1494,6 +1495,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		"task_id", exec.TaskID,
 		"tdd_cycle", exec.TDDCycle,
 		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars,
 	)
 }
 

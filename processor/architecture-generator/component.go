@@ -413,7 +413,8 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		"slug", plan.Slug,
 		"task_id", taskID,
 		"model", modelName,
-		"fragments", len(assembled.FragmentsUsed))
+		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars)
 }
 
 // ---------------------------------------------------------------------------

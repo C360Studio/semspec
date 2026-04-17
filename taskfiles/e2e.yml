@@ -464,6 +464,12 @@ tasks:
       - echo "[UI:TEST:MOCK] Running @mock Playwright tests..."
       - cmd: cd ui && npx playwright test --grep '@t0|@t1' --workers=1 {{.CLI_ARGS}}
         ignore_error: true
+      - cmd: |
+          echo ""
+          echo "[METRICS] Post-run agentic metrics:"
+          curl -s http://localhost:3000/metrics 2>/dev/null | grep -E '^semstreams_agentic_(loop_|model_)' | sort | head -30
+          echo ""
+        ignore_error: true
       - defer: { task: ui:cleanup:mock }
       - echo "[UI:TEST:MOCK] Complete"
 
@@ -515,6 +521,12 @@ tasks:
             PLAYWRIGHT_TIMEOUT=1200000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           fi
+        ignore_error: true
+      - cmd: |
+          echo ""
+          echo "[METRICS] Post-run agentic metrics:"
+          curl -s http://localhost:3000/metrics 2>/dev/null | grep -E '^semstreams_agentic_(loop_request_tokens|loop_context_utilization|loop_loops_|loop_iterations_per_loop|model_length_truncations|model_tokens_total|model_requests_total|loop_tool_results_truncated)' | sort
+          echo ""
         ignore_error: true
       - defer: { task: ui:cleanup:llm }
       - echo "[UI:TEST:LLM] Complete"

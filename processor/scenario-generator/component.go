@@ -375,7 +375,8 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		"requirement_id", req.RequirementID,
 		"task_id", taskID,
 		"model", modelName,
-		"fragments", len(assembled.FragmentsUsed))
+		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars)
 }
 
 // ---------------------------------------------------------------------------
