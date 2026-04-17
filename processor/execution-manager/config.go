@@ -165,6 +165,9 @@ func (c Config) withDefaults() Config {
 	if c.LessonThreshold <= 0 {
 		c.LessonThreshold = DefaultLessonThreshold
 	}
+	if c.MaxReviewRetries == 0 {
+		c.MaxReviewRetries = d.MaxReviewRetries
+	}
 	if c.Model == "" {
 		c.Model = d.Model
 	}

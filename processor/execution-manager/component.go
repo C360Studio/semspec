@@ -938,6 +938,7 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	exec.Verdict = ""
 	exec.RejectionType = ""
 	exec.ReviewerLLMRequestIDs = nil
+	exec.ReviewRetryCount = 0 // reset reviewer parse-retry budget for new TDD cycle
 	// Enrich feedback with worktree file listing so the retrying developer
 	// knows what files already exist from prior iterations.
 	if c.sandbox != nil && exec.WorktreePath != "" {
@@ -1578,10 +1579,14 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 	// the sandbox repo lock is contended.
 	var result *sandbox.MergeResult
 	var err error
+	mergeCtx := context.WithoutCancel(c.shutdownCtx)
 	for attempt := range 3 {
-		result, err = c.sandbox.MergeWorktree(context.Background(), exec.TaskID, opts...)
+		result, err = c.sandbox.MergeWorktree(mergeCtx, exec.TaskID, opts...)
 		if err == nil {
 			break
+		}
+		if c.shutdownCtx.Err() != nil {
+			break // component shutting down — don't retry
 		}
 		c.logger.Warn("Worktree merge failed, retrying",
 			"slug", exec.Slug,
@@ -1597,7 +1602,7 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 			"task_id", exec.TaskID,
 			"error", err,
 		)
-		_ = c.tripleWriter.WriteTriple(context.Background(), exec.EntityID, wf.ErrorReason,
+		_ = c.tripleWriter.WriteTriple(mergeCtx, exec.EntityID, wf.ErrorReason,
 			fmt.Sprintf("worktree merge failed: %v", err))
 	} else {
 		c.logger.Info("Worktree merged successfully",

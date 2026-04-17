@@ -124,7 +124,7 @@
 					title="Peak context window utilization"
 					style="color: {peakUtilization > 0.8 ? 'var(--color-error)' : peakUtilization > 0.6 ? 'var(--color-warning)' : 'var(--color-text-secondary)'}"
 				>
-					<Icon name="gauge" size={12} />
+					{#if peakUtilization > 0.8}<Icon name="alert-triangle" size={12} />{:else}<Icon name="gauge" size={12} />{/if}
 					{peakUtilizationPct}% ctx
 				</span>
 			{/if}

@@ -151,6 +151,9 @@ func ValidateReviewDeliverable(d map[string]any) error {
 			if _, ok := obj["scenario_id"].(string); !ok {
 				return fmt.Errorf("scenario_verdicts[%d].scenario_id is required (string)", i)
 			}
+			if _, ok := obj["passed"].(bool); !ok {
+				return fmt.Errorf("scenario_verdicts[%d].passed is required (boolean)", i)
+			}
 		}
 	}
 	return nil

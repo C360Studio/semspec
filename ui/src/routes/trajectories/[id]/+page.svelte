@@ -124,7 +124,7 @@
 					{/if}
 					{#if peakUtilization > 0}
 						<div class="metric-row" style="color: {peakUtilization > 0.8 ? 'var(--color-error)' : peakUtilization > 0.6 ? 'var(--color-warning)' : 'var(--color-text-secondary)'}">
-							<Icon name="gauge" size={13} />
+							{#if peakUtilization > 0.8}<Icon name="alert-triangle" size={13} />{:else}<Icon name="gauge" size={13} />{/if}
 							<span>Peak ctx: {peakUtilizationPct}%</span>
 						</div>
 					{/if}
@@ -233,6 +233,7 @@
 							data-testid="trajectory-peak-ctx"
 							style="color: {peakUtilization > 0.8 ? 'var(--color-error)' : peakUtilization > 0.6 ? 'var(--color-warning)' : 'inherit'}"
 						>
+							{#if peakUtilization > 0.8}<Icon name="alert-triangle" size={13} />{/if}
 							Peak ctx: <strong>{peakUtilizationPct}%</strong>
 						</span>
 					{/if}

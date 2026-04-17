@@ -102,10 +102,20 @@
 			{/if}
 			{#if utilization > 0}
 				<span class="metric ctx-metric">
-					<span class="ctx-bar" title="{utilizationPct}% context window used">
+					<span
+						class="ctx-bar"
+						role="progressbar"
+						aria-valuenow={utilizationPct}
+						aria-valuemin={0}
+						aria-valuemax={100}
+						aria-label="Context window utilization: {utilizationPct}%"
+					>
 						<span class="ctx-fill" style="width: {utilizationPct}%; background: {utilizationColor}"></span>
 					</span>
-					<span class="ctx-label" style="color: {utilizationColor}">{utilizationPct}%</span>
+					<span class="ctx-label" style="color: {utilizationColor}">
+						{utilizationPct}%
+						{#if utilization > 0.8}<Icon name="alert-triangle" size={10} />{/if}
+					</span>
 				</span>
 			{/if}
 		{:else}
@@ -284,14 +294,14 @@
 		width: 48px;
 		height: 6px;
 		background: var(--color-bg-elevated);
-		border-radius: 3px;
+		border-radius: var(--radius-full);
 		overflow: hidden;
 	}
 
 	.ctx-fill {
 		display: block;
 		height: 100%;
-		border-radius: 3px;
+		border-radius: var(--radius-full);
 		transition: width var(--transition-fast);
 	}
 

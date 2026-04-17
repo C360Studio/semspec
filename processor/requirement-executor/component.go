@@ -1260,7 +1260,8 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requirementExecution, feedback string, verdicts []ScenarioVerdict) {
 	exec.RetryCount++
 	exec.LastReviewFeedback = feedback
-	exec.terminated = false // allow new terminal write
+	exec.ReviewRetryCount = 0 // reset reviewer parse-retry budget for new attempt
+	exec.terminated = false   // allow new terminal write
 
 	// Collect failed scenario IDs.
 	failedScenarios := make(map[string]bool)
@@ -1371,6 +1372,7 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 	exec.DirtyNodeIDs = nil
 	exec.ReviewVerdict = ""
 	exec.ReviewFeedback = ""
+	exec.ReviewRetryCount = 0
 	exec.ScenarioVerdicts = nil
 
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseDecomposing, map[string]any{
