@@ -52,6 +52,10 @@
 	const totalDurationMs = $derived(
 		entries.reduce((sum, e) => sum + (e.duration ?? 0), 0)
 	);
+	const peakUtilization = $derived(
+		Math.max(0, ...entries.map(e => e.utilization ?? 0))
+	);
+	const peakUtilizationPct = $derived(Math.round(peakUtilization * 100));
 
 	function formatTokens(count: number): string {
 		if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
@@ -111,6 +115,17 @@
 				<span class="summary-stat" title="Total duration">
 					<Icon name="clock" size={12} />
 					{formatDuration(totalDurationMs)}
+				</span>
+			{/if}
+			{#if peakUtilization > 0}
+				<span class="summary-divider" aria-hidden="true">·</span>
+				<span
+					class="summary-stat"
+					title="Peak context window utilization"
+					style="color: {peakUtilization > 0.8 ? 'var(--color-error)' : peakUtilization > 0.6 ? 'var(--color-warning)' : 'var(--color-text-secondary)'}"
+				>
+					<Icon name="gauge" size={12} />
+					{peakUtilizationPct}% ctx
 				</span>
 			{/if}
 		</div>

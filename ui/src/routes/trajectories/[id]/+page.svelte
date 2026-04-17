@@ -39,6 +39,8 @@
 	const totalTokensIn = $derived(entries.reduce((s, e) => s + (e.tokens_in ?? 0), 0));
 	const totalTokensOut = $derived(entries.reduce((s, e) => s + (e.tokens_out ?? 0), 0));
 	const totalDurationMs = $derived(entries.reduce((s, e) => s + (e.duration ?? 0), 0));
+	const peakUtilization = $derived(Math.max(0, ...entries.map(e => e.utilization ?? 0)));
+	const peakUtilizationPct = $derived(Math.round(peakUtilization * 100));
 
 	// Expanded step tracking
 	let expandedIndices = $state<Set<number>>(new Set());
@@ -118,6 +120,12 @@
 						<div class="metric-row">
 							<Icon name="clock" size={13} />
 							<span>{formatDuration(totalDurationMs)}</span>
+						</div>
+					{/if}
+					{#if peakUtilization > 0}
+						<div class="metric-row" style="color: {peakUtilization > 0.8 ? 'var(--color-error)' : peakUtilization > 0.6 ? 'var(--color-warning)' : 'var(--color-text-secondary)'}">
+							<Icon name="gauge" size={13} />
+							<span>Peak ctx: {peakUtilizationPct}%</span>
 						</div>
 					{/if}
 				</div>
@@ -217,6 +225,15 @@
 					{#if trajectory.duration > 0}
 						<span class="summary-item" data-testid="trajectory-duration">
 							<strong>{formatDuration(trajectory.duration)}</strong>
+						</span>
+					{/if}
+					{#if peakUtilization > 0}
+						<span
+							class="summary-item"
+							data-testid="trajectory-peak-ctx"
+							style="color: {peakUtilization > 0.8 ? 'var(--color-error)' : peakUtilization > 0.6 ? 'var(--color-warning)' : 'inherit'}"
+						>
+							Peak ctx: <strong>{peakUtilizationPct}%</strong>
 						</span>
 					{/if}
 					{#if entries.length > 0}

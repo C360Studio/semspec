@@ -26,6 +26,14 @@
 		(entry.tokens_in ?? 0) + (entry.tokens_out ?? 0)
 	);
 
+	const utilization = $derived(entry.utilization ?? 0);
+	const utilizationPct = $derived(Math.round(utilization * 100));
+	const utilizationColor = $derived(
+		utilization > 0.8 ? 'var(--color-error)' :
+		utilization > 0.6 ? 'var(--color-warning)' :
+		'var(--color-success)'
+	);
+
 	function formatDuration(ms: number | undefined): string {
 		if (ms === undefined) return '—';
 		if (ms < 1000) return `${ms}ms`;
@@ -92,12 +100,26 @@
 					{formatTokens(entry.tokens_in ?? 0)} / {formatTokens(entry.tokens_out ?? 0)} tokens
 				</span>
 			{/if}
+			{#if utilization > 0}
+				<span class="metric ctx-metric">
+					<span class="ctx-bar" title="{utilizationPct}% context window used">
+						<span class="ctx-fill" style="width: {utilizationPct}%; background: {utilizationColor}"></span>
+					</span>
+					<span class="ctx-label" style="color: {utilizationColor}">{utilizationPct}%</span>
+				</span>
+			{/if}
 		{:else}
 			<span class="metric">
 				<Icon name="clock" size={11} />
 				{formatDuration(entry.duration)}
 			</span>
+			{#if (entry.tokens_in ?? 0) > 0}
+				<span class="metric">
+					<Icon name="cpu" size={11} />
+					{formatTokens(entry.tokens_in ?? 0)} tokens
+				</span>
 			{/if}
+		{/if}
 	</div>
 
 	{#if hasError}
@@ -251,6 +273,31 @@
 		font-size: var(--font-size-xs);
 		color: var(--color-text-secondary);
 		font-family: var(--font-family-mono);
+	}
+
+	.ctx-metric {
+		gap: var(--space-1);
+	}
+
+	.ctx-bar {
+		display: inline-block;
+		width: 48px;
+		height: 6px;
+		background: var(--color-bg-elevated);
+		border-radius: 3px;
+		overflow: hidden;
+	}
+
+	.ctx-fill {
+		display: block;
+		height: 100%;
+		border-radius: 3px;
+		transition: width var(--transition-fast);
+	}
+
+	.ctx-label {
+		font-size: 10px;
+		font-weight: var(--font-weight-semibold);
 	}
 
 	.error-message {
