@@ -57,6 +57,11 @@ func startQASubscriber(
 		AckPolicy:     "explicit",
 		MaxDeliver:    3,
 		AckWait:       qaAckWait,
+		// MessageTimeout is the per-message client-side ctx deadline.
+		// Must exceed act's run time or the handler's ctx cancels mid-run and
+		// act is killed before tests finish. Matches AckWait so semstreams
+		// and JetStream agree on how long a single QA run may take.
+		MessageTimeout: qaAckWait,
 	}
 
 	handler := &qaHandler{

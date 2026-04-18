@@ -114,10 +114,13 @@ services:
         condition: service_healthy
     environment:
       - NATS_URL=nats://nats:4222
-      - PROJECT_HOST_PATH=${SEMSPEC_REPO:-/workspace}
+      - PROJECT_HOST_PATH=${PWD}/test/e2e/workspace
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../../test/e2e/workspace:/workspace
+      # Mount at the host absolute path inside the container so act's --bind
+      # (which tells the host daemon to bind-mount into act-spawned runners)
+      # resolves the same path on both sides of the docker.sock share.
+      - ${PWD}/test/e2e/workspace:${PWD}/test/e2e/workspace
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
       interval: 10s

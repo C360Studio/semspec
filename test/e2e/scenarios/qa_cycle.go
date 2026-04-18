@@ -36,19 +36,54 @@ type QACycleScenario struct {
 	fs      *client.FilesystemClient
 	nats    *client.NATSClient
 	mockLLM *client.MockLLMClient
+
+	// qaLevel selects the executor path: "unit" routes to sandbox (go test),
+	// "integration" routes to qa-runner (act on .github/workflows/qa.yml).
+	qaLevel string
+	// name is the scenario name; also the mock-llm fixture subdirectory.
+	name string
 }
 
-// NewQACycleScenario creates a new QA cycle scenario that validates the full
-// qa_level=unit pipeline using a pre-seeded Go workspace and mock LLM fixtures.
+// integrationQAWorkflow is the qa.yml seeded into the workspace for the
+// integration-level variant. Kept in sync with the single-job
+// processor/project-manager/templates/qa.yml — e2e variant omits the e2e job
+// since act runs with --job integration at qa_level=integration.
+const integrationQAWorkflow = `name: QA
+on: [push, pull_request]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Integration tests
+        run: go test ./... -tags=integration -v
+`
+
+// NewQACycleScenario creates a new QA cycle scenario at qa_level=unit.
+// Exercises the sandbox unit-test executor path.
 func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
-	return &QACycleScenario{config: cfg}
+	return &QACycleScenario{config: cfg, qaLevel: "unit", name: "qa-cycle"}
+}
+
+// NewQACycleIntegrationScenario creates a qa-cycle variant at qa_level=
+// integration. Exercises the qa-runner path: act invocation against a
+// .github/workflows/qa.yml that runs `go test -tags=integration`.
+func NewQACycleIntegrationScenario(cfg *config.Config) *QACycleScenario {
+	return &QACycleScenario{config: cfg, qaLevel: "integration", name: "qa-cycle-integration"}
 }
 
 // Name implements Scenario.
-func (s *QACycleScenario) Name() string { return "qa-cycle" }
+func (s *QACycleScenario) Name() string { return s.name }
 
 // Description implements Scenario.
 func (s *QACycleScenario) Description() string {
+	if s.qaLevel == "integration" {
+		return "QA phase end-to-end at qa_level=integration: qa-runner invokes act, runs integration tests, qa-reviewer approves"
+	}
 	return "QA phase end-to-end at qa_level=unit: sandbox runs go test, qa-reviewer approves, plan → complete"
 }
 
@@ -94,6 +129,18 @@ func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 		return time.Duration(normalSec) * time.Second
 	}
 
+	// qaBudget is the per-stage timeout for stages that wait on the executor
+	// (reviewing_qa / qa.completed assertions / complete). Integration runs go
+	// through act which pulls a ~1GB runner image on first invocation and
+	// spawns a test container — a couple orders of magnitude slower than the
+	// sandbox unit path.
+	qaBudget := func(unitNormal, unitFast int) time.Duration {
+		if s.qaLevel == "integration" {
+			return t(600, 600)
+		}
+		return t(unitNormal, unitFast)
+	}
+
 	stages := []struct {
 		name    string
 		fn      func(context.Context, *Result) error
@@ -110,9 +157,9 @@ func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 		{"wait-for-implementing", s.stageWaitForImplementing, t(300, 120)},
 		{"wait-for-ready-for-qa", s.stageWaitForReadyForQA, t(180, 90)},
 		{"assert-qa-requested", s.stageAssertQARequested, t(30, 15)},
-		{"wait-for-reviewing-qa", s.stageWaitForReviewingQA, t(60, 30)},
-		{"assert-qa-completed", s.stageAssertQACompleted, t(30, 15)},
-		{"wait-for-complete", s.stageWaitForComplete, t(60, 30)},
+		{"wait-for-reviewing-qa", s.stageWaitForReviewingQA, qaBudget(60, 30)},
+		{"assert-qa-completed", s.stageAssertQACompleted, qaBudget(30, 15)},
+		{"wait-for-complete", s.stageWaitForComplete, qaBudget(60, 30)},
 		{"assert-qa-verdict", s.stageAssertQAVerdict, t(30, 15)},
 		{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
 	}
@@ -168,6 +215,18 @@ func (s *QACycleScenario) stageSetupWorkspace(ctx context.Context, result *Resul
 		"cmd/server/main.go": "// Package main is the QA cycle project entry point.\npackage main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"QA cycle server\") }\n",
 		// Makefile satisfies structural-validator make-based checks.
 		"Makefile": "test:\n\tgo test ./...\n\nbuild:\n\tgo build ./...\n\nlint:\n\tgo vet ./...\n",
+	}
+
+	if s.qaLevel == "integration" {
+		// integration-tagged test so `go test ./... -tags=integration -v` finds
+		// at least one test and returns zero. Without the tag the default
+		// qa.yml integration job would report "no tests to run".
+		files["pkg/math/math_integration_test.go"] = "//go:build integration\n\npackage math\n\nimport \"testing\"\n\nfunc TestAddIntegration(t *testing.T) {\n\tif got := Add(10, 20); got != 30 {\n\t\tt.Errorf(\"Add(10, 20) = %d; want 30\", got)\n\t}\n}\n"
+
+		// act needs a qa.yml to execute. In a real project this would be
+		// scaffolded by project-manager's ensureQAWorkflow; here we pre-seed a
+		// minimal version so the scenario is independent of that helper.
+		files[".github/workflows/qa.yml"] = integrationQAWorkflow
 	}
 
 	for path, content := range files {
@@ -244,11 +303,11 @@ func (s *QACycleScenario) stageInitProject(ctx context.Context, result *Result) 
 // Stage: set-qa-level
 // ---------------------------------------------------------------------------
 
-// stageSetQALevel patches the project config to set qa_level=unit.
-// This ensures plans created after this point snapshot qa_level=unit and
-// trigger the sandbox unit-test executor path at implementing convergence.
+// stageSetQALevel patches the project config to set the scenario's qa_level.
+// Plans created after this point snapshot the level and trigger the matching
+// executor (sandbox at unit, qa-runner at integration/full).
 func (s *QACycleScenario) stageSetQALevel(ctx context.Context, result *Result) error {
-	qaLevel := "unit"
+	qaLevel := s.qaLevel
 	reqBody := map[string]*string{"qa_level": &qaLevel}
 
 	data, err := json.Marshal(reqBody)
@@ -300,8 +359,8 @@ func (s *QACycleScenario) stageVerifyQALevel(_ context.Context, result *Result) 
 		return fmt.Errorf("unmarshal project.json: %w", err)
 	}
 
-	if pc.QALevel != "unit" {
-		return fmt.Errorf("expected qa_level=unit in project.json, got %q", pc.QALevel)
+	if pc.QALevel != s.qaLevel {
+		return fmt.Errorf("expected qa_level=%s in project.json, got %q", s.qaLevel, pc.QALevel)
 	}
 
 	result.SetDetail("qa_level_verified", true)
@@ -534,7 +593,8 @@ func (s *QACycleScenario) stageWaitForReadyForQA(ctx context.Context, result *Re
 // ---------------------------------------------------------------------------
 
 // stageAssertQARequested fetches message-logger entries and confirms that
-// workflow.events.qa.requested was published with Mode=unit for this plan's slug.
+// workflow.events.qa.requested was published with Mode matching the
+// scenario's qa_level for this plan's slug.
 func (s *QACycleScenario) stageAssertQARequested(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
@@ -557,7 +617,7 @@ func (s *QACycleScenario) stageAssertQARequested(ctx context.Context, result *Re
 		}
 
 		for _, entry := range entries {
-			if !s.entryMatchesSlugAndMode(entry.RawData, slug, "unit") {
+			if !s.entryMatchesSlugAndMode(entry.RawData, slug, s.qaLevel) {
 				continue
 			}
 			result.SetDetail("qa_requested_found", true)
@@ -566,7 +626,7 @@ func (s *QACycleScenario) stageAssertQARequested(ctx context.Context, result *Re
 		}
 	}
 
-	return fmt.Errorf("no %s message found for slug=%q mode=unit after %d attempts", qaRequestedSubject, slug, maxAttempts)
+	return fmt.Errorf("no %s message found for slug=%q mode=%s after %d attempts", qaRequestedSubject, slug, s.qaLevel, maxAttempts)
 }
 
 // ---------------------------------------------------------------------------
@@ -643,9 +703,9 @@ func (s *QACycleScenario) stageAssertQACompleted(ctx context.Context, result *Re
 				continue
 			}
 
-			// Validate: level must be "unit" and passed must be true.
-			if evt.Level != "unit" {
-				result.AddWarning(fmt.Sprintf("QACompleted for slug=%q has level=%q (want unit)", slug, evt.Level))
+			// Validate: level must match the scenario's qa_level and Passed=true.
+			if evt.Level != s.qaLevel {
+				result.AddWarning(fmt.Sprintf("QACompleted for slug=%q has level=%q (want %s)", slug, evt.Level, s.qaLevel))
 				continue
 			}
 			if !evt.Passed {
@@ -668,7 +728,7 @@ func (s *QACycleScenario) stageAssertQACompleted(ctx context.Context, result *Re
 		}
 	}
 
-	return fmt.Errorf("no %s message found for slug=%q level=unit passed=true after %d attempts", qaCompletedSubject, slug, maxAttempts)
+	return fmt.Errorf("no %s message found for slug=%q level=%s passed=true after %d attempts", qaCompletedSubject, slug, s.qaLevel, maxAttempts)
 }
 
 // ---------------------------------------------------------------------------

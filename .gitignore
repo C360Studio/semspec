@@ -45,5 +45,5 @@ node_modules/
 
 # OS
 .DS_Store
-sandbox
+/sandbox
 test/e2e/fixtures/go-project/.semspec/plans/

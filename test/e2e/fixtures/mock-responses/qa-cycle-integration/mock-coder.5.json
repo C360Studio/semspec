@@ -1,0 +1,14 @@
+{
+  "content": "Requirement review complete. All scenarios pass.",
+  "tool_calls": [
+    {
+      "id": "call_review_req",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios verified: /goodbye endpoint returns correct JSON with 200 status.\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

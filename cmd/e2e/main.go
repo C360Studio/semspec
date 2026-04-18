@@ -217,6 +217,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),
 		// Tier 2: QA phase — sandbox unit-test executor + qa-reviewer verdict pipeline
 		scenarios.NewQACycleScenario(cfg),
+		scenarios.NewQACycleIntegrationScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

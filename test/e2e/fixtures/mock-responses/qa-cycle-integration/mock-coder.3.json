@@ -1,0 +1,14 @@
+{
+  "content": "TDD complete. Tests and implementation for /goodbye endpoint.",
+  "tool_calls": [
+    {
+      "id": "call_submit_work",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests in api/test_goodbye.py and endpoint in api/app.py\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
