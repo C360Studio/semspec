@@ -50,6 +50,9 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
+      # PROJECT_HOST_PATH is the HOST path to the workspace (needed so qa-runner
+      # can bind-mount the same tree into act's sibling containers).
+      - PROJECT_HOST_PATH=${PWD}/test/e2e/workspace
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
       - GRAPH_SOURCES=[{"name":"workspace","url":"http://semsource:8080","type":"semsource"}]
@@ -77,6 +80,9 @@ services:
     ports:
       - "8190:8090"
     command: ["--addr", ":8090", "--repo", "/workspace"]
+    environment:
+      # Enables the qa-unit subscriber during E2E runs that exercise qa_level=unit.
+      - NATS_URL=nats://nats:4222
     volumes:
       - ../../test/e2e/workspace:/workspace
     depends_on:
@@ -93,6 +99,30 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 10s
+
+  # qa-runner handles integration and full QA tiers via nektos/act.
+  # Port offset +100 from dev (8091) → 8191 for E2E isolation.
+  qa-runner:
+    build:
+      context: ../..
+      dockerfile: docker/qa-runner.Dockerfile
+    ports:
+      - "8191:8091"
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - PROJECT_HOST_PATH=${SEMSPEC_REPO:-/workspace}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ../../test/e2e/workspace:/workspace
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
       start_period: 10s
 
 volumes:

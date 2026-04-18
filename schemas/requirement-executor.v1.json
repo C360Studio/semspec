@@ -26,6 +26,14 @@
       "maximum": 5,
       "category": "advanced"
     },
+    "max_review_retries": {
+      "type": "number",
+      "description": "Max reviewer re-dispatches on parse/verdict failure",
+      "default": 3,
+      "minimum": 0,
+      "maximum": 5,
+      "category": "advanced"
+    },
     "model": {
       "type": "string",
       "description": "Model endpoint name for agent tasks",
@@ -41,49 +49,6 @@
       "type": "string",
       "description": "Sandbox server URL for branch management",
       "category": "advanced"
-    },
-    "teams": {
-      "type": "object",
-      "description": "Team-based execution configuration",
-      "category": "advanced",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Kill switch — set false to disable team-based execution",
-          "category": "basic"
-        },
-        "roster": {
-          "type": "array",
-          "description": "Team definitions with member roles",
-          "category": "basic",
-          "items": {
-            "type": "object",
-            "properties": {
-              "members": {
-                "type": "array",
-                "description": "members",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "model": {
-                      "type": "string",
-                      "description": "model"
-                    },
-                    "role": {
-                      "type": "string",
-                      "description": "role"
-                    }
-                  }
-                }
-              },
-              "name": {
-                "type": "string",
-                "description": "name"
-              }
-            }
-          }
-        }
-      }
     },
     "timeout_seconds": {
       "type": "number",

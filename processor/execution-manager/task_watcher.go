@@ -101,8 +101,6 @@ func (c *Component) handleTaskPending(ctx context.Context, entry jetstream.KeyVa
 			RequestID:      taskExec.RequestID,
 			TaskType:       taskExec.TaskType,
 			AgentID:        taskExec.AgentID,
-			BlueTeamID:     taskExec.BlueTeamID,
-			RedTeamID:      taskExec.RedTeamID,
 			WorktreePath:   taskExec.WorktreePath,
 			WorktreeBranch: taskExec.WorktreeBranch,
 			ScenarioBranch: taskExec.ScenarioBranch,

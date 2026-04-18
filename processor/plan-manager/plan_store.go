@@ -155,8 +155,11 @@ func (s *planStore) exists(slug string) bool {
 	return ok
 }
 
-// create creates a new plan and persists it through all three layers.
-func (s *planStore) create(ctx context.Context, slug, title string) (*workflow.Plan, error) {
+// create creates a new plan and persists it through all three layers. The
+// qaLevel parameter is snapshotted onto the plan so its QA policy is
+// immutable under project-level config changes. Pass QALevelSynthesis (or
+// empty) for the safe default.
+func (s *planStore) create(ctx context.Context, slug, title string, qaLevel workflow.QALevel) (*workflow.Plan, error) {
 	if err := workflow.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -174,6 +177,10 @@ func (s *planStore) create(ctx context.Context, slug, title string) (*workflow.P
 		displayTitle = displayTitle[:57] + "..."
 	}
 
+	if qaLevel == "" {
+		qaLevel = workflow.QALevelSynthesis
+	}
+
 	now := time.Now()
 	plan := &workflow.Plan{
 		ID:        workflow.PlanEntityID(slug),
@@ -187,6 +194,7 @@ func (s *planStore) create(ctx context.Context, slug, title string) (*workflow.P
 			Exclude:    []string{},
 			DoNotTouch: []string{},
 		},
+		QALevel: qaLevel,
 	}
 
 	if err := s.save(ctx, plan); err != nil {

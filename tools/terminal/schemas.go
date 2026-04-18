@@ -49,6 +49,8 @@ func schemaForDeliverable(deliverableType string) map[string]any {
 		return architectureSchema()
 	case "review":
 		return reviewSchema()
+	case "qa-review":
+		return qaReviewSchema()
 	default:
 		return developerSchema()
 	}
@@ -247,6 +249,39 @@ func architectureSchema() map[string]any {
 					"required": []string{"name", "direction", "protocol"},
 				},
 			},
+			"test_surface": map[string]any{
+				"type":        "object",
+				"description": "The test coverage surface this architecture implies. Consumed by developer role to guide integration/e2e test authoring, and by qa-reviewer to judge coverage adequacy. Derive integration_flows from integrations[] (each external boundary deserves an integration test). Derive e2e_flows from actors[] (each human/system actor triggers a user-visible flow worth end-to-end coverage).",
+				"properties": map[string]any{
+					"integration_flows": map[string]any{
+						"type":        "array",
+						"description": "Cross-component flows that need integration-level tests (real service fixtures, not unit mocks)",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"name":                map[string]any{"type": "string", "description": "Short flow name, kebab-case"},
+								"components_involved": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "component_boundaries[].name entries this flow touches"},
+								"scenario_refs":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Scenario IDs that must verify this flow"},
+								"description":         map[string]any{"type": "string", "description": "What the flow does and why it needs integration testing"},
+							},
+							"required": []string{"name", "components_involved", "description"},
+						},
+					},
+					"e2e_flows": map[string]any{
+						"type":        "array",
+						"description": "Actor-driven user-visible flows that need end-to-end tests (browser, full stack, real data)",
+						"items": map[string]any{
+							"type": "object",
+							"properties": map[string]any{
+								"actor":            map[string]any{"type": "string", "description": "actors[].name entry that initiates this flow"},
+								"steps":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Ordered user actions the test should perform"},
+								"success_criteria": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Observable conditions that mean the flow succeeded"},
+							},
+							"required": []string{"actor", "steps", "success_criteria"},
+						},
+					},
+				},
+			},
 		},
 		"required": []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"},
 	}
@@ -311,5 +346,90 @@ func developerSchema() map[string]any {
 			},
 		},
 		"required": []string{"summary", "files_modified"},
+	}
+}
+
+func qaReviewSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"verdict": map[string]any{
+				"type":        "string",
+				"description": "Release-readiness verdict: approved (ship it), needs_changes (fixable with change proposals), or rejected (escalate to human — cannot be automatically retried)",
+				"enum":        []string{"approved", "needs_changes", "rejected"},
+			},
+			"summary": map[string]any{
+				"type":        "string",
+				"description": "Concise executive summary of the QA verdict. REQUIRED. State what was assessed, what passed, what failed, and the overall recommendation.",
+			},
+			"dimensions": map[string]any{
+				"type":        "object",
+				"description": "Per-axis quality assessment. Populate only the dimensions appropriate to the qa.level (synthesis: requirement_fulfillment only; unit adds coverage/assertion_quality/regression_surface; integration/full add flake_judgment). Leave unpopulated dimensions as empty strings.",
+				"properties": map[string]any{
+					"requirement_fulfillment": map[string]any{
+						"type":        "string",
+						"description": "Did the implementation satisfy each requirement's intent? Note any requirement with no test coverage or with a scenario that went unimplemented.",
+					},
+					"coverage": map[string]any{
+						"type":        "string",
+						"description": "Level ≥ unit. Is the test suite's coverage adequate for the risk surface? Are critical paths exercised? Note any obvious gaps.",
+					},
+					"assertion_quality": map[string]any{
+						"type":        "string",
+						"description": "Level ≥ unit. Are test assertions meaningful and specific, or do they rubber-stamp behavior? Note any tests that can never fail or that assert on irrelevant properties.",
+					},
+					"regression_surface": map[string]any{
+						"type":        "string",
+						"description": "Level ≥ unit. What existing behavior is at risk from this change? Are the files modified covered by the test suite? Note any change in behavior-sensitive code with no corresponding test.",
+					},
+					"flake_judgment": map[string]any{
+						"type":        "string",
+						"description": "Level ≥ integration. Do failures look like genuine defects or likely test flakiness (timing, environment, network)? What evidence supports your judgment?",
+					},
+				},
+			},
+			"change_proposals": map[string]any{
+				"type":        "array",
+				"description": "Structured change proposals. Populate ONLY when verdict is needs_changes. Each proposal targets a specific fixable defect that a developer can address in a subsequent execution cycle.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"title": map[string]any{
+							"type":        "string",
+							"description": "Short imperative title for the change (e.g., 'Add error-path test for payment failure')",
+						},
+						"rationale": map[string]any{
+							"type":        "string",
+							"description": "Why this change is needed — reference the specific failure, gap, or risk that motivated it",
+						},
+						"affected_requirement_ids": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "IDs of requirements this change proposal affects",
+						},
+						"rejection_type": map[string]any{
+							"type":        "string",
+							"enum":        []string{"fixable", "restructure"},
+							"description": "fixable: specific, targeted fix a developer can apply in one cycle; restructure: the requirement or scenario design needs rethinking",
+						},
+						"artifact_refs": map[string]any{
+							"type":        "array",
+							"description": "Optional workspace-relative artifact paths that evidence the defect",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"path":    map[string]any{"type": "string"},
+									"type":    map[string]any{"type": "string", "enum": []string{"screenshot", "log", "trace", "coverage-report"}},
+									"purpose": map[string]any{"type": "string"},
+								},
+								"required": []string{"path", "type"},
+							},
+						},
+					},
+					"required": []string{"title", "rationale", "rejection_type"},
+				},
+			},
+		},
+		"required": []string{"verdict", "summary"},
 	}
 }

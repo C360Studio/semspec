@@ -81,18 +81,6 @@ func (s *executionStore) getTask(key string) (*workflow.TaskExecution, bool) {
 	return nil, false
 }
 
-// getTaskByTaskID finds a task execution by its TaskID field.
-// Scans the cache — O(n) but sufficient for typical execution counts.
-func (s *executionStore) getTaskByTaskID(taskID string) (*workflow.TaskExecution, string, bool) {
-	for _, key := range s.taskCache.Keys() {
-		if exec, ok := s.taskCache.Get(key); ok && exec.TaskID == taskID {
-			e := *exec
-			return &e, key, true
-		}
-	}
-	return nil, "", false
-}
-
 // saveTask persists a task execution through all three layers.
 func (s *executionStore) saveTask(ctx context.Context, key string, exec *workflow.TaskExecution) error {
 	exec.UpdatedAt = time.Now()
@@ -119,25 +107,6 @@ func (s *executionStore) saveTask(ctx context.Context, key string, exec *workflo
 	}
 
 	return nil
-}
-
-// deleteTask removes a task execution from cache and KV.
-func (s *executionStore) deleteTask(ctx context.Context, key string) {
-	s.taskCache.Delete(key) //nolint:errcheck
-	if s.kvStore != nil {
-		_ = s.kvStore.Delete(ctx, key)
-	}
-}
-
-// listTasks returns all task executions from the cache.
-func (s *executionStore) listTasks() []*workflow.TaskExecution {
-	var out []*workflow.TaskExecution
-	for _, key := range s.taskCache.Keys() {
-		if exec, ok := s.taskCache.Get(key); ok {
-			out = append(out, exec)
-		}
-	}
-	return out
 }
 
 // listTasksForSlug returns task executions matching the given plan slug.
@@ -428,9 +397,6 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 	if exec.AgentID != "" {
 		_ = tw.WriteTriple(ctx, entityID, wf.AgentID, exec.AgentID)
 	}
-	if exec.BlueTeamID != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.BlueTeamID, exec.BlueTeamID)
-	}
 	if exec.Model != "" {
 		_ = tw.WriteTriple(ctx, entityID, wf.Model, exec.Model)
 	}
@@ -485,7 +451,6 @@ func taskFromTripleMap(triples map[string]string) *workflow.TaskExecution {
 		TraceID:        triples[wf.TraceID],
 		Model:          triples[wf.Model],
 		AgentID:        triples[wf.AgentID],
-		BlueTeamID:     triples[wf.BlueTeamID],
 		WorktreePath:   triples[wf.WorktreePath],
 		WorktreeBranch: triples[wf.WorktreeBranch],
 	}

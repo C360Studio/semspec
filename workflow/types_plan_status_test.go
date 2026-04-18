@@ -29,6 +29,9 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		// New statuses
 		{StatusAwaitingReview, true},
 		{StatusChanged, true},
+		// QA phase statuses
+		{StatusReadyForQA, true},
+		{StatusReviewingQA, true},
 		// Invalid
 		{"", false},
 		{"unknown", false},
@@ -203,6 +206,26 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusDrafted, StatusChanged, false},
 		{StatusApproved, StatusChanged, false},
 		{StatusReviewingRollup, StatusChanged, false}, // don't interrupt rollup
+
+		// QA phase transitions (Phase 2f branch-point move target)
+		// implementing → ready_for_qa (level=unit|integration|full)
+		{StatusImplementing, StatusReadyForQA, true},
+		// implementing → reviewing_qa (level=synthesis once branch-point moves)
+		{StatusImplementing, StatusReviewingQA, true},
+		// ready_for_qa → reviewing_qa (executor finished, qa-reviewer picks up)
+		{StatusReadyForQA, StatusReviewingQA, true},
+		// ready_for_qa → rejected (executor infra failure)
+		{StatusReadyForQA, StatusRejected, true},
+		// ready_for_qa → implementing (invalid — no going back)
+		{StatusReadyForQA, StatusImplementing, false},
+		// reviewing_qa → complete (verdict approved, auto-approve-review=true)
+		{StatusReviewingQA, StatusComplete, true},
+		// reviewing_qa → awaiting_review (verdict approved, gated)
+		{StatusReviewingQA, StatusAwaitingReview, true},
+		// reviewing_qa → rejected (verdict rejected/needs_changes)
+		{StatusReviewingQA, StatusRejected, true},
+		// reviewing_qa → implementing (invalid — verdict is terminal decision)
+		{StatusReviewingQA, StatusImplementing, false},
 	}
 
 	for _, tt := range tests {

@@ -63,34 +63,19 @@ const (
 	WorkflowSlugTaskExecution = "semspec-task-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
-	// 3-stage TDD pipeline: develop → validate → review.
-	stageDevelop  = "develop"  // developer writes tests then implements code (full TDD cycle)
-	stageValidate = "validate" // structural checklist + integration tests
-	stageReview   = "review"   // LLM code review with verdict + feedback
-
-	// stageRedTeam is the adversarial challenge stage inserted between
-	// validation and review when team-based execution is active.
-	stageRedTeam = "red-team"
+	// TDD pipeline: develop → review.
+	stageDevelop = "develop" // developer writes tests then implements code (full TDD cycle)
+	stageReview  = "review"  // LLM code review with verdict + feedback
 
 	// Phase values written to entity triples.
 	phaseDeveloping       = "developing"
 	phaseValidating       = "validating"
 	phaseReviewing        = "reviewing"
-	phaseRedTeaming       = "red_teaming"
 	phaseApproved         = "approved"
 	phaseEscalated        = "escalated"
 	phaseError            = "error"
 	phaseValidationFailed = "validation_failed"
 	phaseRejected         = "rejected"
-
-	// subjectRedTeamTask is the dispatch subject for red team challenge tasks.
-	subjectRedTeamTask = "agent.task.red-team"
-
-	// Error category IDs that signal a test-coverage gap. Even though the developer
-	// handles the full TDD cycle, these categories are kept for feedback classification
-	// and guidance enrichment in retry prompts.
-	errorCategoryMissingTests   = "missing_tests"
-	errorCategoryEdgeCaseMissed = "edge_case_missed"
 
 	// Rejection type that escalates to requirement level — approach is wrong.
 	rejectionTypeRestructure = "restructure"
@@ -136,6 +121,12 @@ type Component struct {
 
 	// store is the 3-layer execution store (cache + KV + triples).
 	store *executionStore
+
+	// planBucket is a best-effort read-only handle to PLAN_STATES so the
+	// TaskContext builder can surface plan-level fields (currently just the
+	// architect's TestSurface) to the developer prompt. nil when the bucket
+	// is unavailable at startup — callers treat that as "no test_surface".
+	planBucket jetstream.KeyValue
 
 	// activeExecs is a typed TTL cache mapping entityID → *taskExecution.
 	// Holds runtime pipeline state (mutexes, timers) for in-flight executions.
@@ -398,6 +389,38 @@ func (c *Component) initExecutionStore(ctx context.Context) {
 		return
 	}
 	c.store = store
+
+	// Best-effort read handle to PLAN_STATES for plan-level lookups during
+	// TaskContext population (test_surface injection). Failure is non-fatal.
+	if js, err := c.natsClient.JetStream(); err == nil {
+		if pb, err := js.KeyValue(ctx, "PLAN_STATES"); err == nil {
+			c.planBucket = pb
+		} else {
+			c.logger.Warn("PLAN_STATES bucket unavailable — test_surface injection disabled",
+				"error", err)
+		}
+	}
+}
+
+// readPlanTestSurface returns the plan's declared test_surface, or nil when
+// unavailable (bucket missing, plan missing, architecture missing, surface
+// unset). Callers treat nil as "no test_surface declared" and proceed.
+func (c *Component) readPlanTestSurface(ctx context.Context, slug string) *workflow.TestSurface {
+	if c.planBucket == nil || slug == "" {
+		return nil
+	}
+	entry, err := c.planBucket.Get(ctx, slug)
+	if err != nil {
+		return nil
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil
+	}
+	if plan.Architecture == nil {
+		return nil
+	}
+	return plan.Architecture.TestSurface
 }
 
 func (c *Component) initLessonsAndConfig() {
@@ -435,16 +458,6 @@ func (c *Component) initLessonsAndConfig() {
 	}
 
 	c.logger.Info("Lesson system initialized")
-}
-
-// teamsEnabled reports whether team-based execution is active. Teams are ON
-// by default whenever lessonWriter is available. Set Teams.Enabled to false
-// as an explicit kill switch for debugging.
-func (c *Component) teamsEnabled() bool {
-	if c.config.Teams != nil && c.config.Teams.Enabled != nil && !*c.config.Teams.Enabled {
-		return false // explicit kill switch
-	}
-	return c.lessonWriter != nil
 }
 
 // ---------------------------------------------------------------------------
@@ -491,7 +504,6 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			Model:          triples[wf.Model],
 			Prompt:         triples[wf.Prompt],
 			AgentID:        triples[wf.AgentID],
-			BlueTeamID:     triples[wf.BlueTeamID],
 			WorktreePath:   triples[wf.WorktreePath],
 			WorktreeBranch: triples[wf.WorktreeBranch],
 			Stage:          phase,
@@ -1022,7 +1034,7 @@ func resolveProvider(modelStr string) prompt.Provider {
 }
 
 // buildAssemblyContext creates a prompt.AssemblyContext for the given role and execution state.
-// The ctx parameter is used for graph reads (error trends, team knowledge); context.WithoutCancel
+// The ctx parameter is used for graph reads (error trends, lessons); context.WithoutCancel
 // is applied so these reads survive caller cancellation without inheriting the deadline.
 func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
 	var maxTokens int
@@ -1057,6 +1069,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			Iteration:     exec.TDDCycle + 1, // 1-based for display
 			MaxIterations: exec.MaxTDDCycles,
 			Checklist:     c.checklist,
+			TestSurface:   c.readPlanTestSurface(ctx, exec.Slug),
 		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
@@ -1351,82 +1364,6 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 }
 
 // ---------------------------------------------------------------------------
-// Agent dispatch: Red Team (team-mode only — adversarial challenge before review)
-// ---------------------------------------------------------------------------
-
-// dispatchRedTeamLocked dispatches the red team challenge before review.
-// Red team selection was removed — always falls back to direct reviewer.
-// Caller must hold exec.mu.
-func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecution) {
-	// Red team infrastructure removed — go straight to reviewer.
-	if wtErr := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); wtErr != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", wtErr)
-	}
-	exec.Stage = phaseReviewing
-	c.syncToStore(ctx, exec)
-	c.dispatchReviewerLocked(ctx, exec)
-}
-
-// ---------------------------------------------------------------------------
-// Stage: Red Team complete
-// ---------------------------------------------------------------------------
-
-// handleRedTeamCompleteLocked processes the red team challenge result and
-// transitions to the reviewer stage. Parse failures are tolerated — the
-// reviewer still runs, just without the red-team input.
-// Caller must hold exec.mu.
-func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	c.taskRouting.Delete(exec.RedTeamTaskID)
-
-	if event.Outcome != agentic.OutcomeSuccess {
-		c.logger.Warn("Red team loop failed, proceeding to reviewer without red-team input",
-			"slug", exec.Slug, "task_id", exec.TaskID, "outcome", event.Outcome)
-		// Red team is optional — skip result parsing, dispatch reviewer directly.
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
-		}
-		exec.Stage = phaseReviewing
-		c.syncToStore(ctx, exec)
-		c.dispatchReviewerLocked(ctx, exec)
-		return
-	}
-
-	var challenge payloads.RedTeamChallengeResult
-	if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &challenge); err != nil {
-		c.logger.Warn("Failed to parse red team challenge result, proceeding to reviewer",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"error", err,
-		)
-		// Continue without red-team input rather than blocking the pipeline.
-	} else {
-		exec.RedTeamChallenge = &challenge
-	}
-
-	issueCount := 0
-	testCount := 0
-	if exec.RedTeamChallenge != nil {
-		issueCount = len(exec.RedTeamChallenge.Issues)
-		testCount = len(exec.RedTeamChallenge.TestFiles)
-	}
-
-	c.logger.Info("Red team challenge complete, dispatching reviewer",
-		"slug", exec.Slug,
-		"task_id", exec.TaskID,
-		"tdd_cycle", exec.TDDCycle,
-		"issues_found", issueCount,
-		"tests_written", testCount,
-	)
-
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
-	}
-	exec.Stage = phaseReviewing
-	c.syncToStore(ctx, exec)
-	c.dispatchReviewerLocked(ctx, exec)
-}
-
-// ---------------------------------------------------------------------------
 // Agent dispatch: Code Reviewer
 // ---------------------------------------------------------------------------
 
@@ -1447,15 +1384,6 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec)
-
-	// Wire red team context if available.
-	if exec.RedTeamChallenge != nil {
-		asmCtx.RedTeamContext = &prompt.RedTeamContext{
-			BlueTeamFiles:   exec.FilesModified,
-			BlueTeamSummary: string(exec.DeveloperOutput),
-		}
-	}
-
 	assembled := c.assembler.Assemble(asmCtx)
 
 	// User prompt carries task context (what to review), not implementation

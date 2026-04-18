@@ -7,14 +7,17 @@ import (
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/pkg/retry"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 // watchExecutionCompletions watches the EXECUTION_STATES KV bucket for
 // requirement execution entries reaching terminal state. When all requirements
 // for a plan reach terminal state, the plan transitions:
-//   - all completed → StatusReviewingRollup (or StatusComplete as fallback)
+//   - all completed → target chosen by plan.QALevel (reviewing_qa / ready_for_qa / complete)
 //   - any failed    → stays in StatusImplementing (user decides: retry/complete/reject)
 //
 // On startup, the KV watcher replays all historical entries before a nil
@@ -148,22 +151,31 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 
 	// All requirements are terminal.
 	if failedCount == 0 {
-		c.logger.Info("All requirements completed — transitioning to rollup review",
+		// Branch on the plan's QA level (snapshotted at plan creation).
+		level := plan.EffectiveQALevel()
+		target := c.targetForQALevel(level, plan, slug)
+
+		c.logger.Info("All requirements completed — transitioning to review",
 			"slug", slug,
-			"completed", completedCount)
-		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusReviewingRollup); err != nil {
-			// Fall back: no rollup configured. Route to awaiting_review or complete
-			// based on config.
-			c.logger.Warn("Rollup transition failed, routing based on review gate config",
+			"completed", completedCount,
+			"qa_level", level,
+			"target", target)
+
+		if err := c.setPlanStatusCached(ctx, plan, target); err != nil {
+			// Safety fallback: route to awaiting_review or complete based on config.
+			c.logger.Warn("Review transition failed, routing based on review gate config",
 				"slug", slug, "error", err)
-			target := workflow.StatusComplete
+			fallback := workflow.StatusComplete
 			if c.shouldGateReview(plan) {
-				target = workflow.StatusAwaitingReview
+				fallback = workflow.StatusAwaitingReview
 			}
-			if err := c.setPlanStatusCached(ctx, plan, target); err != nil {
-				c.logger.Error("Failed to transition plan", "slug", slug, "target", target, "error", err)
+			if err := c.setPlanStatusCached(ctx, plan, fallback); err != nil {
+				c.logger.Error("Failed to transition plan", "slug", slug, "target", fallback, "error", err)
 			}
+			return
 		}
+		// If we routed to ready_for_qa, fire the executor dispatch.
+		c.publishQARequestIfNeeded(ctx, plan)
 		return
 	}
 
@@ -179,6 +191,96 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 	// includes the populated ExecutionSummary (stall signal for the frontend).
 	if err := c.savePlanCached(ctx, plan); err != nil {
 		c.logger.Warn("Failed to save plan for SSE stall notification", "slug", slug, "error", err)
+	}
+}
+
+// publishQARequestIfNeeded fires when a plan is routed to ready_for_qa. It
+// publishes a QARequestedEvent with the appropriate Mode so the matching
+// executor (sandbox for unit, qa-runner for integration/full) picks it up.
+// No-op when plan.Status != ready_for_qa or natsClient is nil (tests).
+func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow.Plan) {
+	if plan == nil || plan.Status != workflow.StatusReadyForQA || c.natsClient == nil {
+		return
+	}
+
+	level := plan.EffectiveQALevel()
+	if !level.UsesQARunner() && !level.UsesSandboxTests() {
+		return
+	}
+
+	// qa-runner bind-mounts the workspace via the Docker socket — it needs
+	// the HOST path, not semspec's container path. Without this, act will
+	// try to bind a container-local path on the host and silently produce
+	// an empty workspace.
+	workspaceHost := c.resolveProjectHostPath()
+	if workspaceHost == "" {
+		c.logger.Error("Refusing to publish QARequestedEvent — PROJECT_HOST_PATH unset",
+			"slug", plan.Slug, "level", level,
+			"hint", "set PROJECT_HOST_PATH on the semspec service so qa-runner can resolve the host workspace")
+		return
+	}
+
+	// Load project config for test command (language-aware default).
+	pc := workflow.LoadProjectConfigFromDisk(c.resolveRepoRoot())
+
+	req := &payloads.QARequestedPayload{
+		QARequestedEvent: workflow.QARequestedEvent{
+			Slug:              plan.Slug,
+			PlanID:            plan.ID,
+			Mode:              level,
+			WorkspaceHostPath: workspaceHost,
+			WorkflowPath:      ".github/workflows/qa.yml",
+			TestCommand:       pc.EffectiveTestCommand(),
+			TraceID:           uuid.New().String(),
+		},
+	}
+
+	// Validate before publishing — catches slug path-traversal, empty
+	// workspace, bad Mode, etc. before the wire.
+	if err := req.Validate(); err != nil {
+		c.logger.Error("Refusing to publish invalid QARequestedEvent",
+			"slug", plan.Slug, "error", err)
+		return
+	}
+
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal QARequestedEvent", "slug", plan.Slug, "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, "workflow.events.qa.requested", data); err != nil {
+		c.logger.Error("Failed to publish QARequestedEvent", "slug", plan.Slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Published QARequestedEvent",
+		"slug", plan.Slug, "mode", level, "test_command", req.TestCommand)
+}
+
+// targetForQALevel chooses the post-implementing status based on the plan's
+// QA level. Called at implementing convergence and force-complete.
+//
+// level=none       → StatusComplete (or StatusAwaitingReview when gated)
+// level=synthesis  → StatusReadyForQA (qa-reviewer claims it, no tests run)
+// level=unit        → StatusReadyForQA (sandbox runs project tests first)
+// level=integration → StatusReadyForQA (qa-runner via act)
+// level=full        → StatusReadyForQA (qa-runner + e2e — TODO Phase 7)
+//
+// qa-reviewer owns the ready_for_qa → reviewing_qa transition via
+// plan.mutation.qa.start, mirroring plan-reviewer's mutation-driven shape.
+// For non-synthesis levels, publishQARequestIfNeeded additionally fires a
+// QARequestedEvent so the executor runs before qa-reviewer claims the plan.
+func (c *Component) targetForQALevel(level workflow.QALevel, plan *workflow.Plan, _ string) workflow.Status {
+	switch level {
+	case workflow.QALevelNone:
+		if c.shouldGateReview(plan) {
+			return workflow.StatusAwaitingReview
+		}
+		return workflow.StatusComplete
+	default:
+		return workflow.StatusReadyForQA
 	}
 }
 

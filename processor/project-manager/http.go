@@ -292,6 +292,13 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Scaffold the default QA workflow if not already present. Non-fatal — a
+	// missing scaffold just means the project owner adds it manually later.
+	if err := ensureQAWorkflow(c.repoPath, c.logger); err != nil {
+		c.logger.Warn("Failed to scaffold default QA workflow — continuing without it",
+			"repo_path", c.repoPath, "error", err)
+	}
+
 	c.logger.Info("Project initialized", "name", req.Project.Name, "files", written)
 	writeJSON(w, http.StatusOK, InitResponse{Success: true, FilesWritten: written})
 }
@@ -723,6 +730,13 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate qa_level before touching state. Empty string is accepted
+	// (clears to synthesis default via EffectiveQALevel).
+	if req.QALevel != nil && *req.QALevel != "" && !workflow.QALevel(*req.QALevel).IsValid() {
+		http.Error(w, fmt.Sprintf("qa_level %q is not one of: none, synthesis, unit, integration, full", *req.QALevel), http.StatusBadRequest)
+		return
+	}
+
 	// Check if org/platform change is requested and whether it's safe.
 	prefixChanging := (req.Org != nil && *req.Org != pc.Org) ||
 		(req.Platform != nil && *req.Platform != pc.Platform)
@@ -751,6 +765,12 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Platform != nil {
 		updated.Platform = *req.Platform
+	}
+	if req.QALevel != nil {
+		updated.QALevel = workflow.QALevel(*req.QALevel)
+	}
+	if req.QATestCommand != nil {
+		updated.QATestCommand = *req.QATestCommand
 	}
 	updated.UpdatedAt = time.Now()
 

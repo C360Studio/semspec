@@ -195,9 +195,6 @@ func (c *Component) resumeStuckExecutions(ctx context.Context) {
 			"building": // backward-compat: old executions with phaseBuilding
 			event.WorkflowStep = stageDevelop
 			c.handleDeveloperCompleteLocked(ctx, event, exec)
-		case phaseRedTeaming:
-			event.WorkflowStep = stageRedTeam
-			c.handleRedTeamCompleteLocked(ctx, event, exec)
 		case phaseReviewing:
 			event.WorkflowStep = stageReview
 			c.handleReviewerCompleteLocked(ctx, event, exec)
@@ -231,8 +228,6 @@ func (c *Component) currentStageTaskID(exec *taskExecution) string {
 		"testing",  // backward-compat: old executions with phaseTesting
 		"building": // backward-compat: old executions with phaseBuilding
 		return exec.DeveloperTaskID
-	case phaseRedTeaming:
-		return exec.RedTeamTaskID
 	case phaseReviewing:
 		return exec.ReviewerTaskID
 	default:
@@ -308,8 +303,6 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 		"test",  // backward-compat: old loop entries with stageTest
 		"build": // backward-compat: old loop entries with stageBuild
 		c.handleDeveloperCompleteLocked(ctx, event, exec)
-	case stageRedTeam:
-		c.handleRedTeamCompleteLocked(ctx, event, exec)
 	case stageReview:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
 	}

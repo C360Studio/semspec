@@ -11,32 +11,6 @@ import (
 // executionOrchestratorSchema is the pre-generated schema for this component.
 var executionOrchestratorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
-// TeamsConfig configures the team-based execution mode. Teams are ON by
-// default whenever the agent graph is available. Set Enabled to false as
-// an explicit kill switch for debugging. When Roster is empty, a default
-// two-team roster ("alpha", "bravo") is auto-generated from the component model.
-type TeamsConfig struct {
-	// Enabled is a kill switch. When explicitly set to false, team-based
-	// execution is disabled. When nil (omitted from JSON), teams are ON.
-	Enabled *bool `json:"enabled,omitempty" schema:"type:bool,description:Kill switch — set false to disable team-based execution,category:basic"`
-
-	// Roster defines the teams and their member roles/models.
-	// When empty, a default two-team roster is auto-generated.
-	Roster []TeamRosterEntry `json:"roster,omitempty" schema:"type:array,description:Team definitions with member roles,category:basic"`
-}
-
-// TeamRosterEntry defines a single team in the roster.
-type TeamRosterEntry struct {
-	Name    string            `json:"name"`
-	Members []TeamMemberEntry `json:"members"`
-}
-
-// TeamMemberEntry defines a single agent member of a team.
-type TeamMemberEntry struct {
-	Role  string `json:"role"`  // "developer", "reviewer"
-	Model string `json:"model"` // model endpoint name
-}
-
 // Config holds the configuration for the execution-orchestrator component.
 type Config struct {
 	// MaxTDDCycles is the maximum number of developer→validate→review cycles
@@ -84,10 +58,6 @@ type Config struct {
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
-
-	// Teams configures team-based execution. When Teams.Enabled is false (default),
-	// the pipeline uses the existing 4-stage individual agent mode.
-	Teams *TeamsConfig `json:"teams,omitempty" schema:"type:object,description:Team-based execution configuration,category:basic"`
 
 	// ExecutionStateBucket is the KV bucket name for execution state.
 	// The write IS the event — downstream components watch this bucket.
@@ -188,15 +158,6 @@ func (c *Config) Validate() error {
 	if c.IndexingBudgetStr != "" {
 		if _, err := time.ParseDuration(c.IndexingBudgetStr); err != nil {
 			return fmt.Errorf("invalid indexing_budget %q: %w", c.IndexingBudgetStr, err)
-		}
-	}
-	// Validate explicitly provided roster entries. Empty roster is fine —
-	// seedTeams auto-generates a default two-team roster.
-	if c.Teams != nil {
-		for i, team := range c.Teams.Roster {
-			if len(team.Members) == 0 {
-				return fmt.Errorf("teams.roster[%d] (%q) must have at least 1 member", i, team.Name)
-			}
 		}
 	}
 	return nil

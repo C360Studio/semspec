@@ -388,7 +388,7 @@ func (s *ExecutionPhaseScenario) stageVerifyPlanComplete(ctx context.Context, re
 				continue
 			}
 			switch plan.Status {
-			case "complete", "reviewing_rollup":
+			case "complete", "reviewing_rollup", "reviewing_qa":
 				result.SetDetail("plan_final_status", plan.Status)
 				return nil
 			case "rejected", "error":

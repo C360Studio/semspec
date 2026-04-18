@@ -535,13 +535,12 @@
         }
       }
     },
-    "rollup-reviewer": {
-      "name": "rollup-reviewer",
+    "qa-reviewer": {
+      "name": "qa-reviewer",
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "qa",
-        "skip_review": true
+        "default_capability": "qa"
       }
     }
   },

@@ -19,8 +19,6 @@ import (
 // Example agent:  semspec.local.agent.roster.agent.<agentID>
 // Example review: semspec.local.agent.roster.review.<reviewID>
 // Example errcat: semspec.local.agent.roster.errcat.<categoryID>
-// Example team:   semspec.local.agent.team.team.<teamID>
-// Example insight:semspec.local.agent.team.insight.<teamID>-<insightID>
 const (
 	DomainAgent       = "agent"
 	SystemLoop        = "loop"

@@ -15,9 +15,6 @@ import (
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semstreams/message"
-	"github.com/google/uuid"
 )
 
 // HelloWorldVariant configures expected behavior for scenario variants.
@@ -737,7 +734,7 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 				plan.Stage == "requirements_generated" || plan.Stage == "architecture_generated" ||
 				plan.Stage == "scenarios_generated" ||
 				plan.Stage == "ready_for_execution" || plan.Stage == "implementing" ||
-				plan.Stage == "reviewing_rollup" || plan.Stage == "complete"
+				plan.Stage == "reviewing_rollup" || plan.Stage == "reviewing_qa" || plan.Stage == "complete"
 
 			if isApproved {
 				result.SetDetail("approve_response", plan)
@@ -924,184 +921,6 @@ func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, res
 // ---------------------------------------------------------------------------
 // Code Execution Stages (enabled via WithCodeExecution variant)
 // ---------------------------------------------------------------------------
-
-// stagePrepareCodeExecution pre-writes expected code changes in mock mode.
-// In mock mode, we pre-seed the /goodbye endpoint so the structural validator
-// passes without requiring multi-turn LLM tool calls. In real LLM mode, this
-// stage does nothing and the agent writes the code during execution.
-func (s *HelloWorldScenario) stagePrepareCodeExecution(_ context.Context, result *Result) error {
-	// Only pre-seed code in mock mode
-	if s.config.MockLLMURL == "" {
-		result.SetDetail("code_execution_mode", "real_llm")
-		return nil
-	}
-
-	result.SetDetail("code_execution_mode", "mock_pre_seeded")
-
-	// Pre-write the expected /goodbye endpoint to api/app.py
-	appPyWithGoodbye := `from flask import Flask, jsonify
-
-app = Flask(__name__)
-
-
-@app.route("/hello")
-def hello():
-    return jsonify({"message": "Hello World"})
-
-
-@app.route("/goodbye")
-def goodbye():
-    return jsonify({"message": "Goodbye World"})
-
-
-if __name__ == "__main__":
-    app.run(port=5000)
-`
-	appPath := filepath.Join(s.config.WorkspacePath, "api", "app.py")
-	if err := s.fs.WriteFile(appPath, appPyWithGoodbye); err != nil {
-		return fmt.Errorf("write pre-seeded api/app.py: %w", err)
-	}
-
-	// Also write a test file so pytest finds tests
-	testAppPy := `import pytest
-from api.app import app
-
-
-@pytest.fixture
-def client():
-    app.config['TESTING'] = True
-    with app.test_client() as client:
-        yield client
-
-
-def test_goodbye_endpoint(client):
-    """Test that /goodbye returns a JSON goodbye message."""
-    response = client.get('/goodbye')
-    assert response.status_code == 200
-    data = response.get_json()
-    assert 'message' in data
-    assert 'goodbye' in data['message'].lower()
-`
-	testPath := filepath.Join(s.config.WorkspacePath, "api", "test_app.py")
-	if err := s.fs.WriteFile(testPath, testAppPy); err != nil {
-		return fmt.Errorf("write pre-seeded api/test_app.py: %w", err)
-	}
-
-	result.SetDetail("pre_seeded_files", []string{"api/app.py", "api/test_app.py"})
-	return nil
-}
-
-// stageTriggerTaskDispatch publishes a TaskDispatchRequest to start task-dispatcher.
-// The task-dispatcher will dispatch all approved tasks to the task-execution-loop.
-func (s *HelloWorldScenario) stageTriggerTaskDispatch(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	batchID := uuid.New().String()
-	trigger := payloads.TaskDispatchRequest{
-		RequestID: uuid.New().String(),
-		Slug:      slug,
-		BatchID:   batchID,
-	}
-
-	// Wrap in BaseMessage (required by task-dispatcher)
-	baseMsg := message.NewBaseMessage(payloads.TaskDispatchRequestType, &trigger, "e2e-test")
-	msgData, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal batch trigger: %w", err)
-	}
-
-	// Publish to the task-dispatcher trigger subject via JetStream
-	subject := "workflow.trigger.task-dispatcher"
-	if err := s.nats.PublishToStream(ctx, subject, msgData); err != nil {
-		return fmt.Errorf("publish batch trigger: %w", err)
-	}
-
-	result.SetDetail("batch_id", batchID)
-	result.SetDetail("batch_trigger_request_id", trigger.RequestID)
-	result.SetDetail("batch_trigger_subject", subject)
-	return nil
-}
-
-// stageVerifyFilesModified checks that the expected code changes were made.
-// For the /goodbye endpoint, we verify api/app.py contains the route.
-func (s *HelloWorldScenario) stageVerifyFilesModified(_ context.Context, result *Result) error {
-	// TODO: use workspace API when available (sandbox file access)
-	appPath := filepath.Join(s.config.WorkspacePath, "api", "app.py")
-	content, err := s.fs.ReadFile(appPath)
-	if err != nil {
-		return fmt.Errorf("read api/app.py: %w", err)
-	}
-
-	// Check for /goodbye route decorator
-	if !strings.Contains(content, `@app.route("/goodbye")`) {
-		return fmt.Errorf("api/app.py missing /goodbye route definition")
-	}
-
-	// Check for goodbye function definition
-	if !strings.Contains(content, "def goodbye") {
-		return fmt.Errorf("api/app.py missing goodbye function")
-	}
-
-	// Check for jsonify usage in response (Flask JSON pattern)
-	if !strings.Contains(content, "jsonify") {
-		return fmt.Errorf("api/app.py /goodbye route does not use jsonify for response")
-	}
-
-	result.SetDetail("file_verification_app_py_has_goodbye", true)
-	result.SetDetail("file_verification_app_py_length", len(content))
-	return nil
-}
-
-// stageVerifyExecutionValidation checks that structural validation passed
-// for the executed tasks. Queries the task execution state from KV.
-func (s *HelloWorldScenario) stageVerifyExecutionValidation(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Get REACTIVE_STATE KV entries for our plan
-	kvResp, err := s.http.GetKVEntries(ctx, client.ReactiveStateBucket)
-	if err != nil {
-		return fmt.Errorf("get %s KV: %w", client.ReactiveStateBucket, err)
-	}
-
-	// Check validation results in task execution states
-	validatedCount := 0
-	passedCount := 0
-	for _, entry := range kvResp.Entries {
-		if !strings.Contains(entry.Key, "task-execution."+slug) {
-			continue
-		}
-
-		var state client.WorkflowState
-		if err := json.Unmarshal(entry.Value, &state); err != nil {
-			continue
-		}
-
-		// ValidationPassed is set by the structural validator phase
-		validatedCount++
-		if state.ValidationPassed {
-			passedCount++
-		}
-	}
-
-	if validatedCount == 0 {
-		return fmt.Errorf("no task execution states found with validation results")
-	}
-
-	result.SetDetail("execution_validation_count", validatedCount)
-	result.SetDetail("execution_validation_passed_count", passedCount)
-
-	// In mock mode, validation failures are expected because mock LLM generates placeholder code
-	// that doesn't pass real pytest. We're testing workflow mechanics, not code quality.
-	if passedCount == 0 {
-		if s.config.MockLLMURL != "" {
-			result.AddWarning(fmt.Sprintf("mock mode: no tasks passed structural validation (0/%d) - expected for mock LLM", validatedCount))
-			return nil
-		}
-		return fmt.Errorf("no tasks passed structural validation (0/%d)", validatedCount)
-	}
-
-	return nil
-}
 
 // stageCaptureArtifacts checks that plan file artifacts exist on disk and
 // captures review metrics. KV is the source of truth — on-disk files are
@@ -1900,7 +1719,7 @@ func (s *HelloWorldScenario) stageWaitForExecutionComplete(ctx context.Context, 
 			result.SetDetail("execution_status_snapshot", plan.Status)
 
 			switch plan.Status {
-			case "complete", "reviewing_rollup":
+			case "complete", "reviewing_rollup", "reviewing_qa":
 				result.SetDetail("execution_complete", true)
 				result.SetDetail("execution_final_status", plan.Status)
 				return nil

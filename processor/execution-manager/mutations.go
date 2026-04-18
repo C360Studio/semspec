@@ -41,8 +41,6 @@ type TaskCreateRequest struct {
 	TaskType       workflow.TaskType `json:"task_type,omitempty"`
 	MaxTDDCycles   int               `json:"max_tdd_cycles,omitempty"`
 	AgentID        string            `json:"agent_id,omitempty"`
-	BlueTeamID     string            `json:"blue_team_id,omitempty"`
-	RedTeamID      string            `json:"red_team_id,omitempty"`
 	WorktreePath   string            `json:"worktree_path,omitempty"`
 	WorktreeBranch string            `json:"worktree_branch,omitempty"`
 	ScenarioBranch string            `json:"scenario_branch,omitempty"`
@@ -67,7 +65,6 @@ type TaskPhaseRequest struct {
 	DeveloperTaskID string `json:"developer_task_id,omitempty"`
 	ValidatorTaskID string `json:"validator_task_id,omitempty"`
 	ReviewerTaskID  string `json:"reviewer_task_id,omitempty"`
-	RedTeamTaskID   string `json:"red_team_task_id,omitempty"`
 }
 
 // TaskCompleteRequest marks a task execution as terminally complete.
@@ -96,8 +93,6 @@ type ReqCreateRequest struct {
 	Prompt        string                   `json:"prompt,omitempty"`
 	Role          string                   `json:"role,omitempty"`
 	PlanBranch    string                   `json:"plan_branch,omitempty"`
-	BlueTeamID    string                   `json:"blue_team_id,omitempty"`
-	RedTeamID     string                   `json:"red_team_id,omitempty"`
 }
 
 // ReqPhaseRequest transitions a requirement execution to a new phase.
@@ -113,7 +108,6 @@ type ReqPhaseRequest struct {
 	DecomposerTaskID  string `json:"decomposer_task_id,omitempty"`
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`
 	ReviewerTaskID    string `json:"reviewer_task_id,omitempty"`
-	RedTeamTaskID     string `json:"red_team_task_id,omitempty"`
 	// Branch
 	RequirementBranch string `json:"requirement_branch,omitempty"`
 	// DAG state — persisted after decomposition for crash recovery
@@ -231,8 +225,6 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		RequestID:      req.RequestID,
 		TaskType:       req.TaskType,
 		AgentID:        req.AgentID,
-		BlueTeamID:     req.BlueTeamID,
-		RedTeamID:      req.RedTeamID,
 		WorktreePath:   req.WorktreePath,
 		WorktreeBranch: req.WorktreeBranch,
 		ScenarioBranch: req.ScenarioBranch,
@@ -300,9 +292,6 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 	}
 	if req.ReviewerTaskID != "" {
 		exec.ReviewerTaskID = req.ReviewerTaskID
-	}
-	if req.RedTeamTaskID != "" {
-		exec.RedTeamTaskID = req.RedTeamTaskID
 	}
 
 	if err := c.store.saveTask(ctx, req.Key, exec); err != nil {
@@ -390,8 +379,6 @@ func (c *Component) handleReqCreateMutation(ctx context.Context, data []byte) Ex
 		Prompt:         req.Prompt,
 		Role:           req.Role,
 		PlanBranch:     req.PlanBranch,
-		BlueTeamID:     req.BlueTeamID,
-		RedTeamID:      req.RedTeamID,
 		CurrentNodeIdx: -1,
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -444,9 +431,6 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 	}
 	if req.ReviewerTaskID != "" {
 		exec.ReviewerTaskID = req.ReviewerTaskID
-	}
-	if req.RedTeamTaskID != "" {
-		exec.RedTeamTaskID = req.RedTeamTaskID
 	}
 	if req.RequirementBranch != "" {
 		exec.RequirementBranch = req.RequirementBranch

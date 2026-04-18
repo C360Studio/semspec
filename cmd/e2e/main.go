@@ -52,8 +52,6 @@ Tier 1 — Component Tests (no LLM):
   change-proposal     - Tests ChangeProposal CRUD, status transitions, cascade response, and error handling
   sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
   agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
-  team-roster         - Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs
-  team-knowledge      - Tests always-on team knowledge infrastructure: auto-seeding, HTTP endpoints, error categories
   graph-sources       - Tests graph source registry: semsource readiness, GraphQL entity indexing
   graph-tools         - Tests all graph tool paths: graph_summary, graph_query, graph_search
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
@@ -68,11 +66,11 @@ Tier 2 — Pipeline Tests (mock LLM):
   hello-world-plan-exhaustion    - Hello-world with plan review exhaustion → escalation
   plan-phase                   - Full plan pipeline: plan → requirements → scenarios → review → approved
   execution-phase              - Full execution pipeline: plan → approve → decompose → TDD → complete
-  team-execution               - Team pipeline: plan → requirements → scenarios → execute → dispatch
   context-pressure             - Claims verification: context truncation, model routing, revision quality
   plan-stall-retry             - Execution stall: failed requirement → retry → re-execution succeeds
   plan-stall-complete          - Execution stall: failed requirement → force-complete
   plan-stall-reject            - Execution stall: failed requirement → reject → retry from rejected
+  qa-cycle                     - QA phase: sandbox runs go test, qa-reviewer approves, plan → complete
 
 Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) have moved
 to Playwright E2E — see docs/e2e-scenario-archive.md for details.
@@ -148,8 +146,6 @@ func listCmd() *cobra.Command {
 			fmt.Println("  change-proposal     Tests ChangeProposal CRUD, status transitions, cascade, and error handling")
 			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
 			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
-			fmt.Println("  team-roster         Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs")
-			fmt.Println("  team-knowledge      Tests always-on team knowledge: auto-seeding, HTTP endpoints, error categories")
 			fmt.Println("  graph-sources       Tests graph source registry: semsource readiness, GraphQL entities")
 			fmt.Println("  graph-tools         Tests all graph tool paths: summary, query, search")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
@@ -164,11 +160,11 @@ func listCmd() *cobra.Command {
 			fmt.Println("  hello-world-plan-exhaustion    Plan review exhaustion → escalation variant")
 			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
 			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
-			fmt.Println("  team-execution               Team pipeline: plan → requirements → scenarios → execute → dispatch")
 			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
 			fmt.Println("  plan-stall-retry             Execution stall: failed req → retry → re-execute")
 			fmt.Println("  plan-stall-complete          Execution stall: failed req → force-complete")
 			fmt.Println("  plan-stall-reject            Execution stall: failed req → reject → retry")
+			fmt.Println("  qa-cycle                     QA phase: sandbox go test + qa-reviewer verdict pipeline")
 			fmt.Println()
 			fmt.Println("  Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic)")
 			fmt.Println("  have moved to Playwright E2E — see docs/e2e-scenario-archive.md")
@@ -196,7 +192,6 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewReactiveExecutionScenario(cfg),
 		scenarios.NewChangeProposalScenario(cfg),
 		scenarios.NewSandboxLifecycleScenario(cfg),
-		scenarios.NewTeamKnowledgeScenario(cfg),
 		// Graph source registry (ADR-032)
 		scenarios.NewGraphSourcesScenario(cfg),
 		scenarios.NewGraphToolsScenario(cfg),
@@ -220,6 +215,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete),
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),
+		// Tier 2: QA phase — sandbox unit-test executor + qa-reviewer verdict pipeline
+		scenarios.NewQACycleScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

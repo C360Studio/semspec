@@ -34,11 +34,6 @@ type taskExecution struct {
 	ValidationResults      []payloads.CheckResult
 	ReviewerLLMRequestIDs  []string
 
-	// Red team runtime state.
-	RedTeamAgentID   string
-	RedTeamChallenge *payloads.RedTeamChallengeResult
-	RedTeamKnowledge string
-
 	// Timeout management.
 	timeoutTimer *timeoutHandle
 }

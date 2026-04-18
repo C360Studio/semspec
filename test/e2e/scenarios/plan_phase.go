@@ -263,7 +263,7 @@ func (s *PlanPhaseScenario) stageVerifyArchitecture(ctx context.Context, result 
 			switch plan.Stage {
 			case "architecture_generated", "generating_scenarios", "scenarios_generated",
 				"reviewing_scenarios", "scenarios_reviewed", "ready_for_execution",
-				"implementing", "reviewing_rollup", "complete":
+				"implementing", "reviewing_rollup", "reviewing_qa", "complete":
 				if plan.Architecture == nil {
 					return fmt.Errorf("architecture is nil at stage %s", plan.Stage)
 				}

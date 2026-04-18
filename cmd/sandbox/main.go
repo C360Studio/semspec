@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 func main() {
@@ -32,7 +34,13 @@ func main() {
 	cleanupAge := flag.Duration("cleanup-age", 24*time.Hour, "Remove worktrees older than this")
 	maxOutputBytes := flag.Int("max-output", 100*1024, "Maximum stdout/stderr capture size in bytes")
 	maxFileSize := flag.Int64("max-file-size", 1*1024*1024, "Maximum file size for write operations")
+	natsURL := flag.String("nats-url", "", "NATS server URL for QA event subscription (empty = disable NATS)")
 	flag.Parse()
+
+	// Environment variable override for NATS URL (consistent with semspec convention).
+	if *natsURL == "" {
+		*natsURL = os.Getenv("NATS_URL")
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
@@ -82,13 +90,18 @@ func main() {
 	defer cancel()
 	go srv.CleanupLoop(ctx, *cleanupInterval, *cleanupAge)
 
+	// Optional NATS subscriber for unit-level QA requests.
+	// When -nats-url is empty and NATS_URL is unset, the sandbox runs HTTP-only
+	// — existing callers are unaffected.
+	connectNATSQA(ctx, srv, *natsURL, logger)
+
 	// Graceful shutdown.
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		slog.Info("shutting down sandbox server")
-		cancel()
+		cancel() // cancels ctx, which stops the NATS consumer and cleanup loop
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
 		_ = httpServer.Shutdown(shutdownCtx)
@@ -97,6 +110,44 @@ func main() {
 	slog.Info("sandbox server starting", "addr", *addr, "repo", *repoPath)
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		slog.Error("server error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// connectNATSQA connects to NATS and starts the QA unit-mode subscriber.
+// When url is empty, logs a notice and returns — sandbox operates HTTP-only.
+// On any connection error, logs and exits so the process doesn't start
+// partially configured.
+func connectNATSQA(ctx context.Context, srv *Server, url string, logger *slog.Logger) {
+	if url == "" {
+		slog.Info("NATS not configured — running HTTP-only (set -nats-url or NATS_URL to enable QA subscriber)")
+		return
+	}
+
+	nc, err := natsclient.NewClient(url,
+		natsclient.WithName("sandbox"),
+		natsclient.WithMaxReconnects(-1),
+		natsclient.WithReconnectWait(time.Second),
+	)
+	if err != nil {
+		slog.Error("failed to create NATS client", "url", url, "error", err)
+		os.Exit(1)
+	}
+	if err := nc.Connect(ctx); err != nil {
+		slog.Error("failed to connect to NATS", "url", url, "error", err)
+		os.Exit(1)
+	}
+
+	connCtx, connCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer connCancel()
+	if err := nc.WaitForConnection(connCtx); err != nil {
+		slog.Error("NATS connection timed out", "url", url, "error", err)
+		os.Exit(1)
+	}
+	slog.Info("NATS connected — QA subscriber enabled", "url", url)
+
+	if err := startQASubscriber(ctx, srv, nc, logger); err != nil {
+		slog.Error("failed to start QA subscriber", "error", err)
 		os.Exit(1)
 	}
 }

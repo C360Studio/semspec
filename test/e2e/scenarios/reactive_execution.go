@@ -175,16 +175,6 @@ func (s *ReactiveExecutionScenario) storedScenarioID(result *Result) (string, bo
 	return result.GetDetailString("scenario_id")
 }
 
-// pollInterval returns the appropriate polling interval based on whether fast
-// timeouts are enabled. Fast mode is used for mock/deterministic LLM backends
-// where responses are instant.
-func (s *ReactiveExecutionScenario) pollInterval() time.Duration {
-	if s.config.FastTimeouts {
-		return config.FastPollInterval
-	}
-	return config.DefaultPollInterval
-}
-
 // ---------------------------------------------------------------------------
 // Plan bootstrap stages
 // ---------------------------------------------------------------------------

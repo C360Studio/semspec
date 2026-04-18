@@ -34,6 +34,12 @@
       "default": 2,
       "category": "advanced"
     },
+    "max_review_retries": {
+      "type": "number",
+      "description": "Max reviewer re-dispatches on parse failure",
+      "default": 3,
+      "category": "advanced"
+    },
     "max_tdd_cycles": {
       "type": "number",
       "description": "Maximum dev→validate→review cycles before escalation",
@@ -55,49 +61,6 @@
       "type": "string",
       "description": "Sandbox server URL for worktree isolation (empty=disabled)",
       "category": "advanced"
-    },
-    "teams": {
-      "type": "object",
-      "description": "Team-based execution configuration",
-      "category": "basic",
-      "properties": {
-        "enabled": {
-          "type": "boolean",
-          "description": "Kill switch — set false to disable team-based execution",
-          "category": "basic"
-        },
-        "roster": {
-          "type": "array",
-          "description": "Team definitions with member roles",
-          "category": "basic",
-          "items": {
-            "type": "object",
-            "properties": {
-              "members": {
-                "type": "array",
-                "description": "members",
-                "items": {
-                  "type": "object",
-                  "properties": {
-                    "model": {
-                      "type": "string",
-                      "description": "model"
-                    },
-                    "role": {
-                      "type": "string",
-                      "description": "role"
-                    }
-                  }
-                }
-              },
-              "name": {
-                "type": "string",
-                "description": "name"
-              }
-            }
-          }
-        }
-      }
     },
     "timeout_seconds": {
       "type": "number",

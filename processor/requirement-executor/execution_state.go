@@ -125,12 +125,6 @@ type requirementExecution struct {
 
 	// --- Requirement-level review ---
 
-	// RedTeamTaskID is the agentic task ID for the red team challenge.
-	RedTeamTaskID string
-
-	// RedTeamChallenge holds the parsed red team result.
-	RedTeamChallenge *payloads.RedTeamChallengeResult
-
 	// ReviewerTaskID is the agentic task ID for the scenario reviewer.
 	ReviewerTaskID string
 
@@ -143,12 +137,6 @@ type requirementExecution struct {
 	// ReviewRetryCount tracks reviewer re-dispatches on parse failure or
 	// invalid verdict. Independent of the requirement-level RetryCount.
 	ReviewRetryCount int
-
-	// BlueTeamID is the team that did the implementation (set from trigger).
-	BlueTeamID string
-
-	// RedTeamID is the adversarial review team.
-	RedTeamID string
 
 	// --- Requirement-level retry ---
 

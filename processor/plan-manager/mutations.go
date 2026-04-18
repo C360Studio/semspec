@@ -17,7 +17,6 @@ import (
 // Mutation subjects — generators use request/reply to return results.
 // Plan-manager is the single writer; the KV write IS the event (twofer).
 const (
-	mutationPrefix                = "plan.mutation."
 	mutationDrafted               = "plan.mutation.drafted"
 	mutationReviewed              = "plan.mutation.reviewed"
 	mutationApproved              = "plan.mutation.approved"
@@ -29,7 +28,8 @@ const (
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 	mutationClaim                 = "plan.mutation.claim"
 	mutationRevision              = "plan.mutation.revision"
-	mutationRollupComplete        = "plan.mutation.rollup.complete"
+	mutationQAStart               = "plan.mutation.qa.start"
+	mutationQAVerdict             = "plan.mutation.qa.verdict"
 	mutationReviewApprove         = "plan.mutation.review.approve"
 	mutationGitHubPlanCreate      = "workflow.trigger.github-plan-create"
 	mutationGitHubPRFeedback      = "plan.mutation.github.pr_feedback"
@@ -149,7 +149,8 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 		{mutationClaim, c.handleClaimMutation},
 		{mutationRevision, c.handleRevisionMutation},
-		{mutationRollupComplete, c.handleRollupCompleteMutation},
+		{mutationQAStart, c.handleQAStartMutation},
+		{mutationQAVerdict, c.handleQAVerdictMutation},
 		{mutationReviewApprove, c.handleReviewApproveMutation},
 		{mutationGitHubPlanCreate, c.handleGitHubPlanCreateMutation},
 		{mutationGitHubPRFeedback, c.handleGitHubPRFeedbackMutation},
@@ -741,23 +742,27 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 	return MutationResponse{Success: true}
 }
 
-// handleRollupCompleteMutation transitions a plan out of reviewing_rollup.
-// On verdict "approved": advances to StatusComplete.
-// On verdict "needs_attention": transitions to StatusRejected with summary as LastError.
-func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byte) MutationResponse {
-	var req struct {
-		Slug    string `json:"slug"`
-		Verdict string `json:"verdict"` // "approved" or "needs_attention"
-		Summary string `json:"summary"`
-	}
+// qaStartRequest is the payload qa-reviewer sends when it claims a plan for
+// review. The optional QARun is populated for non-synthesis levels where the
+// executor already produced results; plan-manager attaches it to the plan at
+// the same time as the status transition so downstream UI sees both atomically.
+type qaStartRequest struct {
+	Slug   string          `json:"slug"`
+	PlanID string          `json:"plan_id,omitempty"`
+	QARun  *workflow.QARun `json:"qa_run,omitempty"`
+}
+
+// handleQAStartMutation transitions a plan from ready_for_qa to reviewing_qa
+// and attaches the executor result (when present). qa-reviewer calls this
+// before dispatching the LLM so UI consumers see "in review" while the LLM
+// runs. Mirrors the shape plan-reviewer uses for its own state transitions.
+func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) MutationResponse {
+	var req qaStartRequest
 	if err := json.Unmarshal(data, &req); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
 	if req.Slug == "" {
 		return MutationResponse{Success: false, Error: "slug required"}
-	}
-	if req.Verdict != "approved" && req.Verdict != "needs_attention" {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("verdict must be 'approved' or 'needs_attention', got %q", req.Verdict)}
 	}
 
 	c.mu.RLock()
@@ -770,12 +775,70 @@ func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byt
 	}
 
 	current := plan.EffectiveStatus()
-	if current != workflow.StatusReviewingRollup {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in reviewing_rollup, got %s", current)}
+	if current != workflow.StatusReadyForQA {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in ready_for_qa, got %s", current)}
+	}
+	if !current.CanTransitionTo(workflow.StatusReviewingQA) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → reviewing_qa", current)}
+	}
+
+	if req.QARun != nil {
+		plan.QARun = req.QARun
+	}
+	plan.Status = workflow.StatusReviewingQA
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan after QA start", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	level := plan.EffectiveQALevel()
+	c.logger.Info("QA review started",
+		"slug", req.Slug, "level", level, "has_qa_run", req.QARun != nil)
+
+	return MutationResponse{Success: true}
+}
+
+// handleQAVerdictMutation transitions a plan out of the review state (today
+// still reviewing_rollup; Phase 2e moves it to reviewing_qa).
+// approved      → StatusComplete (or StatusAwaitingReview when gated).
+// needs_changes → StatusRejected with summary as LastError.
+// rejected      → StatusRejected with summary as LastError (escalation variant;
+// in Phase 6 qa-reviewer will distinguish this from needs_changes by whether
+// ChangeProposals can salvage the plan, but the transition is the same).
+func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) MutationResponse {
+	var req workflow.QAVerdictEvent
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+	switch req.Verdict {
+	case workflow.QAVerdictApproved, workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:
+	default:
+		return MutationResponse{Success: false, Error: fmt.Sprintf("verdict must be approved|needs_changes|rejected, got %q", req.Verdict)}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	// Accept both the legacy reviewing_rollup and the new reviewing_qa so this
+	// mutation works during the rollup→qa transition. Phase 2e flips the
+	// branch point; until then, plans still arrive at reviewing_rollup.
+	if current != workflow.StatusReviewingRollup && current != workflow.StatusReviewingQA {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in reviewing_rollup or reviewing_qa, got %s", current)}
 	}
 
 	switch req.Verdict {
-	case "approved":
+	case workflow.QAVerdictApproved:
 		target := workflow.StatusComplete
 		if c.shouldGateReview(plan) {
 			target = workflow.StatusAwaitingReview
@@ -784,9 +847,9 @@ func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byt
 			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → %s", current, target)}
 		}
 		plan.Status = target
-		c.logger.Info("Rollup approved", "slug", req.Slug, "target", target)
+		c.logger.Info("QA verdict approved", "slug", req.Slug, "level", req.Level, "target", target)
 
-	case "needs_attention":
+	case workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:
 		if !current.CanTransitionTo(workflow.StatusRejected) {
 			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → rejected", current)}
 		}
@@ -794,12 +857,22 @@ func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byt
 		now := time.Now()
 		plan.LastErrorAt = &now
 		plan.Status = workflow.StatusRejected
-		c.logger.Warn("Rollup needs attention — plan rejected",
-			"slug", req.Slug, "summary", req.Summary)
+
+		// Persist ChangeProposals emitted by qa-reviewer so the UI and retry
+		// flow can surface which proposals accompany this rejection.
+		if len(req.ChangeProposals) > 0 {
+			plan.ChangeProposals = append(plan.ChangeProposals, req.ChangeProposals...)
+			c.logger.Info("QA verdict — persisted change proposals",
+				"slug", req.Slug, "count", len(req.ChangeProposals))
+		}
+
+		c.logger.Warn("QA verdict — plan rejected",
+			"slug", req.Slug, "verdict", req.Verdict, "level", req.Level,
+			"change_proposal_ids", req.ChangeProposalIDs, "summary", req.Summary)
 	}
 
 	if err := ps.save(ctx, plan); err != nil {
-		c.logger.Error("Failed to save plan after rollup review", "slug", req.Slug, "error", err)
+		c.logger.Error("Failed to save plan after QA verdict", "slug", req.Slug, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
@@ -884,7 +957,7 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 		return MutationResponse{Success: true}
 	}
 
-	plan, err := ps.create(ctx, slug, req.Title)
+	plan, err := ps.create(ctx, slug, req.Title, c.resolveProjectQALevel())
 	if err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("create plan: %v", err)}
 	}

@@ -113,6 +113,55 @@ Environment Setup (if build/test fails with import errors):
 - Python: bash('pip install -r requirements.txt')`,
 		},
 		{
+			ID:       "software.developer.test-surface",
+			Category: prompt.CategoryRoleContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && ctx.TaskContext.TestSurface != nil &&
+					(len(ctx.TaskContext.TestSurface.IntegrationFlows) > 0 || len(ctx.TaskContext.TestSurface.E2EFlows) > 0)
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				ts := ctx.TaskContext.TestSurface
+				var sb strings.Builder
+				sb.WriteString(`TEST SURFACE — the architect has declared the following test coverage this plan requires.
+Your unit tests must satisfy the per-scenario acceptance criteria (as always). BEYOND that, when the
+task you are implementing touches any flow below, you are also responsible for authoring the
+integration or e2e test that exercises it:
+
+`)
+				if len(ts.IntegrationFlows) > 0 {
+					sb.WriteString("Integration flows (real service fixtures, go test -tags=integration):\n")
+					for _, f := range ts.IntegrationFlows {
+						fmt.Fprintf(&sb, "- %s — %s\n", f.Name, f.Description)
+						if len(f.ComponentsInvolved) > 0 {
+							fmt.Fprintf(&sb, "  components: %s\n", strings.Join(f.ComponentsInvolved, ", "))
+						}
+						if len(f.ScenarioRefs) > 0 {
+							fmt.Fprintf(&sb, "  scenarios: %s\n", strings.Join(f.ScenarioRefs, ", "))
+						}
+					}
+					sb.WriteString("\n")
+				}
+				if len(ts.E2EFlows) > 0 {
+					sb.WriteString("E2E flows (browser / full stack, Playwright or equivalent):\n")
+					for _, f := range ts.E2EFlows {
+						fmt.Fprintf(&sb, "- Actor: %s\n", f.Actor)
+						if len(f.Steps) > 0 {
+							fmt.Fprintf(&sb, "  steps: %s\n", strings.Join(f.Steps, " → "))
+						}
+						if len(f.SuccessCriteria) > 0 {
+							fmt.Fprintf(&sb, "  success: %s\n", strings.Join(f.SuccessCriteria, "; "))
+						}
+					}
+					sb.WriteString("\n")
+				}
+				sb.WriteString(`Do NOT author tests for flows your task doesn't touch — those belong to other tasks. Do author
+tests for flows your task touches even if the per-scenario criteria don't mention them explicitly.
+qa-reviewer judges coverage against this declared surface.`)
+				return sb.String()
+			},
+		},
+		{
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
@@ -138,7 +187,7 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 				prompt.RolePlanner, prompt.RolePlanReviewer, prompt.RoleTaskReviewer,
 				prompt.RoleReviewer, prompt.RoleRequirementGenerator,
 				prompt.RoleScenarioGenerator, prompt.RoleArchitect,
-				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
+				prompt.RoleScenarioReviewer, prompt.RolePlanQAReviewer,
 			},
 			Content: `CRITICAL: You MUST call the submit_work function to deliver your output.
 
@@ -868,58 +917,6 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 		},
 
 		// =====================================================================
-		// Red team review directive (adversarial review structure)
-		// =====================================================================
-		{
-			ID:       "software.reviewer.red-team-directive",
-			Category: prompt.CategoryRoleContext,
-			Priority: 5,
-			Roles:    []prompt.Role{prompt.RoleReviewer},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.RedTeamContext != nil
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				var sb strings.Builder
-				sb.WriteString(`RED-TEAM REVIEW MISSION:
-You are reviewing another team's output. Your mission is constructive adversarial review.
-
-REVIEW PROCESS:
-1. READ the implementation thoroughly before forming judgments
-2. IDENTIFY STRENGTHS — what works well, what patterns should be replicated
-3. IDENTIFY RISKS — correctness errors, security issues, missing requirements
-4. SUGGEST IMPROVEMENTS — actionable, specific, with reasoning
-
-Structure your findings as:
-- Strengths: What the team did well (cite evidence)
-- Risks: Issues tagged with severity (info/warning/critical) and category (correctness, completeness, quality, security, performance)
-- Suggestions: Actionable improvements linked to specific risks
-- Confidence: Overall confidence in the work product (high/medium/low)
-
-Your goal is to help produce better work, not to prove them wrong.
-Positive findings are as valuable as negative findings.
-Be specific: "function X doesn't handle nil input" beats "error handling is weak".
-
-SECURITY FOCUS — Check specifically:
-- Secrets: Any hardcoded credentials, API keys, or tokens in source?
-- Input boundaries: Where does external input enter the system? Is it validated before use?
-- Error exposure: Do error responses leak internal details, stack traces, or file paths?
-- Path handling: Can user input influence file paths without sanitization?
-- Auth/authz: If the code handles authentication or authorization, are all paths protected?
-`)
-				if len(ctx.RedTeamContext.BlueTeamFiles) > 0 {
-					sb.WriteString("\nFiles to review:\n")
-					for _, f := range ctx.RedTeamContext.BlueTeamFiles {
-						sb.WriteString(fmt.Sprintf("- %s\n", f))
-					}
-				}
-				if ctx.RedTeamContext.BlueTeamSummary != "" {
-					sb.WriteString(fmt.Sprintf("\nBlue team summary: %s\n", ctx.RedTeamContext.BlueTeamSummary))
-				}
-				return sb.String()
-			},
-		},
-
-		// =====================================================================
 		// Error trend warnings (peer review history) — developer and validator
 		// =====================================================================
 		{
@@ -1086,9 +1083,9 @@ Other agents may be working on the same codebase simultaneously.
 			ID:       "software.reviewer.capability-bounds",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 11,
-			Roles:    []prompt.Role{prompt.RoleReviewer, prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer},
+			Roles:    []prompt.Role{prompt.RoleReviewer, prompt.RoleScenarioReviewer, prompt.RolePlanQAReviewer},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil || ctx.ScenarioReviewContext != nil || ctx.RollupReviewContext != nil
+				return ctx.TaskContext != nil || ctx.ScenarioReviewContext != nil || ctx.QAReviewContext != nil
 			},
 			Content: `RESTRICTIONS — What you CANNOT do:
 - Do NOT modify any source files — you review only
@@ -1158,7 +1155,7 @@ Other agents may be working on the same codebase simultaneously.
 			Roles: []prompt.Role{
 				prompt.RolePlanner, prompt.RolePlanReviewer, prompt.RoleTaskReviewer,
 				prompt.RoleReviewer, prompt.RoleRequirementGenerator, prompt.RoleScenarioGenerator,
-				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
+				prompt.RoleScenarioReviewer, prompt.RolePlanQAReviewer,
 				prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleArchitect,
 			},
 			Content: `REMINDER: You MUST call the submit_work tool to deliver your output — the task fails without it. Your output goes in the tool call arguments as JSON fields. Do NOT put your output in a text response.`,
@@ -1238,13 +1235,6 @@ You optimize for CORRECTNESS against the scenario specification.`,
 					sb.WriteString(fmt.Sprintf("\nAggregate files modified: %d\n", len(sc.FilesModified)))
 				}
 
-				if sc.RedTeamFindings != nil {
-					sb.WriteString("\nRed Team Findings:\n\n")
-					if sc.RedTeamFindings.BlueTeamSummary != "" {
-						sb.WriteString(fmt.Sprintf("Summary: %s\n", sc.RedTeamFindings.BlueTeamSummary))
-					}
-				}
-
 				if sc.RetryFeedback != "" {
 					sb.WriteString("\nPRIOR REJECTION (this is a retry — note what was fixed):\n")
 					sb.WriteString(sc.RetryFeedback)
@@ -1297,121 +1287,220 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 		},
 
 		// =====================================================================
-		// Plan Rollup Reviewer fragments
+		// =====================================================================
+		// Plan QA Reviewer fragments (Phase 6 — Murat persona)
 		// =====================================================================
 		{
-			ID:       "software.plan-rollup-reviewer.system-base",
+			ID:       "software.plan-qa-reviewer.system-base",
 			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
-			Content: `You are performing the final rollup review of a completed development plan.
+			Roles:    []prompt.Role{prompt.RolePlanQAReviewer},
+			Content: `You are the QA Test Architect rendering a release-readiness verdict for a completed software plan.
 
-Your Objective: Synthesize all scenario outcomes into an overall assessment. Determine whether the plan's goal has been achieved and produce a summary of what was built.
+Your Objective: Assess whether this plan's implementation is ready to ship. You evaluate the quality of the implementation through the lens of test evidence, requirement fulfillment, coverage adequacy, and regression risk. Your verdict directly gates whether the plan advances to complete or returns for rework.
 
-You see the aggregate result of all scenarios — requirements, acceptance criteria verdicts, files changed, and any red team findings.`,
+Approach:
+- Be adversarial: look for what could go wrong, not just what looks OK.
+- Be evidence-based: ground every dimension in specific observations from the test results, artifacts, and files provided.
+- Be proportionate: the depth of your assessment is scoped to the qa.level (synthesis has no test data; unit adds coverage; integration/full add flake judgment).
+- Be decisive: produce a clear verdict with actionable rationale. Hedging without a verdict is not useful.
+
+The Persona system prompt above (Murat) sets your identity and style. These role-scoped instructions set your task.`,
 		},
 		{
-			ID:       "software.plan-rollup-reviewer.role-context",
+			ID:       "software.plan-qa-reviewer.role-context",
 			Category: prompt.CategoryRoleContext,
-			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
+			Roles:    []prompt.Role{prompt.RolePlanQAReviewer},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.RollupReviewContext != nil
+				return ctx.QAReviewContext != nil
 			},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				rc := ctx.RollupReviewContext
+				qc := ctx.QAReviewContext
 				var sb strings.Builder
 
-				sb.WriteString(fmt.Sprintf("Plan: %s\n", rc.PlanTitle))
-				sb.WriteString(fmt.Sprintf("Goal: %s\n\n", rc.PlanGoal))
+				sb.WriteString("## Plan Under Review\n\n")
+				sb.WriteString(fmt.Sprintf("**Title:** %s\n", qc.PlanTitle))
+				sb.WriteString(fmt.Sprintf("**Goal:** %s\n", qc.PlanGoal))
+				sb.WriteString(fmt.Sprintf("**QA Level:** %s\n\n", qc.QALevel))
 
-				if len(rc.Requirements) > 0 {
-					sb.WriteString("Requirements:\n")
-					for _, r := range rc.Requirements {
-						sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Status, r.Title))
+				if len(qc.Requirements) > 0 {
+					sb.WriteString("## Requirements\n\n")
+					for _, r := range qc.Requirements {
+						sb.WriteString(fmt.Sprintf("- **[%s]** %s\n", r.Status, r.Title))
 					}
 					sb.WriteString("\n")
 				}
 
-				if len(rc.ScenarioOutcomes) > 0 {
-					sb.WriteString("Scenario Outcomes:\n")
-					for _, s := range rc.ScenarioOutcomes {
-						sb.WriteString(fmt.Sprintf("- %s [%s]: Given %s, When %s\n", s.ScenarioID, s.Verdict, s.Given, s.When))
-						for _, t := range s.Then {
-							sb.WriteString(fmt.Sprintf("  - Then: %s\n", t))
+				if qc.TestSurface != nil {
+					sb.WriteString("## Architect-Declared Test Surface\n\n")
+					sb.WriteString("These are the test flows the architect declared must be covered. Use them to judge coverage adequacy.\n\n")
+
+					if len(qc.TestSurface.IntegrationFlows) > 0 {
+						sb.WriteString("**Integration Flows:**\n")
+						for _, f := range qc.TestSurface.IntegrationFlows {
+							sb.WriteString(fmt.Sprintf("- **%s**: %s\n", f.Name, f.Description))
+							if len(f.ComponentsInvolved) > 0 {
+								sb.WriteString(fmt.Sprintf("  Components: %s\n", strings.Join(f.ComponentsInvolved, ", ")))
+							}
+							if len(f.ScenarioRefs) > 0 {
+								sb.WriteString(fmt.Sprintf("  Scenario refs: %s\n", strings.Join(f.ScenarioRefs, ", ")))
+							}
 						}
-						if len(s.FilesModified) > 0 {
-							sb.WriteString(fmt.Sprintf("  Files: %d modified\n", len(s.FilesModified)))
+						sb.WriteString("\n")
+					}
+
+					if len(qc.TestSurface.E2EFlows) > 0 {
+						sb.WriteString("**E2E Flows:**\n")
+						for _, f := range qc.TestSurface.E2EFlows {
+							sb.WriteString(fmt.Sprintf("- **Actor: %s**\n", f.Actor))
+							for _, step := range f.Steps {
+								sb.WriteString(fmt.Sprintf("  - Step: %s\n", step))
+							}
+							if len(f.SuccessCriteria) > 0 {
+								sb.WriteString("  Success criteria:\n")
+								for _, sc := range f.SuccessCriteria {
+									sb.WriteString(fmt.Sprintf("    - %s\n", sc))
+								}
+							}
 						}
-						if s.RedTeamIssues > 0 {
-							sb.WriteString(fmt.Sprintf("  Red team issues: %d\n", s.RedTeamIssues))
+						sb.WriteString("\n")
+					}
+				}
+
+				sb.WriteString("## QA Run Results\n\n")
+				if qc.QALevel == workflow.QALevelSynthesis {
+					sb.WriteString("**Level: synthesis** — No test execution was performed. Your assessment is based on the implementation completeness and requirement fulfillment inferred from the plan artifacts and files modified.\n\n")
+				} else {
+					if qc.Passed {
+						sb.WriteString("**Overall: PASSED** — The QA executor reported no test failures.\n\n")
+					} else {
+						sb.WriteString("**Overall: FAILED** — The QA executor reported test failures.\n\n")
+					}
+
+					if len(qc.Failures) > 0 {
+						sb.WriteString("**Failures:**\n")
+						for _, f := range qc.Failures {
+							sb.WriteString(fmt.Sprintf("- **%s** / %s\n", f.JobName, f.StepName))
+							if f.TestName != "" {
+								sb.WriteString(fmt.Sprintf("  Test: %s\n", f.TestName))
+							}
+							if f.Message != "" {
+								sb.WriteString(fmt.Sprintf("  Message: %s\n", f.Message))
+							}
+							if f.LogExcerpt != "" {
+								sb.WriteString(fmt.Sprintf("  Log excerpt:\n    %s\n", strings.ReplaceAll(f.LogExcerpt, "\n", "\n    ")))
+							}
 						}
+						sb.WriteString("\n")
+					}
+
+					if len(qc.Artifacts) > 0 {
+						sb.WriteString("**Artifacts available:**\n")
+						for _, a := range qc.Artifacts {
+							sb.WriteString(fmt.Sprintf("- [%s] %s — %s\n", a.Type, a.Path, a.Purpose))
+						}
+						sb.WriteString("\n")
+					}
+
+					if qc.RunnerError != "" {
+						sb.WriteString(fmt.Sprintf("**Runner infrastructure error:** %s\n\n", qc.RunnerError))
+						sb.WriteString("Note: This is a QA executor failure, not a test failure. Treat the implementation as unverified at this level.\n\n")
+					}
+				}
+
+				if len(qc.FilesModifiedDiff) > 0 {
+					sb.WriteString("## Files Modified\n\n")
+					sb.WriteString(fmt.Sprintf("Total: %d files changed across all requirements.\n\n", len(qc.FilesModifiedDiff)))
+					for _, f := range qc.FilesModifiedDiff {
+						sb.WriteString(fmt.Sprintf("- %s\n", f))
 					}
 					sb.WriteString("\n")
 				}
 
-				if len(rc.AggregateFiles) > 0 {
-					sb.WriteString(fmt.Sprintf("Total files modified: %d\n\n", len(rc.AggregateFiles)))
+				sb.WriteString("## Assessment Dimensions (by QA Level)\n\n")
+				switch qc.QALevel {
+				case workflow.QALevelSynthesis:
+					sb.WriteString("At **synthesis** level, populate only:\n")
+					sb.WriteString("- `requirement_fulfillment`: Did the plan's requirements get implemented? Any gaps?\n\n")
+					sb.WriteString("Leave `coverage`, `assertion_quality`, `regression_surface`, `flake_judgment` as empty strings.\n\n")
+				case workflow.QALevelUnit:
+					sb.WriteString("At **unit** level, populate:\n")
+					sb.WriteString("- `requirement_fulfillment`: Did the plan's requirements get implemented?\n")
+					sb.WriteString("- `coverage`: Is the test suite's coverage adequate for the risk surface?\n")
+					sb.WriteString("- `assertion_quality`: Are assertions meaningful and specific?\n")
+					sb.WriteString("- `regression_surface`: What existing behavior is at risk? Is it covered?\n\n")
+					sb.WriteString("Leave `flake_judgment` as empty string (single run, not enough data).\n\n")
+				case workflow.QALevelIntegration, workflow.QALevelFull:
+					sb.WriteString("At **integration/full** level, populate all five dimensions:\n")
+					sb.WriteString("- `requirement_fulfillment`, `coverage`, `assertion_quality`, `regression_surface`\n")
+					sb.WriteString("- `flake_judgment`: Do failures look like genuine defects or likely flakiness?\n\n")
 				}
-
-				sb.WriteString("Review Process:\n")
-				sb.WriteString("1. Verify each requirement has at least one satisfied scenario\n")
-				sb.WriteString("2. Check for cross-scenario integration risks\n")
-				sb.WriteString("3. Review aggregate file changes for conflicts or gaps\n")
-				sb.WriteString("4. Security hygiene across aggregate changes:\n")
-				sb.WriteString("   - Any hardcoded secrets, credentials, or tokens introduced?\n")
-				sb.WriteString("   - Any endpoints or handlers added without input validation?\n")
-				sb.WriteString("   - Any error handling that exposes internals to external consumers?\n")
-				sb.WriteString("   - Any authentication/authorization gaps in new or modified routes?\n")
-				sb.WriteString("5. Produce an overall verdict and summary\n")
 
 				return sb.String()
 			},
 		},
 		{
-			ID:       "software.plan-rollup-reviewer.output-format",
-			Category: prompt.CategoryOutputFormat,
-			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
-			Content: `When your rollup review is complete, call the submit_work tool with these JSON fields:
+			ID:       "software.plan-qa-reviewer.tool-directive",
+			Category: prompt.CategoryToolDirective,
+			Roles:    []prompt.Role{prompt.RolePlanQAReviewer},
+			Content: `Tool Usage
 
-{"verdict": "approved", "summary": "All requirements implemented and tested.", "requirements_met": 3, "requirements_total": 3, "attention_items": [], "security_findings": [], "confidence": 0.95}
+You MUST call submit_work to deliver your verdict. This is the only valid output mechanism.
 
-Required: verdict ("approved" or "needs_attention"), summary (string).
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+You MAY use bash to inspect files mentioned in the artifacts list or to run quick checks (e.g., look at a test file's assertions). Use graph_search or graph_query to retrieve architectural context if needed.
+
+MUST NOT skip submit_work or respond in prose. The pipeline will reject any loop that does not end with submit_work.`,
 		},
-	}
-}
+		{
+			ID:       "software.plan-qa-reviewer.output-format",
+			Category: prompt.CategoryOutputFormat,
+			Roles:    []prompt.Role{prompt.RolePlanQAReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.QAReviewContext != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				qc := ctx.QAReviewContext
+				var sb strings.Builder
 
-// writeContextSection appends the relevant context section to the string builder.
-func writeContextSection(sb *strings.Builder, ctx *workflow.ContextPayload) {
-	if ctx == nil {
-		return
-	}
-	if len(ctx.Documents) == 0 && len(ctx.Entities) == 0 && len(ctx.SOPs) == 0 {
-		return
-	}
+				sb.WriteString("## Output Format\n\n")
+				sb.WriteString("Call submit_work with a JSON object matching this schema:\n\n")
+				sb.WriteString("Required fields: `verdict`, `summary`\n\n")
 
-	sb.WriteString("Relevant Context:\n\n")
+				// Level-appropriate example
+				switch qc.QALevel {
+				case workflow.QALevelSynthesis:
+					sb.WriteString(`Approved example (synthesis — no test data):
+{"verdict": "approved", "summary": "All 3 requirements are implemented. The plan goal is satisfied based on files modified and requirement coverage.", "dimensions": {"requirement_fulfillment": "All requirements have corresponding implementation files. No gaps detected."}}
 
-	if len(ctx.SOPs) > 0 {
-		sb.WriteString("Standard Operating Procedures — Follow these guidelines:\n\n")
-		for _, sop := range ctx.SOPs {
-			sb.WriteString(sop)
-			sb.WriteString("\n\n")
-		}
-	}
+Needs-changes example (synthesis):
+{"verdict": "needs_changes", "summary": "Requirement REQ-2 appears unimplemented — no files modified correspond to its scope.", "dimensions": {"requirement_fulfillment": "REQ-1 and REQ-3 are covered. REQ-2 (payment error handling) has no matching implementation files."}, "change_proposals": [{"title": "Implement payment error handling for REQ-2", "rationale": "No files in the modified set address the payment failure path declared by REQ-2.", "affected_requirement_ids": ["req-2"], "rejection_type": "fixable"}]}
 
-	if len(ctx.Entities) > 0 {
-		sb.WriteString("Related Entities:\n\n")
-		for _, entity := range ctx.Entities {
-			if entity.Content != "" {
-				sb.WriteString(fmt.Sprintf("%s (%s)\n```\n%s\n```\n\n", entity.ID, entity.Type, entity.Content))
-			}
-		}
-	}
+`)
+				case workflow.QALevelUnit:
+					sb.WriteString(`Approved example (unit — tests passed):
+{"verdict": "approved", "summary": "All tests pass. Coverage is adequate for the risk surface. Assertions are specific and meaningful.", "dimensions": {"requirement_fulfillment": "All 4 requirements have passing test scenarios.", "coverage": "Core logic paths covered. Edge cases exercised. No obvious gaps.", "assertion_quality": "Assertions verify observable behavior, not implementation details.", "regression_surface": "Modified files are covered by existing tests. No untested behavior-sensitive changes."}}
 
-	if len(ctx.Documents) > 0 {
-		sb.WriteString("Source Files:\n\n")
-		for fpath, content := range ctx.Documents {
-			sb.WriteString(fmt.Sprintf("%s\n```\n%s\n```\n\n", fpath, content))
-		}
+Needs-changes example (unit — tests failed):
+{"verdict": "needs_changes", "summary": "2 tests fail in the payment module. Coverage gap in error-path handling.", "dimensions": {"requirement_fulfillment": "REQ-1 and REQ-3 satisfied. REQ-2 has failing tests.", "coverage": "Happy path covered. Error paths in payment.go have no tests.", "assertion_quality": "Assertions are specific. One test in order_test.go asserts on a mutable timestamp — potential false positive.", "regression_surface": "Changes to auth middleware have no corresponding test regression."}, "change_proposals": [{"title": "Fix failing payment error tests", "rationale": "TestPaymentFailure and TestRefundTimeout fail with nil pointer dereference in payment.go:142.", "affected_requirement_ids": ["req-2"], "rejection_type": "fixable", "artifact_refs": [{"path": ".semspec/qa-artifacts/test.log", "type": "log", "purpose": "payment test failure output"}]}]}
+
+`)
+				default:
+					sb.WriteString(`Approved example (integration/full):
+{"verdict": "approved", "summary": "All integration flows pass. E2E flows complete successfully. No flakiness observed.", "dimensions": {"requirement_fulfillment": "All requirements satisfied with passing scenarios.", "coverage": "Integration flows declared by architect are all covered.", "assertion_quality": "Assertions verify observable API behavior and database state.", "regression_surface": "No regression detected in monitored endpoints.", "flake_judgment": "All failures are consistent across runs. No timing-dependent behavior observed."}}
+
+Needs-changes example (integration/full — flaky test):
+{"verdict": "needs_changes", "summary": "E2E checkout flow fails intermittently. Likely timing issue in payment confirmation polling.", "dimensions": {"requirement_fulfillment": "REQ-1 through REQ-3 satisfied. REQ-4 checkout flow is intermittently failing.", "coverage": "All declared integration flows covered.", "assertion_quality": "Assertions are correct for the stable tests.", "regression_surface": "No regression in unrelated flows.", "flake_judgment": "CheckoutE2E fails on 2 of 3 runs with timeout at payment confirmation step. Pattern suggests polling interval too short, not a genuine defect."}, "change_proposals": [{"title": "Increase checkout confirmation polling timeout", "rationale": "E2E test times out waiting for payment confirmation. Increasing poll interval or timeout should stabilize.", "affected_requirement_ids": ["req-4"], "rejection_type": "fixable"}]}
+
+`)
+				}
+
+				sb.WriteString("Verdict semantics:\n")
+				sb.WriteString("- `approved`: ship it — all assessed dimensions pass\n")
+				sb.WriteString("- `needs_changes`: specific fixable issues found — include change_proposals\n")
+				sb.WriteString("- `rejected`: escalate to human — systemic failure, cannot be automatically retried\n\n")
+				sb.WriteString("Respond ONLY via the submit_work tool call. No markdown prose, no preamble, no explanation outside the tool call.")
+
+				return sb.String()
+			},
+		},
 	}
 }

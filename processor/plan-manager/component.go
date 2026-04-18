@@ -40,10 +40,6 @@ type Component struct {
 	// workspace proxies read-only workspace requests to the sandbox server.
 	workspace *workspaceProxy
 
-	// rollupTaskIndex maps rollup taskID → plan slug for routing agent.complete
-	// events back to the correct plan when rollup review completes.
-	rollupTaskIndex sync.Map
-
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
 	state     atomic.Int32

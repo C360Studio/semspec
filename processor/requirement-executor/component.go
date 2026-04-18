@@ -37,7 +37,6 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -55,9 +54,8 @@ const (
 	WorkflowSlugRequirementExecution = "semspec-requirement-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
-	stageDecompose          = "decompose"
-	stageRequirementRedTeam = "requirement-red-team"
-	stageRequirementReview  = "requirement-review"
+	stageDecompose         = "decompose"
+	stageRequirementReview = "requirement-review"
 
 	// Phase values written to entity triples.
 	phaseDecomposing = "decomposing"
@@ -65,7 +63,6 @@ const (
 	phaseCompleted   = "completed"
 	phaseFailed      = "failed"
 	phaseError       = "error"
-	phaseRedTeaming  = "red_teaming"
 	phaseReviewing   = "reviewing"
 
 	// NATS subjects.
@@ -189,7 +186,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.reconcileFromGraph(ctx)
 
 	// KV watchers for durable completion delivery and self-triggering:
-	// - AGENT_LOOPS: decomposer, reviewer, red-team (direct agentic loops)
+	// - AGENT_LOOPS: decomposer, reviewer (direct agentic loops)
 	// - EXECUTION_STATES task.>: TDD node completions (execution-manager pipeline)
 	// - EXECUTION_STATES req.>: pending requirement executions (KV self-trigger)
 	//
@@ -433,12 +430,9 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		Model:             reqExec.Model,
 		ProjectID:         reqExec.ProjectID,
 		Scenarios:         reqExec.Scenarios,
-		BlueTeamID:        reqExec.BlueTeamID,
-		RedTeamID:         reqExec.RedTeamID,
 		DecomposerTaskID:  reqExec.DecomposerTaskID,
 		CurrentNodeTaskID: reqExec.CurrentNodeTaskID,
 		ReviewerTaskID:    reqExec.ReviewerTaskID,
-		RedTeamTaskID:     reqExec.RedTeamTaskID,
 		RequirementBranch: reqExec.RequirementBranch,
 		CurrentNodeIdx:    reqExec.CurrentNodeIdx,
 		SortedNodeIDs:     reqExec.SortedNodeIDs,
@@ -765,8 +759,8 @@ func (c *Component) loadPlanScope(ctx context.Context, slug string) *workflow.Sc
 	return plan.Scope
 }
 
-// buildReviewPrompt constructs the prompt for requirement-level review (reviewer
-// and red-team). Includes requirement context, scenarios as acceptance criteria,
+// buildReviewPrompt constructs the prompt for requirement-level review.
+// Includes requirement context, scenarios as acceptance criteria,
 // files modified by completed nodes, and node summaries.
 func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 	var sb strings.Builder
@@ -997,102 +991,8 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 // ---------------------------------------------------------------------------
 
 // beginRequirementReviewLocked starts the requirement-level review pipeline.
-// If teams are enabled, dispatches red team first. Otherwise, goes straight to reviewer.
 // Caller must hold exec.mu.
 func (c *Component) beginRequirementReviewLocked(ctx context.Context, exec *requirementExecution) {
-	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		c.dispatchRequirementRedTeamLocked(ctx, exec)
-	} else {
-		c.dispatchRequirementReviewerLocked(ctx, exec)
-	}
-}
-
-// dispatchRequirementRedTeamLocked dispatches the red team challenge for a requirement.
-// Caller must hold exec.mu.
-func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *requirementExecution) {
-	taskID := fmt.Sprintf("requirement-red-%s-%s", exec.EntityID, uuid.New().String())
-	exec.RedTeamTaskID = taskID
-
-	// Create a worktree for the red team so it can access merged files.
-	if c.sandbox != nil && exec.RequirementBranch != "" {
-		if _, err := c.sandbox.CreateWorktree(ctx, taskID, sandbox.WithBaseBranch(exec.RequirementBranch)); err != nil {
-			c.logger.Warn("Failed to create red-team worktree",
-				"task_id", taskID, "branch", exec.RequirementBranch, "error", err)
-		}
-	}
-
-	if err := c.sendReqPhase(ctx, exec.storeKey, phaseRedTeaming, map[string]any{
-		"red_team_task_id": taskID,
-	}); err != nil {
-		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseRedTeaming, "error", err)
-	}
-
-	asmCtx := c.buildRequirementReviewContext(exec)
-	asmCtx.RedTeamContext = &prompt.RedTeamContext{
-		BlueTeamFiles:   c.aggregateFiles(exec),
-		BlueTeamSummary: c.aggregateNodeSummaries(exec),
-	}
-	assembled := c.assembler.Assemble(asmCtx)
-
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleDeveloper,
-		Model:        exec.Model,
-		Tools:        terminal.ToolsForDeliverable("review", availableToolNames()...),
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageRequirementRedTeam,
-		Prompt:       c.buildReviewPrompt(exec),
-		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleScenarioReviewer, asmCtx.AvailableTools),
-		Context: &agentic.ConstructedContext{
-			Content: assembled.SystemMessage,
-		},
-		Metadata: map[string]any{
-			"requirement_id": exec.RequirementID,
-			"plan_slug":      exec.Slug,
-			"task_id":        taskID,
-		},
-	}
-	if err := c.publishTask(ctx, "agent.task.red-team", task); err != nil {
-		c.logger.Error("Failed to dispatch requirement red team, falling back to reviewer", "error", err)
-		// Fallback: skip red team, go directly to reviewer.
-		c.dispatchRequirementReviewerLocked(ctx, exec)
-		return
-	}
-
-	c.logger.Info("Dispatched requirement red team",
-		"entity_id", exec.EntityID,
-		"task_id", taskID,
-	)
-}
-
-// handleRequirementRedTeamCompleteLocked processes the red team challenge result.
-// Caller must hold exec.mu.
-func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-
-	if event.Outcome != agentic.OutcomeSuccess {
-		c.logger.Warn("Requirement red team loop failed, proceeding to reviewer without red-team input",
-			"entity_id", exec.EntityID, "outcome", event.Outcome)
-		// Skip result parsing — red team is optional, proceed directly to reviewer.
-		if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, nil); err != nil {
-			c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
-		}
-		c.dispatchRequirementReviewerLocked(ctx, exec)
-		return
-	}
-
-	if event.Result != "" {
-		var challenge payloads.RedTeamChallengeResult
-		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &challenge); err != nil {
-			c.logger.Warn("Failed to parse requirement red team result, proceeding to reviewer",
-				"entity_id", exec.EntityID, "error", err)
-		} else {
-			exec.RedTeamChallenge = &challenge
-		}
-	}
-
-	if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, nil); err != nil {
-		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
-	}
 	c.dispatchRequirementReviewerLocked(ctx, exec)
 }
 
@@ -1118,13 +1018,6 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	}
 
 	asmCtx := c.buildRequirementReviewContext(exec)
-	// Wire red team findings if available.
-	if exec.RedTeamChallenge != nil && asmCtx.ScenarioReviewContext != nil {
-		asmCtx.ScenarioReviewContext.RedTeamFindings = &prompt.RedTeamContext{
-			BlueTeamFiles:   c.aggregateFiles(exec),
-			BlueTeamSummary: c.aggregateNodeSummaries(exec),
-		}
-	}
 	assembled := c.assembler.Assemble(asmCtx)
 
 	task := &agentic.TaskMessage{
@@ -1665,15 +1558,12 @@ func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 	}
 
 	// Clean up worktrees: node worktrees kept alive by execution-manager
-	// (WithKeepWorktree) and reviewer/red-team worktrees we created.
+	// (WithKeepWorktree) and reviewer worktrees we created.
 	if c.sandbox != nil {
 		var worktreeIDs []string
 		worktreeIDs = append(worktreeIDs, exec.NodeTaskIDs...)
 		if exec.ReviewerTaskID != "" {
 			worktreeIDs = append(worktreeIDs, exec.ReviewerTaskID)
-		}
-		if exec.RedTeamTaskID != "" {
-			worktreeIDs = append(worktreeIDs, exec.RedTeamTaskID)
 		}
 		for _, id := range worktreeIDs {
 			if err := c.sandbox.DeleteWorktree(context.Background(), id); err != nil {
@@ -1775,17 +1665,6 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
-}
-
-// teamsEnabled returns true when team-based requirement review is active.
-// Teams are always on unless the explicit kill switch (Teams.Enabled = false)
-// is set. The actual BlueTeamID guard at usage sites prevents nil-deref when
-// no team is assigned.
-func (c *Component) teamsEnabled() bool {
-	if c.config.Teams != nil && c.config.Teams.Enabled != nil && !*c.config.Teams.Enabled {
-		return false // explicit kill switch
-	}
-	return true
 }
 
 // ---------------------------------------------------------------------------

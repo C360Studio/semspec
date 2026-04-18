@@ -14,7 +14,6 @@ import (
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/message"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -61,30 +60,6 @@ func buildTriggerMsg(req payloads.RequirementExecutionRequest) *mockMsg {
 		panic("buildTriggerMsg: marshal envelope: " + err.Error())
 	}
 	return &mockMsg{data: data, subject: "workflow.trigger.requirement-execution-loop"}
-}
-
-// buildLoopCompletedMsg builds a *mockMsg that handleLoopCompleted can parse.
-// It constructs a proper BaseMessage so that base.Payload() returns a
-// *agentic.LoopCompletedEvent after registry lookup.
-func buildLoopCompletedMsg(t *testing.T, event agentic.LoopCompletedEvent) *mockMsg {
-	t.Helper()
-	baseMsg := message.NewBaseMessage(event.Schema(), &event, "test")
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		t.Fatalf("buildLoopCompletedMsg: marshal: %v", err)
-	}
-	return &mockMsg{data: data, subject: "agent.complete.test"}
-}
-
-// minLoopEvent returns a LoopCompletedEvent with the required fields set.
-func minLoopEvent(taskID, workflowSlug, workflowStep, outcome string) agentic.LoopCompletedEvent {
-	return agentic.LoopCompletedEvent{
-		LoopID:       "loop-" + taskID,
-		TaskID:       taskID,
-		WorkflowSlug: workflowSlug,
-		WorkflowStep: workflowStep,
-		Outcome:      outcome,
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1649,44 +1624,5 @@ func TestBuildDecomposerPrompt_IncludesPrerequisites(t *testing.T) {
 	}
 	if !strings.Contains(got, "auth/jwt.go") {
 		t.Errorf("prompt should include prereq files modified, got: %s", got)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Red team failed outcome → skip to reviewer (red team is optional)
-// ---------------------------------------------------------------------------
-
-func TestHandleRequirementRedTeamComplete_FailedOutcome_SkipsToReviewer(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:      workflow.EntityPrefix() + ".exec.req.run.p-rt",
-		Slug:          "p",
-		RequirementID: "rt",
-		RedTeamTaskID: "redteam-rt",
-		Model:         "default",
-		VisitedNodes:  make(map[string]bool),
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-redteam-rt",
-		TaskID:       "redteam-rt",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageRequirementRedTeam,
-		Outcome:      agentic.OutcomeFailed,
-	}
-
-	exec.mu.Lock()
-	c.handleRequirementRedTeamCompleteLocked(context.Background(), event, exec)
-	terminated := exec.terminated
-	exec.mu.Unlock()
-
-	// Red team is optional — failure should skip to reviewer, not fail the execution.
-	if terminated {
-		t.Error("failed red team outcome should NOT terminate — execution continues to reviewer")
-	}
-	if exec.RedTeamChallenge != nil {
-		t.Error("RedTeamChallenge should be nil when red team loop failed")
 	}
 }

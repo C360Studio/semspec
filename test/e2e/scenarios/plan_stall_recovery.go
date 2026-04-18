@@ -15,7 +15,7 @@ package scenarios
 //
 // Variants:
 //
-//	StallRecoveryRetry    — POST /retry scope=failed, wait for complete/reviewing_rollup.
+//	StallRecoveryRetry    — POST /retry scope=failed, wait for complete/reviewing_qa.
 //	StallRecoveryComplete — POST /complete (force-complete), verify status.
 //	StallRecoveryReject   — POST /reject → verify rejected → POST /retry scope=all →
 //	                        wait for implementing/ready_for_execution.
@@ -458,7 +458,7 @@ func (s *PlanStallRecoveryScenario) stageWaitForComplete(ctx context.Context, re
 			}
 			lastStatus = plan.Status
 			switch plan.Status {
-			case "complete", "reviewing_rollup":
+			case "complete", "reviewing_rollup", "reviewing_qa":
 				result.SetDetail("post_retry_status", plan.Status)
 				return nil
 			case "rejected", "error":
@@ -476,7 +476,7 @@ func (s *PlanStallRecoveryScenario) stageVerifyCompletion(ctx context.Context, r
 		return fmt.Errorf("get plan: %w", err)
 	}
 	switch plan.Status {
-	case "complete", "reviewing_rollup":
+	case "complete", "reviewing_rollup", "reviewing_qa":
 		result.SetDetail("final_status", plan.Status)
 		return nil
 	default:
@@ -520,7 +520,7 @@ func (s *PlanStallRecoveryScenario) stageVerifyForceCompleted(ctx context.Contex
 				continue
 			}
 			switch plan.Status {
-			case "complete", "reviewing_rollup":
+			case "complete", "reviewing_rollup", "reviewing_qa":
 				result.SetDetail("force_complete_final_status", plan.Status)
 				return nil
 			case "rejected", "error":

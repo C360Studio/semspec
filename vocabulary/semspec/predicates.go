@@ -1814,7 +1814,6 @@ func init() {
 	registerReviewPredicates()
 	registerErrorCategoryPredicates()
 	registerAgentPredicates()
-	registerTeamPredicates()
 }
 
 func registerRequirementPredicates() {
@@ -2044,32 +2043,6 @@ const (
 	PredicateAgentReviewCount = "agent.review.count"
 	PredicateAgentCreatedAt   = "agent.lifecycle.created_at"
 	PredicateAgentUpdatedAt   = "agent.lifecycle.updated_at"
-
-	// PredicateAgentTeamID records the team this agent is currently assigned to.
-	PredicateAgentTeamID = "agent.team.id"
-)
-
-// Team predicates for the persistent team roster.
-// Team entities group agents, accumulate aggregated review scores, shared knowledge
-// insights, and red-team assessment statistics across collaborative task executions.
-const (
-	PredicateTeamName           = "team.identity.name"
-	PredicateTeamState          = "team.status.state"
-	PredicateTeamMember         = "team.member.agent_id"
-	PredicateTeamInsight        = "team.knowledge.insight"
-	PredicateTeamQ1Avg          = "team.review.q1_avg"
-	PredicateTeamQ2Avg          = "team.review.q2_avg"
-	PredicateTeamQ3Avg          = "team.review.q3_avg"
-	PredicateTeamOverallAvg     = "team.review.overall_avg"
-	PredicateTeamReviewCount    = "team.review.count"
-	PredicateTeamRedQ1Avg       = "team.redteam.q1_avg"
-	PredicateTeamRedQ2Avg       = "team.redteam.q2_avg"
-	PredicateTeamRedQ3Avg       = "team.redteam.q3_avg"
-	PredicateTeamRedOverallAvg  = "team.redteam.overall_avg"
-	PredicateTeamRedReviewCount = "team.redteam.count"
-	PredicateTeamErrorCounts    = "team.error.counts"
-	PredicateTeamCreatedAt      = "team.lifecycle.created_at"
-	PredicateTeamUpdatedAt      = "team.lifecycle.updated_at"
 )
 
 func registerAgenticPredicates() {
@@ -2278,98 +2251,6 @@ func registerAgentPredicates() {
 
 	vocabulary.Register(PredicateAgentUpdatedAt,
 		vocabulary.WithDescription("RFC3339 timestamp when the agent entity was last modified"),
-		vocabulary.WithDataType("datetime"),
-		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
-
-	vocabulary.Register(PredicateAgentTeamID,
-		vocabulary.WithDescription("Team entity ID this agent is currently assigned to"),
-		vocabulary.WithDataType("entity_id"),
-		vocabulary.WithIRI(Namespace+"agentTeamId"))
-}
-
-func registerTeamPredicates() {
-	vocabulary.Register(PredicateTeamName,
-		vocabulary.WithDescription("Human-readable team name (e.g., backend-alpha)"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"teamIdentityName"))
-
-	vocabulary.Register(PredicateTeamState,
-		vocabulary.WithDescription("Team lifecycle state: active, benched, retired"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"teamStatusState"))
-
-	vocabulary.Register(PredicateTeamMember,
-		vocabulary.WithDescription("Persistent agent entity ID that is a member of this team (multi-valued)"),
-		vocabulary.WithDataType("entity_id"),
-		vocabulary.WithIRI(Namespace+"teamMemberAgentId"))
-
-	vocabulary.Register(PredicateTeamInsight,
-		vocabulary.WithDescription("Shared knowledge entry accumulated by the team (JSON or plain text, multi-valued)"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"teamKnowledgeInsight"))
-
-	vocabulary.Register(PredicateTeamQ1Avg,
-		vocabulary.WithDescription("Running average Q1 correctness score aggregated across team members (0–5)"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamReviewQ1Avg"))
-
-	vocabulary.Register(PredicateTeamQ2Avg,
-		vocabulary.WithDescription("Running average Q2 quality score aggregated across team members (0–5)"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamReviewQ2Avg"))
-
-	vocabulary.Register(PredicateTeamQ3Avg,
-		vocabulary.WithDescription("Running average Q3 completeness score aggregated across team members (0–5)"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamReviewQ3Avg"))
-
-	vocabulary.Register(PredicateTeamOverallAvg,
-		vocabulary.WithDescription("Mean of team Q1, Q2, and Q3 running averages"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamReviewOverallAvg"))
-
-	vocabulary.Register(PredicateTeamReviewCount,
-		vocabulary.WithDescription("Total number of peer reviews incorporated into the team running averages"),
-		vocabulary.WithDataType("int"),
-		vocabulary.WithIRI(Namespace+"teamReviewCount"))
-
-	vocabulary.Register(PredicateTeamRedQ1Avg,
-		vocabulary.WithDescription("Running average red-team Q1 accuracy score for this team (0–5)"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamRedteamQ1Avg"))
-
-	vocabulary.Register(PredicateTeamRedQ2Avg,
-		vocabulary.WithDescription("Running average red-team Q2 thoroughness score for this team (0–5)"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamRedteamQ2Avg"))
-
-	vocabulary.Register(PredicateTeamRedQ3Avg,
-		vocabulary.WithDescription("Running average red-team Q3 fairness score for this team (0–5)"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamRedteamQ3Avg"))
-
-	vocabulary.Register(PredicateTeamRedOverallAvg,
-		vocabulary.WithDescription("Mean of red-team Q1, Q2, and Q3 running averages for this team"),
-		vocabulary.WithDataType("float"),
-		vocabulary.WithIRI(Namespace+"teamRedteamOverallAvg"))
-
-	vocabulary.Register(PredicateTeamRedReviewCount,
-		vocabulary.WithDescription("Total number of red-team reviews incorporated into the team running averages"),
-		vocabulary.WithDataType("int"),
-		vocabulary.WithIRI(Namespace+"teamRedteamCount"))
-
-	vocabulary.Register(PredicateTeamErrorCounts,
-		vocabulary.WithDescription("JSON-encoded map of error category IDs to accumulated team occurrence counts"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"teamErrorCounts"))
-
-	vocabulary.Register(PredicateTeamCreatedAt,
-		vocabulary.WithDescription("RFC3339 timestamp when the team entity was first created"),
-		vocabulary.WithDataType("datetime"),
-		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
-
-	vocabulary.Register(PredicateTeamUpdatedAt,
-		vocabulary.WithDescription("RFC3339 timestamp when the team entity was last modified"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
 }

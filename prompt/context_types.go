@@ -30,27 +30,3 @@ type RequirementSummary struct {
 	// Status is the satisfaction status: "satisfied", "partially", or "failed".
 	Status string
 }
-
-// ScenarioOutcome summarises a single scenario's execution result.
-type ScenarioOutcome struct {
-	// ScenarioID is the scenario entity ID.
-	ScenarioID string
-
-	// Given is the BDD Given clause.
-	Given string
-
-	// When is the BDD When clause.
-	When string
-
-	// Then is the BDD Then assertions.
-	Then []string
-
-	// Verdict is the execution outcome: "approved", "rejected", or "failed".
-	Verdict string
-
-	// FilesModified lists files changed during this scenario's execution.
-	FilesModified []string
-
-	// RedTeamIssues is the number of red team issues raised during this scenario.
-	RedTeamIssues int
-}

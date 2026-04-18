@@ -51,6 +51,59 @@ type ProjectConfig struct {
 
 	// Repository contains VCS metadata.
 	Repository RepositoryInfo `json:"repository,omitempty"`
+
+	// QALevel is the project-wide QA policy applied at plan completion.
+	// Values: "none" (escape hatch), "synthesis" (default, LLM verdict only,
+	// no test execution), "unit" (sandbox runs project tests), "integration"
+	// (qa-runner via act), "full" (integration + e2e). Plans snapshot this
+	// value at creation — changing qa_level does not affect in-flight plans.
+	// Empty string is treated as "synthesis".
+	QALevel QALevel `json:"qa_level,omitempty"`
+
+	// QATestCommand is the shell command the sandbox runs at qa.level=unit.
+	// Empty means "infer from primary language" — see EffectiveTestCommand.
+	// Examples: "go test ./...", "npm test", "pytest", "cargo test".
+	QATestCommand string `json:"qa_test_command,omitempty"`
+}
+
+// EffectiveQALevel returns the project's QA level, defaulting to synthesis
+// when unset. Matches Plan.EffectiveQALevel so both config surfaces agree on
+// the empty-value interpretation.
+func (pc *ProjectConfig) EffectiveQALevel() QALevel {
+	if pc == nil || pc.QALevel == "" {
+		return QALevelSynthesis
+	}
+	return pc.QALevel
+}
+
+// EffectiveTestCommand returns the test command sandbox runs at level=unit.
+// When unset, infers from the primary language — Go projects run
+// `go test ./...`, Node `npm test`, Python `pytest`, Rust `cargo test`.
+// Falls through to an empty string when the language is unknown, leaving
+// the sandbox to refuse execution with a clear error.
+func (pc *ProjectConfig) EffectiveTestCommand() string {
+	if pc == nil {
+		return ""
+	}
+	if pc.QATestCommand != "" {
+		return pc.QATestCommand
+	}
+	for _, l := range pc.Languages {
+		if !l.Primary {
+			continue
+		}
+		switch l.Name {
+		case "Go":
+			return "go test ./..."
+		case "TypeScript", "JavaScript":
+			return "npm test"
+		case "Python":
+			return "pytest"
+		case "Rust":
+			return "cargo test"
+		}
+	}
+	return ""
 }
 
 // LanguageInfo describes a detected programming language.
@@ -429,6 +482,21 @@ func LoadStandardsFromDisk(repoRoot string) *Standards {
 		return nil
 	}
 	return &standards
+}
+
+// LoadProjectConfigFromDisk reads .semspec/project.json from the given repo
+// root. Returns nil when the file is missing or malformed — callers should
+// treat nil as "use defaults." Mirrors LoadStandardsFromDisk.
+func LoadProjectConfigFromDisk(repoRoot string) *ProjectConfig {
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".semspec", ProjectConfigFile))
+	if err != nil {
+		return nil
+	}
+	var pc ProjectConfig
+	if err := json.Unmarshal(data, &pc); err != nil {
+		return nil
+	}
+	return &pc
 }
 
 // InitStatus describes the current initialization state of the project.

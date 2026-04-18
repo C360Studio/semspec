@@ -62,9 +62,9 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 
-		// --- Plan-level rollup reviewer (read-only) ---
+		// --- Plan-level QA reviewer (release-readiness verdict, read-only) ---
 
-		RolePlanRollupReviewer: {
+		RolePlanQAReviewer: {
 			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 

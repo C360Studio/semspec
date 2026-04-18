@@ -60,9 +60,6 @@ const (
 	// AgentID is the agentic loop ID assigned to this execution stage.
 	AgentID = "workflow.execution.agent_id"
 
-	// BlueTeamID is the blue-team oversight loop ID for this execution stage.
-	BlueTeamID = "workflow.execution.blue_team_id"
-
 	// Model is the LLM model used for this execution.
 	Model = "workflow.execution.model"
 
@@ -280,11 +277,6 @@ func registerTrackingPredicates() {
 		vocabulary.WithDescription("Agentic loop ID assigned to this execution stage"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"agentID"))
-
-	vocabulary.Register(BlueTeamID,
-		vocabulary.WithDescription("Blue-team oversight loop ID for this execution stage"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"blueTeamID"))
 
 	vocabulary.Register(Model,
 		vocabulary.WithDescription("LLM model used for this execution"),

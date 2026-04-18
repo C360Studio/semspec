@@ -206,6 +206,50 @@ func (c *Component) getRepoRoot(w http.ResponseWriter) string {
 	return repoRoot
 }
 
+// resolveRepoRoot returns the repository root path without HTTP side
+// effects, for callers that run outside a request scope. Falls back to the
+// current working directory silently; logs a warning if even that fails.
+func (c *Component) resolveRepoRoot() string {
+	if v := os.Getenv("SEMSPEC_REPO_PATH"); v != "" {
+		return v
+	}
+	wd, err := os.Getwd()
+	if err != nil {
+		c.logger.Warn("Failed to resolve repo root", "error", err)
+		return "."
+	}
+	return wd
+}
+
+// resolveProjectHostPath returns the HOST filesystem path to the project
+// workspace. This differs from resolveRepoRoot: semspec runs in a container
+// where the workspace is mounted at a container path (e.g., /workspace), but
+// qa-runner needs the HOST path to bind-mount when it spawns act's sibling
+// containers via the Docker socket.
+//
+// Reads PROJECT_HOST_PATH env var (set by compose from ${SEMSPEC_REPO:-.}).
+// Falls back to SEMSPEC_REPO for host-run scenarios. Returns empty string
+// when neither is resolvable — caller should reject the publish rather than
+// invent a bogus path.
+func (c *Component) resolveProjectHostPath() string {
+	if v := os.Getenv("PROJECT_HOST_PATH"); v != "" {
+		return v
+	}
+	// Host-run (no container): the host path IS the repo root.
+	if v := os.Getenv("SEMSPEC_REPO"); v != "" {
+		return v
+	}
+	return ""
+}
+
+// resolveProjectQALevel reads the project config from disk and returns its
+// QA level, falling back to QALevelSynthesis when project.json is missing
+// or has no qa_level set. Call this when creating a new plan so the plan's
+// QA policy is a point-in-time snapshot of project policy.
+func (c *Component) resolveProjectQALevel() workflow.QALevel {
+	return workflow.LoadProjectConfigFromDisk(c.resolveRepoRoot()).EffectiveQALevel()
+}
+
 // findExecutionBySlug searches for a completed workflow execution with the given slug.
 func (c *Component) findExecutionBySlug(ctx context.Context, bucket jetstream.KeyValue, slug string) (*WorkflowExecution, error) {
 	if bucket == nil {
@@ -605,8 +649,9 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create new plan
-	plan, err := ps.create(ctx, slug, title)
+	// Create new plan — snapshot the project's current QA level onto the plan
+	// so its policy is immutable under project-config changes.
+	plan, err := ps.create(ctx, slug, title, c.resolveProjectQALevel())
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)
@@ -655,40 +700,6 @@ func (c *Component) respondWithExistingPlan(w http.ResponseWriter, r *http.Reque
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
-}
-
-// triggerPlanCoordinator builds and publishes a plan-coordinator trigger.
-// It returns the generated requestID that callers include in their response.
-func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.Plan, traceID string) (string, error) {
-	requestID := uuid.New().String()
-
-	req := &payloads.PlanCoordinatorRequest{
-		RequestID:   requestID,
-		Slug:        plan.Slug,
-		Title:       plan.Title,
-		Description: plan.Title,
-		ProjectID:   plan.ProjectID,
-		TraceID:     traceID,
-	}
-
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		c.logger.Error("Failed to marshal plan-coordinator trigger", "error", err)
-		return "", fmt.Errorf("Internal error")
-	}
-
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-coordinator", data); err != nil {
-		c.logger.Error("Failed to trigger plan-coordinator", "error", err)
-		return "", fmt.Errorf("Failed to start planning")
-	}
-
-	c.logger.Info("Triggered plan-coordinator",
-		"request_id", requestID,
-		"slug", plan.Slug,
-		"trace_id", traceID)
-
-	return requestID, nil
 }
 
 // handleListPlans handles GET /plan-api/plans.
@@ -935,6 +946,10 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "implementing"
 	case workflow.StatusReviewingRollup:
 		return "reviewing_rollup"
+	case workflow.StatusReadyForQA:
+		return "ready_for_qa"
+	case workflow.StatusReviewingQA:
+		return "reviewing_qa"
 	case workflow.StatusAwaitingReview:
 		return "awaiting_review"
 	case workflow.StatusComplete:
@@ -1344,18 +1359,23 @@ func (c *Component) handleForceCompletePlan(w http.ResponseWriter, r *http.Reque
 		}
 
 	case workflow.StatusImplementing:
-		// Force-complete: attempt rollup review first; fall back based on review gate config.
-		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReviewingRollup); err != nil {
-			c.logger.Warn("Rollup transition rejected, routing based on review gate config", "slug", slug, "error", err)
-			target := workflow.StatusComplete
+		// Force-complete: route to the plan's QA-level target; fall back to
+		// complete/awaiting_review if the transition is rejected.
+		target := c.targetForQALevel(plan.EffectiveQALevel(), plan, slug)
+		if err := c.setPlanStatusCached(r.Context(), plan, target); err != nil {
+			c.logger.Warn("QA-level transition rejected, routing based on review gate config", "slug", slug, "error", err)
+			fallback := workflow.StatusComplete
 			if c.shouldGateReview(plan) {
-				target = workflow.StatusAwaitingReview
+				fallback = workflow.StatusAwaitingReview
 			}
-			if err := c.setPlanStatusCached(r.Context(), plan, target); err != nil {
+			if err := c.setPlanStatusCached(r.Context(), plan, fallback); err != nil {
 				c.logger.Error("Failed to force-complete plan", "slug", slug, "error", err)
 				writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
+		} else {
+			// If we routed to ready_for_qa, fire the executor dispatch.
+			c.publishQARequestIfNeeded(r.Context(), plan)
 		}
 
 	default:

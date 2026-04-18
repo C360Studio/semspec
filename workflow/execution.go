@@ -36,9 +36,7 @@ type TaskExecution struct {
 	TaskType    TaskType `json:"task_type,omitempty"`
 
 	// Agent identity (Phase B)
-	AgentID    string `json:"agent_id,omitempty"`
-	BlueTeamID string `json:"blue_team_id,omitempty"`
-	RedTeamID  string `json:"red_team_id,omitempty"`
+	AgentID string `json:"agent_id,omitempty"`
 
 	// Sandbox worktree (persists across retries)
 	WorktreePath   string   `json:"worktree_path,omitempty"`
@@ -56,7 +54,6 @@ type TaskExecution struct {
 	DeveloperTaskID string `json:"developer_task_id,omitempty"`
 	ValidatorTaskID string `json:"validator_task_id,omitempty"`
 	ReviewerTaskID  string `json:"reviewer_task_id,omitempty"`
-	RedTeamTaskID   string `json:"red_team_task_id,omitempty"`
 
 	// Review outcome
 	Verdict          string `json:"verdict,omitempty"`        // "approved" or "rejected"
@@ -128,10 +125,6 @@ type RequirementExecution struct {
 	Role       string          `json:"role,omitempty"`
 	PlanBranch string          `json:"plan_branch,omitempty"`
 
-	// Agent
-	BlueTeamID string `json:"blue_team_id,omitempty"`
-	RedTeamID  string `json:"red_team_id,omitempty"`
-
 	// DAG decomposition
 	NodeCount      int             `json:"node_count,omitempty"`
 	CurrentNodeIdx int             `json:"current_node_idx"` // -1 before execution starts
@@ -143,7 +136,6 @@ type RequirementExecution struct {
 	DecomposerTaskID  string `json:"decomposer_task_id,omitempty"`
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`
 	ReviewerTaskID    string `json:"reviewer_task_id,omitempty"`
-	RedTeamTaskID     string `json:"red_team_task_id,omitempty"`
 
 	// Branch
 	RequirementBranch string `json:"requirement_branch,omitempty"`

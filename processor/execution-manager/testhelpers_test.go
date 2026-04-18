@@ -130,15 +130,6 @@ func testCtx(t *testing.T) context.Context {
 }
 
 // ---------------------------------------------------------------------------
-// makeNATSMsg wraps raw bytes in a *mockMsg for handleLoopCompleted tests.
-// ---------------------------------------------------------------------------
-
-func makeNATSMsg(t *testing.T, data []byte) *mockMsg {
-	t.Helper()
-	return &mockMsg{data: data}
-}
-
-// ---------------------------------------------------------------------------
 // mockKVEntry implements jetstream.KeyValueEntry for handleTaskPending tests.
 // ---------------------------------------------------------------------------
 
@@ -168,49 +159,4 @@ func makeKVEntry(t *testing.T, key string, fields map[string]any) *mockKVEntry {
 		value: data,
 		op:    jetstream.KeyValuePut,
 	}
-}
-
-// ---------------------------------------------------------------------------
-// makeLoopCompletedMsg builds a BaseMessage-wrapped agentic.LoopCompletedEvent.
-//
-// The message.BaseMessage.Payload() method returns registered types; here we
-// marshal raw JSON that the component will attempt to type-assert. For tests
-// that only need to exercise routing guards (wrong slug, unknown task ID), the
-// payload type assertion failing is fine — it causes an early return before
-// any state is mutated.
-// ---------------------------------------------------------------------------
-
-func makeLoopCompletedMsg(t *testing.T, workflowSlug, taskID, workflowStep, resultJSON string) []byte {
-	t.Helper()
-
-	// Build the inner LoopCompletedEvent payload fields.
-	event := map[string]any{
-		"workflow_slug": workflowSlug,
-		"task_id":       taskID,
-		"workflow_step": workflowStep,
-		"result":        resultJSON,
-	}
-	payloadBytes, err := json.Marshal(event)
-	if err != nil {
-		t.Fatalf("makeLoopCompletedMsg: marshal event: %v", err)
-	}
-
-	// The component calls json.Unmarshal into message.BaseMessage and then
-	// calls base.Payload() which uses the payload registry. For routing guard
-	// tests we only need the outer envelope to be valid JSON — the type
-	// assertion will fail (because the payload factory isn't registered in
-	// unit tests) and the handler will return early, which is acceptable.
-	envelope := map[string]any{
-		"type": map[string]any{
-			"domain":   "agentic",
-			"category": "loop-completed",
-			"version":  "v1",
-		},
-		"payload": json.RawMessage(payloadBytes),
-	}
-	data, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatalf("makeLoopCompletedMsg: marshal envelope: %v", err)
-	}
-	return data
 }

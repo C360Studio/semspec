@@ -118,8 +118,6 @@ func (c *Component) handleReqPending(ctx context.Context, entry jetstream.KeyVal
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 		MaxRetries:     c.config.MaxRequirementRetries,
-		BlueTeamID:     reqExec.BlueTeamID,
-		RedTeamID:      reqExec.RedTeamID,
 		storeKey:       key,
 	}
 

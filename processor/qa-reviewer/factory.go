@@ -1,4 +1,4 @@
-package rollupreviewer
+package qareviewer
 
 import (
 	"fmt"
@@ -11,19 +11,19 @@ type RegistryInterface interface {
 	RegisterWithConfig(component.RegistrationConfig) error
 }
 
-// Register registers the rollup-reviewer component with the given registry.
+// Register registers the qa-reviewer component with the given registry.
 func Register(registry RegistryInterface) error {
 	if registry == nil {
 		return fmt.Errorf("registry cannot be nil")
 	}
 	return registry.RegisterWithConfig(component.RegistrationConfig{
-		Name:        "rollup-reviewer",
+		Name:        "qa-reviewer",
 		Factory:     NewComponent,
-		Schema:      rollupReviewerSchema,
+		Schema:      qaReviewerSchema,
 		Type:        "processor",
 		Protocol:    "workflow",
 		Domain:      "semspec",
-		Description: "Reviews completed plan rollups; Phase 1 auto-approves to unblock the pipeline",
+		Description: "Renders the release-readiness verdict for completed plans; Phase 2 auto-approves, Phase 6 wires LLM review scoped by qa.level",
 		Version:     "0.1.0",
 	})
 }

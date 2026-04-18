@@ -11,7 +11,7 @@ import (
 )
 
 // watchLoopCompletions watches the AGENT_LOOPS KV bucket for agentic loop
-// completions (decomposer, requirement reviewer, red-team). These are direct
+// completions (decomposer, requirement reviewer). These are direct
 // agentic loops dispatched by requirement-executor — not routed through
 // execution-manager's TDD pipeline.
 //
@@ -111,8 +111,6 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 	switch {
 	case loop.TaskID == exec.DecomposerTaskID:
 		c.handleDecomposerCompleteLocked(ctx, event, exec)
-	case loop.TaskID == exec.RedTeamTaskID:
-		c.handleRequirementRedTeamCompleteLocked(ctx, event, exec)
 	case loop.TaskID == exec.ReviewerTaskID:
 		c.handleRequirementReviewerCompleteLocked(ctx, event, exec)
 	}
@@ -230,8 +228,7 @@ func (c *Component) findExecByTaskID(taskID string) *requirementExecution {
 		}
 		if exec.DecomposerTaskID == taskID ||
 			exec.CurrentNodeTaskID == taskID ||
-			exec.ReviewerTaskID == taskID ||
-			exec.RedTeamTaskID == taskID {
+			exec.ReviewerTaskID == taskID {
 			found = exec
 			break
 		}

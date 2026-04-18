@@ -11,13 +11,11 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
 // Mutation subjects — must match execution-manager/mutations.go constants.
 const (
-	mutReqCreate  = "execution.mutation.req.create"
 	mutReqPhase   = "execution.mutation.req.phase"
 	mutReqNode    = "execution.mutation.req.node"
 	mutTaskCreate = "execution.mutation.task.create"
@@ -28,35 +26,6 @@ type execMutationResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
 	Key     string `json:"key,omitempty"`
-}
-
-// sendReqCreate sends a requirement execution creation mutation to execution-manager.
-// Returns the store key on success.
-func (c *Component) sendReqCreate(ctx context.Context, exec *requirementExecution, trigger *payloads.RequirementExecutionRequest) (string, error) {
-	req := map[string]any{
-		"slug":           trigger.Slug,
-		"requirement_id": trigger.RequirementID,
-		"title":          trigger.Title,
-		"description":    trigger.Description,
-		"project_id":     trigger.ProjectID,
-		"trace_id":       trigger.TraceID,
-		"loop_id":        trigger.LoopID,
-		"request_id":     trigger.RequestID,
-		"model":          trigger.Model,
-		"scenarios":      exec.Scenarios,
-	}
-	if exec.BlueTeamID != "" {
-		req["blue_team_id"] = exec.BlueTeamID
-	}
-	if exec.RedTeamID != "" {
-		req["red_team_id"] = exec.RedTeamID
-	}
-
-	resp, err := c.sendMutation(ctx, mutReqCreate, req)
-	if err != nil {
-		return "", err
-	}
-	return resp.Key, nil
 }
 
 // sendReqPhase sends a phase transition mutation to execution-manager.

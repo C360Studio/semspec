@@ -28,7 +28,7 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 		}
 		return &agentic.ToolChoice{Mode: "required"}
 
-	case RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleScenarioReviewer, RolePlanRollupReviewer:
+	case RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleScenarioReviewer, RolePlanQAReviewer:
 		// Reviewers submit verdict via submit_work deliverable — must call tools
 		return &agentic.ToolChoice{Mode: "required"}
 

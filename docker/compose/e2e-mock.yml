@@ -30,6 +30,12 @@ services:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
       - SANDBOX_URL=http://sandbox:8090
+      # Mock-LLM fixtures don't depend on semsource graph data, so don't
+      # wait the full 60s readiness budget before the first plan dispatches.
+      # Base e2e.yml sets 60s which consistently pushed wait-for-plan-goal
+      # past its 60s scenario timeout. 5s is plenty — if semsource is going
+      # to come up in a mock stack it's up in milliseconds.
+      - SEMSOURCE_READINESS_BUDGET=5s
     depends_on:
       nats:
         condition: service_healthy

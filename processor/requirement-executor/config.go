@@ -6,13 +6,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/component"
-
-	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 )
-
-// TeamsConfig is an alias for the execution-orchestrator TeamsConfig so that
-// requirement-executor can share the same team roster format.
-type TeamsConfig = executionmanager.TeamsConfig
 
 // requirementExecutorSchema is the pre-generated schema for this component.
 var requirementExecutorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
@@ -51,11 +45,6 @@ type Config struct {
 	// requirement reviewer when its verdict is empty or unparseable. Independent
 	// of requirement-level retries. Default: 3.
 	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse/verdict failure,category:advanced,default:3,min:0,max:5"`
-
-	// Teams configures requirement-level team-based review. When Teams.Enabled is true
-	// and at least two teams are defined, a red team challenge runs after all DAG
-	// nodes complete before the reviewer makes a final verdict.
-	Teams *TeamsConfig `json:"teams,omitempty" schema:"type:object,description:Team-based execution configuration,category:advanced"`
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
@@ -131,15 +120,6 @@ func (c Config) withDefaults() Config {
 func (c *Config) Validate() error {
 	if c.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")
-	}
-	// Validate explicitly provided roster entries. Empty roster is fine —
-	// execution-manager auto-generates defaults.
-	if c.Teams != nil {
-		for i, team := range c.Teams.Roster {
-			if len(team.Members) == 0 {
-				return fmt.Errorf("teams.roster[%d] (%q) must have at least 1 member", i, team.Name)
-			}
-		}
 	}
 	return nil
 }

@@ -1180,6 +1180,12 @@ components:
                 platform:
                     nullable: true
                     type: string
+                qa_level:
+                    nullable: true
+                    type: string
+                qa_test_command:
+                    nullable: true
+                    type: string
             type: object
         CreatePlanRequest:
             properties:
@@ -2052,6 +2058,50 @@ components:
                                     - rationale
                                 type: object
                             type: array
+                        test_surface:
+                            nullable: true
+                            properties:
+                                e2e_flows:
+                                    items:
+                                        properties:
+                                            actor:
+                                                type: string
+                                            steps:
+                                                items:
+                                                    type: string
+                                                type: array
+                                            success_criteria:
+                                                items:
+                                                    type: string
+                                                type: array
+                                        required:
+                                            - actor
+                                            - steps
+                                            - success_criteria
+                                        type: object
+                                    type: array
+                                integration_flows:
+                                    items:
+                                        properties:
+                                            components_involved:
+                                                items:
+                                                    type: string
+                                                type: array
+                                            description:
+                                                type: string
+                                            name:
+                                                type: string
+                                            scenario_refs:
+                                                items:
+                                                    type: string
+                                                type: array
+                                        required:
+                                            - name
+                                            - components_involved
+                                            - description
+                                        type: object
+                                    type: array
+                            type: object
                     required:
                         - technology_choices
                         - component_boundaries
@@ -2066,6 +2116,20 @@ components:
                             affected_requirement_ids:
                                 items:
                                     type: string
+                                type: array
+                            artifact_references:
+                                items:
+                                    properties:
+                                        path:
+                                            type: string
+                                        purpose:
+                                            type: string
+                                        type:
+                                            type: string
+                                    required:
+                                        - path
+                                        - type
+                                    type: object
                                 type: array
                             created_at:
                                 format: date-time
@@ -2172,6 +2236,8 @@ components:
                             type: array
                     type: object
                 project_id:
+                    type: string
+                qa_level:
                     type: string
                 requirements:
                     items:
@@ -2404,6 +2470,50 @@ components:
                                     - rationale
                                 type: object
                             type: array
+                        test_surface:
+                            nullable: true
+                            properties:
+                                e2e_flows:
+                                    items:
+                                        properties:
+                                            actor:
+                                                type: string
+                                            steps:
+                                                items:
+                                                    type: string
+                                                type: array
+                                            success_criteria:
+                                                items:
+                                                    type: string
+                                                type: array
+                                        required:
+                                            - actor
+                                            - steps
+                                            - success_criteria
+                                        type: object
+                                    type: array
+                                integration_flows:
+                                    items:
+                                        properties:
+                                            components_involved:
+                                                items:
+                                                    type: string
+                                                type: array
+                                            description:
+                                                type: string
+                                            name:
+                                                type: string
+                                            scenario_refs:
+                                                items:
+                                                    type: string
+                                                type: array
+                                        required:
+                                            - name
+                                            - components_involved
+                                            - description
+                                        type: object
+                                    type: array
+                            type: object
                     required:
                         - technology_choices
                         - component_boundaries
@@ -2418,6 +2528,20 @@ components:
                             affected_requirement_ids:
                                 items:
                                     type: string
+                                type: array
+                            artifact_references:
+                                items:
+                                    properties:
+                                        path:
+                                            type: string
+                                        purpose:
+                                            type: string
+                                        type:
+                                            type: string
+                                    required:
+                                        - path
+                                        - type
+                                    type: object
                                 type: array
                             created_at:
                                 format: date-time
@@ -2541,6 +2665,8 @@ components:
                             type: array
                     type: object
                 project_id:
+                    type: string
+                qa_level:
                     type: string
                 requirements:
                     items:
@@ -2702,6 +2828,10 @@ components:
                 org:
                     type: string
                 platform:
+                    type: string
+                qa_level:
+                    type: string
+                qa_test_command:
                     type: string
                 repository:
                     properties:

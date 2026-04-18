@@ -96,6 +96,15 @@
           "mock-fast"
         ],
         "fallback": []
+      },
+      "qa": {
+        "description": "QA release-readiness review (mock: returns approved verdict)",
+        "preferred": [
+          "mock-qa-reviewer"
+        ],
+        "fallback": [
+          "mock-reviewer"
+        ]
       }
     },
     "endpoints": {
@@ -160,6 +169,14 @@
         "url": "http://mock-llm:11434/v1",
         "model": "mock-fast",
         "max_tokens": 32768
+      },
+      "mock-qa-reviewer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-qa-reviewer",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
       }
     },
     "defaults": {
@@ -575,13 +592,12 @@
         }
       }
     },
-    "rollup-reviewer": {
-      "name": "rollup-reviewer",
+    "qa-reviewer": {
+      "name": "qa-reviewer",
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "qa",
-        "skip_review": true
+        "default_capability": "qa"
       }
     }
   },

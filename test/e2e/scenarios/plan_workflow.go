@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"time"
 
 	"github.com/c360studio/semspec/test/e2e/client"
@@ -241,30 +243,6 @@ func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *R
 	}
 
 	result.SetDetail("approve_verified", true)
-	return nil
-}
-
-// stageExecuteDryRun tests ExecutePlan via REST API.
-func (s *PlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result *Result) error {
-	expectedSlug, _ := result.GetDetailString("expected_slug")
-
-	resp, err := s.http.ExecutePlan(ctx, expectedSlug)
-	if err != nil {
-		return fmt.Errorf("execute plan: %w", err)
-	}
-
-	if resp.Error != "" {
-		return fmt.Errorf("execute returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("execute_response", resp)
-	result.SetDetail("batch_id", resp.BatchID)
-	return nil
-}
-
-// stageExecuteVerify verifies execution was triggered for the plan.
-func (s *PlanWorkflowScenario) stageExecuteVerify(_ context.Context, result *Result) error {
-	result.SetDetail("execute_verified", true)
 	return nil
 }
 
@@ -625,4 +603,29 @@ func (s *PlanWorkflowScenario) stageVerifyHealthEndpoint(ctx context.Context, re
 	}
 	result.SetDetail("health_status", status)
 	return nil
+}
+
+// httpGetJSON performs a GET request and decodes the JSON response.
+func httpGetJSON(ctx context.Context, url string) (any, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("GET %s: status %d", url, resp.StatusCode)
+	}
+	var result any
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("decode JSON: %w", err)
+	}
+	return result, nil
 }

@@ -37,9 +37,6 @@ type AssemblyContext struct {
 	// ReviewContext carries review-specific data for reviewer prompts.
 	ReviewContext *ReviewContext
 
-	// RedTeamContext carries data for red team review prompts.
-	RedTeamContext *RedTeamContext
-
 	// LessonsLearned carries role-scoped lesson data for prompt injection.
 	LessonsLearned *LessonsLearned
 
@@ -49,8 +46,8 @@ type AssemblyContext struct {
 	// ScenarioReviewContext carries data for scenario-level review prompts.
 	ScenarioReviewContext *ScenarioReviewContext
 
-	// RollupReviewContext carries data for plan-level rollup review prompts.
-	RollupReviewContext *RollupReviewContext
+	// QAReviewContext carries data for QA release-readiness review prompts.
+	QAReviewContext *QAReviewContext
 
 	// Persona carries optional persona configuration for this role.
 	// When non-nil, a CategoryPersona fragment is injected into the prompt.
@@ -98,6 +95,13 @@ type TaskContext struct {
 	// .semspec/checklist.json. When non-empty, prompt fragments inject the
 	// actual check names and commands instead of a hardcoded generic list.
 	Checklist []workflow.Check
+
+	// TestSurface is the architect's declared test coverage — integration
+	// flows to exercise cross-component behavior and e2e flows to exercise
+	// actor-driven user-visible outcomes. When non-nil, developer prompts
+	// render this as "tests you must write" guidance. Phase 5 threads the
+	// struct + prompt; Phase 5.1 wires the value through execution-manager.
+	TestSurface *workflow.TestSurface
 }
 
 // PlanContext carries data for planner prompts.
@@ -142,14 +146,6 @@ type PlanContext struct {
 	FocusContext *FocusContextInfo
 }
 
-// RedTeamContext carries data for red team review prompts.
-type RedTeamContext struct {
-	// BlueTeamFiles lists files the blue team modified.
-	BlueTeamFiles []string
-	// BlueTeamSummary is the blue team's implementation summary.
-	BlueTeamSummary string
-}
-
 // ReviewContext carries data for reviewer prompts.
 type ReviewContext struct {
 	// PlanSlug is the plan slug being reviewed.
@@ -183,9 +179,6 @@ type ScenarioReviewContext struct {
 	// FilesModified is the aggregate list of files changed across all nodes.
 	FilesModified []string
 
-	// RedTeamFindings is present when a red team challenge preceded this review.
-	RedTeamFindings *RedTeamContext
-
 	// RetryFeedback carries the reviewer's feedback from a prior rejection.
 	// When non-empty, this is a retry — the reviewer should note what was fixed.
 	RetryFeedback string
@@ -199,22 +192,46 @@ type ScenarioSpec struct {
 	Then  []string `json:"then"`
 }
 
-// RollupReviewContext carries data for plan-level rollup review prompts.
-type RollupReviewContext struct {
-	// PlanTitle is the plan title.
+// QAReviewContext carries data for QA release-readiness review prompts.
+// It is populated by qa-reviewer when dispatching the LLM agent.
+type QAReviewContext struct {
+	// PlanTitle is the human-readable plan title.
 	PlanTitle string
 
-	// PlanGoal is the plan goal.
+	// PlanGoal is the plan's stated goal.
 	PlanGoal string
 
-	// Requirements summarises each requirement's completion status.
+	// Requirements summarises each requirement's execution status.
 	Requirements []RequirementSummary
 
-	// ScenarioOutcomes summarises each scenario's result.
-	ScenarioOutcomes []ScenarioOutcome
+	// TestSurface is the architect's declared test coverage matrix.
+	// Contains integration flows and e2e flows the developer was expected to implement.
+	// Nil when the plan has no architecture phase (synthesis-level review).
+	TestSurface *workflow.TestSurface
 
-	// AggregateFiles is the total list of files modified across all scenarios.
-	AggregateFiles []string
+	// QALevel is the project QA policy the executor ran at.
+	QALevel workflow.QALevel
+
+	// Passed is true when the QA executor reported no test failures.
+	// Always false for synthesis-level review (no tests were run).
+	Passed bool
+
+	// Failures lists individual test or CI job failures from the QA executor.
+	// Empty for synthesis-level review or when Passed is true.
+	Failures []workflow.QAFailure
+
+	// Artifacts lists workspace-relative references to logs, screenshots, traces,
+	// and coverage reports produced by the QA run.
+	Artifacts []workflow.QAArtifactRef
+
+	// FilesModifiedDiff is the aggregate set of files changed across all requirements.
+	// Derived from plan.Requirements[*].FilesModified at review time.
+	FilesModifiedDiff []string
+
+	// RunnerError describes an infrastructure failure in the QA executor itself
+	// (e.g., sandbox timeout, docker failure). Distinct from test failures.
+	// Empty when the executor ran cleanly regardless of test outcomes.
+	RunnerError string
 }
 
 // HasTool returns true if the named tool is in AvailableTools.

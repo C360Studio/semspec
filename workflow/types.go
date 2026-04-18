@@ -48,6 +48,15 @@ const (
 	// StatusChanged indicates requirements were deprecated via a change proposal
 	// and the plan is awaiting partial requirement regeneration.
 	StatusChanged Status = "changed"
+	// StatusReadyForQA indicates the plan is waiting for the QA executor (sandbox at
+	// level=unit, qa-runner at level=integration or full) to run project tests.
+	// Entered at implementing convergence when qa.level ≥ unit; skipped for
+	// level=synthesis (which goes straight to reviewing_qa) and level=none.
+	StatusReadyForQA Status = "ready_for_qa"
+	// StatusReviewingQA indicates qa-reviewer is producing the release-readiness
+	// verdict. Entered for all non-"none" levels. Inputs vary by level:
+	// synthesis reads plan+impl only; unit/integration/full add test results.
+	StatusReviewingQA Status = "reviewing_qa"
 
 	// In-progress statuses — claimed by watchers via plan.mutation.claim before
 	// starting work. Plan-manager's single-writer serialization ensures only one
@@ -78,6 +87,57 @@ func (s Status) String() string {
 	return string(s)
 }
 
+// QALevel describes the project-level quality-assurance depth applied at
+// plan completion. Each level is a strict superset of the previous and uses
+// different execution substrate.
+type QALevel string
+
+const (
+	// QALevelNone skips qa-reviewer entirely. Escape hatch for doc-only hotfix
+	// plans; un-advertised and should not be the default.
+	QALevelNone QALevel = "none"
+	// QALevelSynthesis runs qa-reviewer with no test execution. Preserves the
+	// pre-QA-phase rollup review behavior. Default.
+	QALevelSynthesis QALevel = "synthesis"
+	// QALevelUnit runs the project's existing test suite in the sandbox at
+	// plan-completion time, then qa-reviewer interprets. No qa-runner needed.
+	QALevelUnit QALevel = "unit"
+	// QALevelIntegration runs .github/workflows/qa.yml via the qa-runner
+	// container (act-based). Adds integration-tagged tests with real fixtures.
+	QALevelIntegration QALevel = "integration"
+	// QALevelFull adds e2e browser flows (Playwright) on top of integration,
+	// with screenshot/trace/video artifact collection.
+	QALevelFull QALevel = "full"
+)
+
+// String returns the string representation of the QA level.
+func (l QALevel) String() string {
+	return string(l)
+}
+
+// IsValid returns true if the level is one of the defined values.
+func (l QALevel) IsValid() bool {
+	switch l {
+	case QALevelNone, QALevelSynthesis, QALevelUnit, QALevelIntegration, QALevelFull:
+		return true
+	default:
+		return false
+	}
+}
+
+// UsesQARunner returns true if this level requires the qa-runner container.
+// Synthesis runs in-process; unit runs in the sandbox; integration and full
+// require the act-based qa-runner.
+func (l QALevel) UsesQARunner() bool {
+	return l == QALevelIntegration || l == QALevelFull
+}
+
+// UsesSandboxTests returns true if this level runs the project's test suite
+// in the sandbox at plan-completion time.
+func (l QALevel) UsesSandboxTests() bool {
+	return l == QALevelUnit
+}
+
 // IsValid returns true if the status is a valid workflow status.
 func (s Status) IsValid() bool {
 	switch s {
@@ -86,7 +146,7 @@ func (s Status) IsValid() bool {
 		StatusScenariosGenerated, StatusScenariosReviewed,
 		StatusReadyForExecution,
 		StatusImplementing, StatusReviewingRollup, StatusAwaitingReview, StatusComplete, StatusArchived, StatusRejected,
-		StatusChanged,
+		StatusChanged, StatusReadyForQA, StatusReviewingQA,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
@@ -188,18 +248,33 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// ready_for_execution → rejected (orchestration failure)
 		return target == StatusImplementing || target == StatusChanged || target == StatusRejected
 	case StatusImplementing:
-		// implementing → reviewing_rollup (all scenarios done, run final synthesis review)
-		// implementing → awaiting_review (no rollup, auto_approve_review=false or GitHub)
-		// implementing → complete (legacy: no rollup, auto_approve_review=true, no GitHub)
+		// implementing → reviewing_rollup (legacy alias for reviewing_qa; still emitted today until Phase 2f branch-point move)
+		// implementing → reviewing_qa (level=synthesis after Phase 2f)
+		// implementing → ready_for_qa (level=unit|integration|full after Phase 2f; executor runs tests before review)
+		// implementing → awaiting_review (no QA, auto_approve_review=false or GitHub)
+		// implementing → complete (level=none; direct terminal with no review)
 		// implementing → changed (change proposal deprecated requirements)
 		// implementing → rejected (execution escalation)
-		return target == StatusReviewingRollup || target == StatusAwaitingReview || target == StatusComplete ||
+		return target == StatusReviewingRollup || target == StatusReviewingQA || target == StatusReadyForQA ||
+			target == StatusAwaitingReview || target == StatusComplete ||
 			target == StatusChanged || target == StatusRejected
 	case StatusReviewingRollup:
-		// reviewing_rollup → awaiting_review (rollup approved, auto_approve_review=false or GitHub)
-		// reviewing_rollup → complete (rollup approved, auto_approve_review=true, no GitHub)
-		// reviewing_rollup → rejected (rollup flagged critical issues requiring human intervention)
-		return target == StatusAwaitingReview || target == StatusComplete || target == StatusRejected
+		// Legacy state — equivalent to reviewing_qa at level=synthesis. Kept for
+		// in-flight plans at upgrade time. New code should emit reviewing_qa.
+		// reviewing_rollup → awaiting_review (qa-reviewer approved, auto_approve_review=false or GitHub)
+		// reviewing_rollup → complete (qa-reviewer approved, auto_approve_review=true, no GitHub)
+		// reviewing_rollup → rejected (qa-reviewer flagged critical issues)
+		return target == StatusAwaitingReview ||
+			target == StatusComplete || target == StatusRejected
+	case StatusReadyForQA:
+		// ready_for_qa → reviewing_qa (qa-runner claims the plan)
+		// ready_for_qa → rejected (qa-runner cannot execute — missing workflow, infrastructure error)
+		return target == StatusReviewingQA || target == StatusRejected
+	case StatusReviewingQA:
+		// reviewing_qa → complete (QA passed, auto_approve_review=true, no GitHub)
+		// reviewing_qa → awaiting_review (QA passed, auto_approve_review=false or GitHub)
+		// reviewing_qa → rejected (QA failed — qa-reviewer emits ChangeProposals)
+		return target == StatusComplete || target == StatusAwaitingReview || target == StatusRejected
 	case StatusAwaitingReview:
 		// awaiting_review → complete (human approves: PR merge / UI / HTTP)
 		// awaiting_review → ready_for_execution (human requests changes)
@@ -486,6 +561,46 @@ type Plan struct {
 	// GitHub contains GitHub integration metadata for plans originating from
 	// GitHub issues (ADR-031). Nil for non-GitHub plans.
 	GitHub *GitHubMetadata `json:"github,omitempty"`
+
+	// QALevel is the plan's QA policy, snapshotted from the project default at
+	// plan creation so a running plan is immutable under QA policy changes.
+	// Empty string is treated as QALevelSynthesis (the behavior-preserving
+	// default). Decides the branch point at implementing convergence:
+	// none → complete; synthesis → reviewing_qa; unit/integration/full →
+	// ready_for_qa + QARequestedEvent published for the appropriate executor.
+	QALevel QALevel `json:"qa_level,omitempty"`
+
+	// QARun captures the executor result for this plan's QA phase. Populated by
+	// plan-manager when it consumes QACompletedEvent and transitions the plan
+	// to reviewing_qa. qa-reviewer reads it from the plan KV instead of
+	// subscribing to the one-shot event (which races the KV watcher).
+	// Nil for synthesis-level plans (no executor run) and plans that have not
+	// yet reached reviewing_qa.
+	QARun *QARun `json:"qa_run,omitempty"`
+}
+
+// QARun carries the executor result persisted on the plan at reviewing_qa.
+// Mirrors the informative fields of QACompletedEvent minus slug/plan_id/level
+// which already live on the plan.
+type QARun struct {
+	RunID       string          `json:"run_id"`
+	Passed      bool            `json:"passed"`
+	Failures    []QAFailure     `json:"failures,omitempty"`
+	Artifacts   []QAArtifactRef `json:"artifacts,omitempty"`
+	DurationMs  int64           `json:"duration_ms"`
+	RunnerError string          `json:"runner_error,omitempty"`
+	TraceID     string          `json:"trace_id,omitempty"`
+	CompletedAt time.Time       `json:"completed_at"`
+}
+
+// EffectiveQALevel returns the plan's QA level, defaulting to synthesis when
+// unset. Centralized so the branch point and verdict handlers agree on the
+// empty-value interpretation.
+func (p *Plan) EffectiveQALevel() QALevel {
+	if p.QALevel == "" {
+		return QALevelSynthesis
+	}
+	return p.QALevel
 }
 
 // ArchitectureDocument captures the output of the architecture phase.
@@ -497,6 +612,38 @@ type ArchitectureDocument struct {
 	Decisions           []ArchDecision     `json:"decisions"`
 	Actors              []ActorDef         `json:"actors"`
 	Integrations        []IntegrationPoint `json:"integrations"`
+	// TestSurface declares the test coverage the architecture implies. Consumed
+	// by the developer role to guide integration/e2e test authoring, and by
+	// qa-reviewer (Phase 6) to judge coverage adequacy against what was
+	// actually implemented. Optional for backward compat with plans drafted
+	// before the field existed.
+	TestSurface *TestSurface `json:"test_surface,omitempty"`
+}
+
+// TestSurface describes the test coverage implied by an ArchitectureDocument.
+// Integration flows derive from Integrations[] (each external boundary deserves
+// an integration test). E2E flows derive from Actors[] (each human/system actor
+// triggers a user-visible flow worth end-to-end coverage).
+type TestSurface struct {
+	IntegrationFlows []IntegrationFlow `json:"integration_flows,omitempty"`
+	E2EFlows         []E2EFlow         `json:"e2e_flows,omitempty"`
+}
+
+// IntegrationFlow describes a cross-component flow that needs integration
+// tests (real service fixtures, not unit mocks).
+type IntegrationFlow struct {
+	Name               string   `json:"name"`
+	ComponentsInvolved []string `json:"components_involved"`
+	Description        string   `json:"description"`
+	ScenarioRefs       []string `json:"scenario_refs,omitempty"`
+}
+
+// E2EFlow describes an actor-driven user-visible flow that needs end-to-end
+// tests (browser, full stack, real data).
+type E2EFlow struct {
+	Actor           string   `json:"actor"`
+	Steps           []string `json:"steps"`
+	SuccessCriteria []string `json:"success_criteria"`
 }
 
 // TechChoice records a single technology selection with its rationale.
@@ -810,6 +957,17 @@ func (s ChangeProposalStatus) CanTransitionTo(target ChangeProposalStatus) bool 
 	}
 }
 
+// ArtifactRef is a reference to a QA artifact (log, screenshot, trace, coverage report)
+// attached to a ChangeProposal. Helps the human reviewer understand why the change is needed.
+type ArtifactRef struct {
+	// Path is the workspace-relative path to the artifact.
+	Path string `json:"path"`
+	// Type is the artifact category: log, screenshot, trace, or coverage-report.
+	Type string `json:"type"`
+	// Purpose describes what this artifact shows (e.g., "playwright flow X failure").
+	Purpose string `json:"purpose,omitempty"`
+}
+
 // ChangeProposal represents a mid-stream proposal to mutate one or more Requirements.
 type ChangeProposal struct {
 	ID               string               `json:"id"`
@@ -820,9 +978,13 @@ type ChangeProposal struct {
 	ProposedBy       string               `json:"proposed_by"`
 	AffectedReqIDs   []string             `json:"affected_requirement_ids"`
 	RejectionReasons map[string]string    `json:"rejection_reasons,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	ReviewedAt       *time.Time           `json:"reviewed_at,omitempty"`
-	DecidedAt        *time.Time           `json:"decided_at,omitempty"`
+	// ArtifactReferences links QA artifacts (logs, screenshots, traces) to this proposal.
+	// Populated by qa-reviewer when verdict is needs_changes so the human reviewer
+	// can see why the change is needed.
+	ArtifactReferences []ArtifactRef `json:"artifact_references,omitempty"`
+	CreatedAt          time.Time     `json:"created_at"`
+	ReviewedAt         *time.Time    `json:"reviewed_at,omitempty"`
+	DecidedAt          *time.Time    `json:"decided_at,omitempty"`
 }
 
 // ContextPayload contains pre-built context for task execution.

@@ -62,8 +62,6 @@ func registerRequestPayloads() {
 		{ScenarioOrchestrationTriggerType, "Scenario orchestration trigger for plan execution", func() any { return &ScenarioOrchestrationTrigger{} }},
 		{ScenarioExecutionRequestType, "Scenario execution request from scenario-orchestrator", func() any { return &ScenarioExecutionRequest{} }},
 		{RequirementExecutionRequestType, "Requirement execution request from scenario-orchestrator", func() any { return &RequirementExecutionRequest{} }},
-		// Red-team challenge results
-		{RedTeamChallengeResultType, "Red-team challenge result with issues and optional adversarial tests", func() any { return &RedTeamChallengeResult{} }},
 		// Generation event payloads (single-writer fix)
 		{ScenariosForRequirementGeneratedType, "Per-requirement scenario generation result", func() any { return &ScenariosForRequirementGeneratedPayload{} }},
 		{GenerationFailedType, "Generation failure event from requirement/scenario generators", func() any { return &GenerationFailedPayload{} }},
@@ -71,6 +69,9 @@ func registerRequestPayloads() {
 		{GitHubPlanCreationRequestType, "GitHub issue-to-plan creation request", func() any { return &GitHubPlanCreationRequest{} }},
 		{GitHubPRCreatedEventType, "GitHub PR created event", func() any { return &GitHubPRCreatedEvent{} }},
 		{GitHubPRFeedbackRequestType, "GitHub PR feedback request from review", func() any { return &GitHubPRFeedbackRequest{} }},
+		// QA phase payloads
+		{QARequestedType, "QA execution request dispatched to sandbox (unit) or qa-runner (integration/full)", func() any { return &QARequestedPayload{} }},
+		{QACompletedType, "QA execution result event published by sandbox or qa-runner", func() any { return &QACompletedPayload{} }},
 	}
 
 	for _, p := range payloads {
