@@ -265,3 +265,24 @@ func TestActCappedWriter_SubsequentWritesAfterCap(t *testing.T) {
 		t.Errorf("buffer changed after cap: %q vs %q", before, after)
 	}
 }
+
+func TestJobFilterFor(t *testing.T) {
+	tests := []struct {
+		level workflow.QALevel
+		want  string
+	}{
+		{workflow.QALevelIntegration, "integration"},
+		{workflow.QALevelFull, ""},
+		{workflow.QALevelUnit, ""},
+		{workflow.QALevelSynthesis, ""},
+		{workflow.QALevelNone, ""},
+		{workflow.QALevel(""), ""},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.level), func(t *testing.T) {
+			if got := jobFilterFor(tt.level); got != tt.want {
+				t.Errorf("jobFilterFor(%q) = %q, want %q", tt.level, got, tt.want)
+			}
+		})
+	}
+}

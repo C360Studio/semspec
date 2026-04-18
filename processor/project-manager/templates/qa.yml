@@ -1,8 +1,17 @@
 name: QA
 # Default QA workflow scaffolded by semspec project-manager.
-# Customize this file to add integration test services (databases, message
-# brokers, etc.) as GitHub Actions `services:` entries on the job.
-# See: https://docs.github.com/en/actions/using-containerized-services
+#
+# Two jobs:
+#   - integration: run at qa_level=integration and qa_level=full
+#   - e2e:        run at qa_level=full (Playwright browser flows)
+#
+# qa-runner invokes this file via nektos/act, passing --job integration at
+# qa_level=integration so the e2e job is skipped for faster feedback. At
+# qa_level=full act runs the full workflow, exercising both jobs.
+#
+# Customize by adding integration test services (databases, message brokers,
+# etc.) as GitHub Actions `services:` entries. See:
+# https://docs.github.com/en/actions/using-containerized-services
 on: [push, pull_request]
 jobs:
   integration:
@@ -23,3 +32,28 @@ jobs:
           path: |
             coverage.out
             *.log
+
+  e2e:
+    runs-on: ubuntu-latest
+    # Runs at qa_level=full. For Go-only projects without a browser UI you can
+    # delete this job. Projects with a Playwright suite should adapt the steps
+    # to their actual dev-server startup, test command, and artifact paths.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: Run Playwright tests
+        run: npx playwright test
+      - name: Archive Playwright artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/

@@ -68,7 +68,7 @@ func (h *qaHandler) runQA(ctx context.Context, evt workflow.QARequestedEvent) *w
 		"mode", evt.Mode)
 
 	timeout := h.resolveTimeout(evt)
-	result := invokeAct(ctx, workspaceHost, workflowFile, artifactServerPath, timeout)
+	result := invokeAct(ctx, workspaceHost, workflowFile, artifactServerPath, jobFilterFor(evt.Mode), timeout)
 	if result.runnerErr != "" {
 		h.logger.Error("act infra error", "slug", evt.Slug, "run_id", runID, "error", result.runnerErr)
 		return h.errorEvent(evt, runID, start, result.runnerErr)
@@ -98,6 +98,18 @@ func (h *qaHandler) runQA(ctx context.Context, evt workflow.QARequestedEvent) *w
 		DurationMs: durationMs,
 		TraceID:    evt.TraceID,
 	}
+}
+
+// jobFilterFor returns the act --job argument for the given QA level. level=
+// integration runs only the integration job (Playwright is skipped). level=
+// full returns empty, which omits --job and runs the whole workflow. Other
+// levels never reach qa-runner — sandbox handles unit and synthesis; none
+// short-circuits entirely.
+func jobFilterFor(level workflow.QALevel) string {
+	if level == workflow.QALevelIntegration {
+		return "integration"
+	}
+	return ""
 }
 
 // resolveWorkspace returns the host-absolute workspace path from the event or
@@ -168,7 +180,7 @@ type actResult struct {
 //	  --rm                         clean up containers after run
 func invokeAct(
 	ctx context.Context,
-	workspaceHost, workflowFile, artifactServerPath string,
+	workspaceHost, workflowFile, artifactServerPath, jobName string,
 	timeout time.Duration,
 ) actResult {
 	if _, err := exec.LookPath("act"); err != nil {
@@ -178,14 +190,18 @@ func invokeAct(
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(runCtx, "act", "push",
+	args := []string{"push",
 		"-W", workflowFile,
 		"-P", actRunnerImage,
 		"--bind",
 		"--artifact-server-path", artifactServerPath,
 		"-v",
 		"--rm",
-	)
+	}
+	if jobName != "" {
+		args = append(args, "--job", jobName)
+	}
+	cmd := exec.CommandContext(runCtx, "act", args...)
 	cmd.Dir = workspaceHost
 
 	var combined actCappedWriter
