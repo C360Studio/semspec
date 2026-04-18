@@ -105,7 +105,7 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 │  │               requirement-generator, scenario-gen)   │
 │  ├── Execution   (scenario-orchestrator,                 │
 │  │               requirement-executor, execution-manager,│
-│  │               rollup-reviewer, change-proposal-handler)│
+│  │               qa-reviewer, change-proposal-handler)    │
 │  └── Support     (plan-manager, project-manager,        │
 │                   question-manager, etc.)                │
 └─────────────────────────────────────────────────────────┘
@@ -325,8 +325,9 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 │                          node dispatch, and per-requirement review   │
 │  execution-manager      TDD pipeline per DAG node:                  │
 │                          developer → validator → reviewer            │
-│  rollup-reviewer        QA rollup after all requirements complete;   │
-│                          integration validation and cross-req testing│
+│  qa-reviewer            Release-readiness verdict (Murat persona);   │
+│                          scoped by qa_level (synthesis/unit/          │
+│                          integration/full)                           │
 │  change-proposal-handler  ChangeProposal OODA loop and cascade      │
 └──────────────────────────────────────────────────────────────────────┘
 

@@ -120,8 +120,63 @@ via `POST /project-manager/detect` or created manually.
 | `frameworks` | Array of `{name, language}` — detected frameworks |
 | `tooling` | `{task_runner, linters[], test_frameworks[], ci, container}` |
 | `repository` | `{url, default_branch}` — VCS metadata |
+| `qa_level` | QA depth applied at plan completion — see below |
+| `qa_test_command` | Unit-level test command override (default inferred from language) |
 
 `org` and `platform` are locked after the first plan is created to prevent entity ID divergence.
+
+## QA Level
+
+After a plan's requirements are implemented, semspec runs a final release-readiness
+gate via the **qa-reviewer** (Murat, the BMAD QA Test Architect). The depth of that
+gate is controlled by `qa_level` on `project.json`, which is snapshotted onto every
+plan at creation so policy changes don't retroactively affect in-flight work.
+
+| Level | Executor | What runs | When to use |
+|-------|----------|-----------|-------------|
+| `none` | — | No QA gate; plan goes straight to `complete` | Doc-only hotfixes |
+| `synthesis` | qa-reviewer only | LLM verdict on plan artifacts, no test execution | Default; fast, content-based check |
+| `unit` | sandbox | `go test ./...` (or language default) against the merged worktree | Most projects |
+| `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — typically tagged integration tests with real service dependencies | Projects with integration suites |
+| `full` | qa-runner + `act` | Both `integration` + `e2e` jobs — adds Playwright browser flows | Projects with UI + browser tests |
+
+Configure via `.semspec/project.json`:
+
+```json
+{
+  "name": "my-project",
+  "languages": [{"name": "Go", "primary": true}],
+  "qa_level": "unit",
+  "qa_test_command": "go test ./... -race"
+}
+```
+
+Or at runtime:
+
+```bash
+curl -X PATCH http://localhost:8080/project-manager/config \
+  -H "Content-Type: application/json" \
+  -d '{"qa_level": "integration"}'
+```
+
+**Sandbox** (level=unit) runs the project's native test command in the same
+container semspec uses for per-task structural validation. **qa-runner**
+(level=integration/full) invokes nektos/act against `.github/workflows/qa.yml`
+using the host Docker daemon via a mounted socket — tests run in real GitHub
+Actions runner images (catthehacker/ubuntu:act-latest). The qa.yml template is
+scaffolded by `POST /project-manager/init` when missing; customize jobs, add
+`services:` entries for databases, or change runner images as needed.
+
+Artifacts from every QA run land at `.semspec/qa-artifacts/{plan-slug}/{run-id}/`:
+- `act.log` — combined act stdout+stderr
+- Any files the workflow uploads via `actions/upload-artifact` (coverage,
+  playwright traces, screenshots, etc.)
+
+The verdict has three outcomes: `approved` (plan → `complete`), `needs_changes`
+(plan → `rejected` with `ChangeProposals` describing what to fix), or
+`rejected` (plan → `rejected`, escalation to human).
+
+See [ADR-031](adr/ADR-031-qa-test-execution.md) for the full design rationale.
 
 ## standards.json
 

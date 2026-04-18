@@ -1,9 +1,10 @@
 # ADR-031: QA Test Execution Stage
 
-**Status:** Proposed
+**Status:** Implemented (2026-04-18)
 **Date:** 2026-04-01
 **Authors:** Coby, Claude
 **Depends on:** ADR-030 (QA capability constants)
+**Shipped in:** commits 9457053, 850e4c1, 65e6d16
 
 ## Context
 
