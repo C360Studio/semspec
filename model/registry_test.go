@@ -330,6 +330,51 @@ func TestRegistryValidate(t *testing.T) {
 			wantError: true,
 			errorMsg:  "missing1",
 		},
+		{
+			name: "endpoint name with dot rejected",
+			registry: NewRegistry(
+				map[Capability]*CapabilityConfig{
+					CapabilityWriting: {
+						Preferred: []string{"qwen.fast"},
+					},
+				},
+				map[string]*EndpointConfig{
+					"qwen.fast": {Provider: "ollama", Model: "qwen:7b"},
+				},
+			),
+			wantError: true,
+			errorMsg:  `endpoint name "qwen.fast" must not contain dots`,
+		},
+		{
+			name: "empty endpoint name rejected",
+			registry: NewRegistry(
+				map[Capability]*CapabilityConfig{},
+				map[string]*EndpointConfig{
+					"": {Provider: "ollama", Model: "qwen:7b"},
+				},
+			),
+			wantError: true,
+			errorMsg:  "endpoint name must not be empty",
+		},
+		{
+			name: "dashed and underscored endpoint names accepted",
+			registry: func() *Registry {
+				r := NewRegistry(
+					map[Capability]*CapabilityConfig{
+						CapabilityWriting: {
+							Preferred: []string{"qwen-fast", "qwen_slow"},
+						},
+					},
+					map[string]*EndpointConfig{
+						"qwen-fast": {Provider: "ollama", Model: "qwen:1b"},
+						"qwen_slow": {Provider: "ollama", Model: "qwen:7b"},
+					},
+				)
+				r.SetDefault("qwen-fast")
+				return r
+			}(),
+			wantError: false,
+		},
 	}
 
 	for _, tt := range tests {

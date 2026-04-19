@@ -79,6 +79,17 @@ Models are configured in `configs/semspec.json` under `model_registry`:
 | `api_key_env` | Environment variable for the API key (e.g., `GEMINI_API_KEY`) |
 | `supports_tools` | Whether the endpoint supports tool/function calling |
 
+### Endpoint Name Constraints
+
+Endpoint names (the JSON keys under `endpoints`) are used as the final segment of the
+`{org}.{platform}.agent.model-registry.endpoint.{name}` entity ID written to the graph.
+Dots are reserved as segment separators, so endpoint names must not contain dots.
+
+Use dashes instead: `llama3-2`, not `llama3.2`. The `model` field inside the endpoint is
+sent to the provider as-is and may contain dots (e.g. `"model": "llama3.2"`).
+
+Startup fails fast with a clear error if any endpoint name contains a dot.
+
 ### Understanding max_tokens
 
 `max_tokens` tells semspec how large the model's context window is. It is **not** sent to the
@@ -175,4 +186,49 @@ Reduce model size or use quantized versions:
 ```bash
 ollama pull qwen2.5-coder:7b   # Instead of 30b
 ollama pull qwen3:8b           # Instead of 14b
+```
+
+### Config Edits Don't Take Effect
+
+The official `docker/Dockerfile` bakes `configs/semspec.json` into the image at
+`/app/configs/semspec.json`. If you run the published image and edit the file on your
+host, nothing changes until you either rebuild or mount the config at runtime.
+
+Mount your host config over the baked-in one:
+
+```yaml
+services:
+  semspec:
+    volumes:
+      - ${SEMSPEC_REPO:-.}:/workspace
+      - ./configs/semspec.json:/app/configs/semspec.json:ro  # override baked config
+```
+
+Rebuild the image instead if you prefer to keep config in-image:
+
+```bash
+task local:rebuild
+```
+
+### Stale Endpoints After Renaming
+
+Endpoint definitions are cached in the `KV_semstreams_config` KV bucket and mirrored as
+entities in `KV_ENTITY_STATES`. On startup semstreams compares the `"version"` field in
+`configs/semspec.json` against the version stored in KV:
+
+- **File newer** → KV is overwritten from file (what you want).
+- **Equal or KV newer** → KV wins, file edits are ignored. Look for this in logs:
+  `"File version is older than KV, using KV config" hint="bump file version to update KV"`.
+
+**Recipe for config edits:** bump `"version"` (e.g. `"1.1.0"` → `"1.1.1"`) in
+`configs/semspec.json` whenever you change anything else in the file. On next boot
+semstreams will push your file over the stale KV state.
+
+If the KV also has orphan entities from an old bad endpoint name, delete them targeted
+via `nats kv del` or the NATS monitor at `http://localhost:8222`. As a last resort wipe
+everything:
+
+```bash
+docker compose down -v   # drops all NATS state, including KV buckets
+docker compose up -d
 ```

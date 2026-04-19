@@ -139,22 +139,22 @@ func NewDefaultRegistry() *Registry {
 			CapabilityPlanning: {
 				Description: "High-level reasoning, architecture decisions",
 				Preferred:   []string{"qwen"},
-				Fallback:    []string{"qwen3", "llama3.2"},
+				Fallback:    []string{"qwen3", "llama3-2"},
 			},
 			CapabilityWriting: {
 				Description: "Documentation, plans, specifications",
 				Preferred:   []string{"qwen"},
-				Fallback:    []string{"qwen3-fast", "llama3.2"},
+				Fallback:    []string{"qwen3-fast", "llama3-2"},
 			},
 			CapabilityCoding: {
 				Description: "Code generation, implementation",
 				Preferred:   []string{"qwen"},
-				Fallback:    []string{"codellama", "llama3.2"},
+				Fallback:    []string{"codellama", "llama3-2"},
 			},
 			CapabilityReviewing: {
 				Description: "Code review, quality analysis",
 				Preferred:   []string{"qwen"},
-				Fallback:    []string{"qwen3-fast", "llama3.2"},
+				Fallback:    []string{"qwen3-fast", "llama3-2"},
 			},
 			CapabilityFast: {
 				Description: "Quick responses, simple tasks",
@@ -184,7 +184,7 @@ func NewDefaultRegistry() *Registry {
 				Model:     "qwen3:1.7b",
 				MaxTokens: 32768,
 			},
-			"llama3.2": {
+			"llama3-2": {
 				Provider:  "ollama",
 				URL:       ollamaURL,
 				Model:     "llama3.2",
@@ -295,13 +295,30 @@ func (r *Registry) GetDefaults() *DefaultsConfig {
 
 // Validate checks the registry configuration for consistency.
 // It verifies that:
+// - Endpoint names are well-formed (non-empty, no dots)
 // - All models referenced in capabilities exist in endpoints
 // - The default model exists in endpoints
+//
+// Endpoint names become the 6th segment of model-endpoint entity IDs
+// ({org}.{platform}.agent.model-registry.endpoint.{name}), so dots or
+// empty strings would produce invalid entity IDs and panic later inside
+// agentic-loop's graph writer. Catch it here at config load instead.
 func (r *Registry) Validate() error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	var errs []string
+
+	// Check endpoint names don't contain dots (entity ID separator)
+	for name := range r.endpoints {
+		if name == "" {
+			errs = append(errs, "endpoint name must not be empty")
+			continue
+		}
+		if strings.Contains(name, ".") {
+			errs = append(errs, fmt.Sprintf("endpoint name %q must not contain dots (dots are entity ID separators — rename to e.g. %q)", name, strings.ReplaceAll(name, ".", "-")))
+		}
+	}
 
 	// Check that all capability model references exist
 	for capVal, cfg := range r.capabilities {

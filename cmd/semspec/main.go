@@ -408,7 +408,7 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 	// Initialize model registry from config if present
 	// This must happen before component initialization since components use model.Global()
 	if err := initModelRegistryFromConfig([]byte(expanded)); err != nil {
-		slog.Warn("Failed to load model_registry from config, using defaults", "error", err)
+		return nil, fmt.Errorf("load model_registry from %s: %w", configPath, err)
 	}
 
 	// Initialize persona registry from config if a preset is referenced.
@@ -539,11 +539,17 @@ func parseGraphSourcesFromEnv() []graph.Source {
 
 // initModelRegistryFromConfig loads model_registry section from config JSON and
 // initializes the global model registry. If no model_registry is present, no action is taken.
+// Validation errors (e.g. endpoint names containing dots) are returned so startup fails
+// loudly rather than panicking later inside agentic-loop's graph writer.
 func initModelRegistryFromConfig(data []byte) error {
 	registry, err := model.LoadFromJSON(data)
 	if err != nil {
 		// No model_registry in config - this is fine, use defaults
 		return nil
+	}
+
+	if err := registry.Validate(); err != nil {
+		return fmt.Errorf("model_registry validation failed: %w", err)
 	}
 
 	// Initialize global registry with loaded config
