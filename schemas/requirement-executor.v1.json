@@ -10,6 +10,12 @@
       "description": "Model endpoint for decomposer agent",
       "category": "advanced"
     },
+    "enforce_scenario_coverage": {
+      "type": "boolean",
+      "description": "Reject decomposer output that leaves input scenarios uncovered",
+      "default": true,
+      "category": "advanced"
+    },
     "max_decomposer_retries": {
       "type": "number",
       "description": "Max retries when decomposer output fails to parse or produces an invalid DAG",

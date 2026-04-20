@@ -2239,6 +2239,59 @@ components:
                     type: string
                 qa_level:
                     type: string
+                qa_run:
+                    nullable: true
+                    properties:
+                        artifacts:
+                            items:
+                                properties:
+                                    path:
+                                        type: string
+                                    purpose:
+                                        type: string
+                                    type:
+                                        type: string
+                                required:
+                                    - path
+                                    - type
+                                type: object
+                            type: array
+                        completed_at:
+                            format: date-time
+                            type: string
+                        duration_ms:
+                            type: integer
+                        failures:
+                            items:
+                                properties:
+                                    job_name:
+                                        type: string
+                                    log_excerpt:
+                                        type: string
+                                    message:
+                                        type: string
+                                    step_name:
+                                        type: string
+                                    test_name:
+                                        type: string
+                                required:
+                                    - job_name
+                                type: object
+                            type: array
+                        passed:
+                            type: boolean
+                        run_id:
+                            type: string
+                        runner_error:
+                            type: string
+                        trace_id:
+                            type: string
+                    required:
+                        - run_id
+                        - passed
+                        - duration_ms
+                        - completed_at
+                    type: object
                 requirements:
                     items:
                         properties:
@@ -2668,6 +2721,59 @@ components:
                     type: string
                 qa_level:
                     type: string
+                qa_run:
+                    nullable: true
+                    properties:
+                        artifacts:
+                            items:
+                                properties:
+                                    path:
+                                        type: string
+                                    purpose:
+                                        type: string
+                                    type:
+                                        type: string
+                                required:
+                                    - path
+                                    - type
+                                type: object
+                            type: array
+                        completed_at:
+                            format: date-time
+                            type: string
+                        duration_ms:
+                            type: integer
+                        failures:
+                            items:
+                                properties:
+                                    job_name:
+                                        type: string
+                                    log_excerpt:
+                                        type: string
+                                    message:
+                                        type: string
+                                    step_name:
+                                        type: string
+                                    test_name:
+                                        type: string
+                                required:
+                                    - job_name
+                                type: object
+                            type: array
+                        passed:
+                            type: boolean
+                        run_id:
+                            type: string
+                        runner_error:
+                            type: string
+                        trace_id:
+                            type: string
+                    required:
+                        - run_id
+                        - passed
+                        - duration_ms
+                        - completed_at
+                    type: object
                 requirements:
                     items:
                         properties:

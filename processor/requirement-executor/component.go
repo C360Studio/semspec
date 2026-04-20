@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -69,6 +70,29 @@ const (
 	subjectDecomposer = "agent.task.development"
 )
 
+// sandboxClient is the narrow interface requirement-executor uses over the
+// sandbox API. Declared as an interface so tests can inject a stub and verify
+// which worktree/branch lifecycle calls the orchestrator makes. Satisfied by
+// *sandbox.Client.
+type sandboxClient interface {
+	CreateWorktree(ctx context.Context, taskID string, opts ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error)
+	DeleteWorktree(ctx context.Context, taskID string) error
+	CreateBranch(ctx context.Context, branch, baseRef string) error
+	DeleteBranch(ctx context.Context, branch string) error
+}
+
+// newSandboxClient returns a sandboxClient backed by the real sandbox HTTP
+// client, or an untyped nil interface when url is empty. Using a constructor
+// avoids the Go nil-interface gotcha where a typed nil (*sandbox.Client)(nil)
+// assigned to the interface field appears non-nil.
+func newSandboxClient(url string) sandboxClient {
+	c := sandbox.NewClient(url)
+	if c == nil {
+		return nil
+	}
+	return c
+}
+
 // Component orchestrates per-requirement execution.
 type Component struct {
 	config       Config
@@ -76,7 +100,7 @@ type Component struct {
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
-	sandbox      *sandbox.Client   // nil when sandbox is disabled
+	sandbox      sandboxClient     // nil when sandbox is disabled
 	assembler    *prompt.Assembler // composes system prompts for requirement-level review
 
 	inputPorts  []component.Port
@@ -132,7 +156,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient: deps.NATSClient,
 		logger:     logger,
 		platform:   deps.Platform,
-		sandbox:    sandbox.NewClient(cfg.SandboxURL),
+		sandbox:    newSandboxClient(cfg.SandboxURL),
 		assembler:  prompt.NewAssembler(registry),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
@@ -505,6 +529,28 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 		return
 	}
 
+	// Coverage gate: every scenario on the requirement must appear in at least
+	// one node's scenario_ids. Without it, the fixable-retry path can't target
+	// failed scenarios and the downstream executor escalates to restructure —
+	// catching the bug here saves a round-trip and gives the decomposer a
+	// specific list to fix rather than a vague "try again." The gate is
+	// toggleable so mock-LLM fixtures that can't cite runtime scenario IDs can
+	// opt out until they're updated.
+	if uncovered := uncoveredInputScenarios(exec.Scenarios, dagResponse.DAG.Nodes); len(uncovered) > 0 {
+		if c.config.enforceScenarioCoverage() {
+			c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf(
+				"DAG does not cover every scenario: uncovered scenario_ids=[%s]. Every scenario from the requirement's acceptance criteria must be assigned to at least one node's scenario_ids array.",
+				strings.Join(uncovered, ", "),
+			))
+			return
+		}
+		c.logger.Warn("Decomposer coverage gap — gate disabled, proceeding anyway",
+			"entity_id", exec.EntityID,
+			"uncovered_scenario_ids", uncovered,
+			"hint", "set enforce_scenario_coverage=true once decomposer is reliable",
+		)
+	}
+
 	// Successful parse — clear retry state.
 	exec.DecomposerLastError = ""
 
@@ -857,9 +903,12 @@ func (c *Component) buildDecomposerPrompt(exec *requirementExecution, previousEr
 		sb.WriteString("\nAcceptance Criteria (scenarios to satisfy):\n")
 		for i, sc := range exec.Scenarios {
 			thenParts := strings.Join(sc.Then, ", ")
-			sb.WriteString(fmt.Sprintf("%d. Given %s, When %s, Then %s\n",
-				i+1, sc.Given, sc.When, thenParts))
+			sb.WriteString(fmt.Sprintf("%d. [id=%s] Given %s, When %s, Then %s\n",
+				i+1, sc.ID, sc.Given, sc.When, thenParts))
 		}
+		sb.WriteString("\nEvery scenario ID above MUST appear in at least one node's scenario_ids array. ")
+		sb.WriteString("This is how failed-scenario retries route back to the right node. ")
+		sb.WriteString("A DAG that leaves any scenario ID uncovered will be rejected and you will re-run.\n")
 	}
 
 	return sb.String()
@@ -962,6 +1011,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 	taskReq := map[string]any{
 		"slug":            exec.Slug,
 		"task_id":         taskID,
+		"requirement_id":  exec.RequirementID,
 		"title":           node.Prompt,
 		"prompt":          nodePrompt,
 		"model":           exec.Model,
@@ -1141,9 +1191,87 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 	case "restructure":
 		c.startRestructureRetryLocked(ctx, exec, result.Feedback)
 	default:
-		// "fixable" or unrecognized → dirty-node retry.
+		// "fixable" retry needs per-scenario targeting. If any failed scenario
+		// has no DAG node carrying its ID, the decomposer emitted a DAG that
+		// cannot be fixed by touching a subset — escalate to restructure and
+		// hand the uncovered IDs back as actionable feedback. This replaces an
+		// earlier silent "mark all nodes dirty" fallback that masked decomposer
+		// bugs and lit up the whole DAG every retry.
+		if uncovered := c.uncoveredFailedScenarios(exec, result.ScenarioVerdicts); len(uncovered) > 0 {
+			c.logger.Error("Coverage gap — failed scenarios have no DAG node mapping; forcing restructure",
+				"entity_id", exec.EntityID,
+				"uncovered_scenario_ids", uncovered,
+			)
+			c.startRestructureRetryLocked(ctx, exec, fmt.Sprintf(
+				"coverage gap: failed scenarios [%s] have no DAG node with matching scenario_ids. Regenerate the DAG so every scenario is assigned to at least one node. Reviewer feedback: %s",
+				strings.Join(uncovered, ", "), result.Feedback,
+			))
+			return
+		}
 		c.startFixableRetryLocked(ctx, exec, result.Feedback, result.ScenarioVerdicts)
 	}
+}
+
+// uncoveredInputScenarios returns the sorted IDs of requirement scenarios
+// that don't appear in any node's ScenarioIDs. Empty return means the DAG
+// covers every input scenario (or the requirement had no scenarios to begin
+// with — a pre-scenario flow or a requirement whose acceptance is implicit).
+// Package-level because it operates on plain inputs and is easier to test
+// without wiring a Component.
+func uncoveredInputScenarios(scenarios []workflow.Scenario, nodes []decompose.TaskNode) []string {
+	if len(scenarios) == 0 {
+		return nil
+	}
+	covered := make(map[string]bool, len(scenarios))
+	for _, n := range nodes {
+		for _, sid := range n.ScenarioIDs {
+			covered[sid] = true
+		}
+	}
+	var uncovered []string
+	for _, sc := range scenarios {
+		if sc.ID == "" {
+			continue
+		}
+		if !covered[sc.ID] {
+			uncovered = append(uncovered, sc.ID)
+		}
+	}
+	sort.Strings(uncovered)
+	return uncovered
+}
+
+// uncoveredFailedScenarios returns the sorted IDs of failed scenarios that
+// don't appear in any DAG node's ScenarioIDs. An empty return means every
+// failed scenario can be targeted for fixable retry.
+func (c *Component) uncoveredFailedScenarios(exec *requirementExecution, verdicts []ScenarioVerdict) []string {
+	failed := make(map[string]bool)
+	for _, sv := range verdicts {
+		if !sv.Passed {
+			failed[sv.ScenarioID] = true
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	for _, nodeID := range exec.SortedNodeIDs {
+		node, ok := exec.NodeIndex[nodeID]
+		if !ok {
+			continue
+		}
+		for _, sid := range node.ScenarioIDs {
+			delete(failed, sid)
+		}
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(failed))
+	for sid := range failed {
+		out = append(out, sid)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // startFixableRetryLocked handles a fixable rejection by mapping failed scenarios
@@ -1177,17 +1305,6 @@ func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requireme
 				break
 			}
 		}
-	}
-
-	// If no mapping found (decomposer didn't set ScenarioIDs), fall back to
-	// marking ALL nodes dirty. This is the safe default — less targeted but
-	// still preserves workspace files for the prior-work-directive.
-	if len(dirtyNodes) == 0 && len(failedScenarios) > 0 {
-		dirtyNodes = make([]string, len(exec.SortedNodeIDs))
-		copy(dirtyNodes, exec.SortedNodeIDs)
-		c.logger.Warn("No scenario-to-node mapping — marking all nodes dirty",
-			"entity_id", exec.EntityID,
-			"failed_scenarios", len(failedScenarios))
 	}
 
 	exec.DirtyNodeIDs = dirtyNodes
@@ -1427,7 +1544,7 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementEx
 
 	c.publishRequirementCompleteEvent(ctx, exec, "completed")
 	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseCompleted))
-	c.cleanupExecutionLocked(exec)
+	c.cleanupExecutionLocked(exec, true)
 }
 
 // markFailedLocked transitions to the failed terminal state.
@@ -1455,7 +1572,7 @@ func (c *Component) markFailedLocked(ctx context.Context, exec *requirementExecu
 
 	c.publishRequirementCompleteEvent(ctx, exec, "failed")
 	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseFailed).WithFailureReason(reason))
-	c.cleanupExecutionLocked(exec)
+	c.cleanupExecutionLocked(exec, false)
 }
 
 // publishRequirementCompleteEvent publishes a typed RequirementExecutionCompleteEvent
@@ -1547,21 +1664,30 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *requirementExecut
 
 	c.publishRequirementCompleteEvent(ctx, exec, "error")
 	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
-	c.cleanupExecutionLocked(exec)
+	c.cleanupExecutionLocked(exec, false)
 }
 
 // cleanupExecutionLocked removes execution from maps and cancels timeout.
 // Caller must hold exec.mu.
-func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
+//
+// success=true is the happy path (all nodes merged), where we delete every
+// node worktree plus our reviewer worktree. success=false is the failure/
+// error path: in-flight execution-manager loops may still be running against
+// node worktrees, so deleting them races with live work and produces silent
+// merge failures. Leave node worktrees behind on failure and let sandbox's
+// stale-cleanup loop reclaim them (cmd/sandbox/cleanup.go, cleanup-age=24h).
+// Reviewer worktree is owned solely by this component and is always safe to
+// remove.
+func (c *Component) cleanupExecutionLocked(exec *requirementExecution, success bool) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
 
-	// Clean up worktrees: node worktrees kept alive by execution-manager
-	// (WithKeepWorktree) and reviewer worktrees we created.
 	if c.sandbox != nil {
 		var worktreeIDs []string
-		worktreeIDs = append(worktreeIDs, exec.NodeTaskIDs...)
+		if success {
+			worktreeIDs = append(worktreeIDs, exec.NodeTaskIDs...)
+		}
 		if exec.ReviewerTaskID != "" {
 			worktreeIDs = append(worktreeIDs, exec.ReviewerTaskID)
 		}
@@ -1570,6 +1696,12 @@ func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 				c.logger.Debug("Worktree cleanup failed (may already be deleted)",
 					"task_id", id, "error", err)
 			}
+		}
+		if !success && len(exec.NodeTaskIDs) > 0 {
+			c.logger.Info("Leaving node worktrees for sandbox GC (failure path)",
+				"entity_id", exec.EntityID,
+				"requirement_id", exec.RequirementID,
+				"node_count", len(exec.NodeTaskIDs))
 		}
 	}
 

@@ -46,8 +46,26 @@ type Config struct {
 	// of requirement-level retries. Default: 3.
 	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse/verdict failure,category:advanced,default:3,min:0,max:5"`
 
+	// EnforceScenarioCoverage rejects decomposer output whose DAG does not carry
+	// every input scenario ID on at least one node's scenario_ids. When false,
+	// coverage gaps are warn-only and the DAG proceeds (legacy behavior).
+	// Real-LLM runs should keep this on — it catches decomposer bugs early and
+	// gives actionable feedback. Mock-LLM runs must set it false until fixtures
+	// are updated to cite runtime-generated scenario IDs.
+	EnforceScenarioCoverage *bool `json:"enforce_scenario_coverage,omitempty" schema:"type:bool,description:Reject decomposer output that leaves input scenarios uncovered,category:advanced,default:true"`
+
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
+}
+
+// enforceScenarioCoverage returns true when the gate is on. Defaults to true
+// when unset — primary enforcement is the stated design, opt-out is for mock
+// fixtures that can't cite runtime scenario IDs yet.
+func (c *Config) enforceScenarioCoverage() bool {
+	if c.EnforceScenarioCoverage == nil {
+		return true
+	}
+	return *c.EnforceScenarioCoverage
 }
 
 // DefaultConfig returns a Config with sensible defaults.
