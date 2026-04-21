@@ -170,8 +170,54 @@ export async function stubHealth(
 	});
 }
 
-export async function stubActivityStream(page: Page): Promise<void> {
-	await page.route('**/agentic-dispatch/activity', fulfillEmptyStream);
+export interface ActivityEventSeed {
+	loop_id: string;
+	type: 'loop_created' | 'loop_updated' | 'loop_deleted' | 'loop_completed';
+	timestamp?: string;
+	// Any extra fields land on the ActivityEvent as-is; matches the backend's
+	// flexible shape without pinning us to a rigid type here.
+	[key: string]: unknown;
+}
+
+/**
+ * Stub the global activity SSE endpoint. By default serves an empty stream
+ * (opens, never pushes) — same behaviour as before. Pass `events` to preload
+ * the stream body with one `event: activity` frame per entry so the browser's
+ * EventSource fires each handler and activityStore fills deterministically.
+ *
+ * Ends with an SSE comment line (`: keep-alive`) rather than closing the
+ * stream. Without it, route.fulfill() terminates the body, the EventSource
+ * fires onerror, and activityStore.connected flips to false before assertions
+ * run — which would break any spec that asserts on connection state.
+ */
+export async function stubActivityStream(
+	page: Page,
+	events: ActivityEventSeed[] = []
+): Promise<void> {
+	if (events.length === 0) {
+		await page.route('**/agentic-dispatch/activity', fulfillEmptyStream);
+		return;
+	}
+	await page.route('**/agentic-dispatch/activity', async (route) => {
+		const frames: string[] = ['event: connected', 'data: {}', ''];
+		for (const ev of events) {
+			frames.push('event: activity');
+			frames.push(
+				`data: ${JSON.stringify({
+					timestamp: ev.timestamp ?? new Date().toISOString(),
+					...ev
+				})}`
+			);
+			frames.push('');
+		}
+		// SSE comment — holds the connection open past the last event.
+		frames.push(': keep-alive');
+		await route.fulfill({
+			status: 200,
+			contentType: 'text/event-stream',
+			body: frames.join('\n') + '\n'
+		});
+	});
 }
 
 export async function stubPlanStream(page: Page): Promise<void> {
@@ -287,6 +333,7 @@ export async function stubBoardBackend(
 		plans?: Record<string, unknown>[];
 		loops?: Record<string, unknown>[];
 		health?: { healthy: boolean; components?: unknown[] };
+		activityEvents?: ActivityEventSeed[];
 	} = {}
 ): Promise<void> {
 	await stubPlans(page, args.plans ?? []);
@@ -296,5 +343,5 @@ export async function stubBoardBackend(
 	} else {
 		await stubHealth(page);
 	}
-	await stubActivityStream(page);
+	await stubActivityStream(page, args.activityEvents ?? []);
 }

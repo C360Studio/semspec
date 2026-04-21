@@ -3,6 +3,7 @@
 	import { feedStore } from '$lib/stores/feed.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { projectActivityFeed } from '$lib/stores/activityProjection';
+	import { getEventHref, getEventLinkText } from './feedRouting';
 	import type { FeedEvent } from '$lib/types/feed';
 
 	type Scope = 'plan' | 'global';
@@ -109,32 +110,6 @@
 		return labels[source] ?? source;
 	}
 
-	function getEventHref(event: FeedEvent): string | null {
-		const loopId = event.data?.loop_id;
-		if (
-			typeof loopId === 'string' &&
-			loopId.length > 0 &&
-			(event.type === 'task_updated' || event.type === 'task_completed')
-		) {
-			return `/trajectories/${loopId}`;
-		}
-		if (event.slug) {
-			return `/plans/${event.slug}`;
-		}
-		return null;
-	}
-
-	function getEventLinkText(event: FeedEvent): string {
-		const loopId = event.data?.loop_id;
-		if (
-			typeof loopId === 'string' &&
-			loopId.length > 0 &&
-			(event.type === 'task_updated' || event.type === 'task_completed')
-		) {
-			return 'trajectory';
-		}
-		return event.slug ?? 'plan';
-	}
 </script>
 
 <div class="activity-feed">
@@ -182,25 +157,48 @@
 	{:else}
 		<div class="events-list" role="log" aria-live="polite">
 			{#each filteredEvents as event (event.id)}
-				<div class="event-item">
-					<div class="event-icon" style="color: {getEventColor(event)}">
-						<Icon name={getEventIcon(event)} size={14} />
-					</div>
-
-					<div class="event-body">
-						<div class="event-summary">
-							<span class="event-text">{event.summary}</span>
-							<span class="event-time">{formatTime(event.timestamp)}</span>
+				{@const href = getEventHref(event)}
+				{#if href}
+					<a
+						class="event-item event-item--link"
+						href={href}
+						data-testid="activity-feed-row"
+						data-href={href}
+					>
+						<div class="event-icon" style="color: {getEventColor(event)}">
+							<Icon name={getEventIcon(event)} size={14} />
 						</div>
-
-						<div class="event-meta">
-							<span class="event-source-tag {event.source}">{event.source}</span>
-							{#if getEventHref(event)}
-								<a href={getEventHref(event)} class="event-plan-tag">{getEventLinkText(event)}</a>
-							{/if}
+						<div class="event-body">
+							<div class="event-summary">
+								<span class="event-text">{event.summary}</span>
+								<span class="event-time">{formatTime(event.timestamp)}</span>
+							</div>
+							<div class="event-meta">
+								<span class="event-source-tag {event.source}">{event.source}</span>
+								<span class="event-plan-tag">{getEventLinkText(event)}</span>
+							</div>
+						</div>
+					</a>
+				{:else}
+					<div class="event-item" data-testid="activity-feed-row">
+						<div class="event-icon" style="color: {getEventColor(event)}">
+							<Icon name={getEventIcon(event)} size={14} />
+						</div>
+						<div class="event-body">
+							<div class="event-summary">
+								<span class="event-text">{event.summary}</span>
+								<span class="event-time">{formatTime(event.timestamp)}</span>
+							</div>
+							<div class="event-meta">
+								<span class="event-source-tag {event.source}">{event.source}</span>
+								<!-- Spacer badge keeps non-link rows the same height as link rows
+								     so the list doesn't shift visually when an unlinkable event
+								     lands between linkable ones. -->
+								<span class="event-plan-tag event-plan-tag--muted">&mdash;</span>
+							</div>
 						</div>
 					</div>
-				</div>
+				{/if}
 			{/each}
 		</div>
 	{/if}
@@ -303,8 +301,22 @@
 		transition: background var(--transition-fast);
 	}
 
-	.event-item:hover {
+	/* Linkified rows — the whole row navigates. Keeps text color neutral
+	 * (not link-blue) so the row looks like a clickable card rather than a
+	 * conventional underlined link. Focus ring for keyboard operability. */
+	.event-item--link {
+		color: inherit;
+		text-decoration: none;
+		cursor: pointer;
+	}
+
+	.event-item--link:hover {
 		background: var(--color-bg-tertiary);
+	}
+
+	.event-item--link:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 1px;
 	}
 
 	.event-icon {
@@ -375,19 +387,20 @@
 		color: var(--color-warning, var(--color-error));
 	}
 
+	/* Badge now; the whole row is the click target (bug #7.8) so this is
+	 * just a visual indicator of the destination, not an interactive element. */
 	.event-plan-tag {
 		font-size: 10px;
 		padding: 1px 4px;
 		background: var(--color-bg-tertiary);
 		color: var(--color-text-muted);
 		border-radius: var(--radius-sm);
-		text-decoration: none;
 		font-family: var(--font-family-mono);
 	}
 
-	.event-plan-tag:hover {
-		text-decoration: none;
-		background: var(--color-accent);
-		color: white;
+	/* Spacer variant for non-link rows — matches dimensions without visual weight. */
+	.event-plan-tag--muted {
+		opacity: 0.35;
+		background: transparent;
 	}
 </style>
