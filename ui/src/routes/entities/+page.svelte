@@ -42,7 +42,9 @@
 		},
 
 		async getEntityNeighbors(entityId: string) {
-			const result = await graphApi.pathSearch(entityId, 2, 50);
+			// Depth=3 reaches plan → requirement → scenario → dag-node chains
+			// that depth=2 silently truncated (bug #7.3).
+			const result = await graphApi.pathSearch(entityId, 3, 50);
 			const entities = transformPathSearchResult(result);
 			return { entities };
 		},

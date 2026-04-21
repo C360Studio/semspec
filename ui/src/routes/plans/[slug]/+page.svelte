@@ -50,14 +50,18 @@
 	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
 	const planGraphAdapter: GraphStoreAdapter = {
 		async listEntities({ limit = 50 }) {
-			// Load entities connected to this plan via pathSearch
+			// Load entities connected to this plan via pathSearch. Depth=3 is
+			// required to cover plan → requirement → scenario → dag-node — depth=2
+			// stopped at requirements and rendered a near-empty view (bug #7.3).
 			const planEntityId = `semspec.plan.${slug}`;
-			const result = await graphApi.pathSearch(planEntityId, 2, limit);
+			const result = await graphApi.pathSearch(planEntityId, 3, limit);
 			const entities = transformPathSearchResult(result);
 			return { entities };
 		},
 		async getEntityNeighbors(entityId: string) {
-			const result = await graphApi.pathSearch(entityId, 2, 50);
+			// Depth=3 matches the initial load; keeps expand-by-click consistent
+			// with what the plan graph shows on first paint.
+			const result = await graphApi.pathSearch(entityId, 3, 50);
 			const entities = transformPathSearchResult(result);
 			return { entities };
 		},
