@@ -456,7 +456,15 @@ function createGraphStore() {
 					visibleTypes.add(e.idParts.type);
 				}
 			} catch (err) {
-				error = err instanceof Error ? err.message : 'Failed to load graph entities';
+				// The empty-prefix full-graph scan is the most expensive query in
+				// the stack; when it times out the message is opaque. Surface a
+				// hint so the user knows to narrow (bug #7.4).
+				const raw = err instanceof Error ? err.message : String(err);
+				if (/timeout|deadline/i.test(raw) && prefix === '') {
+					error = `${raw}. Try a narrower prefix (e.g. "semspec.plan.") — the full-graph scan may exceed the request timeout on large stores.`;
+				} else {
+					error = raw || 'Failed to load graph entities';
+				}
 			} finally {
 				loading = false;
 			}

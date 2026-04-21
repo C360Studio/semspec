@@ -397,7 +397,7 @@
           ],
           "outputs": []
         },
-        "request_timeout": "5s",
+        "request_timeout": "15s",
         "max_traversal_depth": 5,
         "max_traversal_nodes": 100
       }
