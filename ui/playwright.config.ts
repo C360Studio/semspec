@@ -25,7 +25,11 @@ const dockerComposeCommand = useMockLLM
 	: 'docker compose -f docker-compose.e2e.yml up --wait';
 
 const T1_SPECS = ['e2e/plan-journey.spec.ts', 'e2e/plan-rejection-journey.spec.ts'];
-const T2_SPECS = ['e2e/plan-lifecycle-llm.spec.ts', 'e2e/epic-meshtastic-llm.spec.ts'];
+const T2_SPECS = [
+	'e2e/plan-lifecycle-llm.spec.ts',
+	'e2e/epic-meshtastic-llm.spec.ts',
+	'e2e/mortgage-calc-llm.spec.ts'
+];
 
 export default defineConfig({
 	testDir: './e2e',
