@@ -1,5 +1,5 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "persona_preset": "bmad",
   "platform": {
     "org": "semspec",
@@ -44,6 +44,15 @@
         "supports_tools": true,
         "stream": true,
         "request_timeout": "300s"
+      },
+      "qwen35-coder-35b": {
+        "provider": "ollama",
+        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
+        "model": "mdq100/qwen3.5-coder:35b",
+        "max_tokens": 131072,
+        "supports_tools": true,
+        "stream": true,
+        "request_timeout": "1800s"
       }
     },
     "capabilities": {
@@ -77,18 +86,20 @@
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen35-coder-35b"
         ],
         "fallback": [
+          "qwen3-coder-30b",
           "qwen-coder-14b"
         ]
       },
       "plan_review": {
         "description": "Strategic plan assessment, SOP compliance, completeness validation",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen35-coder-35b"
         ],
         "fallback": [
+          "qwen3-coder-30b",
           "qwen-coder-14b"
         ]
       },
@@ -113,9 +124,10 @@
       "scenario_generation": {
         "description": "BDD scenario generation from requirements",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen35-coder-35b"
         ],
         "fallback": [
+          "qwen3-coder-30b",
           "qwen-coder-14b"
         ]
       },
