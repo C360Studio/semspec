@@ -1,11 +1,35 @@
 package planmanager
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// BranchDiffFile mirrors the sandbox branchDiffFile shape. Duplicated here
+// to avoid importing cmd/sandbox (which is package main).
+type BranchDiffFile struct {
+	Path       string `json:"path"`
+	OldPath    string `json:"old_path,omitempty"`
+	Status     string `json:"status"`
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
+	Binary     bool   `json:"binary,omitempty"`
+}
+
+// BranchDiffSummary is the response shape from sandbox /git/branch-diff.
+type BranchDiffSummary struct {
+	Base            string           `json:"base"`
+	Branch          string           `json:"branch"`
+	Files           []BranchDiffFile `json:"files"`
+	TotalInsertions int              `json:"total_insertions"`
+	TotalDeletions  int              `json:"total_deletions"`
+}
 
 // workspaceProxy forwards read-only workspace requests to the sandbox server.
 type workspaceProxy struct {
@@ -73,4 +97,75 @@ func (p *workspaceProxy) handleFile(w http.ResponseWriter, r *http.Request) {
 // handleDownload proxies GET /plan-api/workspace/download?task_id=X → sandbox GET /workspace/download?task_id=X.
 func (p *workspaceProxy) handleDownload(w http.ResponseWriter, r *http.Request) {
 	p.proxyTo(w, r, "/workspace/download")
+}
+
+// postJSON issues a POST to the sandbox at path with a JSON body and decodes
+// the JSON response. 404 is returned separately so callers can distinguish
+// "branch never materialized" from real errors.
+func (p *workspaceProxy) postJSON(ctx context.Context, path string, body, out any) (int, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return 0, fmt.Errorf("marshal: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.sandboxURL+path, bytes.NewReader(data))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return resp.StatusCode, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("sandbox %s: %s", path, strings.TrimSpace(string(msg)))
+	}
+	if out != nil {
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+			return resp.StatusCode, fmt.Errorf("decode: %w", err)
+		}
+	}
+	return resp.StatusCode, nil
+}
+
+// branchDiff calls sandbox POST /git/branch-diff. Returns (summary, found, err)
+// where found=false signals the branch does not exist (e.g. requirement not
+// yet started) — caller should treat as empty diff, not error.
+func (p *workspaceProxy) branchDiff(ctx context.Context, branch, base string) (*BranchDiffSummary, bool, error) {
+	var out BranchDiffSummary
+	status, err := p.postJSON(ctx, "/git/branch-diff", map[string]string{
+		"branch": branch,
+		"base":   base,
+	}, &out)
+	if err != nil {
+		return nil, false, err
+	}
+	if status == http.StatusNotFound {
+		return nil, false, nil
+	}
+	return &out, true, nil
+}
+
+// branchFileDiff calls sandbox POST /git/branch-file-diff and returns the
+// raw unified patch. 404 returns ("", false, nil).
+func (p *workspaceProxy) branchFileDiff(ctx context.Context, branch, base, path string) (string, bool, error) {
+	var out struct {
+		Patch string `json:"patch"`
+	}
+	status, err := p.postJSON(ctx, "/git/branch-file-diff", map[string]string{
+		"branch": branch,
+		"base":   base,
+		"path":   path,
+	}, &out)
+	if err != nil {
+		return "", false, err
+	}
+	if status == http.StatusNotFound {
+		return "", false, nil
+	}
+	return out.Patch, true, nil
 }

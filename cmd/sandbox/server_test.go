@@ -685,6 +685,170 @@ func TestGitDiff(t *testing.T) {
 	}
 }
 
+// defaultBranch returns the repo's current branch name — portable across
+// git init defaults (master vs main) that depend on host config.
+func defaultBranch(t *testing.T, dir string) string {
+	t.Helper()
+	c := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	c.Dir = dir
+	out, err := c.Output()
+	if err != nil {
+		t.Fatalf("rev-parse HEAD: %v", err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// createBranchWithCommit creates `name` off HEAD in dir, writes path=content,
+// commits it, and switches back to the previous branch so the main repo is
+// left untouched.
+func createBranchWithCommit(t *testing.T, dir, name, path, content, msg string) {
+	t.Helper()
+	prev := defaultBranch(t, dir)
+	for _, args := range [][]string{
+		{"git", "checkout", "-b", name},
+		{"git", "config", "user.email", "test@semspec.test"},
+		{"git", "config", "user.name", "Test Agent"},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", args, out)
+		}
+	}
+	fullPath := filepath.Join(dir, path)
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+		t.Fatalf("mkdir for %s: %v", path, err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+	for _, args := range [][]string{
+		{"git", "add", "-A"},
+		{"git", "commit", "-m", msg},
+		{"git", "checkout", prev},
+	} {
+		c := exec.Command(args[0], args[1:]...)
+		c.Dir = dir
+		if out, err := c.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %s", args, out)
+		}
+	}
+}
+
+func TestGitBranchDiff(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := defaultBranch(t, srv.repoPath)
+
+	createBranchWithCommit(t, srv.repoPath, "semspec/requirement-r1",
+		"src/parser.go", "package parser\n\nfunc Parse() {}\n", "feat: add parser")
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/branch-diff", branchDiffRequest{
+		Branch: "semspec/requirement-r1",
+		Base:   base,
+	})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("branch-diff: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result branchDiffResponse
+	decodeJSON(t, resp, &result)
+
+	if len(result.Files) != 1 {
+		t.Fatalf("files = %d, want 1: %+v", len(result.Files), result.Files)
+	}
+	f := result.Files[0]
+	if f.Path != "src/parser.go" {
+		t.Errorf("path = %q, want src/parser.go", f.Path)
+	}
+	if f.Status != "added" {
+		t.Errorf("status = %q, want added", f.Status)
+	}
+	if f.Insertions == 0 {
+		t.Errorf("insertions = 0, want > 0")
+	}
+	if result.TotalInsertions != f.Insertions {
+		t.Errorf("total_insertions = %d, want %d", result.TotalInsertions, f.Insertions)
+	}
+}
+
+func TestGitBranchDiff_InvalidBranch(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	cases := []branchDiffRequest{
+		{Branch: "", Base: "main"},
+		{Branch: "../etc/passwd", Base: "main"},
+		{Branch: "foo bar", Base: "main"},
+		{Branch: "semspec/ok", Base: "../bad"},
+	}
+	for _, tc := range cases {
+		resp := doRequest(t, ts, http.MethodPost, "/git/branch-diff", tc)
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("expected non-200 for %+v, got 200", tc)
+		}
+		resp.Body.Close()
+	}
+}
+
+func TestGitBranchDiff_BranchNotFound(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := defaultBranch(t, srv.repoPath)
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/branch-diff", branchDiffRequest{
+		Branch: "does-not-exist",
+		Base:   base,
+	})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for missing branch, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+func TestGitBranchFileDiff(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := defaultBranch(t, srv.repoPath)
+
+	createBranchWithCommit(t, srv.repoPath, "semspec/requirement-r2",
+		"src/mod.go", "package mod\n\nconst V = 1\n", "feat: add mod")
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/branch-file-diff", branchFileDiffRequest{
+		Branch: "semspec/requirement-r2",
+		Base:   base,
+		Path:   "src/mod.go",
+	})
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("branch-file-diff: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	var result branchFileDiffResponse
+	decodeJSON(t, resp, &result)
+
+	if !strings.Contains(result.Patch, "src/mod.go") {
+		t.Errorf("patch missing file path: %q", result.Patch)
+	}
+	if !strings.Contains(result.Patch, "+package mod") {
+		t.Errorf("patch missing added content: %q", result.Patch)
+	}
+}
+
+func TestGitBranchFileDiff_PathEscape(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	cases := []string{"", "../etc/passwd", "/etc/passwd"}
+	for _, p := range cases {
+		resp := doRequest(t, ts, http.MethodPost, "/git/branch-file-diff", branchFileDiffRequest{
+			Branch: "semspec/requirement-r1",
+			Base:   "main",
+			Path:   p,
+		})
+		if resp.StatusCode == http.StatusOK {
+			t.Errorf("expected non-200 for path %q, got 200", p)
+		}
+		resp.Body.Close()
+	}
+}
+
 func TestPathEscape(t *testing.T) {
 	_, ts := newTestServer(t)
 	createWorktree(t, ts, "test-escape")

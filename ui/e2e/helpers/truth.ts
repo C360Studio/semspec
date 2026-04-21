@@ -183,6 +183,100 @@ export async function stubExecutionStream(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Files view (bug #7.6) — stubs for the per-plan branches + file-diff endpoints
+// backing PlanWorkspace. Specs build BranchFixture rows and register a single
+// route that serves them; a companion stub fulfils per-file patch requests.
+// ---------------------------------------------------------------------------
+
+export interface BranchDiffFileFixture {
+	path: string;
+	status?: string;
+	insertions?: number;
+	deletions?: number;
+	binary?: boolean;
+	old_path?: string;
+}
+
+export interface BranchFixture {
+	requirement_id: string;
+	title: string;
+	branch?: string;
+	stage?: string;
+	base?: string;
+	files?: BranchDiffFileFixture[];
+	total_insertions?: number;
+	total_deletions?: number;
+	diff_error?: string;
+}
+
+function materializeBranch(input: BranchFixture): Record<string, unknown> {
+	const files = (input.files ?? []).map((f) => ({
+		path: f.path,
+		status: f.status ?? 'modified',
+		insertions: f.insertions ?? 0,
+		deletions: f.deletions ?? 0,
+		binary: f.binary ?? false,
+		old_path: f.old_path ?? ''
+	}));
+	const totalIns =
+		input.total_insertions ??
+		files.reduce((s, f) => s + (typeof f.insertions === 'number' ? f.insertions : 0), 0);
+	const totalDel =
+		input.total_deletions ??
+		files.reduce((s, f) => s + (typeof f.deletions === 'number' ? f.deletions : 0), 0);
+	return {
+		requirement_id: input.requirement_id,
+		title: input.title,
+		branch: input.branch ?? '',
+		stage: input.stage ?? 'pending',
+		base: input.base ?? 'main',
+		files,
+		total_insertions: totalIns,
+		total_deletions: totalDel,
+		...(input.diff_error ? { diff_error: input.diff_error } : {})
+	};
+}
+
+export async function stubPlanBranches(
+	page: Page,
+	slug: string,
+	branches: BranchFixture[]
+): Promise<void> {
+	await page.route(`**/plan-manager/plans/${slug}/branches`, async (route) => {
+		if (route.request().method() !== 'GET') {
+			await route.fallback();
+			return;
+		}
+		await fulfillJSON(route, branches.map(materializeBranch));
+	});
+}
+
+/**
+ * Stub per-file diff requests. `patches` is a map from file path to the
+ * unified-diff string to return. Paths not in the map receive a generic
+ * placeholder so the UI has something to render.
+ */
+export async function stubRequirementFileDiff(
+	page: Page,
+	slug: string,
+	patches: Record<string, string>
+): Promise<void> {
+	await page.route(
+		new RegExp(`/plan-manager/plans/${slug}/requirements/.+/file-diff(\\?.*)?$`),
+		async (route) => {
+			if (route.request().method() !== 'GET') {
+				await route.fallback();
+				return;
+			}
+			const url = new URL(route.request().url());
+			const requestedPath = url.searchParams.get('path') ?? '';
+			const patch = patches[requestedPath] ?? `diff placeholder for ${requestedPath}`;
+			await fulfillJSON(route, { patch });
+		}
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Board-scenario bundle — most /board truth-tests need the same four stubs
 // with identical no-op content. One call; specs can still add overrides.
 // ---------------------------------------------------------------------------

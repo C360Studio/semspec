@@ -502,6 +502,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodPost, func() { c.handleForceCompletePlan(w, r, slug) })
 	case "reject":
 		requireMethod(w, r, http.MethodPost, func() { c.handleRejectPlan(w, r, slug) })
+	case "branches":
+		requireMethod(w, r, http.MethodGet, func() { c.handlePlanBranches(w, r, slug) })
 	default:
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return

@@ -77,6 +77,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /git/status", s.handleGitStatus)
 	mux.HandleFunc("POST /git/commit", s.handleGitCommit)
 	mux.HandleFunc("POST /git/diff", s.handleGitDiff)
+	mux.HandleFunc("POST /git/branch-diff", s.handleGitBranchDiff)
+	mux.HandleFunc("POST /git/branch-file-diff", s.handleGitBranchFileDiff)
 
 	// Command execution (scoped to worktree).
 	mux.HandleFunc("POST /exec", s.handleExec)
@@ -200,6 +202,39 @@ type gitStatusResponse struct {
 
 type gitDiffResponse struct {
 	Output string `json:"output"`
+}
+
+// branchDiffFile describes one file changed between base..branch.
+type branchDiffFile struct {
+	Path       string `json:"path"`
+	OldPath    string `json:"old_path,omitempty"` // set for renames
+	Status     string `json:"status"`             // added, modified, deleted, renamed, copied, binary
+	Insertions int    `json:"insertions"`
+	Deletions  int    `json:"deletions"`
+	Binary     bool   `json:"binary,omitempty"`
+}
+
+type branchDiffRequest struct {
+	Branch string `json:"branch"`
+	Base   string `json:"base"` // defaults to "main"
+}
+
+type branchDiffResponse struct {
+	Base            string           `json:"base"`
+	Branch          string           `json:"branch"`
+	Files           []branchDiffFile `json:"files"`
+	TotalInsertions int              `json:"total_insertions"`
+	TotalDeletions  int              `json:"total_deletions"`
+}
+
+type branchFileDiffRequest struct {
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	Path   string `json:"path"`
+}
+
+type branchFileDiffResponse struct {
+	Patch string `json:"patch"`
 }
 
 // ---------------------------------------------------------------------------
@@ -860,6 +895,228 @@ func (s *Server) handleGitDiff(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, gitDiffResponse{Output: unstaged + staged})
+}
+
+// handleGitBranchDiff returns per-file stats for the commits on `branch` that
+// are not on `base` (i.e. `git diff base...branch --numstat --name-status`).
+// Used by the UI to show what an agent actually changed on a requirement's
+// branch, not the working tree of a scratch worktree.
+//
+// POST /git/branch-diff  {"branch": "semspec/requirement-R1", "base": "main"}
+func (s *Server) handleGitBranchDiff(w http.ResponseWriter, r *http.Request) {
+	var req branchDiffRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if !isValidBranchName(req.Branch) {
+		writeError(w, http.StatusBadRequest, "invalid branch")
+		return
+	}
+	base := req.Base
+	if base == "" {
+		base = "main"
+	}
+	if !isValidBranchName(base) {
+		writeError(w, http.StatusBadRequest, "invalid base")
+		return
+	}
+
+	ctx := r.Context()
+
+	// Verify both refs exist so we return 404 instead of a cryptic 500.
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", req.Branch); err != nil {
+		writeError(w, http.StatusNotFound, "branch not found: "+req.Branch)
+		return
+	}
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", base); err != nil {
+		writeError(w, http.StatusNotFound, "base not found: "+base)
+		return
+	}
+
+	spec := base + "..." + req.Branch
+
+	numstat, err := gitOutput(ctx, s.repoPath, "diff", "--numstat", spec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "git diff --numstat failed: "+err.Error())
+		return
+	}
+	namestatus, err := gitOutput(ctx, s.repoPath, "diff", "--name-status", spec)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "git diff --name-status failed: "+err.Error())
+		return
+	}
+
+	files := mergeBranchDiff(numstat, namestatus)
+	totalIns, totalDel := 0, 0
+	for _, f := range files {
+		totalIns += f.Insertions
+		totalDel += f.Deletions
+	}
+
+	writeJSON(w, http.StatusOK, branchDiffResponse{
+		Base:            base,
+		Branch:          req.Branch,
+		Files:           files,
+		TotalInsertions: totalIns,
+		TotalDeletions:  totalDel,
+	})
+}
+
+// handleGitBranchFileDiff returns the unified patch for a single file between
+// base and branch. Separate endpoint because patches can be large and callers
+// usually only want one at a time (file clicked in the UI).
+//
+// POST /git/branch-file-diff  {"branch": "...", "base": "...", "path": "src/x.go"}
+func (s *Server) handleGitBranchFileDiff(w http.ResponseWriter, r *http.Request) {
+	var req branchFileDiffRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if !isValidBranchName(req.Branch) {
+		writeError(w, http.StatusBadRequest, "invalid branch")
+		return
+	}
+	base := req.Base
+	if base == "" {
+		base = "main"
+	}
+	if !isValidBranchName(base) {
+		writeError(w, http.StatusBadRequest, "invalid base")
+		return
+	}
+	if req.Path == "" || strings.Contains(req.Path, "..") || strings.HasPrefix(req.Path, "/") {
+		writeError(w, http.StatusBadRequest, "invalid path")
+		return
+	}
+
+	ctx := r.Context()
+	spec := base + "..." + req.Branch
+
+	// `--` separates path args from revision args; prevents a path that looks
+	// like a revision from being interpreted as one.
+	patch, err := gitOutput(ctx, s.repoPath, "diff", spec, "--", req.Path)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "git diff failed: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, branchFileDiffResponse{Patch: patch})
+}
+
+// mergeBranchDiff joins `git diff --numstat` and `git diff --name-status`
+// output into one file list keyed by path. Handles renames where numstat
+// reports the new path and name-status reports `R<score>\told\tnew`.
+func mergeBranchDiff(numstat, namestatus string) []branchDiffFile {
+	type entry struct {
+		ins, del int
+		binary   bool
+		status   string
+		oldPath  string
+	}
+	files := map[string]*entry{}
+
+	for _, line := range splitLines(numstat) {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 3 {
+			continue
+		}
+		ins, del := parts[0], parts[1]
+		// Numstat format for renames: "N\tM\told => new" or tab-separated
+		// new path alone depending on diff.renames config. Trust the tab split.
+		path := parts[len(parts)-1]
+		e := &entry{}
+		if ins == "-" && del == "-" {
+			e.binary = true
+		} else {
+			e.ins = atoiDefault(ins, 0)
+			e.del = atoiDefault(del, 0)
+		}
+		files[path] = e
+	}
+
+	for _, line := range splitLines(namestatus) {
+		parts := strings.Split(line, "\t")
+		if len(parts) < 2 {
+			continue
+		}
+		code := parts[0]
+		var path, oldPath string
+		switch code[0] {
+		case 'R', 'C':
+			if len(parts) < 3 {
+				continue
+			}
+			oldPath, path = parts[1], parts[2]
+		default:
+			path = parts[1]
+		}
+		e, ok := files[path]
+		if !ok {
+			e = &entry{}
+			files[path] = e
+		}
+		e.status = statusFromCode(code)
+		if oldPath != "" {
+			e.oldPath = oldPath
+		}
+	}
+
+	out := make([]branchDiffFile, 0, len(files))
+	for path, e := range files {
+		status := e.status
+		if status == "" {
+			if e.binary {
+				status = "binary"
+			} else {
+				status = "modified"
+			}
+		}
+		out = append(out, branchDiffFile{
+			Path:       path,
+			OldPath:    e.oldPath,
+			Status:     status,
+			Insertions: e.ins,
+			Deletions:  e.del,
+			Binary:     e.binary,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+func statusFromCode(code string) string {
+	if code == "" {
+		return ""
+	}
+	switch code[0] {
+	case 'A':
+		return "added"
+	case 'D':
+		return "deleted"
+	case 'M':
+		return "modified"
+	case 'R':
+		return "renamed"
+	case 'C':
+		return "copied"
+	case 'T':
+		return "typechange"
+	default:
+		return "modified"
+	}
+}
+
+func atoiDefault(s string, def int) int {
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return def
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
 }
 
 // handleExec executes a shell command inside a task's worktree.

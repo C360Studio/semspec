@@ -91,6 +91,10 @@ func (c *Component) handleRequirementByID(w http.ResponseWriter, r *http.Request
 		c.handleDeprecateRequirement(w, r, slug, requirementID)
 	case "scenarios":
 		c.handleListScenariosByRequirement(w, r, slug, requirementID)
+	case "file-diff":
+		requireMethod(w, r, http.MethodGet, func() {
+			c.handleRequirementFileDiff(w, r, slug, requirementID)
+		})
 	default:
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
 	}
