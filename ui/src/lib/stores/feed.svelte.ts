@@ -23,6 +23,9 @@ class FeedStore {
 	connected = $state(false);
 	currentSlug = $state<string | null>(null);
 	requirementStages = $state<Map<string, RequirementSSEPayload>>(new Map());
+	/** Latest task SSE payload keyed by task_id — consumers like PlanCard derive
+	 * "TDD cycle X/Y · updated Nm ago" from this to answer "is this working?" */
+	taskStages = $state<Map<string, TaskSSEPayload>>(new Map());
 
 	private planSSE: EventSource | null = null;
 	private execSSE: EventSource | null = null;
@@ -208,13 +211,19 @@ class FeedStore {
 		const title = payload.title?.slice(0, 50) ?? payload.task_id;
 		const stage = payload.stage;
 		const iter = payload.iteration > 1 ? ` (iter ${payload.iteration})` : '';
+		// TDD cycle counter — reveals how many rework loops this node has burned.
+		// Critical signal for long small-LLM runs: "is the node making progress or spinning?"
+		const cycle =
+			typeof payload.tdd_cycle === 'number' && typeof payload.max_tdd_cycles === 'number'
+				? ` [cycle ${payload.tdd_cycle + 1}/${payload.max_tdd_cycles}]`
+				: '';
 
 		let summary: string;
 		if (eventType === 'task_completed') {
 			const verdict = payload.verdict ?? stage;
-			summary = `Task ${verdict}: ${title}${iter}`;
+			summary = `Task ${verdict}: ${title}${iter}${cycle}`;
 		} else {
-			summary = `Task ${formatTaskStage(stage)}: ${title}${iter}`;
+			summary = `Task ${formatTaskStage(stage)}: ${title}${iter}${cycle}`;
 		}
 
 		const event: FeedEvent = {
@@ -227,6 +236,11 @@ class FeedStore {
 			data: payload as unknown as Record<string, unknown>
 		};
 		this.addEvent(event);
+
+		// Mirror the latest payload per task so PlanCard / detail views can derive
+		// "is this working?" signals without re-wiring the SSE stream. Must replace
+		// the Map to trigger Svelte 5 reactivity (Maps are not deeply reactive).
+		this.taskStages = new Map(this.taskStages).set(payload.task_id, payload);
 	}
 
 	private handleRequirementUpdated(payload: RequirementSSEPayload, eventType: string): void {
@@ -314,17 +328,19 @@ function formatReqStage(stage: string): string {
 export const feedStore = new FeedStore();
 
 // Re-export questionsStore integration helper.
-// Wire this in the layout or plan page via $effect watching questionsStore.
+// Wire this in the layout or plan page inside an $effect that reads questionsStore.all
+// to establish the dependency; this function then untrack()s its own derived reads so
+// callers' effects don't re-subscribe to every derived slice individually.
 export function syncQuestionsToFeed(): void {
-	// This is a reactive helper — call inside $effect.
-	// It watches questionsStore.all and pushes new pending questions to feed.
-	for (const q of questionsStore.pending) {
-		feedStore.addQuestionEvent(q, 'question_created');
-	}
-	for (const q of questionsStore.answered) {
-		feedStore.addQuestionEvent(q, 'question_answered');
-	}
-	for (const q of questionsStore.timedOut) {
-		feedStore.addQuestionEvent(q, 'question_timeout');
-	}
+	untrack(() => {
+		for (const q of questionsStore.pending) {
+			feedStore.addQuestionEvent(q, 'question_created');
+		}
+		for (const q of questionsStore.answered) {
+			feedStore.addQuestionEvent(q, 'question_answered');
+		}
+		for (const q of questionsStore.timedOut) {
+			feedStore.addQuestionEvent(q, 'question_timeout');
+		}
+	});
 }

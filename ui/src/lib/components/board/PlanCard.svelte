@@ -3,8 +3,10 @@
 	import PipelineIndicator from './PipelineIndicator.svelte';
 	import ModeIndicator from './ModeIndicator.svelte';
 	import AgentBadge from './AgentBadge.svelte';
+	import LoopHeartbeat from './LoopHeartbeat.svelte';
 	import { derivePlanPipeline, getStageLabel, type PlanWithStatus } from '$lib/types/plan';
 	import { questionsStore } from '$lib/stores/questions.svelte';
+	import { feedStore } from '$lib/stores/feed.svelte';
 	import { executePlan } from '$lib/actions/plans';
 	import type { Task } from '$lib/types/task';
 
@@ -40,6 +42,51 @@
 		tasks.filter((t) => t.status === 'dirty').length
 	);
 
+	// Liveness signal for implementing plans: find the most-recently-updated task
+	// SSE payload for one of this plan's active loops and surface its TDD cycle
+	// plus "last update Nm ago". Answers "is this thing working?" without a detail drill-down.
+	const activeTaskStatus = $derived.by(() => {
+		if (plan.stage !== 'implementing') return null;
+		const taskIds = (plan.active_loops ?? [])
+			.map((l) => l.current_task_id)
+			.filter((id): id is string => !!id);
+		if (taskIds.length === 0) return null;
+		let latest: { task_id: string; tdd_cycle?: number; max_tdd_cycles?: number; updated_at?: string } | null = null;
+		let latestTs = 0;
+		for (const id of taskIds) {
+			const payload = feedStore.taskStages.get(id);
+			if (!payload) continue;
+			const ts = payload.updated_at ? Date.parse(payload.updated_at) : 0;
+			if (!latest || ts > latestTs) {
+				latest = payload;
+				latestTs = ts;
+			}
+		}
+		return latest;
+	});
+
+	// Stalled = no forward motion for 10+ minutes while implementing. Small-LLM
+	// runs churn and the user needs a clear "something is wrong" signal vs the
+	// subtle "Nm ago" text. Border treatment mirrors has-rejection for consistency.
+	const STALLED_THRESHOLD_MS = 10 * 60 * 1000;
+	const isStalled = $derived.by(() => {
+		if (!activeTaskStatus?.updated_at) return false;
+		const age = Date.now() - Date.parse(activeTaskStatus.updated_at);
+		return Number.isFinite(age) && age > STALLED_THRESHOLD_MS;
+	});
+
+	function ageLabel(iso: string | undefined): string {
+		if (!iso) return '';
+		const ms = Date.now() - Date.parse(iso);
+		if (Number.isNaN(ms) || ms < 0) return '';
+		const s = Math.floor(ms / 1000);
+		if (s < 60) return `${s}s ago`;
+		const m = Math.floor(s / 60);
+		if (m < 60) return `${m}m ago`;
+		const h = Math.floor(m / 60);
+		return `${h}h ago`;
+	}
+
 	async function handleExecute(e: Event) {
 		e.preventDefault();
 		e.stopPropagation();
@@ -52,6 +99,7 @@
 	class="plan-card"
 	class:draft={isDraft}
 	class:has-rejection={hasRejection}
+	class:stalled={isStalled}
 >
 	<div class="card-header">
 		<div class="title-row">
@@ -83,6 +131,28 @@
 			/>
 		{/if}
 	</div>
+
+	{#if activeTaskStatus}
+		<div class="liveness-row" data-testid="plan-card-liveness">
+			{#if typeof activeTaskStatus.tdd_cycle === 'number' && typeof activeTaskStatus.max_tdd_cycles === 'number'}
+				<span class="cycle-badge" title="TDD rework cycle">
+					cycle {activeTaskStatus.tdd_cycle + 1}/{activeTaskStatus.max_tdd_cycles}
+				</span>
+			{/if}
+			{#if activeTaskStatus.updated_at}
+				<span class="liveness-age" title="Time since the last state change">
+					{ageLabel(activeTaskStatus.updated_at)}
+				</span>
+			{/if}
+		</div>
+	{:else if (plan.active_loops ?? []).length > 0}
+		<!-- Generation phases (planning, requirements, scenarios, reviews) don't
+		     have TaskExecution data yet, but they DO have active agent loops.
+		     LoopHeartbeat surfaces "is this thing on?" from the activity SSE
+		     tick timeline — so humans watching a 15-minute scenario phase
+		     see a live pulse and "idle Ns" counter instead of deafening silence. -->
+		<LoopHeartbeat loops={plan.active_loops ?? []} />
+	{/if}
 
 	{#if plan.stage === 'scenarios_generated'}
 		<div class="action-row">
@@ -145,6 +215,15 @@
 		border-left: 3px solid var(--color-warning);
 	}
 
+	.plan-card.stalled {
+		border-left: 3px solid var(--color-error);
+	}
+
+	.plan-card.stalled .liveness-age {
+		color: var(--color-error);
+		font-weight: var(--font-weight-semibold);
+	}
+
 	.card-header {
 		display: flex;
 		justify-content: space-between;
@@ -187,6 +266,26 @@
 		border-radius: var(--radius-full);
 		font-size: var(--font-size-xs);
 		font-weight: var(--font-weight-semibold);
+	}
+
+	.liveness-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin-top: var(--space-2);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+
+	.cycle-badge {
+		padding: 2px 6px;
+		border-radius: var(--radius-sm);
+		background: var(--color-bg-tertiary);
+		font-family: var(--font-family-mono);
+	}
+
+	.liveness-age {
+		font-family: var(--font-family-mono);
 	}
 
 	.stage-row {

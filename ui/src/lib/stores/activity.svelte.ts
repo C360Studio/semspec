@@ -14,6 +14,14 @@ type ActivityCallback = (event: ActivityEvent) => void;
 class ActivityStore {
 	recent = $state<ActivityEvent[]>([]);
 	connected = $state(false);
+	/**
+	 * Tick timestamp (browser Date.now()) of the last SSE event per loop_id.
+	 * Lets UIs surface "is this thing on?" — the time since last tick tells a
+	 * watching human whether the model is quietly chewing or genuinely stuck.
+	 * Populated from every loop_updated/loop_created event; evicted on
+	 * loop_deleted or terminal completion events.
+	 */
+	loopLastSeen = $state<Map<string, number>>(new Map());
 
 	private eventSource: EventSource | null = null;
 	private mockCleanup: (() => void) | null = null;
@@ -25,6 +33,12 @@ class ActivityStore {
 
 	connect(filter?: string): void {
 		if (!browser) return;
+
+		// Idempotent: if we already have an open EventSource (or a mock stream),
+		// do not open another. Without this guard, any caller that re-invokes
+		// connect() — directly or via a re-running $effect — leaves an orphan
+		// EventSource and the server logs a reconnect burst.
+		if (this.eventSource || this.mockCleanup) return;
 
 		this.currentFilter = filter;
 
@@ -66,10 +80,37 @@ class ActivityStore {
 
 	private addEvent(event: ActivityEvent): void {
 		this.recent = [...this.recent.slice(-(this.maxEvents - 1)), event];
+
+		// Maintain loopLastSeen as a heartbeat timeline. Map must be replaced,
+		// not mutated, to trigger Svelte 5 reactivity — Maps aren't deeply reactive.
+		if (event.loop_id) {
+			if (event.type === 'loop_deleted') {
+				if (this.loopLastSeen.has(event.loop_id)) {
+					const next = new Map(this.loopLastSeen);
+					next.delete(event.loop_id);
+					this.loopLastSeen = next;
+				}
+			} else {
+				// loop_created / loop_updated / anything else with loop_id → tick
+				this.loopLastSeen = new Map(this.loopLastSeen).set(event.loop_id, Date.now());
+			}
+		}
+
 		// Notify all subscribers of the new event
 		for (const callback of this.callbacks) {
 			callback(event);
 		}
+	}
+
+	/**
+	 * Milliseconds since we last saw an activity event for this loop.
+	 * Returns null when we have never seen the loop. Consumers render
+	 * idle time labels and fire the "stalled" treatment past a threshold.
+	 */
+	idleMsForLoop(loopID: string): number | null {
+		const lastSeen = this.loopLastSeen.get(loopID);
+		if (lastSeen === undefined) return null;
+		return Date.now() - lastSeen;
 	}
 
 	// Subscribe to new activity events

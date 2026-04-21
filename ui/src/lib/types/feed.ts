@@ -41,6 +41,14 @@ export type TaskSSEPayload = {
 	validation_passed?: boolean;
 	verdict?: string;
 	feedback?: string;
+	/** Current TDD cycle (0-indexed) — reveals how many rework loops this node has burned */
+	tdd_cycle?: number;
+	/** Hard cap on TDD cycles before escalation */
+	max_tdd_cycles?: number;
+	/** How many times the reviewer was re-dispatched because its output couldn't be parsed */
+	review_retry_count?: number;
+	/** ISO timestamp of last state mutation — used to surface "is this still moving?" */
+	updated_at?: string;
 };
 
 /** Requirement execution payload from execution SSE */
@@ -54,4 +62,6 @@ export type RequirementSSEPayload = {
 	current_node_idx?: number;
 	loop_id?: string;
 	review_verdict?: string;
+	/** ISO timestamp of last state mutation — used to surface liveness */
+	updated_at?: string;
 };
