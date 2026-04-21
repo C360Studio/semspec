@@ -3,9 +3,27 @@
   "mode": "headless",
   "sources": [
     {
-      "type": "repo",
-      "path": "/workspace",
+      "type": "git",
+      "url": "/workspace",
       "branch": "main",
+      "poll_interval": "20s",
+      "watch": true
+    },
+    {
+      "type": "ast",
+      "path": "/workspace",
+      "language": "go",
+      "index_interval": "20s",
+      "watch": true
+    },
+    {
+      "type": "docs",
+      "paths": ["/workspace"],
+      "watch": true
+    },
+    {
+      "type": "config",
+      "paths": ["/workspace"],
       "watch": true
     }
   ]

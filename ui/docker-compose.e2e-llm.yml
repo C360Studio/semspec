@@ -23,6 +23,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../docker/semsource.json:/etc/semsource/semsource.json:ro
+      - ../docker/semsource.gitconfig:/root/.gitconfig:ro
       - ../test/e2e/fixtures/go-project:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:

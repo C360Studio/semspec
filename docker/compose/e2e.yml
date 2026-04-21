@@ -27,6 +27,10 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../../docker/semsource.json:/etc/semsource/semsource.json:ro
+      # Bind-mount a gitconfig that marks every repo as safe. Without this, git
+      # refuses host-owned repos when semsource runs as root and initial clone
+      # retries for 2m30s before succeeding on subsequent attempts.
+      - ../../docker/semsource.gitconfig:/root/.gitconfig:ro
       - ../../test/e2e/workspace:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
