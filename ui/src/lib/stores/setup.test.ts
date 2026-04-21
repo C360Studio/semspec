@@ -206,8 +206,19 @@ describe('SetupStore — checkStatus', () => {
 		vi.clearAllMocks();
 	});
 
-	it('transitions to complete step when project is already initialized', async () => {
-		vi.mocked(projectApi.getStatus).mockResolvedValue(makeStatus({ initialized: true }));
+	// A fully-configured status has the hard-required fields: project_org,
+	// project_name, has_checklist. Without all three, the store treats the
+	// project as initialized-but-incomplete and lands on `config_required`.
+	const fullyConfigured = () =>
+		makeStatus({
+			initialized: true,
+			project_org: 'acme',
+			project_name: 'widgets',
+			has_checklist: true
+		});
+
+	it('transitions to complete when project is initialized and fully configured', async () => {
+		vi.mocked(projectApi.getStatus).mockResolvedValue(fullyConfigured());
 
 		await setupStore.checkStatus();
 
@@ -215,14 +226,47 @@ describe('SetupStore — checkStatus', () => {
 		expect(setupStore.status?.initialized).toBe(true);
 	});
 
-	it('runs detection when project is not initialized', async () => {
-		vi.mocked(projectApi.getStatus).mockResolvedValue(makeStatus({ initialized: false }));
+	it('transitions to config_required when initialized but missing required fields', async () => {
+		vi.mocked(projectApi.getStatus).mockResolvedValue(makeStatus({ initialized: true }));
+
+		await setupStore.checkStatus();
+
+		expect(setupStore.step).toBe('config_required');
+	});
+
+	it('runs autoInit when project is not initialized', async () => {
+		// Not-initialized → checkStatus delegates to autoInit, which detects,
+		// calls initProject with defaults, then re-fetches status. The final
+		// step depends on whether that re-fetched status is fully configured.
+		vi.mocked(projectApi.getStatus)
+			.mockResolvedValueOnce(makeStatus({ initialized: false }))
+			.mockResolvedValueOnce(fullyConfigured());
 		vi.mocked(projectApi.detect).mockResolvedValue(makeDetection());
+		vi.mocked(projectApi.initProject).mockResolvedValue({
+			success: true,
+			files_written: []
+		});
 
 		await setupStore.checkStatus();
 
 		expect(projectApi.detect).toHaveBeenCalledOnce();
-		expect(setupStore.step).toBe('detection');
+		expect(projectApi.initProject).toHaveBeenCalledOnce();
+		expect(setupStore.step).toBe('complete');
+	});
+
+	it('lands on config_required when autoInit leaves required fields missing', async () => {
+		vi.mocked(projectApi.getStatus)
+			.mockResolvedValueOnce(makeStatus({ initialized: false }))
+			.mockResolvedValueOnce(makeStatus({ initialized: true, has_checklist: true }));
+		vi.mocked(projectApi.detect).mockResolvedValue(makeDetection());
+		vi.mocked(projectApi.initProject).mockResolvedValue({
+			success: true,
+			files_written: []
+		});
+
+		await setupStore.checkStatus();
+
+		expect(setupStore.step).toBe('config_required');
 	});
 
 	it('transitions to error step on API failure', async () => {
@@ -235,13 +279,11 @@ describe('SetupStore — checkStatus', () => {
 	});
 
 	it('clears previous error on retry', async () => {
-		// First call fails
 		vi.mocked(projectApi.getStatus).mockRejectedValue(new Error('First error'));
 		await setupStore.checkStatus();
 		expect(setupStore.error).toBe('First error');
 
-		// Second call succeeds
-		vi.mocked(projectApi.getStatus).mockResolvedValue(makeStatus({ initialized: true }));
+		vi.mocked(projectApi.getStatus).mockResolvedValue(fullyConfigured());
 		await setupStore.checkStatus();
 
 		expect(setupStore.error).toBeNull();
