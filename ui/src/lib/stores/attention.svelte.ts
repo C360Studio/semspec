@@ -15,10 +15,17 @@ export type AttentionType =
 /**
  * Compute attention items from plans, loops, and tasks.
  * Pure function — no store dependency.
+ *
+ * `loops` is kept in the signature for backward compatibility but is only
+ * used for the `rejection` path via tasksByPlan. Loop-level `state=failed`
+ * is NOT surfaced as an alarm because a failed dev loop mid-TDD is actively
+ * being retried — not user-actionable. Only a requirement whose retry budget
+ * is exhausted (plan.execution_summary.failed > 0, while stage is still
+ * implementing) deserves the banner.
  */
 export function computeAttentionItems(
 	plans: PlanWithStatus[],
-	loops: Loop[],
+	_loops: Loop[],
 	tasksByPlan?: Record<string, Task[]>
 ): AttentionItem[] {
 	const result: AttentionItem[] = [];
@@ -53,20 +60,23 @@ export function computeAttentionItems(
 		}
 	}
 
-	// Failed loops
-	for (const loop of loops.filter((l) => l.state === 'failed')) {
-		const plan = plans.find((p) =>
-			p.active_loops?.some((al) => al.loop_id === loop.loop_id)
-		);
+	// Requirement-level terminal failures — only while the plan is still
+	// in-flight (implementing). Once the plan rolls up to complete/failed/
+	// rejected, its own card communicates the state; duplicating it in the
+	// banner adds noise without adding action.
+	for (const p of plans) {
+		if (p.stage !== 'implementing') continue;
+		const failed = p.execution_summary?.failed ?? 0;
+		if (failed <= 0) continue;
 
+		const total = p.execution_summary?.total ?? 0;
 		result.push({
 			type: 'task_failed',
-			loop_id: loop.loop_id,
-			plan_slug: plan?.slug,
-			title: `Task failed in loop ${loop.loop_id.slice(-6)}`,
-			description: `Loop failed after ${loop.iterations} iterations`,
-			action_url: plan ? `/plans/${plan.slug}` : '/activity',
-			created_at: loop.created_at || new Date().toISOString()
+			plan_slug: p.slug,
+			title: `${failed} of ${total} requirements failed in "${p.slug}"`,
+			description: `Retry budget exhausted on ${failed} requirement${failed === 1 ? '' : 's'}. Intervene or let the plan roll up.`,
+			action_url: `/plans/${p.slug}`,
+			created_at: p.approved_at || p.created_at
 		});
 	}
 

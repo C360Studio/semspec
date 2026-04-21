@@ -4,6 +4,7 @@
 	import PlansList from './PlansList.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { feedStore } from '$lib/stores/feed.svelte';
+	import { activityStore } from '$lib/stores/activity.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	type PanelMode = 'feed' | 'plans';
@@ -18,9 +19,15 @@
 	let mode = $state<PanelMode>('plans');
 	let manualOverride = $state(false);
 
-	// Auto-switch: feed when there's activity (loops running or feed events arriving)
+	// Auto-switch: feed when there's activity from any source — active loops,
+	// plan-scoped feed events, OR global loop ticks. The global branch matters
+	// on /board where no plan is selected and feedStore never populates
+	// (ActivityFeed renders activityStore in that case — see scope="global").
 	$effect(() => {
-		const hasActivity = activeLoopCount > 0 || feedStore.events.length > 0;
+		const hasActivity =
+			activeLoopCount > 0 ||
+			feedStore.events.length > 0 ||
+			activityStore.recent.length > 0;
 		if (hasActivity && !manualOverride) {
 			mode = 'feed';
 		} else if (!hasActivity) {
@@ -74,7 +81,7 @@
 		{#if mode === 'plans'}
 			<PlansList {plans} />
 		{:else}
-			<ActivityFeed maxEvents={100} />
+			<ActivityFeed maxEvents={100} scope="global" />
 		{/if}
 	</div>
 </div>

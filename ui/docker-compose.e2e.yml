@@ -26,6 +26,11 @@ services:
       - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
       - LOG_LEVEL=${LOG_LEVEL:-info}
+    ports:
+      # Prometheus metrics scrape — exposed so host-side ops tooling and the
+      # UI /status widgets can read semstreams_agentic_* counters. Offset to
+      # avoid the backend E2E stack's 9090.
+      - "9190:9090"
     volumes:
       - ../test/e2e/fixtures/go-project:/workspace
     depends_on:

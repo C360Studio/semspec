@@ -304,6 +304,7 @@ func setupServiceManager(
 		return nil, fmt.Errorf("register services: %w", err)
 	}
 	ensureServiceManagerConfig(cfg)
+	ensureMetricsConfig(cfg)
 	manager := service.NewServiceManager(serviceRegistry)
 	svcDeps := &service.Dependencies{
 		NATSClient:        natsClient,
@@ -706,6 +707,31 @@ func extractPlatformMeta(cfg *config.Config) types.PlatformMeta {
 	return types.PlatformMeta{
 		Org:      cfg.Platform.Org,
 		Platform: platformID,
+	}
+}
+
+// ensureMetricsConfig ensures the metrics service is registered so /metrics is
+// bound. Mirrors semstreams' cmd/semstreams/main.go behavior — observability
+// should not be opt-in. Without this, nothing serves the Prometheus endpoint
+// and ops-glass/dashboard tooling has no telemetry to scrape.
+func ensureMetricsConfig(cfg *config.Config) {
+	if cfg.Services == nil {
+		cfg.Services = make(types.ServiceConfigs)
+	}
+	if _, exists := cfg.Services["metrics"]; !exists {
+		slog.Debug("Adding default metrics config")
+		defaultConfig := map[string]any{
+			"port":               9090,
+			"path":               "/metrics",
+			"include_go_metrics": true,
+		}
+		defaultConfigJSON, _ := json.Marshal(defaultConfig)
+		cfg.Services["metrics"] = types.ServiceConfig{
+			Name:    "metrics",
+			Enabled: true,
+			Config:  defaultConfigJSON,
+		}
+		slog.Debug("Metrics config added", "port", 9090)
 	}
 }
 

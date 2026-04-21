@@ -1,20 +1,35 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { feedStore } from '$lib/stores/feed.svelte';
+	import { activityStore } from '$lib/stores/activity.svelte';
+	import { projectActivityFeed } from '$lib/stores/activityProjection';
 	import type { FeedEvent } from '$lib/types/feed';
+
+	type Scope = 'plan' | 'global';
 
 	interface Props {
 		maxEvents?: number;
+		/**
+		 * 'plan' (default) renders feedStore.events — plan-scoped SSE populated
+		 * by plan detail pages. 'global' renders activityStore.recent projected
+		 * into FeedEvent shape — the only source available on /board where no
+		 * plan is selected. Fixes bug #7.2: ActivityFeed on /board used to be
+		 * permanently empty because feedStore is plan-scoped only.
+		 */
+		scope?: Scope;
 	}
 
-	let { maxEvents = 100 }: Props = $props();
+	let { maxEvents = 100, scope = 'plan' }: Props = $props();
 
 	let sourceFilter = $state<string>('all');
 
 	const sourceOptions = ['all', 'plan', 'execution', 'question'];
 
 	const filteredEvents = $derived.by(() => {
-		let events = feedStore.events.slice(-maxEvents);
+		let events: FeedEvent[] =
+			scope === 'global'
+				? projectActivityFeed(activityStore.recent, maxEvents)
+				: feedStore.events.slice(-maxEvents);
 
 		if (sourceFilter !== 'all') {
 			events = events.filter((e) => e.source === sourceFilter);
@@ -22,6 +37,14 @@
 
 		return events;
 	});
+
+	// Connection indicator reflects which scope's SSE we're rendering.
+	const isConnected = $derived(
+		scope === 'global' ? activityStore.connected : feedStore.connected
+	);
+	const waitingLabel = $derived(
+		scope === 'global' ? 'Activity stream offline' : 'Waiting for plan...'
+	);
 
 	function getEventIcon(event: FeedEvent): string {
 		switch (event.source) {
@@ -131,9 +154,9 @@
 	</div>
 
 	<div class="feed-status">
-		<div class="connection-indicator" class:connected={feedStore.connected}>
+		<div class="connection-indicator" class:connected={isConnected}>
 			<span class="status-dot"></span>
-			<span>{feedStore.connected ? 'Live' : 'Waiting for plan...'}</span>
+			<span>{isConnected ? 'Live' : waitingLabel}</span>
 		</div>
 		<span class="event-count">{filteredEvents.length} events</span>
 	</div>
@@ -141,9 +164,16 @@
 	{#if filteredEvents.length === 0}
 		<div class="empty-feed">
 			<Icon name="activity" size={32} />
-			{#if feedStore.connected}
+			{#if isConnected}
 				<p>No activity yet</p>
-				<p class="hint">Events will appear as the plan progresses</p>
+				<p class="hint">
+					{scope === 'global'
+						? 'Loop events will appear as agents start'
+						: 'Events will appear as the plan progresses'}
+				</p>
+			{:else if scope === 'global'}
+				<p>Activity stream offline</p>
+				<p class="hint">Global loop events will appear when the stream reconnects</p>
 			{:else}
 				<p>Select a plan to see activity</p>
 				<p class="hint">Plan stages, execution progress, and questions will appear here</p>

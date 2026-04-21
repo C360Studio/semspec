@@ -339,6 +339,26 @@ tasks:
         echo "[DEBUG:MOCK] Tailing semspec logs (Ctrl+C to stop)..."
       - docker logs -f semspec-e2e-semspec-1
 
+  dump:
+    desc: "Snapshot logs + bus + KV state from a running UI E2E stack to /tmp (pre-teardown forensics)"
+    cmds:
+      - |
+        OUT=/tmp/semspec-postmortem-$(date +%Y%m%d-%H%M%S)
+        mkdir -p $OUT
+        echo "[DUMP] Saving to $OUT"
+        docker logs ui-semspec-1 > $OUT/semspec.log 2>&1 || echo "  semspec logs: not available"
+        docker logs ui-semsource-1 > $OUT/semsource.log 2>&1 || echo "  semsource logs: not available"
+        docker logs ui-sandbox-1 > $OUT/sandbox.log 2>&1 || echo "  sandbox logs: not available"
+        docker logs ui-qa-runner-1 > $OUT/qa-runner.log 2>&1 || echo "  qa-runner logs: not available"
+        curl -s 'http://localhost:3000/message-logger/entries?limit=2000' > $OUT/messages.json 2>/dev/null || echo "  messages: not available"
+        curl -s 'http://localhost:3000/agentic-dispatch/loops' > $OUT/loops.json 2>/dev/null || echo "  loops: not available"
+        curl -s 'http://localhost:3000/plan-manager/plans' > $OUT/plans.json 2>/dev/null || echo "  plans: not available"
+        docker exec ui-semspec-1 wget -qO- http://localhost:9090/metrics > $OUT/metrics.prom 2>/dev/null || echo "  prometheus: not available"
+        docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}' > $OUT/stats.txt 2>&1 || true
+        echo ""
+        echo "[DUMP] Saved to $OUT"
+        ls -la $OUT
+
   nuke:
     desc: Nuclear cleanup - remove ALL semspec docker resources (backend + UI)
     cmds:
