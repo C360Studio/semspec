@@ -35,3 +35,31 @@ export function getEventLinkText(event: FeedEvent): string {
 	}
 	return event.slug ?? 'plan';
 }
+
+/**
+ * Compact requirement anchor (e.g. "R3", "R12") for events carrying a
+ * requirement_id. Returns null when the event isn't requirement-scoped so
+ * the template can conditionally render the pill.
+ *
+ * Requirement IDs arrive in two shapes:
+ *   - Short: "R1", "R3", "r12" — kept as-is, upper-cased.
+ *   - Long:  "requirement.<slug>.3" — reduced to the trailing segment.
+ *
+ * Bug #7.9 — the feed is visually uniform until you read every summary.
+ * A requirement pill lets the eye filter rows at a glance.
+ */
+export function getRequirementAnchor(event: FeedEvent): string | null {
+	const raw = event.data?.requirement_id;
+	if (typeof raw !== 'string' || raw.length === 0) return null;
+
+	const shortPattern = /^r\d+$/i;
+	if (shortPattern.test(raw)) return raw.toUpperCase();
+
+	// Long-form: take the trailing segment. "requirement.slug.3" -> "R3".
+	const parts = raw.split('.');
+	const tail = parts[parts.length - 1];
+	if (!tail) return null;
+	// If the tail is numeric-ish, prefix with R. Otherwise show the tail
+	// as-is (covers UUID-style requirement IDs without producing a junk label).
+	return /^\d+$/.test(tail) ? `R${tail}` : tail.toUpperCase();
+}

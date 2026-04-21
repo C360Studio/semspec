@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getEventHref, getEventLinkText } from './feedRouting';
+import { getEventHref, getEventLinkText, getRequirementAnchor } from './feedRouting';
 import type { FeedEvent } from '$lib/types/feed';
 
 const baseEvent = (over: Partial<FeedEvent> = {}): FeedEvent => ({
@@ -68,5 +68,39 @@ describe('getEventLinkText — destination badge copy', () => {
 	it('"plan" fallback when no slug and no loop_id', () => {
 		const ev = baseEvent({ source: 'plan', type: 'plan_updated' });
 		expect(getEventLinkText(ev)).toBe('plan');
+	});
+});
+
+describe('getRequirementAnchor — bug #7.9 requirement pill', () => {
+	it('returns null when no requirement_id', () => {
+		expect(getRequirementAnchor(baseEvent())).toBeNull();
+		expect(getRequirementAnchor(baseEvent({ data: {} }))).toBeNull();
+	});
+
+	it('returns null for empty string', () => {
+		// Empty strings from the wire shouldn't produce a ghost "R" pill.
+		expect(getRequirementAnchor(baseEvent({ data: { requirement_id: '' } }))).toBeNull();
+	});
+
+	it('uppercases short form "r3" -> "R3"', () => {
+		expect(getRequirementAnchor(baseEvent({ data: { requirement_id: 'r3' } }))).toBe('R3');
+		expect(getRequirementAnchor(baseEvent({ data: { requirement_id: 'R1' } }))).toBe('R1');
+	});
+
+	it('extracts trailing integer from dotted form as R{n}', () => {
+		// The backend emits these as "requirement.<plan-slug>.<idx>".
+		const ev = baseEvent({ data: { requirement_id: 'requirement.mortgage-calc.3' } });
+		expect(getRequirementAnchor(ev)).toBe('R3');
+	});
+
+	it('falls back to uppercased tail for non-numeric trailing segments', () => {
+		// UUID-style IDs would look ugly as "R..." prefix; show the tail
+		// verbatim (still short enough for a pill).
+		const ev = baseEvent({ data: { requirement_id: 'requirement.p1.auth-flow' } });
+		expect(getRequirementAnchor(ev)).toBe('AUTH-FLOW');
+	});
+
+	it('handles numeric-only bare ID (unlikely but safe)', () => {
+		expect(getRequirementAnchor(baseEvent({ data: { requirement_id: '7' } }))).toBe('R7');
 	});
 });

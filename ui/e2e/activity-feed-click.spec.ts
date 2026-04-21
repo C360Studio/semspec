@@ -72,4 +72,29 @@ test.describe('@t0 activity-feed row clickability', () => {
 		await row.click();
 		await expect(page).toHaveURL(/\/trajectories\/loop-click-target$/);
 	});
+
+	// Bug #7.9 — requirement anchor pill. Rows carrying a requirement_id
+	// render a compact [R{n}] pill so the eye can filter by requirement
+	// without reading every summary. Rows without a requirement_id do not.
+	test('requirement anchor pill appears when event carries a requirement_id', async ({
+		page
+	}) => {
+		await stubBoardBackend(page, {
+			plans: [],
+			loops: [],
+			activityEvents: [
+				{ loop_id: 'loop-r7', type: 'loop_updated', requirement_id: 'requirement.demo.7' },
+				{ loop_id: 'loop-plain', type: 'loop_updated' }
+			]
+		});
+
+		await page.goto('/');
+		await waitForHydration(page);
+		await feedModeRadio(page).click();
+
+		// Exactly one anchor across the two rows.
+		const anchors = page.getByTestId('req-anchor');
+		await expect(anchors).toHaveCount(1);
+		await expect(anchors.first()).toHaveText('R7');
+	});
 });

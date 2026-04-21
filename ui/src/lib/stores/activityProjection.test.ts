@@ -58,6 +58,23 @@ describe('activityEventToFeedEvent', () => {
 		const fe = activityEventToFeedEvent(activity({ type: 'loop_updated' }));
 		expect(fe.data?.loop_id).toBe('01234567-abcd');
 	});
+
+	it('passes requirement_id through to data when present (bug #7.9)', () => {
+		// The anchor-pill extractor (getRequirementAnchor) reads
+		// event.data?.requirement_id; if the projection drops the field the
+		// pill never renders for loop-emitted events even when the backend
+		// tags them with a requirement.
+		const raw = { ...activity({ type: 'loop_updated' }), requirement_id: 'R4' };
+		const fe = activityEventToFeedEvent(raw as ActivityEvent);
+		expect(fe.data?.requirement_id).toBe('R4');
+	});
+
+	it('omits requirement_id when empty string on the raw event', () => {
+		// Prevents "R" phantom pills from undefined-backend-data.
+		const raw = { ...activity({ type: 'loop_updated' }), requirement_id: '' };
+		const fe = activityEventToFeedEvent(raw as ActivityEvent);
+		expect(fe.data?.requirement_id).toBeUndefined();
+	});
 });
 
 describe('projectActivityFeed', () => {

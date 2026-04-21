@@ -15,10 +15,21 @@ import type { ActivityEvent } from '$lib/types';
 import type { FeedEvent } from '$lib/types/feed';
 
 /** Convert one ActivityEvent to a FeedEvent. Stable `id` enables dedup when
- * the component keys the `{#each}` block on it. */
+ * the component keys the `{#each}` block on it. Carries `requirement_id`
+ * through when the raw event includes it so the feed UI can render the
+ * per-requirement anchor pill (bug #7.9) without a separate KV lookup. */
 export function activityEventToFeedEvent(event: ActivityEvent): FeedEvent {
 	const loopShort = event.loop_id?.slice(0, 8) ?? 'unknown';
 	const summary = summaryFor(event.type, loopShort);
+
+	const data: Record<string, unknown> = { loop_id: event.loop_id };
+	// The generated ActivityEvent doesn't declare requirement_id, but the wire
+	// payload sometimes carries it when the loop is scoped to a requirement.
+	// Narrow the intersection so we pull only the field we actually read.
+	const reqId = (event as ActivityEvent & { requirement_id?: string }).requirement_id;
+	if (typeof reqId === 'string' && reqId.length > 0) {
+		data.requirement_id = reqId;
+	}
 
 	return {
 		id: `${event.type}:${event.loop_id}:${event.timestamp}`,
@@ -26,7 +37,7 @@ export function activityEventToFeedEvent(event: ActivityEvent): FeedEvent {
 		source: 'execution',
 		type: event.type,
 		summary,
-		data: { loop_id: event.loop_id }
+		data
 	};
 }
 

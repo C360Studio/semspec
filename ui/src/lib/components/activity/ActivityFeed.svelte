@@ -3,7 +3,7 @@
 	import { feedStore } from '$lib/stores/feed.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { projectActivityFeed } from '$lib/stores/activityProjection';
-	import { getEventHref, getEventLinkText } from './feedRouting';
+	import { getEventHref, getEventLinkText, getRequirementAnchor } from './feedRouting';
 	import type { FeedEvent } from '$lib/types/feed';
 
 	type Scope = 'plan' | 'global';
@@ -156,8 +156,16 @@
 		</div>
 	{:else}
 		<div class="events-list" role="log" aria-live="polite">
+			{#snippet anchorPill(anchor: string)}
+				<span
+					class="req-anchor"
+					data-testid="req-anchor"
+					aria-label="Requirement {anchor}"
+					title="Requirement {anchor}">{anchor}</span>
+			{/snippet}
 			{#each filteredEvents as event (event.id)}
 				{@const href = getEventHref(event)}
+				{@const reqAnchor = getRequirementAnchor(event)}
 				{#if href}
 					<a
 						class="event-item event-item--link"
@@ -170,6 +178,7 @@
 						</div>
 						<div class="event-body">
 							<div class="event-summary">
+								{#if reqAnchor}{@render anchorPill(reqAnchor)}{/if}
 								<span class="event-text">{event.summary}</span>
 								<span class="event-time">{formatTime(event.timestamp)}</span>
 							</div>
@@ -186,6 +195,7 @@
 						</div>
 						<div class="event-body">
 							<div class="event-summary">
+								{#if reqAnchor}{@render anchorPill(reqAnchor)}{/if}
 								<span class="event-text">{event.summary}</span>
 								<span class="event-time">{formatTime(event.timestamp)}</span>
 							</div>
@@ -340,6 +350,20 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: var(--space-2);
+	}
+
+	/* Requirement anchor pill — visual hook so the eye can filter rows by
+	 * requirement without reading every summary (bug #7.9). */
+	.req-anchor {
+		flex-shrink: 0;
+		font-size: 10px;
+		font-weight: var(--font-weight-semibold);
+		padding: 1px 5px;
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+		border-radius: var(--radius-sm);
+		font-family: var(--font-family-mono);
+		letter-spacing: 0.02em;
 	}
 
 	.event-text {
