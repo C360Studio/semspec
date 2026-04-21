@@ -9,6 +9,7 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
 	import RequirementPanel from './RequirementPanel.svelte';
+	import { deriveGuidance } from './guidance';
 	import { api } from '$lib/api/client';
 	import { promotePlan } from '$lib/actions/plans';
 	import { feedStore } from '$lib/stores/feed.svelte';
@@ -33,75 +34,7 @@
 	let approving = $state(false);
 	let error = $state<string | null>(null);
 
-	// Workflow guidance based on plan stage
-	const guidance = $derived.by(() => {
-		if (!plan.approved) {
-			return {
-				message: 'Review the plan details, then create requirements and scenarios.',
-				showApprove: true,
-				showEdit: true
-			};
-		}
-
-		const stage = plan.stage;
-
-		if (stage === 'approved' && requirements.length === 0) {
-			return {
-				message: 'Generating requirements from the approved plan...',
-				showApprove: false,
-				showEdit: false,
-				isLoading: true
-			};
-		}
-
-		if (stage === 'requirements_generated') {
-			return {
-				message: 'Requirements generated. Generating scenarios...',
-				showApprove: false,
-				showEdit: false,
-				isLoading: true
-			};
-		}
-
-		if (stage === 'scenarios_generated') {
-			return {
-				message: 'Review the requirements and scenarios below. Edit or deprecate any that need changes, then approve to continue.',
-				showApprove: false,
-				showEdit: false
-			};
-		}
-
-		if (stage === 'ready_for_execution') {
-			return {
-				message: 'Requirements and scenarios approved. Click Execute to start.',
-				showApprove: false,
-				showEdit: false
-			};
-		}
-
-		if (['implementing', 'executing'].includes(stage)) {
-			return {
-				message: 'Plan is executing. Select a requirement to view progress.',
-				showApprove: false,
-				showEdit: false
-			};
-		}
-
-		if (stage === 'complete') {
-			return {
-				message: 'Plan execution complete.',
-				showApprove: false,
-				showEdit: false
-			};
-		}
-
-		// Fallback for legacy stages
-		return {
-			message: 'Select a requirement to view its scenarios.',
-			showApprove: false,
-			showEdit: false
-		};
-	});
+	const guidance = $derived(deriveGuidance(plan.approved, plan.stage, requirements.length));
 
 	const canEdit = $derived(!LOCKED_STAGES.includes(plan.stage));
 
@@ -295,7 +228,7 @@
 	</div>
 
 	<!-- Workflow Guidance -->
-	{#if !isEditing}
+	{#if !isEditing && guidance}
 		<div class="detail-guidance">
 			<div class="guidance-hint">
 				{#if guidance.isLoading}
