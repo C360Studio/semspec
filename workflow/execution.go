@@ -18,6 +18,13 @@ type TaskExecution struct {
 	EntityID string `json:"entity_id"`
 	Slug     string `json:"slug"`
 	TaskID   string `json:"task_id"`
+	// RequirementID identifies the parent requirement execution that spawned
+	// this task, when dispatched by requirement-executor for a DAG node. Used
+	// to stop dispatching new pipeline stages once the parent requirement has
+	// reached a terminal state (timeout/error/failed) — prevents burning LLM
+	// calls on work that nobody will merge. Empty for tasks created outside
+	// the requirement-executor flow.
+	RequirementID string `json:"requirement_id,omitempty"`
 
 	// Lifecycle
 	Stage        string `json:"stage"` // developing, validating, reviewing, approved, escalated, error

@@ -56,15 +56,22 @@ func (r *stubRegistry) RegisterWithConfig(cfg component.RegistrationConfig) erro
 
 // ---------------------------------------------------------------------------
 // stubSandbox satisfies worktreeManager for tests that need a non-nil sandbox.
+// Optional mergeErr drives merge-failure scenarios; default behavior returns
+// success from every method.
 // ---------------------------------------------------------------------------
 
-type stubSandbox struct{}
+type stubSandbox struct {
+	mergeErr error
+}
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, _ string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
 	return &sandbox.WorktreeInfo{Status: "created", Path: "/tmp/test-wt", Branch: "agent/test"}, nil
 }
 func (s *stubSandbox) DeleteWorktree(_ context.Context, _ string) error { return nil }
 func (s *stubSandbox) MergeWorktree(_ context.Context, _ string, _ ...sandbox.MergeOption) (*sandbox.MergeResult, error) {
+	if s.mergeErr != nil {
+		return nil, s.mergeErr
+	}
 	return &sandbox.MergeResult{}, nil
 }
 func (s *stubSandbox) ListWorktreeFiles(_ context.Context, _ string) ([]sandbox.FileEntry, error) {
@@ -99,6 +106,12 @@ func newTestComponent(t *testing.T) *Component {
 		t.Fatalf("newTestComponent: create task routing cache: %v", err)
 	}
 	c.taskRouting = tr
+	// Initialize execution store (kvStore nil → cache-only mode).
+	store, err := newExecutionStore(ctx, nil, c.tripleWriter, c.logger)
+	if err != nil {
+		t.Fatalf("newTestComponent: create execution store: %v", err)
+	}
+	c.store = store
 	return c
 }
 

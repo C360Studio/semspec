@@ -30,6 +30,7 @@ const (
 type TaskCreateRequest struct {
 	Slug           string            `json:"slug"`
 	TaskID         string            `json:"task_id"`
+	RequirementID  string            `json:"requirement_id,omitempty"` // parent requirement for DAG-node tasks
 	Title          string            `json:"title"`
 	Description    string            `json:"description,omitempty"`
 	ProjectID      string            `json:"project_id,omitempty"`
@@ -212,6 +213,7 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		EntityID:       workflow.TaskExecutionEntityID(req.Slug, req.TaskID),
 		Slug:           req.Slug,
 		TaskID:         req.TaskID,
+		RequirementID:  req.RequirementID,
 		Stage:          "pending", // KV self-trigger: watcher claims → developing
 		TDDCycle:       0,
 		MaxTDDCycles:   maxCycles,

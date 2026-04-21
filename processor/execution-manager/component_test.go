@@ -2,6 +2,7 @@ package executionmanager
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -772,6 +773,155 @@ func TestAwaitIndexing_EmptyCommitSHA_IsNoop(t *testing.T) {
 // Loop outcome=failed → escalation (handler guards)
 // ---------------------------------------------------------------------------
 
+// TestMarkApprovedLocked_MergeFailure_RoutesToError guards the cross-component
+// race fixed for the mortgage-calc early-adopter run: when a parent
+// requirement cleaned up node worktrees while a node reviewer was still in
+// flight, the reviewer's approve + merge would fail silently and the task
+// would still be marked approved. Merge failure must now route to phaseError.
+// TestDispatchDeveloperLocked_ParentTerminated_MarksError guards the
+// cross-component cancellation pathway: once the parent requirement has
+// terminated (timeout/error), execution-manager must stop dispatching new
+// pipeline stages. Without this, small-LLM runs burn 5+ minutes per orphan
+// node producing code nobody will merge.
+func TestDispatchDeveloperLocked_ParentTerminated_MarksError(t *testing.T) {
+	c := newTestComponent(t)
+
+	// Seed a terminal parent requirement in the store cache.
+	reqKey := workflow.RequirementExecutionKey("plan", "req-1")
+	c.store.reqCache.Set(reqKey, &workflow.RequirementExecution{
+		EntityID:      "req-entity",
+		Slug:          "plan",
+		RequirementID: "req-1",
+		Stage:         "failed", // parent timed out
+	})
+
+	exec := newTestExec("plan", "task-orphan")
+	exec.RequirementID = "req-1"
+	exec.Stage = phaseDeveloping
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.dispatchDeveloperLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseError {
+		t.Errorf("Stage: want %q (parent terminal → error), got %q", phaseError, exec.Stage)
+	}
+	if !exec.terminated {
+		t.Error("exec.terminated should be true — no further dispatches")
+	}
+	if c.errors.Load() != 1 {
+		t.Errorf("errors: want 1, got %d", c.errors.Load())
+	}
+}
+
+// TestDispatchDeveloperLocked_ParentAlive_ProceedsNormally confirms that the
+// guard is a narrow gate — a live parent does not block dispatch.
+func TestDispatchDeveloperLocked_ParentAlive_ProceedsNormally(t *testing.T) {
+	c := newTestComponent(t)
+
+	reqKey := workflow.RequirementExecutionKey("plan", "req-2")
+	c.store.reqCache.Set(reqKey, &workflow.RequirementExecution{
+		EntityID:      "req-entity-2",
+		Slug:          "plan",
+		RequirementID: "req-2",
+		Stage:         "executing", // still alive
+	})
+
+	exec := newTestExec("plan", "task-live")
+	exec.RequirementID = "req-2"
+	exec.Stage = phaseDeveloping
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.dispatchDeveloperLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	// With a live parent, the guard lets us through; checkWorktreeExists may
+	// still short-circuit if WorktreePath is unset. Either way, exec must NOT
+	// be marked terminal via parent_requirement_* error.
+	if exec.Stage == phaseError && c.errors.Load() == 1 {
+		t.Error("live parent should not trigger parent_requirement error")
+	}
+}
+
+// TestDispatchDeveloperLocked_NoRequirementID_SkipsGuard verifies tasks
+// created outside requirement-executor (empty RequirementID) are not blocked.
+func TestDispatchDeveloperLocked_NoRequirementID_SkipsGuard(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := newTestExec("plan", "task-adhoc")
+	// RequirementID intentionally empty
+	exec.Stage = phaseDeveloping
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	terminated, _ := c.parentRequirementTerminated(exec)
+	exec.mu.Unlock()
+
+	if terminated {
+		t.Error("empty RequirementID must not trigger the parent-terminated guard")
+	}
+}
+
+func TestMarkApprovedLocked_MergeFailure_RoutesToError(t *testing.T) {
+	c := newTestComponent(t)
+	c.sandbox = &stubSandbox{mergeErr: errors.New("server error 500: failed to stage changes: chdir: no such file or directory")}
+
+	exec := newTestExec("plan", "task-merge-fail")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-merge-fail"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseError {
+		t.Errorf("Stage: want %q (merge failure routes to error), got %q", phaseError, exec.Stage)
+	}
+	if !exec.terminated {
+		t.Error("exec.terminated should be true after markErrorLocked")
+	}
+	if c.executionsApproved.Load() != 0 {
+		t.Errorf("executionsApproved: want 0 (merge failed), got %d", c.executionsApproved.Load())
+	}
+	if c.errors.Load() != 1 {
+		t.Errorf("errors counter: want 1, got %d", c.errors.Load())
+	}
+}
+
+// TestMarkApprovedLocked_MergeSuccess_Approves verifies the happy path still
+// works: successful merge advances the task to phaseApproved.
+func TestMarkApprovedLocked_MergeSuccess_Approves(t *testing.T) {
+	c := newTestComponent(t)
+	c.sandbox = &stubSandbox{} // mergeErr=nil
+
+	exec := newTestExec("plan", "task-merge-ok")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-merge-ok"
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseApproved {
+		t.Errorf("Stage: want %q, got %q", phaseApproved, exec.Stage)
+	}
+	if !exec.terminated {
+		t.Error("exec.terminated should be true after approval")
+	}
+	if c.executionsApproved.Load() != 1 {
+		t.Errorf("executionsApproved: want 1, got %d", c.executionsApproved.Load())
+	}
+	if c.errors.Load() != 0 {
+		t.Errorf("errors counter: want 0 (happy path), got %d", c.errors.Load())
+	}
+}
+
 func TestHandleDeveloperComplete_FailedOutcome_Retries(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-dev-fail")
@@ -803,6 +953,85 @@ func TestHandleDeveloperComplete_FailedOutcome_Retries(t *testing.T) {
 	}
 	if exec.TDDCycle != 1 {
 		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
+}
+
+func TestHandleDeveloperComplete_EmptyResult_RoutesToRetry(t *testing.T) {
+	// Small models sometimes return outcome=success with an empty result
+	// (loop ended without calling submit_work, e.g. after a timed-out question).
+	// That used to silently fall through to the validator and burn a TDD cycle.
+	// It should now route through the fixable retry path with feedback.
+	c := newTestComponent(t)
+	exec := newTestExec("plan", "task-dev-empty")
+	exec.Stage = phaseDeveloping
+	exec.DeveloperTaskID = "dev-empty-1"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.DeveloperTaskID,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       "", // loop ended without a submit_work call
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageDevelop,
+	}
+
+	exec.mu.Lock()
+	c.handleDeveloperCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
+	if exec.terminated {
+		t.Error("exec.terminated should be false — retries remain")
+	}
+	if exec.Feedback == "" {
+		t.Error("exec.Feedback should carry actionable guidance for the retry")
+	}
+}
+
+func TestHandleDeveloperComplete_EmptyFilesModified_RoutesToRetry(t *testing.T) {
+	// submit_work was called but files_modified came back empty — the loop
+	// validator catches this in-loop now, but post-loop we still guard against
+	// the case where the parse succeeds but the list is empty (e.g. from a
+	// past loop result re-delivered via KV).
+	c := newTestComponent(t)
+	exec := newTestExec("plan", "task-dev-nofiles")
+	exec.Stage = phaseDeveloping
+	exec.DeveloperTaskID = "dev-empty-files"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.DeveloperTaskID,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"summary": "done", "files_modified": []}`,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageDevelop,
+	}
+
+	exec.mu.Lock()
+	c.handleDeveloperCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
+	if exec.Feedback == "" {
+		t.Error("exec.Feedback should carry actionable guidance about empty files_modified")
 	}
 }
 

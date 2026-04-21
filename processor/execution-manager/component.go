@@ -284,7 +284,8 @@ func (c *Component) Start(ctx context.Context) error {
 	// KV watchers:
 	// - AGENT_LOOPS: TDD pipeline loop completions (from agentic-dispatch)
 	// - EXECUTION_STATES task.>: pending task executions (KV self-trigger)
-	c.wg.Add(2)
+	// - EXECUTION_STATES req.>: requirement termination → cancel orphan children
+	c.wg.Add(3)
 	go func() {
 		defer c.wg.Done()
 		c.watchLoopCompletions(ctx)
@@ -292,6 +293,10 @@ func (c *Component) Start(ctx context.Context) error {
 	go func() {
 		defer c.wg.Done()
 		c.watchTaskPending(ctx)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.watchRequirementTermination(ctx)
 	}()
 
 	c.mu.Lock()
@@ -614,12 +619,30 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	}
 
 	var result payloads.DeveloperResult
-	if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result); err != nil {
-		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", err)
+	parseErr := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result)
+	if parseErr != nil {
+		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", parseErr)
 	} else {
 		exec.FilesModified = result.FilesModified
 		exec.DeveloperOutput = result.Output
 		exec.DeveloperLLMRequestIDs = result.LLMRequestIDs
+	}
+
+	// Small models sometimes stop the loop without calling submit_work, or
+	// submit with an empty files_modified list after asking circular questions.
+	// That produced a "successful" empty developer output that burned a TDD
+	// cycle on nothing. Treat it as a fixable rejection so the retry path
+	// re-dispatches the developer with actionable feedback.
+	if parseErr != nil || len(exec.FilesModified) == 0 {
+		var feedback string
+		switch {
+		case parseErr != nil:
+			feedback = "Your previous attempt ended without calling submit_work. You must call submit_work with a summary and a non-empty files_modified array before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer."
+		default:
+			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified."
+		}
+		c.routeFixableRejection(ctx, exec, feedback)
+		return
 	}
 
 	// Write developer output triples — one triple per modified file.
@@ -808,14 +831,26 @@ func (c *Component) enrichFeedbackWithGuidance(feedback string, categoryIDs []st
 
 // markApprovedLocked transitions to the approved terminal state.
 // Caller must hold exec.mu.
+//
+// Approval is gated on a successful worktree merge: if the merge fails
+// (e.g. the worktree was deleted by a parent requirement's cleanup during
+// a cross-component race), we route to markErrorLocked instead of
+// persisting phaseApproved. Previously the merge error was swallowed
+// silently and the task was marked approved for changes that never
+// landed.
 func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution) {
 	if exec.terminated {
 		return
 	}
-	exec.terminated = true
 
-	// Merge worktree back to main branch before marking approved.
-	c.mergeWorktree(exec)
+	// Merge BEFORE setting terminated=true, so a merge failure can route
+	// through markErrorLocked (which itself checks exec.terminated).
+	if err := c.mergeWorktree(exec); err != nil {
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("merge_failed: %v", err))
+		return
+	}
+
+	exec.terminated = true
 
 	exec.Stage = phaseApproved
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
@@ -1131,11 +1166,38 @@ func (c *Component) availableToolNames() []string {
 	}
 }
 
+// parentRequirementTerminated returns true when a DAG-node task's parent
+// requirement has reached a terminal state (completed/failed/error). Called
+// before each pipeline-stage dispatch so we stop burning LLM calls on orphan
+// work after requirement-executor has given up on the parent. Tasks created
+// outside the requirement-executor flow (RequirementID empty) always return
+// false — they have no parent to check.
+func (c *Component) parentRequirementTerminated(exec *taskExecution) (bool, string) {
+	if exec.RequirementID == "" {
+		return false, ""
+	}
+	key := workflow.RequirementExecutionKey(exec.Slug, exec.RequirementID)
+	req, ok := c.store.getReq(key)
+	if !ok {
+		return false, "" // parent state not in cache/KV — don't block dispatch
+	}
+	if workflow.IsTerminalReqStage(req.Stage) {
+		return true, req.Stage
+	}
+	return false, ""
+}
+
 // ---------------------------------------------------------------------------
 // Agent dispatch: Developer (Stage 1 — full TDD cycle: tests + implementation)
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecution) {
+	if terminated, stage := c.parentRequirementTerminated(exec); terminated {
+		c.logger.Info("Parent requirement terminal — skipping developer dispatch",
+			"task_id", exec.TaskID, "requirement_id", exec.RequirementID, "parent_stage", stage)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("parent_requirement_%s", stage))
+		return
+	}
 	if err := c.checkWorktreeExists(ctx, exec); err != nil {
 		c.logger.Warn("Worktree lost — marking execution as error",
 			"task_id", exec.TaskID,
@@ -1172,8 +1234,9 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"plan_slug": exec.Slug,
-			"task_id":   exec.TaskID,
+			"plan_slug":        exec.Slug,
+			"task_id":          exec.TaskID,
+			"deliverable_type": "developer",
 		},
 	}
 	c.publishTask(ctx, "agent.task.development", task)
@@ -1193,6 +1256,12 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecution) {
+	if terminated, stage := c.parentRequirementTerminated(exec); terminated {
+		c.logger.Info("Parent requirement terminal — skipping validator dispatch",
+			"task_id", exec.TaskID, "requirement_id", exec.RequirementID, "parent_stage", stage)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("parent_requirement_%s", stage))
+		return
+	}
 	if err := c.checkWorktreeExists(ctx, exec); err != nil {
 		c.logger.Warn("Worktree lost — marking execution as error",
 			"task_id", exec.TaskID,
@@ -1368,6 +1437,12 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecution) {
+	if terminated, stage := c.parentRequirementTerminated(exec); terminated {
+		c.logger.Info("Parent requirement terminal — skipping reviewer dispatch",
+			"task_id", exec.TaskID, "requirement_id", exec.RequirementID, "parent_stage", stage)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("parent_requirement_%s", stage))
+		return
+	}
 	if err := c.checkWorktreeExists(ctx, exec); err != nil {
 		c.logger.Warn("Worktree lost — marking execution as error",
 			"task_id", exec.TaskID,
@@ -1480,11 +1555,34 @@ func (c *Component) checkWorktreeExists(ctx context.Context, exec *taskExecution
 // mergeWorktree merges the worktree for the given execution back into its
 // scenario branch (if set) or the current HEAD branch. Merge metadata
 // (commit hash, files changed) is captured for lineage tracking.
-// Best-effort: failures are logged and recorded as a triple but never block
-// the terminal state transition. Caller must hold exec.mu.
-func (c *Component) mergeWorktree(exec *taskExecution) {
+//
+// Returns the merge error after retries are exhausted so the caller can fail
+// the task instead of silently marking it approved. A previous version swallowed
+// the error and persisted phaseApproved even when the worktree had been deleted
+// by requirement-executor during a cross-component race; the result was "green"
+// status for changes that never made it to main. Callers MUST check the return
+// value. Returns nil (not an error) for no-op cases: sandbox disabled, empty
+// WorktreePath, or component shutting down.
+// Caller must hold exec.mu.
+func (c *Component) mergeWorktree(exec *taskExecution) error {
 	if c.sandbox == nil || exec.WorktreePath == "" {
-		return
+		return nil
+	}
+
+	// Derive a context that outlives request cancellation so the merge can
+	// complete even if the reviewer's ctx is cancelled. Fall back to Background
+	// when shutdownCtx hasn't been set yet (e.g. in unit tests that skip Start).
+	parent := c.shutdownCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	mergeCtx := context.WithoutCancel(parent)
+
+	// Pre-flight: if the worktree no longer exists (e.g. deleted by a parent
+	// requirement's cleanup), fail fast with a clean reason rather than
+	// producing "chdir: no such file or directory" noise from the merge retry.
+	if err := c.checkWorktreeExists(mergeCtx, exec); err != nil {
+		return fmt.Errorf("merge worktree: %w", err)
 	}
 
 	var opts []sandbox.MergeOption
@@ -1505,14 +1603,13 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 	// the sandbox repo lock is contended.
 	var result *sandbox.MergeResult
 	var err error
-	mergeCtx := context.WithoutCancel(c.shutdownCtx)
 	for attempt := range 3 {
 		result, err = c.sandbox.MergeWorktree(mergeCtx, exec.TaskID, opts...)
 		if err == nil {
 			break
 		}
-		if c.shutdownCtx.Err() != nil {
-			break // component shutting down — don't retry
+		if c.shutdownCtx != nil && c.shutdownCtx.Err() != nil {
+			return nil // component shutting down — don't treat as a task failure
 		}
 		c.logger.Warn("Worktree merge failed, retrying",
 			"slug", exec.Slug,
@@ -1523,32 +1620,34 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 	}
 	if err != nil {
-		c.logger.Warn("Worktree merge failed after retries; changes may need manual merge",
+		c.logger.Warn("Worktree merge failed after retries; failing task",
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
 			"error", err,
 		)
 		_ = c.tripleWriter.WriteTriple(mergeCtx, exec.EntityID, wf.ErrorReason,
 			fmt.Sprintf("worktree merge failed: %v", err))
-	} else {
-		c.logger.Info("Worktree merged successfully",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"commit", result.Commit,
-			"files_changed", len(result.FilesChanged),
-		)
-		// Update FilesModified with definitive file list from merge.
-		if len(result.FilesChanged) > 0 {
-			exec.FilesModified = make([]string, len(result.FilesChanged))
-			for i, f := range result.FilesChanged {
-				exec.FilesModified[i] = f.Path
-			}
-		}
-
-		// Wait for semsource to index the merge commit so dependent tasks
-		// get fresh graph context. Soft gate: proceeds with warning on timeout.
-		c.awaitIndexing(result.Commit, exec.TaskID)
+		return fmt.Errorf("merge worktree after retries: %w", err)
 	}
+
+	c.logger.Info("Worktree merged successfully",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"commit", result.Commit,
+		"files_changed", len(result.FilesChanged),
+	)
+	// Update FilesModified with definitive file list from merge.
+	if len(result.FilesChanged) > 0 {
+		exec.FilesModified = make([]string, len(result.FilesChanged))
+		for i, f := range result.FilesChanged {
+			exec.FilesModified[i] = f.Path
+		}
+	}
+
+	// Wait for semsource to index the merge commit so dependent tasks
+	// get fresh graph context. Soft gate: proceeds with warning on timeout.
+	c.awaitIndexing(result.Commit, exec.TaskID)
+	return nil
 }
 
 // awaitIndexing waits for semsource to index a merge commit. No-op when the
