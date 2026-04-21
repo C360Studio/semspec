@@ -18,6 +18,7 @@ var deliverableValidators = map[string]DeliverableValidator{
 	"scenarios":    ValidateScenariosDeliverable,
 	"architecture": ValidateArchitectDeliverable,
 	"review":       ValidateReviewDeliverable,
+	"developer":    ValidateDeveloperDeliverable,
 }
 
 // GetDeliverableValidator returns the validator for the given deliverable type.
@@ -154,6 +155,41 @@ func ValidateReviewDeliverable(d map[string]any) error {
 			if _, ok := obj["passed"].(bool); !ok {
 				return fmt.Errorf("scenario_verdicts[%d].passed is required (boolean)", i)
 			}
+		}
+	}
+	return nil
+}
+
+// ValidateDeveloperDeliverable validates a developer deliverable from submit_work.
+// Required: summary (non-empty) AND files_modified (non-empty array of non-empty strings).
+//
+// Small models occasionally call submit_work with an empty files_modified array,
+// claiming "done" without writing any code. That was silently accepted, sent to
+// the structural validator, and burned a full TDD cycle on nothing. Rejecting
+// here lets the agent fix and retry within the same loop iteration.
+func ValidateDeveloperDeliverable(d map[string]any) error {
+	summary, _ := d["summary"].(string)
+	if summary == "" {
+		return fmt.Errorf("summary is required — describe what was implemented, which tests were added, and any notable decisions")
+	}
+	filesRaw, ok := d["files_modified"]
+	if !ok {
+		return fmt.Errorf("files_modified is required — provide the list of files you created or modified (e.g. [\"calculator/calc.go\", \"calculator/calc_test.go\"])")
+	}
+	files, ok := filesRaw.([]any)
+	if !ok {
+		return fmt.Errorf("files_modified must be an array of file paths, got %T", filesRaw)
+	}
+	if len(files) == 0 {
+		return fmt.Errorf("files_modified must not be empty — if you have nothing to submit, keep working; do not call submit_work until you have written at least one file")
+	}
+	for i, f := range files {
+		path, ok := f.(string)
+		if !ok {
+			return fmt.Errorf("files_modified[%d] must be a string path, got %T", i, f)
+		}
+		if path == "" {
+			return fmt.Errorf("files_modified[%d] must be a non-empty path", i)
 		}
 	}
 	return nil
