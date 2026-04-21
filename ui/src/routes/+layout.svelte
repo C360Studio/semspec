@@ -42,14 +42,18 @@
 		}
 	});
 
-	// One-time browser-only DOM setup
+	// One-time browser-only setup: hydration marker, setup probe, and
+	// SSE connections. SSE belongs in onMount (not $effect) because the
+	// layout is a long-lived root component and we want exactly one
+	// EventSource per store for its lifetime. Putting the same code in
+	// $effect reintroduces the reconnect churn previously fixed in
+	// commit 0a6381e: any untracked reactive read (direct or indirect)
+	// re-runs the effect, closes the EventSource, and opens a new one —
+	// producing the 5-30s "context canceled" → "connected" log pattern.
 	onMount(() => {
 		document.body.classList.add('hydrated');
 		setupStore.checkStatus();
-	});
 
-	// SSE connections — $effect handles cleanup via return
-	$effect(() => {
 		if (typeof window === 'undefined') return;
 
 		activityStore.connect();

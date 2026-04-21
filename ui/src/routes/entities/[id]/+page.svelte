@@ -11,7 +11,6 @@
 	let { data }: Props = $props();
 
 	const entity = $derived(data.entity);
-	const loading = false; // Load function handles fetching before render
 	const error = $derived(data.error);
 
 	// BFO/CCO classification mapping
@@ -80,12 +79,7 @@
 		<span>Back to Entities</span>
 	</button>
 
-	{#if loading}
-		<div class="loading-state">
-			<Icon name="loader" size={24} />
-			<span>Loading entity...</span>
-		</div>
-	{:else if error}
+	{#if error}
 		<div class="error-state">
 			<Icon name="alert-circle" size={24} />
 			<span>{error}</span>
@@ -194,7 +188,6 @@
 		color: var(--color-text-primary);
 	}
 
-	.loading-state,
 	.error-state {
 		display: flex;
 		flex-direction: column;
@@ -203,10 +196,6 @@
 		gap: var(--space-3);
 		padding: var(--space-12);
 		text-align: center;
-		color: var(--color-text-muted);
-	}
-
-	.error-state {
 		color: var(--color-error);
 	}
 

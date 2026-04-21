@@ -26,7 +26,6 @@
 	const loopId = $derived(data.loopId);
 	const loop = $derived(data.loop);
 	const trajectory = $derived(data.trajectory);
-	const loading = false; // Load function handles fetching before render
 	// trajectory is null when the API returns non-ok OR the loop has no trajectory
 	// yet. Only show an error when we have steps === undefined (API failure), not
 	// when steps is simply empty (loop in progress).
@@ -247,22 +246,17 @@
 							<button
 								class="text-btn"
 								onclick={handleRefresh}
-								disabled={loading}
 								title="Refresh"
 							>
-								<Icon name="refresh-cw" size={12} class={loading ? 'spin' : ''} />
+								<Icon name="refresh-cw" size={12} />
 							</button>
 						</span>
 					{/if}
 				</div>
 			{/if}
 
-			<!-- Loading / empty / timeline states -->
-			{#if loading && !hasTrajectory}
-				<div class="loading-state" data-testid="trajectory-loading">
-					<p>Loading trajectory...</p>
-				</div>
-			{:else if !hasTrajectory}
+			<!-- Empty / timeline states -->
+			{#if !hasTrajectory}
 				<div class="empty-state" data-testid="trajectory-not-found">
 					<Icon name="history" size={28} />
 					<p>No trajectory data found</p>
@@ -683,8 +677,7 @@
 		color: var(--color-text-muted);
 	}
 
-	/* Loading / empty states */
-	.loading-state,
+	/* Empty state */
 	.empty-state {
 		display: flex;
 		flex-direction: column;
@@ -695,7 +688,6 @@
 		color: var(--color-text-muted);
 	}
 
-	.loading-state p,
 	.empty-state p {
 		margin: 0;
 		font-size: var(--font-size-sm);

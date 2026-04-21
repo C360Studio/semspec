@@ -194,7 +194,8 @@
 		summaryCacheFromList = next;
 	});
 
-	// Subscribe to SSE activity events and invalidate+refetch on loop updates
+	// Refetch trajectory only when a loop completes — loop_updated fires every agent tick
+	// and would cause N×M REST calls (N loops × M ticks).
 	$effect(() => {
 		const allPlanLoopIds = new Set([
 			...planLoops.map((l) => l.loop_id),
@@ -202,7 +203,7 @@
 		]);
 
 		const unsubscribe = activityStore.onEvent((event) => {
-			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
+			if (event.type !== 'loop_completed') return;
 			const loopId = event.loop_id;
 			if (!loopId || !allPlanLoopIds.has(loopId)) return;
 			invalidateAndRefetch(loopId);

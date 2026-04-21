@@ -15,6 +15,7 @@
 	 * - NLQ search is handled via graphStore.searchEntities (calls graphApi.globalSearch).
 	 */
 
+	import { onMount } from 'svelte';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import SigmaCanvas from '$lib/components/graph/SigmaCanvas.svelte';
 	import GraphFilters from '$lib/components/graph/GraphFilters.svelte';
@@ -62,9 +63,10 @@
 	// rather than silently resetting their exploration. The refresh button
 	// provides an explicit way to reload.
 	// ---------------------------------------------------------------------------
-	$effect(() => {
-		if (graphStore.entities.size > 0) return;
-		graphStore.loadInitialGraph(graphApiAdapter);
+	onMount(() => {
+		if (graphStore.entities.size === 0) {
+			graphStore.loadInitialGraph(graphApiAdapter);
+		}
 	});
 
 	// ---------------------------------------------------------------------------

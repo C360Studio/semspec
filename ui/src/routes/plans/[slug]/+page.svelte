@@ -19,6 +19,7 @@
 	import { promotePlan, executePlan, retryFailed } from '$lib/actions/plans';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
 	import { graphApi } from '$lib/services/graphApi';
@@ -262,8 +263,11 @@
 		};
 	});
 
-	// Sync questions into the feed store.
+	// Re-sync when the questions list changes. questionsStore.all is the explicit
+	// dependency; syncQuestionsToFeed untrack()s its own derived reads so only
+	// this single dependency drives the effect.
 	$effect(() => {
+		void questionsStore.all;
 		syncQuestionsToFeed();
 	});
 </script>

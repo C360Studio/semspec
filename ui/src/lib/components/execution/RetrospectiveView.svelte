@@ -6,7 +6,7 @@
 	 * Each level is expandable. Shows completion times and summary stats.
 	 */
 
-	import { onMount } from 'svelte';
+	import { untrack } from 'svelte';
 	import Icon from '../shared/Icon.svelte';
 	import type { RetrospectivePhase } from '$lib/types/execution';
 	import { computeRetrospectiveStats } from '$lib/types/execution';
@@ -17,15 +17,10 @@
 
 	let { phases }: Props = $props();
 
-	// Track expanded state for requirements and scenarios
-	// Initialize with first requirement expanded on mount
-	let expandedRequirements = $state<Set<string>>(new Set());
-
-	onMount(() => {
-		if (phases.length > 0) {
-			expandedRequirements = new Set([phases[0].requirementId]);
-		}
-	});
+	// untrack: one-shot initialization from prop — intentionally not reactive to later phase changes.
+	let expandedRequirements = $state<Set<string>>(
+		untrack(() => phases.length > 0 ? new Set([phases[0].requirementId]) : new Set())
+	);
 	let expandedScenarios = $state<Set<string>>(new Set());
 
 	function toggleRequirement(id: string) {

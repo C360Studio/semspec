@@ -7,36 +7,28 @@
 	 * Right panel: preview of selected trajectory (collapsed by default)
 	 */
 
-	import { onMount } from 'svelte';
+	import { invalidate } from '$app/navigation';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
-	import { api } from '$lib/api/client';
+	import type { PageData } from './$types';
 	import type { TrajectoryListItem } from '$lib/types/trajectory';
+
+	interface Props {
+		data: PageData;
+	}
+
+	let { data }: Props = $props();
+
+	const items = $derived(data.trajectories);
 
 	// Filter state
 	let outcomeFilter = $state<string>('all');
 	let roleFilter = $state<string>('all');
 	let selectedLoopId = $state<string | null>(null);
 
-	// Local state replacing trajectoryStore
-	let items = $state<TrajectoryListItem[]>([]);
-	let recentLoading = $state(false);
-	let recentError = $state<string | null>(null);
-
-	async function fetchRecent() {
-		recentLoading = true;
-		recentError = null;
-		try {
-			const result = await api.trajectory.list({ limit: 50 });
-			items = result.trajectories;
-		} catch (e) {
-			recentError = e instanceof Error ? e.message : 'Failed to fetch trajectories';
-		} finally {
-			recentLoading = false;
-		}
-	}
+	let refreshing = $state(false);
 
 	// Outcome counts for filter badges
 	const outcomeCounts = $derived.by(() => {
@@ -60,7 +52,7 @@
 
 	// Filtered items
 	const filteredItems = $derived.by(() => {
-		return items.filter((item) => {
+		return items.filter((item: TrajectoryListItem) => {
 			if (outcomeFilter !== 'all' && (item.outcome ?? 'unknown') !== outcomeFilter) return false;
 			if (roleFilter !== 'all' && (item.role ?? 'unknown') !== roleFilter) return false;
 			return true;
@@ -68,17 +60,14 @@
 	});
 
 	// Unique roles for filter
-	const roles = $derived([...new Set(items.map((i) => i.role ?? 'unknown'))]);
+	const roles = $derived([...new Set(items.map((i: TrajectoryListItem) => i.role ?? 'unknown'))]);
 
-	onMount(() => {
-		fetchRecent();
-	});
-
-	// Re-fetch list when SSE signals loop activity
+	// Invalidate load data only when a loop finishes — loop_updated fires every tick
+	// and the list doesn't change mid-loop.
 	$effect(() => {
 		const unsubscribe = activityStore.onEvent((event) => {
-			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
-			fetchRecent();
+			if (event.type !== 'loop_completed') return;
+			invalidate('app:trajectories');
 		});
 		return unsubscribe;
 	});
@@ -109,8 +98,13 @@
 		return 'status-muted';
 	}
 
-	function handleRefresh() {
-		fetchRecent();
+	async function handleRefresh() {
+		refreshing = true;
+		try {
+			await invalidate('app:trajectories');
+		} finally {
+			refreshing = false;
+		}
 	}
 </script>
 
@@ -186,26 +180,16 @@
 					<button
 						class="btn-icon-labeled"
 						onclick={handleRefresh}
-						disabled={recentLoading}
+						disabled={refreshing}
 						title="Refresh"
 					>
-						<Icon name="refresh-cw" size={14} class={recentLoading ? 'spin' : ''} />
+						<Icon name="refresh-cw" size={14} class={refreshing ? 'spin' : ''} />
 						<span>Refresh</span>
 					</button>
 				</div>
 			</header>
 
-			{#if recentError}
-				<div class="error-state" data-testid="trajectories-error">
-					<Icon name="alert-triangle" size={20} />
-					<p>{recentError}</p>
-					<button class="btn btn-secondary btn-sm" onclick={handleRefresh}>Retry</button>
-				</div>
-			{:else if recentLoading && items.length === 0}
-				<div class="loading-state" data-testid="trajectories-loading">
-					<p>Loading trajectories...</p>
-				</div>
-			{:else if filteredItems.length === 0}
+			{#if filteredItems.length === 0}
 				<div class="empty-state" data-testid="trajectories-empty">
 					{#if items.length === 0}
 						<Icon name="activity" size={32} />
@@ -525,8 +509,6 @@
 	}
 
 	/* ---- States ---- */
-	.loading-state,
-	.error-state,
 	.empty-state {
 		display: flex;
 		flex-direction: column;
@@ -537,16 +519,10 @@
 		color: var(--color-text-muted);
 	}
 
-	.loading-state p,
-	.error-state p,
 	.empty-state p {
 		margin: 0;
 		font-size: var(--font-size-sm);
 		color: var(--color-text-secondary);
-	}
-
-	.error-state {
-		color: var(--color-error);
 	}
 
 	.empty-hint {

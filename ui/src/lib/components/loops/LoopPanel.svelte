@@ -2,7 +2,6 @@
 	import Icon from '../shared/Icon.svelte';
 	import LoopCard from './LoopCard.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
-	import { invalidate } from '$app/navigation';
 	import { sendLoopSignal } from '$lib/actions/loops';
 	import type { Loop } from '$lib/types';
 
@@ -36,16 +35,6 @@
 		await sendLoopSignal(loopId, 'cancel');
 	}
 
-	// Refresh loops when SSE reports changes (replaces 2s polling)
-	$effect(() => {
-		if (collapsed) return;
-		const unsubscribe = activityStore.onEvent((event) => {
-			if (event.type === 'loop_updated' || event.type === 'loop_completed' || event.type === 'loop_created') {
-				invalidate('app:loops');
-			}
-		});
-		return unsubscribe;
-	});
 </script>
 
 <aside class="loop-panel" class:collapsed>

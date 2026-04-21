@@ -24,27 +24,26 @@
 
 	let { loop, onClose, initialTrajectory = null }: Props = $props();
 
-	let trajectory = $state<Trajectory | null>(null);
-
-	// Sync from prop — initialTrajectory may arrive after mount
-	$effect(() => {
-		if (initialTrajectory) trajectory = initialTrajectory;
-	});
+	let fetchedTrajectory = $state<Trajectory | null>(null);
 	let trajectoryLoading = $state(false);
 	let trajectoryError = $state<string | null>(null);
+
+	// Prefer the pre-loaded prop; fall back to a one-shot fetch when missing.
+	const trajectory = $derived(initialTrajectory ?? fetchedTrajectory);
 
 	function fetchTrajectory(loopId: string) {
 		trajectoryLoading = true;
 		trajectoryError = null;
 		api.trajectory.getByLoop(loopId)
-			.then((t) => { trajectory = t; })
+			.then((t) => { fetchedTrajectory = t; })
 			.catch((e) => { trajectoryError = e instanceof Error ? e.message : 'Failed to fetch trajectory'; })
 			.finally(() => { trajectoryLoading = false; });
 	}
 
-	// Only fetch if no initial data provided
+	let fetched = false;
 	$effect(() => {
-		if (!initialTrajectory) {
+		if (!initialTrajectory && !fetched) {
+			fetched = true;
 			const id = loop.loopId;
 			if (id) fetchTrajectory(id);
 		}

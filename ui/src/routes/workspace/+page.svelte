@@ -9,7 +9,7 @@
 	 * URL param ?task_id=X auto-selects a task on load.
 	 */
 
-	import { onMount } from 'svelte';
+	import { onMount, untrack } from 'svelte';
 	import {
 		fetchWorkspaceTasks,
 		fetchWorkspaceTree,
@@ -24,8 +24,9 @@
 
 	let { data }: Props = $props();
 
-	// Task list state — synced from load function
-	let tasks = $state<WorkspaceTask[]>([]);
+	// Task list state — initialized from load function; overwritten by manual Refresh.
+	// untrack: one-shot seed from load data — loadTasks() handles subsequent refreshes.
+	let tasks = $state<WorkspaceTask[]>(untrack(() => data.tasks));
 	let tasksLoading = $state(false);
 	let tasksError = $state<string | null>(null);
 
@@ -50,11 +51,6 @@
 	// Copy-to-clipboard state
 	let copied = $state(false);
 	let copiedPath = $state(false);
-
-	// Sync from load data
-	$effect(() => {
-		tasks = data.tasks;
-	});
 
 	// Auto-select task from URL param (browser-only, needs DOM interaction)
 	onMount(() => {
