@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { getEventHref, getEventLinkText, getRequirementAnchor } from './feedRouting';
+import {
+	getEventHref,
+	getEventLinkText,
+	getRequirementAnchor,
+	countBySource
+} from './feedRouting';
 import type { FeedEvent } from '$lib/types/feed';
 
 const baseEvent = (over: Partial<FeedEvent> = {}): FeedEvent => ({
@@ -102,5 +107,49 @@ describe('getRequirementAnchor — bug #7.9 requirement pill', () => {
 
 	it('handles numeric-only bare ID (unlikely but safe)', () => {
 		expect(getRequirementAnchor(baseEvent({ data: { requirement_id: '7' } }))).toBe('R7');
+	});
+});
+
+describe('countBySource — bug #7.5 dropdown counts', () => {
+	const sources = ['plan', 'execution', 'question'] as const;
+
+	it('sums events per source plus an all-events total', () => {
+		const events = [
+			baseEvent({ id: '1', source: 'plan' }),
+			baseEvent({ id: '2', source: 'plan' }),
+			baseEvent({ id: '3', source: 'execution' }),
+			baseEvent({ id: '4', source: 'execution' }),
+			baseEvent({ id: '5', source: 'execution' }),
+			baseEvent({ id: '6', source: 'question' })
+		];
+		const counts = countBySource(events, sources);
+		expect(counts).toEqual({ all: 6, plan: 2, execution: 3, question: 1 });
+	});
+
+	it('reports zero for sources with no events (so dropdown can grey them)', () => {
+		const events = [baseEvent({ source: 'plan' })];
+		const counts = countBySource(events, sources);
+		expect(counts.plan).toBe(1);
+		expect(counts.execution).toBe(0);
+		expect(counts.question).toBe(0);
+	});
+
+	it('returns zeros + 0 total for empty input', () => {
+		const counts = countBySource([], sources);
+		expect(counts).toEqual({ all: 0, plan: 0, execution: 0, question: 0 });
+	});
+
+	it('ignores events with unknown sources (defensive against wire drift)', () => {
+		// If the backend introduces a new source and we haven't rev'd the UI,
+		// we must not silently hide those events from the "all" total.
+		const events = [
+			baseEvent({ source: 'plan' }),
+			baseEvent({ source: 'mystery' as FeedEvent['source'] })
+		];
+		const counts = countBySource(events, sources);
+		// "all" still counts every event — only per-source keys are filtered.
+		expect(counts.all).toBe(2);
+		expect(counts.plan).toBe(1);
+		expect(counts.mystery).toBeUndefined();
 	});
 });

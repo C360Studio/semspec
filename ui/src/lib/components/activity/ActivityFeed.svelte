@@ -3,7 +3,12 @@
 	import { feedStore } from '$lib/stores/feed.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { projectActivityFeed } from '$lib/stores/activityProjection';
-	import { getEventHref, getEventLinkText, getRequirementAnchor } from './feedRouting';
+	import {
+		getEventHref,
+		getEventLinkText,
+		getRequirementAnchor,
+		countBySource
+	} from './feedRouting';
 	import type { FeedEvent } from '$lib/types/feed';
 
 	type Scope = 'plan' | 'global';
@@ -25,18 +30,22 @@
 	let sourceFilter = $state<string>('all');
 
 	const sourceOptions = ['all', 'plan', 'execution', 'question'];
+	const sourcesForCount = ['plan', 'execution', 'question'] as const;
+
+	// All events before the source-filter is applied. We need the unfiltered
+	// list so per-source counts in the dropdown reflect the totals, not the
+	// current filter's narrowed view (bug #7.5).
+	const allEvents = $derived.by(() =>
+		scope === 'global'
+			? projectActivityFeed(activityStore.recent, maxEvents)
+			: feedStore.events.slice(-maxEvents)
+	);
+
+	const sourceCounts = $derived(countBySource(allEvents, sourcesForCount));
 
 	const filteredEvents = $derived.by(() => {
-		let events: FeedEvent[] =
-			scope === 'global'
-				? projectActivityFeed(activityStore.recent, maxEvents)
-				: feedStore.events.slice(-maxEvents);
-
-		if (sourceFilter !== 'all') {
-			events = events.filter((e) => e.source === sourceFilter);
-		}
-
-		return events;
+		if (sourceFilter === 'all') return allEvents;
+		return allEvents.filter((e) => e.source === sourceFilter);
 	});
 
 	// Connection indicator reflects which scope's SSE we're rendering.
@@ -110,6 +119,17 @@
 		return labels[source] ?? source;
 	}
 
+	/**
+	 * Build the dropdown option text with a per-source count appended.
+	 * Bug #7.5: without counts users can't tell which source dominates
+	 * without scrolling through the list; the count makes "most events are
+	 * execution ticks" legible from the collapsed dropdown state.
+	 */
+	function sourceOptionText(source: string): string {
+		const count = sourceCounts[source] ?? 0;
+		return `${sourceLabel(source)} (${count})`;
+	}
+
 </script>
 
 <div class="activity-feed">
@@ -120,9 +140,14 @@
 				bind:value={sourceFilter}
 				class="filter-select"
 				aria-label="Filter by event source"
+				data-testid="feed-source-filter"
 			>
 				{#each sourceOptions as source}
-					<option value={source}>{sourceLabel(source)}</option>
+					<option
+						value={source}
+						data-testid="feed-source-option"
+						data-source={source}
+						data-count={sourceCounts[source] ?? 0}>{sourceOptionText(source)}</option>
 				{/each}
 			</select>
 		</div>
@@ -247,6 +272,9 @@
 		border-radius: var(--radius-md);
 		color: var(--color-text-primary);
 		font-size: var(--font-size-xs);
+		/* Prevents header jitter as counts grow from "(0)" to "(999)"; anchored
+		 * at "All events (999)" which is ~16ch. Bug #7.5. */
+		min-width: 14ch;
 	}
 
 	.feed-status {

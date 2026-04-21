@@ -37,6 +37,30 @@ export function getEventLinkText(event: FeedEvent): string {
 }
 
 /**
+ * Count events by `source` field for the filter dropdown (bug #7.5).
+ * Returns totals for "all" plus each known source, so the dropdown can show
+ * "All events (42) / Plan (5) / Execution (37) / Questions (0)" and the user
+ * can tell at a glance which source dominates.
+ *
+ * `knownSources` is typed off FeedEvent['source'] so the compiler fails the
+ * component build if the wire-level union grows and the component's filter
+ * options aren't updated alongside.
+ */
+export function countBySource(
+	events: FeedEvent[],
+	knownSources: readonly FeedEvent['source'][]
+): Record<string, number> {
+	const counts: Record<string, number> = { all: events.length };
+	for (const src of knownSources) {
+		counts[src] = 0;
+	}
+	for (const event of events) {
+		if (event.source in counts) counts[event.source]++;
+	}
+	return counts;
+}
+
+/**
  * Compact requirement anchor (e.g. "R3", "R12") for events carrying a
  * requirement_id. Returns null when the event isn't requirement-scoped so
  * the template can conditionally render the pill.
