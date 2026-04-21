@@ -11,6 +11,12 @@ import { planFixture, stubBoardBackend } from './helpers/truth';
  * backend state per test. These surfaces are hard to observe from a real or
  * mock pipeline because they blink through generation states in under a
  * second; stubbing lets us park the plan in the exact state we care about.
+ *
+ * Navigates to /e2e-test/plan-card (ssr=false) rather than /board because
+ * /board's +layout.server.ts fetches plans SSR-side — Playwright stubs can't
+ * intercept Node-side fetches, so real backend data used to leak through
+ * whenever the test stack had plans. The harness renders PlanCards off the
+ * stubbed response directly.
  */
 
 test.describe('@t0 plan-card-status', () => {
@@ -33,7 +39,7 @@ test.describe('@t0 plan-card-status', () => {
 			})
 		] });
 
-		await page.goto('/');
+		await page.goto('/e2e-test/plan-card');
 		await waitForHydration(page);
 
 		const card = page.locator(`a[href="/plans/${slug}"]`);
@@ -63,7 +69,7 @@ test.describe('@t0 plan-card-status', () => {
 			})
 		] });
 
-		await page.goto('/');
+		await page.goto('/e2e-test/plan-card');
 		await waitForHydration(page);
 
 		const heartbeat = page
@@ -86,7 +92,7 @@ test.describe('@t0 plan-card-status', () => {
 			})
 		] });
 
-		await page.goto('/');
+		await page.goto('/e2e-test/plan-card');
 		await waitForHydration(page);
 
 		const card = page.locator(`a[href="/plans/${slug}"]`);
@@ -123,7 +129,7 @@ test.describe('@t0 plan-card-status', () => {
 			})
 		] });
 
-		await page.goto('/');
+		await page.goto('/e2e-test/plan-card');
 		await waitForHydration(page);
 
 		const card = page.locator(`a[href="/plans/${slug}"]`);

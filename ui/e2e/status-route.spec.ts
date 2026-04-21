@@ -168,8 +168,12 @@ test.describe('@t0 status-route', () => {
 		await page.goto('/status');
 		await waitForHydration(page);
 
-		// At least the activity SSE health dot should be present.
+		// /status intentionally renders the Activity dot only — Feed SSE is
+		// plan-scoped and no plan is selected on /status, so surfacing a
+		// disconnected Feed dot would misrepresent health. See the component
+		// comment in routes/status/+page.svelte. The test previously asserted
+		// count=2 against an earlier version of the page that showed both.
 		const healthDots = page.getByTestId('status-health-dot');
-		await expect(healthDots).toHaveCount(2);  // activity + feed
+		await expect(healthDots).toHaveCount(1);
 	});
 });
