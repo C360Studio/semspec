@@ -25,6 +25,7 @@
 
 	let branches = $state<PlanRequirementBranch[]>([]);
 	let selectedIds = $state<Set<string>>(new Set());
+	let expandedIds = $state<Set<string>>(new Set());
 	let loading = $state(true);
 	let submitting = $state(false);
 	let error = $state<string | null>(null);
@@ -65,6 +66,48 @@
 		if (next.has(id)) next.delete(id);
 		else next.add(id);
 		selectedIds = next;
+	}
+
+	function toggleDetails(id: string) {
+		const next = new Set(expandedIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		expandedIds = next;
+	}
+
+	/**
+	 * Summarize the "why" of a failure in one short line suitable for the
+	 * row header. Users pick from the full text by expanding. Priority:
+	 * review verdict + feedback (most actionable), then error reason, then
+	 * a bare "failed" fallback.
+	 */
+	function summaryLine(b: PlanRequirementBranch): string {
+		if (b.review_verdict || b.review_feedback) {
+			const verdict = b.review_verdict ?? 'reviewer';
+			const feedback = (b.review_feedback ?? '').replace(/\s+/g, ' ').trim();
+			if (feedback.length > 0) {
+				const clipped = feedback.length > 120 ? feedback.slice(0, 120) + '…' : feedback;
+				return `${verdict}: ${clipped}`;
+			}
+			return verdict;
+		}
+		if (b.error_reason) {
+			const reason = b.error_reason.replace(/\s+/g, ' ').trim();
+			return reason.length > 160 ? reason.slice(0, 160) + '…' : reason;
+		}
+		return b.stage === 'error' ? 'Execution error (no detail)' : 'Failed (no detail)';
+	}
+
+	function hasDetails(b: PlanRequirementBranch): boolean {
+		return Boolean(b.review_feedback || b.error_reason);
+	}
+
+	function retryBudgetText(b: PlanRequirementBranch): string | null {
+		if (!b.retry_count && !b.max_retries) return null;
+		const max = b.max_retries ?? 0;
+		const used = b.retry_count ?? 0;
+		if (max > 0) return `retry ${used}/${max}`;
+		return `retry ${used}`;
 	}
 
 	function toggleAll() {
@@ -115,7 +158,10 @@
 
 		<ul class="picker-list" aria-label="Failed requirements">
 			{#each failed as req (req.requirement_id)}
-				<li class="picker-row">
+				{@const budget = retryBudgetText(req)}
+				{@const showDetailsBtn = hasDetails(req)}
+				{@const isExpanded = expandedIds.has(req.requirement_id)}
+				<li class="picker-row" data-testid="retry-row-{req.requirement_id}">
 					<label class="picker-label">
 						<input
 							type="checkbox"
@@ -127,6 +173,46 @@
 						<span class="req-title">{req.title}</span>
 						<span class="req-stage req-stage--{req.stage}">{req.stage}</span>
 					</label>
+					<div class="req-context">
+						<span
+							class="req-summary"
+							data-testid="retry-summary-{req.requirement_id}"
+							title={req.review_feedback ?? req.error_reason ?? ''}
+						>
+							{summaryLine(req)}
+						</span>
+						{#if budget}
+							<span
+								class="req-budget"
+								data-testid="retry-budget-{req.requirement_id}"
+							>
+								{budget}
+							</span>
+						{/if}
+						{#if showDetailsBtn}
+							<button
+								type="button"
+								class="details-btn"
+								onclick={() => toggleDetails(req.requirement_id)}
+								aria-expanded={isExpanded}
+								data-testid="retry-details-btn-{req.requirement_id}"
+							>
+								{isExpanded ? 'Hide details' : 'Show details'}
+							</button>
+						{/if}
+					</div>
+					{#if isExpanded && showDetailsBtn}
+						<div class="req-details" data-testid="retry-details-{req.requirement_id}">
+							{#if req.review_feedback}
+								<div class="detail-label">Reviewer feedback</div>
+								<pre class="detail-body">{req.review_feedback}</pre>
+							{/if}
+							{#if req.error_reason}
+								<div class="detail-label">Error reason</div>
+								<pre class="detail-body">{req.error_reason}</pre>
+							{/if}
+						</div>
+					{/if}
 				</li>
 			{/each}
 		</ul>
@@ -210,6 +296,81 @@
 
 	.picker-row {
 		padding: var(--space-1) 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.req-context {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding-left: calc(var(--space-2) + 18px); /* align under title, past checkbox */
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+
+	.req-summary {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.req-budget {
+		flex-shrink: 0;
+		font-family: var(--font-family-mono);
+		font-size: 10px;
+		padding: 1px 5px;
+		border-radius: var(--radius-sm);
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-muted);
+	}
+
+	.details-btn {
+		flex-shrink: 0;
+		background: none;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		padding: 1px var(--space-2);
+		color: var(--color-text-secondary);
+		font-size: 10px;
+		cursor: pointer;
+	}
+
+	.details-btn:hover {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-primary);
+	}
+
+	.req-details {
+		margin-left: calc(var(--space-2) + 18px);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-primary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.detail-label {
+		font-size: 10px;
+		color: var(--color-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		margin-top: var(--space-1);
+	}
+
+	.detail-body {
+		margin: 0;
+		font-size: var(--font-size-xs);
+		font-family: var(--font-family-mono);
+		color: var(--color-text-primary);
+		white-space: pre-wrap;
+		word-break: break-word;
+		max-height: 240px;
+		overflow-y: auto;
 	}
 
 	.picker-label {

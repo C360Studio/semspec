@@ -253,6 +253,12 @@ export interface BranchFixture {
 	total_insertions?: number;
 	total_deletions?: number;
 	diff_error?: string;
+	// Failure context surfaced by the retry picker (bug #10 item 2).
+	review_feedback?: string;
+	review_verdict?: string;
+	error_reason?: string;
+	retry_count?: number;
+	max_retries?: number;
 }
 
 function materializeBranch(input: BranchFixture): Record<string, unknown> {
@@ -279,7 +285,12 @@ function materializeBranch(input: BranchFixture): Record<string, unknown> {
 		files,
 		total_insertions: totalIns,
 		total_deletions: totalDel,
-		...(input.diff_error ? { diff_error: input.diff_error } : {})
+		...(input.diff_error ? { diff_error: input.diff_error } : {}),
+		...(input.review_feedback ? { review_feedback: input.review_feedback } : {}),
+		...(input.review_verdict ? { review_verdict: input.review_verdict } : {}),
+		...(input.error_reason ? { error_reason: input.error_reason } : {}),
+		...(input.retry_count !== undefined ? { retry_count: input.retry_count } : {}),
+		...(input.max_retries !== undefined ? { max_retries: input.max_retries } : {})
 	};
 }
 

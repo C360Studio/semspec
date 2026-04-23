@@ -126,4 +126,104 @@ test.describe('@t0 retry-selected-picker', () => {
 		await expect(page.getByText(/No failed requirements/i)).toBeVisible();
 		await expect(page.getByTestId('retry-submit')).toHaveCount(0);
 	});
+
+	// Item 2: failure context surfaced inline so users can read WHY each
+	// requirement failed before deciding which to retry.
+	test('review feedback summary renders with verdict prefix and is expandable', async ({
+		page
+	}) => {
+		await stubPlanBranches(page, slug, [
+			{
+				requirement_id: 'R3',
+				title: 'Parse input',
+				stage: 'failed',
+				review_verdict: 'needs_changes',
+				review_feedback:
+					'Missing input validation on the date field — reviewer flagged the tests pass but the implementation does not handle malformed dates.'
+			}
+		]);
+		await stubRetry(page, slug);
+
+		await page.goto(`/e2e-test/retry-picker?slug=${slug}`);
+		await waitForHydration(page);
+
+		// Summary line prefixed with verdict + clipped feedback.
+		const summary = page.getByTestId('retry-summary-R3');
+		await expect(summary).toContainText('needs_changes:');
+		await expect(summary).toContainText('Missing input validation');
+
+		// Detail block hidden until expanded.
+		await expect(page.getByTestId('retry-details-R3')).toHaveCount(0);
+
+		const toggle = page.getByTestId('retry-details-btn-R3');
+		await expect(toggle).toHaveText('Show details');
+		await toggle.click();
+		await expect(toggle).toHaveText('Hide details');
+		await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+		const details = page.getByTestId('retry-details-R3');
+		await expect(details).toBeVisible();
+		await expect(details).toContainText('Reviewer feedback');
+		// Full feedback text reachable, not just the clipped summary.
+		await expect(details).toContainText('malformed dates');
+	});
+
+	test('error_reason falls through to summary when no review feedback', async ({ page }) => {
+		// A requirement that never reached review — decomposer failed or a
+		// crash in the executor. Only the error_reason is available.
+		await stubPlanBranches(page, slug, [
+			{
+				requirement_id: 'R4',
+				title: 'Compute amortization',
+				stage: 'error',
+				error_reason: 'decomposer timed out after 180s'
+			}
+		]);
+		await stubRetry(page, slug);
+
+		await page.goto(`/e2e-test/retry-picker?slug=${slug}`);
+		await waitForHydration(page);
+
+		await expect(page.getByTestId('retry-summary-R4')).toContainText(
+			'decomposer timed out'
+		);
+		await page.getByTestId('retry-details-btn-R4').click();
+		const details = page.getByTestId('retry-details-R4');
+		await expect(details).toContainText('Error reason');
+		await expect(details).toContainText('decomposer timed out');
+	});
+
+	test('retry budget badge renders used/max ratio', async ({ page }) => {
+		await stubPlanBranches(page, slug, [
+			{
+				requirement_id: 'R5',
+				title: 'Render output',
+				stage: 'failed',
+				review_feedback: 'broken',
+				retry_count: 2,
+				max_retries: 3
+			}
+		]);
+		await stubRetry(page, slug);
+
+		await page.goto(`/e2e-test/retry-picker?slug=${slug}`);
+		await waitForHydration(page);
+
+		await expect(page.getByTestId('retry-budget-R5')).toHaveText('retry 2/3');
+	});
+
+	test('details button hides when no feedback or error to show', async ({ page }) => {
+		await stubPlanBranches(page, slug, [
+			{ requirement_id: 'R6', title: 'No context', stage: 'failed' }
+		]);
+		await stubRetry(page, slug);
+
+		await page.goto(`/e2e-test/retry-picker?slug=${slug}`);
+		await waitForHydration(page);
+
+		await expect(page.getByTestId('retry-summary-R6')).toContainText(
+			'Failed (no detail)'
+		);
+		await expect(page.getByTestId('retry-details-btn-R6')).toHaveCount(0);
+	});
 });

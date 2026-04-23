@@ -16,6 +16,12 @@ import (
 // GET /plans/{slug}/branches. This is the "files view" data source: one
 // entry per plan requirement, joined with its git branch diff so the UI
 // can show what the agent actually changed (not the fixture tree).
+//
+// Also carries failure context (ReviewFeedback, ErrorReason, RetryCount,
+// ReviewVerdict) so the retry picker in #10 item 2 can render inline
+// "why did this fail?" without a second fetch. These are populated only
+// when the execution entry is in a terminal failure stage; successful or
+// in-flight requirements leave them zero-valued.
 type PlanRequirementBranch struct {
 	RequirementID   string           `json:"requirement_id"`
 	Title           string           `json:"title"`
@@ -28,6 +34,20 @@ type PlanRequirementBranch struct {
 	// DiffError is set when sandbox diff failed for this requirement; UI
 	// should surface it instead of silently showing "0 files".
 	DiffError string `json:"diff_error,omitempty"`
+	// ReviewFeedback is the last reviewer's verdict text. Empty unless the
+	// requirement has been through at least one review cycle.
+	ReviewFeedback string `json:"review_feedback,omitempty"`
+	// ReviewVerdict is the last reviewer's structured verdict (approved,
+	// needs_changes, fixable, misscoped, etc). Empty same as above.
+	ReviewVerdict string `json:"review_verdict,omitempty"`
+	// ErrorReason is the executor's error tag when the requirement failed
+	// outside a review cycle (decomposer error, timeout, crash).
+	ErrorReason string `json:"error_reason,omitempty"`
+	// RetryCount is how many times this requirement has already been
+	// retried against its MaxRetries budget. Context for the picker UI
+	// to surface "this has already been retried N of M times".
+	RetryCount int `json:"retry_count,omitempty"`
+	MaxRetries int `json:"max_retries,omitempty"`
 }
 
 // handlePlanBranches handles GET /plans/{slug}/branches.
@@ -73,6 +93,13 @@ func (c *Component) handlePlanBranches(w http.ResponseWriter, r *http.Request, s
 			if exec.Title != "" {
 				entry.Title = exec.Title
 			}
+			// Failure context — populated on every exec entry but meaningful
+			// only for terminal-failure stages; the UI decides what to show.
+			entry.ReviewFeedback = exec.ReviewFeedback
+			entry.ReviewVerdict = exec.ReviewVerdict
+			entry.ErrorReason = exec.ErrorReason
+			entry.RetryCount = exec.RetryCount
+			entry.MaxRetries = exec.MaxRetries
 		}
 		if entry.Title == "" {
 			entry.Title = req.ID

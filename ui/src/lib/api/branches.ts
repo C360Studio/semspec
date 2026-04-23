@@ -30,6 +30,15 @@ export interface PlanRequirementBranch {
 	total_deletions: number;
 	/** Set when the sandbox branch-diff call failed. UI should surface this. */
 	diff_error?: string;
+	/** Last reviewer verdict text. Populated after at least one review cycle. */
+	review_feedback?: string;
+	/** Structured reviewer verdict (approved / needs_changes / fixable / etc). */
+	review_verdict?: string;
+	/** Executor error tag when the requirement failed outside a review cycle. */
+	error_reason?: string;
+	/** Retries already burned against max_retries. */
+	retry_count?: number;
+	max_retries?: number;
 }
 
 export async function fetchPlanBranches(slug: string): Promise<PlanRequirementBranch[]> {
