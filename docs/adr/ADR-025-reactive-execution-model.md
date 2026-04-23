@@ -1,11 +1,29 @@
 # ADR-025: Reactive Execution Model via Semsage Patterns
 ## Architecture Decision Record
 
-**Status:** Proposed  
-**Date:** 2026-03-05  
-**Supercedes:** N/A  
-**Depends on:** ADR-024 (Graph Architecture Refactor — Requirements → Scenarios → Tasks topology)  
+**Status:** Accepted (partial implementation; see 2026-04-23 amendment below)
+**Date:** 2026-03-05
+**Supercedes:** N/A
+**Depends on:** ADR-024 (Graph Architecture Refactor — Requirements → Scenarios → Tasks topology)
 **Informed by:** semsage prototype (C360Studio/semsage), OpenSage paper (Li et al., arXiv:2602.16891), Ian Blenke's SageAgent
+
+## 2026-04-23 amendment — spawn_agent removal
+
+The `spawn_agent` tool originally described below was removed in Phase 3 of
+the task-11 worktree audit (see `docs/audit/task-11-worktree-invariants.md`,
+invariant A4). Runtime audit found it was never reachable: only the
+`RoleCoordinator` / `RolePlanCoordinator` allowlists included it, and no
+component in `processor/` dispatches those roles. The reactive-execution
+shape this ADR set out to achieve is still in effect, but implemented
+differently: `decompose_task` produces the DAG, and `requirement-executor`
+serially dispatches DAG nodes by creating distinct task executions against
+`execution-manager` — no LLM-driven child-agent spawning. The coordinator
+roles, the `tools/spawn/` package, and the per-child host-filesystem
+worktree path (`<repoRoot>/.semspec/worktrees/`) have all been deleted. If
+reactive *child-agent* spawning is reintroduced later, it must route
+worktree lifecycle through the sandbox HTTP client rather than bypassing
+it — the parallel host-filesystem path was the A4 "lie about state" risk
+this amendment closes.
 
 ---
 

@@ -18,22 +18,18 @@ import (
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/question"
-	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/tools/websearch"
 	"github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
 // ToolTimeouts holds configurable timeouts for agent tools.
 // Zero values mean "use the tool's builtin default."
 type ToolTimeouts struct {
-	Bash     time.Duration // Default 120s — shell command execution.
-	Spawn    time.Duration // Default 5m — child agent default timeout.
-	SpawnMax time.Duration // Default 30m — max timeout an LLM can request for a child agent.
-	HTTP     time.Duration // Default 30s — HTTP fetch requests.
+	Bash time.Duration // Default 120s — shell command execution.
+	HTTP time.Duration // Default 30s — HTTP fetch requests.
 }
 
 // AgenticToolDeps carries the infrastructure dependencies required by tools.
@@ -41,11 +37,9 @@ type AgenticToolDeps struct {
 	// NATSClient is the concrete NATS client.
 	NATSClient *natsclient.Client
 
-	// DefaultModel is the fallback LLM model for spawned agents.
+	// DefaultModel is the fallback LLM model for agents. Currently only used
+	// by the question-answerer dispatch below.
 	DefaultModel string
-
-	// MaxDepth overrides the default spawn depth limit (5). Zero uses default.
-	MaxDepth int
 
 	// Timeouts overrides default tool execution timeouts. Zero values use builtin defaults.
 	Timeouts ToolTimeouts
@@ -57,9 +51,10 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 	RegisterAgenticToolsWithContext(context.Background(), deps)
 }
 
-// registerAgenticToolsImpl is the real implementation, accepting a context for
-// lifecycle-aware operations like KV bucket discovery.
-func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
+// registerAgenticToolsImpl is the real implementation. Accepts a context so
+// future tools that need lifecycle-aware KV bucket discovery (or similar)
+// can use it without a signature churn — currently unused post-spawn removal.
+func registerAgenticToolsImpl(_ context.Context, deps AgenticToolDeps) {
 	// --- Stateless tools ---
 
 	// bash — universal shell access (sandbox or local).
@@ -97,42 +92,10 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 
 	// --- Infrastructure-dependent tools ---
 
-	// spawn_agent — requires NATS + AGENT_LOOPS KV.
-	// Graph tracking via TripleWriter is best-effort and non-blocking.
-	if deps.NATSClient != nil {
-		spawnNC := &spawnNATSAdapter{client: deps.NATSClient}
-		spawnOpts := []spawn.Option{}
-		if deps.DefaultModel != "" {
-			spawnOpts = append(spawnOpts, spawn.WithDefaultModel(deps.DefaultModel))
-		}
-		if deps.MaxDepth > 0 {
-			spawnOpts = append(spawnOpts, spawn.WithMaxDepth(deps.MaxDepth))
-		}
-		if deps.Timeouts.Spawn > 0 {
-			spawnOpts = append(spawnOpts, spawn.WithDefaultTimeout(deps.Timeouts.Spawn))
-		}
-		if deps.Timeouts.SpawnMax > 0 {
-			spawnOpts = append(spawnOpts, spawn.WithMaxTimeout(deps.Timeouts.SpawnMax))
-		}
-		// Wire AGENT_LOOPS KV bucket for watching child loop completion.
-		if js, jsErr := deps.NATSClient.JetStream(); jsErr == nil {
-			if loopsBucket, kvErr := wf.WaitForKVBucket(ctx, js, "AGENT_LOOPS"); kvErr == nil {
-				spawnOpts = append(spawnOpts, spawn.WithLoopsBucket(loopsBucket))
-			}
-		}
-		// Wire TripleWriter for best-effort spawn relationship tracking in the graph.
-		tw := &graphutil.TripleWriter{
-			NATSClient:    deps.NATSClient,
-			ComponentName: "spawn-agent",
-		}
-		spawnOpts = append(spawnOpts, spawn.WithTripleWriter(tw))
-		// Wire WorktreeManager for git-level isolation of child agents.
-		if repoRoot != "" {
-			spawnOpts = append(spawnOpts, spawn.WithWorktreeManager(spawn.NewWorktreeManager(repoRoot)))
-		}
-		spawnExec := spawn.NewExecutor(spawnNC, spawnOpts...)
-		_ = agentictools.RegisterTool("spawn_agent", spawnExec)
-	}
+	// spawn_agent was deleted in Phase 3 of the task-11 worktree audit. The
+	// reactive execution model (ADR-025) — decompose_task + serial DAG
+	// dispatch by requirement-executor — replaced the LLM-driven child-agent
+	// spawning pattern. See docs/audit/task-11-worktree-invariants.md (A4).
 
 	// ask_question — writes to QUESTIONS KV, dispatches answerer agent, blocks on KV watch.
 	// answer_question — terminal tool for answerer agents, writes answer to QUESTIONS KV.
@@ -173,13 +136,4 @@ func resolveRepoRoot() string {
 		return repoRoot
 	}
 	return absRepoRoot
-}
-
-// spawnNATSAdapter adapts *natsclient.Client to spawn.NATSClient.
-type spawnNATSAdapter struct {
-	client *natsclient.Client
-}
-
-func (a *spawnNATSAdapter) PublishToStream(ctx context.Context, subject string, data []byte) error {
-	return a.client.PublishToStream(ctx, subject, data)
 }

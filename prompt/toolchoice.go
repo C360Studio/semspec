@@ -32,7 +32,7 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 		// Reviewers submit verdict via submit_work deliverable — must call tools
 		return &agentic.ToolChoice{Mode: "required"}
 
-	case RolePlanner, RolePlanCoordinator, RoleRequirementGenerator, RoleScenarioGenerator, RoleArchitect:
+	case RolePlanner, RoleRequirementGenerator, RoleScenarioGenerator, RoleArchitect:
 		// Generators must call tools — use bash/graph for context, submit_work for deliverable
 		return &agentic.ToolChoice{Mode: "required"}
 

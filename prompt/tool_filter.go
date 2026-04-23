@@ -47,15 +47,6 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash"},
 		},
 
-		// --- Coordination roles ---
-
-		RoleCoordinator: {
-			AllowExact: []string{"spawn_agent"},
-		},
-		RolePlanCoordinator: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "spawn_agent", "submit_work"},
-		},
-
 		// --- Scenario-level review ---
 
 		RoleScenarioReviewer: {

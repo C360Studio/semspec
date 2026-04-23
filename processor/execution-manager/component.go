@@ -1170,7 +1170,7 @@ func (c *Component) availableToolNames() []string {
 		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
-		"decompose_task", "spawn_agent",
+		"decompose_task",
 		"review_scenario",
 	}
 }

@@ -41,7 +41,6 @@ func DefaultToolGuidance() []ToolGuidance {
 
 		// Agentic tools
 		{Name: "decompose_task", Order: 30, Guidance: "Break a task into a DAG of subtasks for parallel execution.", Roles: []Role{RoleDeveloper}},
-		{Name: "spawn_agent", Order: 31, Guidance: "Spawn a child agent for independent subtask execution.", Roles: []Role{RoleDeveloper}},
 		{Name: "review_scenario", Order: 32, Guidance: "Submit scenario review verdict with structured findings.", Roles: []Role{RoleScenarioReviewer}},
 	}
 }

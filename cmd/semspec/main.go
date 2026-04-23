@@ -816,8 +816,7 @@ func createServiceIfEnabled(
 	return nil
 }
 
-// registerAgenticTools registers all agentic tools. The spawn_agent tool uses
-// a TripleWriter for best-effort graph annotation — no ENTITY_STATES gate needed.
+// registerAgenticTools registers all agentic tools.
 func registerAgenticTools(ctx context.Context, natsClient *natsclient.Client) {
 	tools.RegisterAgenticToolsWithContext(ctx, tools.AgenticToolDeps{
 		NATSClient: natsClient,
@@ -833,16 +832,6 @@ func parseToolTimeouts() tools.ToolTimeouts {
 	if v := os.Getenv("SEMSPEC_BASH_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil && d > 0 {
 			t.Bash = d
-		}
-	}
-	if v := os.Getenv("SEMSPEC_SPAWN_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			t.Spawn = d
-		}
-	}
-	if v := os.Getenv("SEMSPEC_SPAWN_MAX_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil && d > 0 {
-			t.SpawnMax = d
 		}
 	}
 	if v := os.Getenv("SEMSPEC_HTTP_TIMEOUT"); v != "" {

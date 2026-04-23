@@ -80,23 +80,32 @@ func TestFilterTools_Planner(t *testing.T) {
 	}
 }
 
-func TestFilterTools_Coordinator(t *testing.T) {
-	allTools := []string{
-		"bash", "submit_work",
-		"spawn_agent", "decompose_task",
+// TestFilterTools_NoRoleGetsSpawnAgent pins Phase 3 of the task-11 worktree
+// audit: spawn_agent has been deleted as a tool, so no role's explicit
+// allowlist must return it. Regression guard for a future change that
+// reintroduces spawn_agent to a role without rewiring the runtime tool
+// registration — which would cause agents to receive prompt guidance for a
+// tool they cannot actually call.
+//
+// Scope: only covers roles with explicit AllowExact entries in tool_filter.go.
+// RoleArchitect/RoleQA fall through to the unknown-role default (all tools
+// returned verbatim); that behavior is documented by TestFilterTools_UnknownRole
+// and is orthogonal to the spawn_agent-dead-code question — in production,
+// availableToolNames() no longer contains "spawn_agent" at all.
+func TestFilterTools_NoRoleGetsSpawnAgent(t *testing.T) {
+	allTools := []string{"bash", "submit_work", "spawn_agent", "decompose_task"}
+
+	rolesWithAllowlist := []Role{
+		RolePlanner, RoleDeveloper, RoleValidator, RoleReviewer,
+		RolePlanReviewer, RoleTaskReviewer, RoleTaskGenerator,
+		RoleRequirementGenerator, RoleScenarioGenerator, RoleScenarioReviewer,
+		RolePlanQAReviewer,
 	}
-
-	tools := FilterTools(allTools, RoleCoordinator)
-
-	want := []string{"spawn_agent"}
-	for _, w := range want {
-		if !slices.Contains(tools, w) {
-			t.Errorf("coordinator should have %q", w)
+	for _, role := range rolesWithAllowlist {
+		got := FilterTools(allTools, role)
+		if slices.Contains(got, "spawn_agent") {
+			t.Errorf("role %q must not receive spawn_agent from FilterTools; got %v", role, got)
 		}
-	}
-
-	if len(tools) != 1 {
-		t.Errorf("coordinator should have exactly 1 tool, got %d: %v", len(tools), tools)
 	}
 }
 

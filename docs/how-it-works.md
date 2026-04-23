@@ -61,7 +61,6 @@ Specialized tools exist only for things bash cannot do.
 | `ask_question` | Signal a blocker requiring human or agent answer (terminal: StopLoop=true) |
 | `answer_question` | Provide an answer to a pending question |
 | `decompose_task` | Decompose a goal into a validated TaskDAG; loop exits with DAG as result |
-| `spawn_agent` | Spawn a child agent loop for a subtask; block until it completes |
 
 **Conditional tools** (enabled when the relevant service or API key is configured):
 

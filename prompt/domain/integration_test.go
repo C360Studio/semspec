@@ -79,11 +79,6 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 			[]string{"task decomposer breaking", "## Identity"},
 			[]string{"code reviewer"},
 		},
-		{
-			prompt.RolePlanCoordinator, prompt.ProviderOpenAI,
-			[]string{"planning coordinator", "## Identity"},
-			[]string{"code reviewer"},
-		},
 	}
 
 	for _, tt := range tests {

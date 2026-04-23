@@ -71,7 +71,6 @@ func softwareFragments() []*Fragment {
 		{ID: "sw.req-gen.system-base", Category: CategorySystemBase, Roles: []Role{RoleRequirementGenerator}, Content: "You are extracting requirements from a plan."},
 		{ID: "sw.scenario-gen.system-base", Category: CategorySystemBase, Roles: []Role{RoleScenarioGenerator}, Content: "You are generating BDD scenarios."},
 		{ID: "sw.task-gen.system-base", Category: CategorySystemBase, Roles: []Role{RoleTaskGenerator}, Content: "You are generating development tasks."},
-		{ID: "sw.plan-coordinator.system-base", Category: CategorySystemBase, Roles: []Role{RolePlanCoordinator}, Content: "You are a planning coordinator spawning focused planners."},
 		{ID: "sw.gap-detection", Category: CategoryGapDetection, Content: "If you encounter knowledge gaps, use <gap> XML blocks."},
 	}
 }
@@ -117,7 +116,6 @@ func TestIntegrationAllRoles(t *testing.T) {
 		{RoleRequirementGenerator, ProviderAnthropic, "extracting requirements", "<identity>", "code reviewer", 0},
 		{RoleScenarioGenerator, ProviderOpenAI, "BDD scenarios", "## Identity", "code reviewer", 0},
 		{RoleTaskGenerator, ProviderOllama, "generating development tasks", "## Identity", "code reviewer", 0},
-		{RolePlanCoordinator, ProviderOpenAI, "planning coordinator", "## Identity", "code reviewer", 0},
 	}
 
 	for _, tt := range tests {
@@ -574,7 +572,7 @@ func TestIntegrationGapDetectionShared(t *testing.T) {
 	roles := []Role{
 		RoleDeveloper, RolePlanner, RoleReviewer, RolePlanReviewer,
 		RoleTaskReviewer, RoleRequirementGenerator, RoleScenarioGenerator,
-		RoleTaskGenerator, RolePlanCoordinator,
+		RoleTaskGenerator,
 	}
 
 	for _, role := range roles {

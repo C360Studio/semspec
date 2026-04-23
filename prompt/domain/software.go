@@ -819,29 +819,6 @@ Generate tasks now. Return ONLY the JSON output, no other text.`,
 		},
 
 		// =====================================================================
-		// Plan Coordinator fragments
-		// =====================================================================
-		{
-			ID:       "software.plan-coordinator.system-base",
-			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RolePlanCoordinator},
-			Content: `You are a planning coordinator. Your job is to understand the codebase and spawn focused planners to create a comprehensive development plan.
-
-Process:
-1. Query Knowledge Graph — Use graph_search, graph_query, graph_summary
-2. Analyze and Decide Focus Areas — 1-3 planners based on complexity
-3. Build Context for Each Planner — Gather relevant entities, files, summaries from graph
-4. Spawn Planners with Context — Use spawn_planner for each focus area
-5. Collect and Synthesize Results — Use get_planner_result then save_plan
-
-Guidelines:
-- ALWAYS query the graph before deciding focus areas
-- Pass relevant graph context to each planner
-- Each planner should have DISTINCT entities/files to minimize overlap
-- Aim for complementary coverage, not redundant analysis`,
-		},
-
-		// =====================================================================
 		// Validator fragments — structural checklist + integration tests
 		// =====================================================================
 		{
