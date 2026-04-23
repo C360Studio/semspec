@@ -123,7 +123,13 @@ type Component struct {
 	triggersProcessed     atomic.Int64
 	requirementsCompleted atomic.Int64
 	requirementsFailed    atomic.Int64
-	errors                atomic.Int64
+	// retriesExhausted bumps when a requirement hits its max_retries ceiling
+	// and is marked failed without further attempts. Passive signal for
+	// answering "should we raise the default retry budget?" after we have
+	// enough runs to mine — paired with requirementsCompleted (which carries
+	// the retry_count on each execution) via trajectory data.
+	retriesExhausted atomic.Int64
+	errors           atomic.Int64
 	lastActivityMu        sync.RWMutex
 	lastActivity          time.Time
 }
@@ -261,6 +267,7 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"triggers_processed", c.triggersProcessed.Load(),
 		"requirements_completed", c.requirementsCompleted.Load(),
 		"requirements_failed", c.requirementsFailed.Load(),
+		"retries_exhausted", c.retriesExhausted.Load(),
 	)
 
 	// Drain in-flight timeout goroutines.
@@ -1183,6 +1190,7 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 
 	// Rejected — check retry budget.
 	if exec.RetryCount >= exec.MaxRetries || exec.MaxRetries == 0 {
+		c.retriesExhausted.Add(1)
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement rejected (retries exhausted): %s", result.Feedback))
 		return
 	}

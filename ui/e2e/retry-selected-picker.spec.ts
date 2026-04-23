@@ -212,6 +212,38 @@ test.describe('@t0 retry-selected-picker', () => {
 		await expect(page.getByTestId('retry-budget-R5')).toHaveText('retry 2/3');
 	});
 
+	test('exhausted-budget badge renders when retry_count >= max_retries', async ({ page }) => {
+		// Item 4 sliver — signal that a bare retry is unlikely to help so the
+		// user considers a different strategy instead of pounding retry.
+		await stubPlanBranches(page, slug, [
+			{
+				requirement_id: 'R7',
+				title: 'Out of budget',
+				stage: 'failed',
+				review_feedback: 'still broken',
+				retry_count: 3,
+				max_retries: 3
+			},
+			{
+				requirement_id: 'R8',
+				title: 'Still has headroom',
+				stage: 'failed',
+				review_feedback: 'transient blip',
+				retry_count: 1,
+				max_retries: 3
+			}
+		]);
+		await stubRetry(page, slug);
+
+		await page.goto(`/e2e-test/retry-picker?slug=${slug}`);
+		await waitForHydration(page);
+
+		await expect(page.getByTestId('retry-exhausted-R7')).toBeVisible();
+		await expect(page.getByTestId('retry-exhausted-R7')).toContainText('Budget exhausted');
+		// R8 has retries left — no badge.
+		await expect(page.getByTestId('retry-exhausted-R8')).toHaveCount(0);
+	});
+
 	test('details button hides when no feedback or error to show', async ({ page }) => {
 		await stubPlanBranches(page, slug, [
 			{ requirement_id: 'R6', title: 'No context', stage: 'failed' }

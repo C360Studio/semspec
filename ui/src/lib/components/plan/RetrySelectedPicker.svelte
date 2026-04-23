@@ -110,6 +110,18 @@
 		return `retry ${used}`;
 	}
 
+	/**
+	 * True when the requirement used its entire retry budget — signals to the
+	 * user that a bare retry will likely exhaust again. Picker surfaces a
+	 * warning badge so the user considers a different strategy (swap model,
+	 * skip, reject) instead of pounding retry.
+	 */
+	function isBudgetExhausted(b: PlanRequirementBranch): boolean {
+		const max = b.max_retries ?? 0;
+		const used = b.retry_count ?? 0;
+		return max > 0 && used >= max;
+	}
+
 	function toggleAll() {
 		if (selectedIds.size === failed.length) {
 			selectedIds = new Set();
@@ -159,6 +171,7 @@
 		<ul class="picker-list" aria-label="Failed requirements">
 			{#each failed as req (req.requirement_id)}
 				{@const budget = retryBudgetText(req)}
+				{@const exhausted = isBudgetExhausted(req)}
 				{@const showDetailsBtn = hasDetails(req)}
 				{@const isExpanded = expandedIds.has(req.requirement_id)}
 				<li class="picker-row" data-testid="retry-row-{req.requirement_id}">
@@ -184,9 +197,19 @@
 						{#if budget}
 							<span
 								class="req-budget"
+								class:req-budget--exhausted={exhausted}
 								data-testid="retry-budget-{req.requirement_id}"
 							>
 								{budget}
+							</span>
+						{/if}
+						{#if exhausted}
+							<span
+								class="exhausted-badge"
+								data-testid="retry-exhausted-{req.requirement_id}"
+								title="This requirement has used its full retry budget. A plain retry is likely to exhaust again — consider swapping models, editing the requirement, or rejecting the plan."
+							>
+								Budget exhausted
 							</span>
 						{/if}
 						{#if showDetailsBtn}
@@ -325,6 +348,23 @@
 		border-radius: var(--radius-sm);
 		background: var(--color-bg-tertiary);
 		color: var(--color-text-muted);
+	}
+
+	.req-budget--exhausted {
+		background: color-mix(in srgb, var(--color-warning, var(--color-error)) 18%, transparent);
+		color: var(--color-warning, var(--color-error));
+	}
+
+	.exhausted-badge {
+		flex-shrink: 0;
+		font-size: 10px;
+		font-weight: var(--font-weight-semibold);
+		padding: 1px 6px;
+		border-radius: var(--radius-sm);
+		text-transform: uppercase;
+		letter-spacing: 0.03em;
+		background: color-mix(in srgb, var(--color-warning, var(--color-error)) 15%, transparent);
+		color: var(--color-warning, var(--color-error));
 	}
 
 	.details-btn {
