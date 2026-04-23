@@ -1191,6 +1191,11 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 	// Rejected — check retry budget.
 	if exec.RetryCount >= exec.MaxRetries || exec.MaxRetries == 0 {
 		c.retriesExhausted.Add(1)
+		// Emit a PlanDecision so the human has a record to act on. Best-effort:
+		// if the publish fails we still mark the requirement failed so the plan
+		// surfaces it via the attention banner + retry picker. The decision is
+		// an additional signal, not the primary resolution path.
+		c.emitExhaustionDecision(ctx, exec, result.Verdict, result.Feedback)
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement rejected (retries exhausted): %s", result.Feedback))
 		return
 	}
@@ -1553,6 +1558,69 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementEx
 	c.publishRequirementCompleteEvent(ctx, exec, "completed")
 	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseCompleted))
 	c.cleanupExecutionLocked(exec, true)
+}
+
+// emitExhaustionDecision sends a PlanDecision to plan-manager recording
+// that this requirement exhausted its retry budget. The decision is a
+// human-attention record; the remedy (retry with different model,
+// force-complete, reject plan) is taken via existing endpoints. Fire-and-
+// forget: a publish failure logs but does not block the failed-state
+// transition that follows. Caller must still hold exec.mu.
+func (c *Component) emitExhaustionDecision(ctx context.Context, exec *requirementExecution, verdict, feedback string) {
+	if c.natsClient == nil {
+		return
+	}
+	now := time.Now()
+	shortID := exec.RequirementID
+	if len(shortID) > 16 {
+		shortID = shortID[len(shortID)-16:]
+	}
+	decisionID := fmt.Sprintf("plan-decision.%s.exhaust.%s.%d",
+		exec.Slug, shortID, now.UnixNano())
+
+	title := fmt.Sprintf("Requirement %s exhausted retries", exec.RequirementID)
+	rationale := fmt.Sprintf(
+		"retries=%d/%d last_verdict=%q last_feedback=%s",
+		exec.RetryCount, exec.MaxRetries, verdict, feedback,
+	)
+
+	// Capture trajectory pointers so the UI can deep-link the human reviewer
+	// to the actual LLM calls that exhausted the budget.
+	var artifacts []workflow.ArtifactRef
+	if exec.LoopID != "" {
+		artifacts = append(artifacts, workflow.ArtifactRef{
+			Path:    fmt.Sprintf("/trajectories/%s", exec.LoopID),
+			Type:    "trajectory",
+			Purpose: fmt.Sprintf("Final loop on requirement %s", exec.RequirementID),
+		})
+	}
+
+	decision := workflow.PlanDecision{
+		ID:                 decisionID,
+		PlanID:             workflow.PlanEntityID(exec.Slug),
+		Kind:               workflow.PlanDecisionKindExecutionExhausted,
+		Title:              title,
+		Rationale:          rationale,
+		Status:             workflow.PlanDecisionStatusProposed,
+		ProposedBy:         "requirement-executor",
+		AffectedReqIDs:     []string{exec.RequirementID},
+		ArtifactReferences: artifacts,
+		CreatedAt:          now,
+	}
+
+	if err := c.sendPlanDecisionAdd(ctx, exec.Slug, decision); err != nil {
+		c.logger.Warn("Failed to emit exhaustion PlanDecision",
+			"entity_id", exec.EntityID,
+			"requirement_id", exec.RequirementID,
+			"error", err,
+		)
+		return
+	}
+	c.logger.Info("Emitted exhaustion PlanDecision",
+		"entity_id", exec.EntityID,
+		"requirement_id", exec.RequirementID,
+		"decision_id", decisionID,
+	)
 }
 
 // markFailedLocked transitions to the failed terminal state.

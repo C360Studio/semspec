@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -98,7 +99,80 @@ func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jet
 		return
 	}
 
+	// Auto-archive any open ExecutionExhausted decisions whose subject just
+	// resolved non-failing. The decision was raised to get human attention
+	// because the agent was stuck; now that the requirement is unstuck
+	// (completed via retry), keeping the record open would keep demanding
+	// attention for a problem that's been resolved.
+	if reqExec.Stage == "completed" && reqExec.RequirementID != "" {
+		c.autoArchiveExhaustionDecisions(ctx, slug, reqExec.RequirementID, "requirement completed after exhaustion")
+	}
+
 	c.checkPlanConvergence(ctx, bucket, slug)
+}
+
+// autoArchiveExhaustionDecisions archives open ExecutionExhausted decisions
+// for a requirement that has just resolved — i.e. the subject of the
+// decision is no longer stuck, so the attention gate can close.
+func (c *Component) autoArchiveExhaustionDecisions(ctx context.Context, slug, reqID, reason string) {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+	if ps == nil {
+		return
+	}
+
+	plan, ok := ps.get(slug)
+	if !ok {
+		return
+	}
+
+	now := time.Now()
+	archived := 0
+	for i := range plan.PlanDecisions {
+		d := &plan.PlanDecisions[i]
+		if d.Kind != workflow.PlanDecisionKindExecutionExhausted {
+			continue
+		}
+		if d.Status != workflow.PlanDecisionStatusProposed && d.Status != workflow.PlanDecisionStatusUnderReview {
+			continue
+		}
+		// Match by affected requirement id.
+		hit := false
+		for _, id := range d.AffectedReqIDs {
+			if id == reqID {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		d.Status = workflow.PlanDecisionStatusArchived
+		d.DecidedAt = &now
+		if d.RejectionReasons == nil {
+			d.RejectionReasons = map[string]string{}
+		}
+		d.RejectionReasons["auto_archive"] = reason
+		archived++
+	}
+
+	if archived == 0 {
+		return
+	}
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Warn("Failed to save plan after auto-archiving exhaustion decisions",
+			"slug", slug, "requirement_id", reqID, "error", err)
+		return
+	}
+
+	c.logger.Info("Auto-archived open exhaustion decisions",
+		"slug", slug,
+		"requirement_id", reqID,
+		"archived", archived,
+		"reason", reason,
+	)
 }
 
 // checkPlanConvergence evaluates whether a plan's requirements have all reached

@@ -19,6 +19,10 @@ const (
 	mutReqPhase   = "execution.mutation.req.phase"
 	mutReqNode    = "execution.mutation.req.node"
 	mutTaskCreate = "execution.mutation.task.create"
+	// mutPlanDecisionAdd targets plan-manager (different processor, different
+	// KV bucket). Used for emitting ExecutionExhausted decisions so the
+	// human has a decision record to act on.
+	mutPlanDecisionAdd = "plan.mutation.plan_decision.add"
 )
 
 // execMutationResponse mirrors ExecMutationResponse from execution-manager.
@@ -63,6 +67,22 @@ func (c *Component) sendTaskCreate(ctx context.Context, req map[string]any) erro
 		return nil
 	}
 	_, err := c.sendMutation(ctx, mutTaskCreate, req)
+	return err
+}
+
+// sendPlanDecisionAdd emits a PlanDecision to plan-manager so the human
+// gets a decision record for this requirement. Best-effort: logs and
+// returns error without blocking the caller's state transition, since the
+// requirement has already been marked failed by the time this fires.
+func (c *Component) sendPlanDecisionAdd(ctx context.Context, slug string, decision workflow.PlanDecision) error {
+	if c.natsClient == nil {
+		return nil
+	}
+	req := map[string]any{
+		"slug":     slug,
+		"decision": decision,
+	}
+	_, err := c.sendMutation(ctx, mutPlanDecisionAdd, req)
 	return err
 }
 

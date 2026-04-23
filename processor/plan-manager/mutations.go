@@ -34,6 +34,7 @@ const (
 	mutationGitHubPlanCreate      = "workflow.trigger.github-plan-create"
 	mutationGitHubPRFeedback      = "plan.mutation.github.pr_feedback"
 	mutationGitHubPRMetadata      = "plan.mutation.github.pr_metadata"
+	mutationPlanDecisionAdd       = "plan.mutation.plan_decision.add"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -155,6 +156,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationGitHubPlanCreate, c.handleGitHubPlanCreateMutation},
 		{mutationGitHubPRFeedback, c.handleGitHubPRFeedbackMutation},
 		{mutationGitHubPRMetadata, c.handleGitHubPRMetadataMutation},
+		{mutationPlanDecisionAdd, c.handlePlanDecisionAddMutation},
 	}
 
 	for _, s := range subjects {
@@ -1297,4 +1299,127 @@ func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON js
 		plan.Architecture = nil
 		return workflow.StatusApproved
 	}
+}
+
+// planDecisionAddRequest carries a single new PlanDecision to append to a
+// plan. Sent by upstream components (requirement-executor on retry exhaust,
+// future sources) so plan-manager remains the single writer.
+type planDecisionAddRequest struct {
+	Slug     string                `json:"slug"`
+	Decision workflow.PlanDecision `json:"decision"`
+}
+
+// handlePlanDecisionAddMutation appends a single PlanDecision to the plan's
+// decisions slice. For ExecutionExhausted kind, any existing open
+// (proposed/under_review) decisions targeting the same requirement IDs are
+// archived first — exhaustion should not accumulate parallel open records
+// for the same requirement; the newer one always supersedes.
+func (c *Component) handlePlanDecisionAddMutation(ctx context.Context, data []byte) MutationResponse {
+	var req planDecisionAddRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug is required"}
+	}
+	if req.Decision.ID == "" {
+		return MutationResponse{Success: false, Error: "decision.id is required"}
+	}
+	if req.Decision.PlanID == "" {
+		return MutationResponse{Success: false, Error: "decision.plan_id is required"}
+	}
+	// Back-compat default — zero-valued Kind maps to the qa-reviewer path.
+	if req.Decision.Kind == "" {
+		req.Decision.Kind = workflow.PlanDecisionKindRequirementChange
+	}
+	if !req.Decision.Kind.IsValid() {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid decision kind: %q", req.Decision.Kind)}
+	}
+	if req.Decision.Status == "" {
+		req.Decision.Status = workflow.PlanDecisionStatusProposed
+	}
+	if req.Decision.CreatedAt.IsZero() {
+		req.Decision.CreatedAt = time.Now()
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+	if ps == nil {
+		return MutationResponse{Success: false, Error: "plan store not ready"}
+	}
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	// For execution_exhausted, supersede earlier open decisions on the same
+	// requirement set so we don't accumulate stale records every retry cycle.
+	if req.Decision.Kind == workflow.PlanDecisionKindExecutionExhausted {
+		supersededIDs := c.archiveOpenExhaustionDecisionsLocked(plan, req.Decision.AffectedReqIDs)
+		if len(supersededIDs) > 0 {
+			c.logger.Info("Superseded open exhaustion decisions",
+				"slug", req.Slug,
+				"superseded", supersededIDs,
+				"replacement", req.Decision.ID,
+			)
+		}
+	}
+
+	plan.PlanDecisions = append(plan.PlanDecisions, req.Decision)
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan after plan_decision add",
+			"slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan decision added",
+		"slug", req.Slug,
+		"decision_id", req.Decision.ID,
+		"kind", req.Decision.Kind,
+		"affected", req.Decision.AffectedReqIDs,
+	)
+	return MutationResponse{Success: true}
+}
+
+// archiveOpenExhaustionDecisionsLocked archives any existing proposed /
+// under_review ExecutionExhausted decisions on the plan whose AffectedReqIDs
+// overlap with the given set. Returns the IDs that were superseded.
+//
+// Caller must ensure the plan object is mutable (single-writer discipline
+// inside the mutation handler satisfies this).
+func (c *Component) archiveOpenExhaustionDecisionsLocked(plan *workflow.Plan, reqIDs []string) []string {
+	if len(reqIDs) == 0 {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(reqIDs))
+	for _, id := range reqIDs {
+		wanted[id] = struct{}{}
+	}
+	var superseded []string
+	now := time.Now()
+	for i := range plan.PlanDecisions {
+		d := &plan.PlanDecisions[i]
+		if d.Kind != workflow.PlanDecisionKindExecutionExhausted {
+			continue
+		}
+		if d.Status != workflow.PlanDecisionStatusProposed && d.Status != workflow.PlanDecisionStatusUnderReview {
+			continue
+		}
+		hit := false
+		for _, id := range d.AffectedReqIDs {
+			if _, ok := wanted[id]; ok {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		d.Status = workflow.PlanDecisionStatusArchived
+		d.DecidedAt = &now
+		superseded = append(superseded, d.ID)
+	}
+	return superseded
 }
