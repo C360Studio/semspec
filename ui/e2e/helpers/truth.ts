@@ -298,6 +298,42 @@ export async function stubPlanBranches(
 }
 
 /**
+ * Stub POST /plans/{slug}/retry. Captures the last request body so tests can
+ * assert which scope + requirement_ids the UI sent. Returns a fixture plan
+ * payload to satisfy the `request<PlanWithStatus>` return type.
+ *
+ * Usage:
+ *   const capture = await stubRetry(page, slug);
+ *   // ...interact...
+ *   expect(capture.last?.scope).toBe('requirements');
+ */
+export interface RetryCapture {
+	last: Record<string, unknown> | null;
+	calls: number;
+}
+
+export async function stubRetry(page: Page, slug: string): Promise<RetryCapture> {
+	const capture: RetryCapture = { last: null, calls: 0 };
+	await page.route(`**/plan-manager/plans/${slug}/retry`, async (route) => {
+		if (route.request().method() !== 'POST') {
+			await route.fallback();
+			return;
+		}
+		try {
+			capture.last = route.request().postDataJSON() as Record<string, unknown>;
+		} catch {
+			capture.last = null;
+		}
+		capture.calls++;
+		// Match the real backend's retryPlanResponse shape; earlier iterations
+		// returned a plan-shaped object by mistake. Callers ignore the body
+		// today but the contract should be honest.
+		await fulfillJSON(route, { success: true, scope: 'requirements', reset_count: 1 });
+	});
+	return capture;
+}
+
+/**
  * Stub per-file diff requests. `patches` is a map from file path to the
  * unified-diff string to return. Paths not in the map receive a generic
  * placeholder so the UI has something to render.

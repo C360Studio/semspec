@@ -1136,9 +1136,18 @@ func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, 
 // retryPlanRequest is the request body for POST /plans/{slug}/retry.
 type retryPlanRequest struct {
 	// Scope controls which requirement executions are reset.
-	// "failed" (default) resets only entries in "failed" or "error" stage.
-	// "all" resets every requirement execution for the plan.
+	//   "failed" (default) resets only entries in "failed" or "error" stage.
+	//   "all" resets every requirement execution for the plan.
+	//   "requirements" resets exactly the requirement IDs listed in
+	//   RequirementIDs, regardless of their current stage. Empty IDs list
+	//   with this scope is rejected.
 	Scope string `json:"scope"`
+
+	// RequirementIDs names the specific requirements to reset when
+	// Scope == "requirements". Ignored for other scopes. Preserves
+	// already-completed and still-running requirements untouched so the
+	// user can cherry-pick which failures to retry.
+	RequirementIDs []string `json:"requirement_ids,omitempty"`
 }
 
 // retryPlanResponse is the response body for POST /plans/{slug}/retry.
@@ -1189,8 +1198,16 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 	if req.Scope == "" {
 		req.Scope = "failed"
 	}
-	if req.Scope != "failed" && req.Scope != "all" {
-		writeJSONError(w, `scope must be "failed" or "all"`, http.StatusBadRequest)
+	switch req.Scope {
+	case "failed", "all":
+		// valid; RequirementIDs are ignored by the reset routine for these scopes.
+	case "requirements":
+		if len(req.RequirementIDs) == 0 {
+			writeJSONError(w, `scope "requirements" requires a non-empty requirement_ids list`, http.StatusBadRequest)
+			return
+		}
+	default:
+		writeJSONError(w, `scope must be "failed", "all", or "requirements"`, http.StatusBadRequest)
 		return
 	}
 
@@ -1217,7 +1234,7 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 	}
 
 	// Reset requirement executions via execution-manager mutations.
-	resetCount, err := c.resetRequirementExecutions(r.Context(), slug, req.Scope)
+	resetCount, err := c.resetRequirementExecutions(r.Context(), slug, req.Scope, req.RequirementIDs)
 	if err != nil {
 		c.logger.Error("Failed to reset requirement executions", "slug", slug, "scope", req.Scope, "error", err)
 		writeJSONError(w, "Failed to reset requirement executions: "+err.Error(), http.StatusInternalServerError)
@@ -1255,9 +1272,15 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 	})
 }
 
-// resetRequirementExecutions scans EXECUTION_STATES for req.<slug>.* keys and resets
-// entries matching the scope. Returns the number of entries reset.
-func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope string) (int, error) {
+// resetRequirementExecutions scans EXECUTION_STATES for req.<slug>.* keys and
+// resets entries selected by scope. Returns the number of entries reset.
+//
+// Scope semantics:
+//
+//	"failed"       — only entries currently in "failed" or "error" stage
+//	"all"          — every entry under the plan's prefix
+//	"requirements" — exactly the ids in requirementIDs, regardless of stage
+func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope string, requirementIDs []string) (int, error) {
 	bucket, err := c.getExecBucket(ctx)
 	if err != nil {
 		// No bucket means no executions to reset — treat as success.
@@ -1274,13 +1297,26 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 		return 0, fmt.Errorf("list execution keys: %w", err)
 	}
 
+	// Build a quick lookup set for scope="requirements". The key format is
+	// "req.<slug>.<requirement_id>" so we match the suffix after the prefix.
+	var idSet map[string]struct{}
+	if scope == "requirements" {
+		idSet = make(map[string]struct{}, len(requirementIDs))
+		for _, id := range requirementIDs {
+			if id != "" {
+				idSet[id] = struct{}{}
+			}
+		}
+	}
+
 	var resetCount int
 	for _, key := range keys {
 		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 
-		if scope == "failed" {
+		switch scope {
+		case "failed":
 			// Only reset entries in a failed or error stage.
 			entry, getErr := bucket.Get(ctx, key)
 			if getErr != nil {
@@ -1295,6 +1331,12 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 				continue
 			}
 			if reqExec.Stage != "failed" && reqExec.Stage != "error" {
+				continue
+			}
+		case "requirements":
+			// Match the requirement_id portion of the key against the allow-list.
+			reqID := strings.TrimPrefix(key, prefix)
+			if _, ok := idSet[reqID]; !ok {
 				continue
 			}
 		}

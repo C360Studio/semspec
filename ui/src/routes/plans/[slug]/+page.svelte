@@ -17,6 +17,7 @@
 	let SigmaCanvas: typeof import('$lib/components/graph/SigmaCanvas.svelte').default | null = $state(null);
 	let GraphFilters: typeof import('$lib/components/graph/GraphFilters.svelte').default | null = $state(null);
 	import { promotePlan, executePlan, retryFailed } from '$lib/actions/plans';
+	import RetrySelectedPicker from '$lib/components/plan/RetrySelectedPicker.svelte';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
@@ -409,6 +410,22 @@
 						onRetryFailed={handleRetryFailed}
 					/>
 				</div>
+				<!-- Per-requirement retry picker — surfaces when the plan has at
+				     least one failed requirement so the user can cherry-pick
+				     which failures to retry, instead of the coarse "retry all
+				     failed" button. Sits under the ActionBar on stalled plans.
+				     Invariant: this mounts only for stage='implementing';
+				     ActionBar's "Retry Failed" button renders for stage='failed'.
+				     The two stages are disjoint so picker + ActionBar-retry
+				     never appear simultaneously today. If a future stage-map
+				     change overlaps them, either gate the ActionBar button or
+				     replace it with the picker. -->
+				{#if plan.execution_summary && plan.execution_summary.failed > 0 && plan.stage === 'implementing'}
+					<RetrySelectedPicker
+						slug={plan.slug}
+						onRetried={handleRefresh}
+					/>
+				{/if}
 			{/if}
 
 			{#if actionError}

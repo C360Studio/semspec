@@ -32,3 +32,16 @@ export async function retryFailed(slug: string): Promise<void> {
 	await api.plans.retry(slug, 'failed');
 	await invalidate('app:plans');
 }
+
+/**
+ * Retry a specific subset of requirements. Preserves already-completed and
+ * still-running requirements untouched — lets the user cherry-pick which
+ * failures to retry instead of the blanket "retry all failed" action.
+ */
+export async function retrySelected(slug: string, requirementIds: string[]): Promise<void> {
+	if (requirementIds.length === 0) {
+		throw new Error('No requirements selected to retry');
+	}
+	await api.plans.retry(slug, 'requirements', requirementIds);
+	await invalidate('app:plans');
+}

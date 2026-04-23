@@ -295,12 +295,30 @@ export const api = {
 		execute: (slug: string) =>
 			request<PlanWithStatus>(`/plan-manager/plans/${slug}/execute`, { method: 'POST' }),
 
-		/** Retry failed requirements only — completed requirements are preserved */
-		retry: (slug: string, scope: 'failed') =>
-			request<PlanWithStatus>(`/plan-manager/plans/${slug}/retry`, {
-				method: 'POST',
-				body: { scope }
-			}),
+		/**
+		 * Retry requirement executions. Three modes:
+		 *   scope="failed"        — all failed/error requirements (default)
+		 *   scope="all"           — every requirement, including completed ones
+		 *   scope="requirements"  — only the ids in requirementIds, regardless
+		 *                           of current stage. Lets the user cherry-pick
+		 *                           which failures to retry without touching
+		 *                           other requirements.
+		 */
+		retry: (
+			slug: string,
+			scope: 'failed' | 'all' | 'requirements',
+			requirementIds?: string[]
+		) =>
+			request<{ success: boolean; scope: string; reset_count: number }>(
+				`/plan-manager/plans/${slug}/retry`,
+				{
+					method: 'POST',
+					body:
+						scope === 'requirements'
+							? { scope, requirement_ids: requirementIds ?? [] }
+							: { scope }
+				}
+			),
 
 		/** Get review synthesis result for a plan */
 		getReviews: (slug: string) => request<SynthesisResult>(`/plan-manager/plans/${slug}/reviews`),
