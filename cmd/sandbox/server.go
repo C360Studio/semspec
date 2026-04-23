@@ -617,6 +617,28 @@ func (s *Server) currentHEAD(ctx context.Context) string {
 	return strings.TrimSpace(out)
 }
 
+// stableHEAD returns a value safe to pass to `git checkout <ref>` to restore
+// the caller's original HEAD after an endpoint finishes its work. For a
+// branch-attached HEAD this is the branch name; for a detached HEAD
+// `rev-parse --abbrev-ref HEAD` returns the literal string "HEAD", which
+// `git checkout HEAD` treats as a no-op — leaving the repo on whatever
+// temporary branch the endpoint checked out in the middle of its work. In
+// that case stableHEAD falls back to the full commit SHA so the restore
+// actually moves HEAD back where the caller started. Returns empty string
+// on error, which callers must treat as "skip the restore" rather than
+// silently operating on a drifted HEAD.
+func (s *Server) stableHEAD(ctx context.Context) string {
+	short := s.currentHEAD(ctx)
+	if short != "HEAD" && short != "<unknown>" {
+		return short
+	}
+	out, err := gitOutput(ctx, s.repoPath, "rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // mergeIntoMainRepo performs the checkout + merge + file-change-parse sequence.
 // Must be called under s.repoMu to prevent concurrent mutations.
 func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req mergeRequest) (mergeResponse, error) {
@@ -792,7 +814,7 @@ func (s *Server) handleMergeBranchesConflict(
 			return
 		}
 	}
-	_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+	s.restoreHEAD(ctx, origBranch)
 	writeJSON(w, http.StatusConflict, mergeBranchesResponse{
 		Status:            "conflict",
 		Target:            target,
@@ -846,15 +868,22 @@ func (s *Server) handleMergeBranches(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	origBranch := s.currentHEAD(ctx)
+	// stableHEAD returns the full SHA for a detached HEAD rather than the
+	// literal string "HEAD" (which `git checkout HEAD` treats as a no-op,
+	// leaving the caller stranded on whatever temporary branch we check
+	// out mid-request). The restore ref must actually move HEAD back.
+	origRef := s.stableHEAD(ctx)
 
 	// Checkout -B creates-or-resets the target branch from base. This makes
-	// the endpoint idempotent: calling it again after a prior success or
-	// conflict re-does the assembly from scratch rather than failing with
-	// "branch already exists."
+	// re-calling the endpoint after a prior attempt safe for *the endpoint's
+	// own retries* — a second call from plan-manager discards the first
+	// attempt's partial merges. It is NOT safe against human intervention:
+	// if an operator cherry-picks a conflict fix onto the target branch,
+	// a subsequent merge-branches call silently destroys that work.
+	// Phase 5's reconciliation UX must address this; for now the behavior
+	// matches "plan-manager owns the assembled branch."
 	if err := runGit(ctx, s.repoPath, "checkout", "-B", req.Target, base); err != nil {
-		// Haven't touched anything yet — best-effort restore of origBranch.
-		_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+		s.restoreHEAD(ctx, origRef)
 		writeError(w, http.StatusInternalServerError, "create target branch: "+err.Error())
 		return
 	}
@@ -862,7 +891,7 @@ func (s *Server) handleMergeBranches(w http.ResponseWriter, r *http.Request) {
 	var commits []mergeBranchesCommit
 	for _, branch := range req.Branches {
 		if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", branch); err != nil {
-			_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+			s.restoreHEAD(ctx, origRef)
 			writeError(w, http.StatusBadRequest, "source branch does not exist: "+branch)
 			return
 		}
@@ -870,7 +899,7 @@ func (s *Server) handleMergeBranches(w http.ResponseWriter, r *http.Request) {
 		msg = appendTrailers(msg, req.Trailers)
 
 		if mergeErr := runGit(ctx, s.repoPath, "merge", branch, "--no-ff", "-m", msg); mergeErr != nil {
-			s.handleMergeBranchesConflict(ctx, w, req.Target, branch, origBranch, commits, mergeErr)
+			s.handleMergeBranchesConflict(ctx, w, req.Target, branch, origRef, commits, mergeErr)
 			return
 		}
 		sha, _ := gitOutput(ctx, s.repoPath, "rev-parse", "HEAD")
@@ -880,12 +909,28 @@ func (s *Server) handleMergeBranches(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+	s.restoreHEAD(ctx, origRef)
 	writeJSON(w, http.StatusOK, mergeBranchesResponse{
 		Status:       "merged",
 		Target:       req.Target,
 		MergeCommits: commits,
 	})
+}
+
+// restoreHEAD checks out the original ref captured via stableHEAD before a
+// mutation endpoint began its work. Logs (but does not fail) when the
+// checkout errors — callers who need a post-condition guarantee (like
+// selfHealAfterFailedRestore) do their own HEAD-verification. Accepts an
+// empty ref as a no-op so caller code can `s.restoreHEAD(ctx, orig)`
+// without a nil check after a stableHEAD() that failed.
+func (s *Server) restoreHEAD(ctx context.Context, ref string) {
+	if ref == "" {
+		return
+	}
+	if err := runGit(ctx, s.repoPath, "checkout", ref); err != nil {
+		s.logger.Warn("failed to restore HEAD after mutation endpoint",
+			"ref", ref, "current_head", s.currentHEAD(ctx), "error", err)
+	}
 }
 
 // fileEntry matches tools/sandbox.FileEntry for JSON serialization.

@@ -853,6 +853,20 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 		// plan in its current state with a LastError the UI can surface — the
 		// work is done, but humans need to resolve the conflicts before the
 		// plan can honestly be called "complete."
+		//
+		// Write-ahead note: the assembled branch is created on disk BEFORE
+		// ps.save persists PlanBranch/PlanMergeCommit to KV. If save fails,
+		// the git state "knows" about the assembled branch but the plan
+		// record doesn't. This is acceptable because:
+		//   (1) the sandbox endpoint uses `checkout -B` for idempotency, so
+		//       the next QA-approved retry will reassemble cleanly; and
+		//   (2) the mutation returns an error on save failure, so the caller
+		//       also won't advance plan.Status = complete.
+		// If an operator cherry-picks a conflict fix onto the assembled
+		// branch between the failed save and the retry, (1) would destroy
+		// their work. Phase 5's reconciliation UX will need to either
+		// prevent retries when the assembled branch has diverged from the
+		// recorded merge commit, or expose an explicit "reassemble" action.
 		if err := c.assembleRequirementBranches(ctx, plan); err != nil {
 			plan.LastError = fmt.Sprintf("plan-level merge failed: %v", err)
 			now := time.Now()
@@ -868,7 +882,7 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 		plan.Status = target
 		c.logger.Info("QA verdict approved",
 			"slug", req.Slug, "level", req.Level, "target", target,
-			"plan_branch", plan.PlanBranch, "plan_merge_commit", plan.PlanMergeCommit)
+			"plan_branch", plan.AssembledBranch, "plan_merge_commit", plan.AssembledMergeCommit)
 
 	case workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:
 		if !current.CanTransitionTo(workflow.StatusRejected) {

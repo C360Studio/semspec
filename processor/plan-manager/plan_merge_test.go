@@ -82,11 +82,11 @@ func TestAssembleRequirementBranches_Success(t *testing.T) {
 		t.Fatalf("assembleRequirementBranches: unexpected error: %v", err)
 	}
 
-	if plan.PlanBranch != "semspec/plan-demo" {
-		t.Errorf("PlanBranch = %q, want %q", plan.PlanBranch, "semspec/plan-demo")
+	if plan.AssembledBranch != "semspec/plan-demo" {
+		t.Errorf("PlanBranch = %q, want %q", plan.AssembledBranch, "semspec/plan-demo")
 	}
-	if plan.PlanMergeCommit != "sha2" {
-		t.Errorf("PlanMergeCommit = %q, want %q (last merge commit)", plan.PlanMergeCommit, "sha2")
+	if plan.AssembledMergeCommit != "sha2" {
+		t.Errorf("PlanMergeCommit = %q, want %q (last merge commit)", plan.AssembledMergeCommit, "sha2")
 	}
 	// Verify the branches were submitted in plan-requirement order with the
 	// correct Plan-Slug trailer — plan-manager is the sole contract owner
@@ -105,6 +105,78 @@ func TestAssembleRequirementBranches_Success(t *testing.T) {
 	}
 	if stub.gotRequest.Trailers["Plan-Slug"] != "demo" {
 		t.Errorf("Plan-Slug trailer = %q, want %q", stub.gotRequest.Trailers["Plan-Slug"], "demo")
+	}
+	// Pin current contract: plan-manager sends Base="", which the sandbox
+	// maps to HEAD at merge time. If this ever changes (e.g. fixing to
+	// main/master), this assertion catches the shift so both layers move
+	// together.
+	if stub.gotRequest.Base != "" {
+		t.Errorf("request Base = %q, want empty (sandbox defaults to HEAD)", stub.gotRequest.Base)
+	}
+}
+
+// TestAssembleRequirementBranches_TopoSortByDependsOn verifies M2 from the
+// Phase 4 go-reviewer findings: requirements are submitted to the sandbox
+// in an order where prerequisites appear before their dependents, so merge
+// conflicts between logically-independent reqs don't depend on plan-manager's
+// KV write order.
+func TestAssembleRequirementBranches_TopoSortByDependsOn(t *testing.T) {
+	stub := newStubMergeBranchesServer(t, http.StatusOK, map[string]any{
+		"status":        "merged",
+		"target":        "semspec/plan-dag",
+		"merge_commits": []map[string]string{},
+	})
+	c := newTestComponentWithSandbox(t, stub.server.URL)
+
+	// Input order is intentionally "wrong" — r3 depends on r1 which depends
+	// on r2, yet they're stored r1, r2, r3. Expected output: r2, r1, r3.
+	plan := &workflow.Plan{
+		Slug: "dag",
+		Requirements: []workflow.Requirement{
+			{ID: "r1", DependsOn: []string{"r2"}},
+			{ID: "r2"},
+			{ID: "r3", DependsOn: []string{"r1"}},
+		},
+	}
+	if err := c.assembleRequirementBranches(context.Background(), plan); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"semspec/requirement-r2", "semspec/requirement-r1", "semspec/requirement-r3"}
+	if len(stub.gotRequest.Branches) != len(want) {
+		t.Fatalf("branches = %v, want %v", stub.gotRequest.Branches, want)
+	}
+	for i, b := range want {
+		if stub.gotRequest.Branches[i] != b {
+			t.Errorf("branches[%d] = %q, want %q (full: %v)",
+				i, stub.gotRequest.Branches[i], b, stub.gotRequest.Branches)
+		}
+	}
+}
+
+// TestAssembleRequirementBranches_ConflictErrorIsWrapped pins the M1 fix:
+// the conflict error bubbled up to plan-manager must be matchable via
+// errors.Is(err, sandbox.ErrMergeBranchesConflict) so Phase 5's UX code can
+// route conflict vs infrastructure failures without string-matching.
+func TestAssembleRequirementBranches_ConflictErrorIsWrapped(t *testing.T) {
+	stub := newStubMergeBranchesServer(t, http.StatusConflict, map[string]any{
+		"status":             "conflict",
+		"target":             "semspec/plan-demo",
+		"conflicting_branch": "semspec/requirement-r2",
+	})
+	c := newTestComponentWithSandbox(t, stub.server.URL)
+	plan := &workflow.Plan{
+		Slug: "demo",
+		Requirements: []workflow.Requirement{
+			{ID: "r1"},
+			{ID: "r2"},
+		},
+	}
+	err := c.assembleRequirementBranches(context.Background(), plan)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !errors.Is(err, sandbox.ErrMergeBranchesConflict) {
+		t.Errorf("error must errors.Is ErrMergeBranchesConflict; got %v", err)
 	}
 }
 
@@ -140,11 +212,11 @@ func TestAssembleRequirementBranches_Conflict(t *testing.T) {
 	// Plan must NOT have been tagged with a merge commit — the merge didn't
 	// complete cleanly. PlanBranch staying empty is the "don't lie about
 	// state" invariant: the plan isn't assembled yet.
-	if plan.PlanBranch != "" {
-		t.Errorf("PlanBranch on conflict = %q, want empty", plan.PlanBranch)
+	if plan.AssembledBranch != "" {
+		t.Errorf("PlanBranch on conflict = %q, want empty", plan.AssembledBranch)
 	}
-	if plan.PlanMergeCommit != "" {
-		t.Errorf("PlanMergeCommit on conflict = %q, want empty", plan.PlanMergeCommit)
+	if plan.AssembledMergeCommit != "" {
+		t.Errorf("PlanMergeCommit on conflict = %q, want empty", plan.AssembledMergeCommit)
 	}
 }
 
@@ -162,8 +234,8 @@ func TestAssembleRequirementBranches_NoSandbox(t *testing.T) {
 	if err := c.assembleRequirementBranches(context.Background(), plan); err != nil {
 		t.Fatalf("nil sandbox should be a no-op, got error: %v", err)
 	}
-	if plan.PlanBranch != "" {
-		t.Errorf("PlanBranch with nil sandbox = %q, want empty", plan.PlanBranch)
+	if plan.AssembledBranch != "" {
+		t.Errorf("PlanBranch with nil sandbox = %q, want empty", plan.AssembledBranch)
 	}
 }
 
@@ -177,8 +249,8 @@ func TestAssembleRequirementBranches_NoRequirements(t *testing.T) {
 	if err := c.assembleRequirementBranches(context.Background(), plan); err != nil {
 		t.Fatalf("empty requirements should be a no-op, got error: %v", err)
 	}
-	if plan.PlanBranch != "" {
-		t.Errorf("PlanBranch on empty plan = %q, want empty", plan.PlanBranch)
+	if plan.AssembledBranch != "" {
+		t.Errorf("PlanBranch on empty plan = %q, want empty", plan.AssembledBranch)
 	}
 	// Verify we didn't actually hit the stub server — if we did, the 500
 	// response would have produced an error above.

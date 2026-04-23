@@ -1708,6 +1708,65 @@ func TestMergeBranches_ConflictSelfHealsAndReturns409(t *testing.T) {
 	// Tracked working tree must be clean — no lingering conflict markers.
 	run(t, srv.repoPath, "git", "diff", "--quiet")
 	run(t, srv.repoPath, "git", "diff", "--cached", "--quiet")
+
+	// The target branch must preserve the successful rB merge so partial
+	// progress is inspectable — the commit message's "Prior successful
+	// merges stay on the target branch" contract is load-bearing for any
+	// future human reconciliation flow and must not regress silently.
+	planLog := runOutput(t, srv.repoPath, "git", "log", "semspec/plan-conflict", "--oneline")
+	if !strings.Contains(planLog, "feat: semspec/requirement-rB") {
+		t.Errorf("target branch should contain rB's commit after conflict; log=\n%s", planLog)
+	}
+	if strings.Contains(planLog, "feat: semspec/requirement-rC") {
+		t.Errorf("target branch must NOT contain the conflicting rC commit; log=\n%s", planLog)
+	}
+}
+
+// TestMergeBranches_DetachedHEADRestore pins H1 from Phase 4's go-reviewer
+// findings: when the caller starts on a detached HEAD, `currentHEAD()`
+// returns the literal string "HEAD" and `git checkout HEAD` is a no-op.
+// Without stableHEAD() the sandbox would be stranded on the plan branch
+// after a successful merge-branches call. This test detaches HEAD before
+// issuing the request and verifies the post-condition SHA matches.
+func TestMergeBranches_DetachedHEADRestore(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Seed a simple req branch so the merge has something to do.
+	run(t, srv.repoPath, "git", "checkout", "-B", "semspec/requirement-rd1", base)
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "rd1.go"), []byte("package rd1\n"), 0o644); err != nil {
+		t.Fatalf("write rd1: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "rd1.go")
+	run(t, srv.repoPath, "git", "commit", "-m", "feat: rd1")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	// Detach HEAD — the mutation handler must restore us to THIS exact SHA,
+	// not to a branch that no longer reflects where the caller was.
+	detachedSHA := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "HEAD"))
+	run(t, srv.repoPath, "git", "checkout", "--detach")
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/merge-branches", mergeBranchesRequest{
+		Target:   "semspec/plan-detached",
+		Base:     base,
+		Branches: []string{"semspec/requirement-rd1"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("merge-branches on detached HEAD: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+
+	// The endpoint must restore HEAD to the exact commit the caller was on,
+	// not stay on the plan branch and not go to base.
+	gotSHA := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "HEAD"))
+	if gotSHA != detachedSHA {
+		t.Errorf("HEAD after detached-start = %s, want %s (caller's original detached SHA)", gotSHA, detachedSHA)
+	}
+	abbr := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	if abbr != "HEAD" {
+		t.Errorf("HEAD should still be detached after restore, abbrev = %q", abbr)
+	}
 }
 
 func TestCleanupStaleWorktrees(t *testing.T) {

@@ -191,10 +191,19 @@ func (c *Component) handleRequirementFileDiff(w http.ResponseWriter, r *http.Req
 }
 
 // resolvePlanBase picks the base branch for diffs against a plan's work.
-// Precedence: ?base= query param > plan.GitHub.PlanBranch > "main".
+// Precedence: ?base= query param > plan.AssembledBranch (if B1 merged) >
+// plan.GitHub.PlanBranch (GitHub-origin plans) > "main".
+//
+// AssembledBranch takes precedence over GitHub.PlanBranch so that after
+// plan-level merge the UI shows diffs against the aggregate work by
+// default — GitHub.PlanBranch remains as the fallback for plans that
+// originated from a GitHub issue but haven't completed yet.
 func resolvePlanBase(r *http.Request, plan *workflow.Plan) string {
 	if v := r.URL.Query().Get("base"); v != "" {
 		return v
+	}
+	if plan.AssembledBranch != "" {
+		return plan.AssembledBranch
 	}
 	if plan.GitHub != nil && plan.GitHub.PlanBranch != "" {
 		return plan.GitHub.PlanBranch
