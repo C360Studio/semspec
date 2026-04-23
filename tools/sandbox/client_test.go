@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -471,6 +472,28 @@ func TestServerError_NotFound(t *testing.T) {
 	err := newTestClient(t, srv).DeleteWorktree(context.Background(), "missing")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "worktree not found")
+}
+
+// TestServerError_NeedsReconciliation_ReturnsTypedError verifies the client
+// maps a 503 response carrying {"error_code":"needs_reconciliation"} to the
+// exported ErrNeedsReconciliation sentinel, so callers can switch on
+// errors.Is and skip their retry loop — the sandbox is wedged and retrying
+// will not help.
+func TestServerError_NeedsReconciliation_ReturnsTypedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusServiceUnavailable, map[string]string{
+			"error":      "sandbox main repo requires operator reconciliation before further merges can proceed",
+			"error_code": "needs_reconciliation",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv).MergeWorktree(context.Background(), "task-wedged",
+		WithTargetBranch("semspec/feature-x"))
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNeedsReconciliation),
+		"errors.Is(err, ErrNeedsReconciliation) must be true; err=%v", err)
+	assert.Contains(t, err.Error(), "reconciliation")
 }
 
 func TestContextCancellation(t *testing.T) {

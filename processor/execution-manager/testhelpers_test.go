@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,18 +62,42 @@ func (r *stubRegistry) RegisterWithConfig(cfg component.RegistrationConfig) erro
 // ---------------------------------------------------------------------------
 
 type stubSandbox struct {
-	mergeErr error
+	mergeErr     error
+	mergeCallsMu sync.Mutex
+	mergeCalls   int
+	// lastMergeOpts records the MergeOption list of the most recent call so
+	// tests can assert on commit trailers etc. Guarded by mergeCallsMu.
+	lastMergeOpts []sandbox.MergeOption
 }
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, _ string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
 	return &sandbox.WorktreeInfo{Status: "created", Path: "/tmp/test-wt", Branch: "agent/test"}, nil
 }
 func (s *stubSandbox) DeleteWorktree(_ context.Context, _ string) error { return nil }
-func (s *stubSandbox) MergeWorktree(_ context.Context, _ string, _ ...sandbox.MergeOption) (*sandbox.MergeResult, error) {
+func (s *stubSandbox) MergeWorktree(_ context.Context, _ string, opts ...sandbox.MergeOption) (*sandbox.MergeResult, error) {
+	s.mergeCallsMu.Lock()
+	s.mergeCalls++
+	s.lastMergeOpts = opts
+	s.mergeCallsMu.Unlock()
 	if s.mergeErr != nil {
 		return nil, s.mergeErr
 	}
 	return &sandbox.MergeResult{}, nil
+}
+
+func (s *stubSandbox) MergeCallCount() int {
+	s.mergeCallsMu.Lock()
+	defer s.mergeCallsMu.Unlock()
+	return s.mergeCalls
+}
+
+// capturedTrailers returns the Trailer key/value pairs applied to the last
+// MergeWorktree call by running the MergeOption list against sandbox's
+// internal options struct (via the exported TrailersFromOptions test helper).
+func (s *stubSandbox) capturedTrailers() map[string]string {
+	s.mergeCallsMu.Lock()
+	defer s.mergeCallsMu.Unlock()
+	return sandbox.TrailersFromOptions(s.lastMergeOpts)
 }
 func (s *stubSandbox) ListWorktreeFiles(_ context.Context, _ string) ([]sandbox.FileEntry, error) {
 	return nil, nil

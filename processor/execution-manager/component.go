@@ -22,6 +22,7 @@ package executionmanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -844,9 +845,16 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	}
 
 	// Merge BEFORE setting terminated=true, so a merge failure can route
-	// through markErrorLocked (which itself checks exec.terminated).
+	// through markErrorLocked (which itself checks exec.terminated). Classify
+	// the failure so downstream retry/UI can distinguish infrastructure
+	// (sandbox wedged) from agent (merge conflict, test failure, etc.) —
+	// the INFRASTRUCTURE: prefix is the wire-level signal Phase 5 will key off.
 	if err := c.mergeWorktree(exec); err != nil {
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("merge_failed: %v", err))
+		reason := fmt.Sprintf("merge_failed: %v", err)
+		if errors.Is(err, sandbox.ErrNeedsReconciliation) {
+			reason = "INFRASTRUCTURE: " + reason
+		}
+		c.markErrorLocked(ctx, exec, reason)
 		return
 	}
 
@@ -923,6 +931,7 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 	c.discardWorktree(exec)
 
 	exec.Stage = phaseError
+	exec.ErrorReason = reason
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
@@ -1590,8 +1599,20 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 		opts = append(opts, sandbox.WithTargetBranch(exec.ScenarioBranch))
 	}
 	opts = append(opts, sandbox.WithCommitMessage(fmt.Sprintf("feat(%s): %s", exec.Slug, exec.TaskID)))
+	// Provenance trailers (invariant A1 from docs/audit/task-11-worktree-invariants.md).
+	// Every merge commit carries enough identity that `git log` alone can trace
+	// the change back to its plan / requirement / loop / task without needing
+	// to cross-reference EXECUTION_STATES. Node-ID is deferred — it lives on
+	// NodeResult rather than TaskExecution, so plumbing it through requires
+	// TaskCreateRequest surgery and is tracked as follow-up.
 	opts = append(opts, sandbox.WithTrailer("Task-ID", exec.TaskID))
 	opts = append(opts, sandbox.WithTrailer("Plan-Slug", exec.Slug))
+	if exec.RequirementID != "" {
+		opts = append(opts, sandbox.WithTrailer("Requirement-ID", exec.RequirementID))
+	}
+	if exec.LoopID != "" {
+		opts = append(opts, sandbox.WithTrailer("Loop-ID", exec.LoopID))
+	}
 	// Keep worktree alive so requirement-level reviewer can access files.
 	// requirement-executor calls DeleteWorktree after review completes.
 	opts = append(opts, sandbox.WithKeepWorktree())
@@ -1600,7 +1621,9 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 	}
 
 	// Retry merge up to 3 times — concurrent node merges can conflict when
-	// the sandbox repo lock is contended.
+	// the sandbox repo lock is contended. EXCEPT when the sandbox has flagged
+	// itself as needing reconciliation: retrying against a wedged repo just
+	// burns tokens and delays the human signal.
 	var result *sandbox.MergeResult
 	var err error
 	for attempt := range 3 {
@@ -1610,6 +1633,18 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 		}
 		if c.shutdownCtx != nil && c.shutdownCtx.Err() != nil {
 			return nil // component shutting down — don't treat as a task failure
+		}
+		if errors.Is(err, sandbox.ErrNeedsReconciliation) {
+			// Sandbox is wedged. Do not retry. Fall through to the failure
+			// path below, but with an INFRASTRUCTURE-prefixed error so UI/
+			// retry logic can distinguish it from an agent-level merge conflict.
+			c.logger.Error("Worktree merge blocked — sandbox needs reconciliation; skipping retry",
+				"slug", exec.Slug,
+				"task_id", exec.TaskID,
+				"attempt", attempt+1,
+				"error", err,
+			)
+			break
 		}
 		c.logger.Warn("Worktree merge failed, retrying",
 			"slug", exec.Slug,
@@ -1625,8 +1660,11 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 			"task_id", exec.TaskID,
 			"error", err,
 		)
-		_ = c.tripleWriter.WriteTriple(mergeCtx, exec.EntityID, wf.ErrorReason,
-			fmt.Sprintf("worktree merge failed: %v", err))
+		// Caller (markApprovedLocked) calls markErrorLocked with a reason that
+		// classifies infra vs agent failure and writes the authoritative
+		// ErrorReason triple — so mergeWorktree only needs to propagate the
+		// wrapped error. errors.Is(err, sandbox.ErrNeedsReconciliation) still
+		// matches on the returned chain for that classification.
 		return fmt.Errorf("merge worktree after retries: %w", err)
 	}
 

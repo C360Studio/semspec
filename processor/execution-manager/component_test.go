@@ -3,9 +3,12 @@ package executionmanager
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -890,6 +893,123 @@ func TestMarkApprovedLocked_MergeFailure_RoutesToError(t *testing.T) {
 	}
 	if c.errors.Load() != 1 {
 		t.Errorf("errors counter: want 1, got %d", c.errors.Load())
+	}
+}
+
+// TestMergeWorktree_IncludesProvenanceTrailers pins invariant A1 from
+// docs/audit/task-11-worktree-invariants.md. Every merge commit must carry
+// enough provenance in its trailers that `git log` alone can answer
+// "which plan / requirement / loop produced this commit?" without cross-
+// referencing EXECUTION_STATES.
+//
+// Task-ID and Plan-Slug were already present. A1 adds Requirement-ID and
+// Loop-ID (Node-ID is deferred — it lives on NodeResult, not TaskExecution).
+func TestMergeWorktree_IncludesProvenanceTrailers(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	exec := newTestExec("plan-auth", "task-p1-t1")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-p1-t1"
+	exec.RequirementID = "req-auth-refresh"
+	exec.LoopID = "loop-abc-123"
+	exec.TraceID = "trace-xyz"
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if stub.MergeCallCount() != 1 {
+		t.Fatalf("expected exactly 1 merge call, got %d", stub.MergeCallCount())
+	}
+	trailers := stub.capturedTrailers()
+
+	want := map[string]string{
+		"Task-ID":        "task-p1-t1",
+		"Plan-Slug":      "plan-auth",
+		"Requirement-ID": "req-auth-refresh",
+		"Loop-ID":        "loop-abc-123",
+		"Trace-ID":       "trace-xyz",
+	}
+	for k, v := range want {
+		if got := trailers[k]; got != v {
+			t.Errorf("trailer %q = %q, want %q (full trailers=%v)", k, got, v, trailers)
+		}
+	}
+}
+
+// TestMergeWorktree_OmitsEmptyTrailers verifies that optional provenance
+// trailers (Requirement-ID, Loop-ID, Trace-ID) are only attached when the
+// corresponding field on the task execution is populated. An empty string
+// would produce a noisy "Trailer: " line in the commit message.
+func TestMergeWorktree_OmitsEmptyTrailers(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	// Minimal exec — no RequirementID, LoopID, or TraceID.
+	exec := newTestExec("plan-bare", "task-bare-1")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-bare-1"
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	trailers := stub.capturedTrailers()
+	for _, k := range []string{"Requirement-ID", "Loop-ID", "Trace-ID"} {
+		if _, present := trailers[k]; present {
+			t.Errorf("trailer %q should be absent when source field is empty; got trailers=%v", k, trailers)
+		}
+	}
+	// Always-present trailers must still be there.
+	if trailers["Task-ID"] == "" || trailers["Plan-Slug"] == "" {
+		t.Errorf("Task-ID and Plan-Slug must always be present; got %v", trailers)
+	}
+}
+
+// TestMarkApprovedLocked_MergeNeedsReconciliation_SkipsRetry pins invariant
+// A2 from docs/audit/task-11-worktree-invariants.md: when the sandbox
+// signals it is wedged (ErrNeedsReconciliation), mergeWorktree must not
+// burn the normal 3× retry loop — the sandbox will return the same error
+// on every attempt until an operator clears the flag. The task must land
+// in phaseError with an INFRASTRUCTURE-prefixed reason so UI + retry code
+// can distinguish it from an agent-level merge conflict.
+func TestMarkApprovedLocked_MergeNeedsReconciliation_SkipsRetry(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{
+		mergeErr: fmt.Errorf("wrapped: %w", sandbox.ErrNeedsReconciliation),
+	}
+	c.sandbox = stub
+
+	exec := newTestExec("plan", "task-wedged")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-wedged"
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if got := stub.MergeCallCount(); got != 1 {
+		t.Errorf("MergeWorktree called %d times; want 1 (no retry on needs_reconciliation)", got)
+	}
+	if exec.Stage != phaseError {
+		t.Errorf("Stage = %q, want %q (infra error must route to phaseError)", exec.Stage, phaseError)
+	}
+	if !exec.terminated {
+		t.Error("exec.terminated should be true after markErrorLocked")
+	}
+	if got := c.errors.Load(); got != 1 {
+		t.Errorf("errors counter = %d, want 1", got)
+	}
+	// ErrorReason must carry the INFRASTRUCTURE: prefix so downstream retry
+	// logic (Phase 5) can distinguish infra failures from agent failures.
+	if !strings.Contains(exec.ErrorReason, "INFRASTRUCTURE:") {
+		t.Errorf("exec.ErrorReason = %q, want INFRASTRUCTURE: prefix", exec.ErrorReason)
 	}
 }
 

@@ -33,6 +33,7 @@ type stubSandbox struct {
 	deletedBranchNames []string
 	createdBranchNames []string
 	deleteWorktreeErr  error
+	createBranchErr    error
 }
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, taskID string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
@@ -53,7 +54,7 @@ func (s *stubSandbox) CreateBranch(_ context.Context, branch, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createdBranchNames = append(s.createdBranchNames, branch)
-	return nil
+	return s.createBranchErr
 }
 
 func (s *stubSandbox) DeleteBranch(_ context.Context, branch string) error {
@@ -785,6 +786,63 @@ func TestCleanupExecutionLocked_SuccessPath_DeletesNodeWorktrees(t *testing.T) {
 		if !seen[w] {
 			t.Errorf("expected %q to be deleted on success path; got %v", w, deleted)
 		}
+	}
+}
+
+// TestInitReqExecution_CreateBranchFailure_MarksError pins invariant B4 from
+// docs/audit/task-11-worktree-invariants.md: if sandbox.CreateBranch fails
+// during requirement init, the execution MUST transition to error and stop.
+// Previously (pre-Phase-2) this was downgraded to a WARN with RequirementBranch
+// left empty, which meant downstream task dispatch would pass
+// scenario_branch="" to the sandbox and silently merge tasks into whatever
+// HEAD pointed at — total loss of per-requirement isolation.
+func TestInitReqExecution_CreateBranchFailure_MarksError(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{createBranchErr: fmt.Errorf("sandbox unavailable")}
+	c.sandbox = stub
+
+	exec := &requirementExecution{
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.plan-b4-req-b4",
+		Slug:           "plan-b4",
+		RequirementID:  "req-b4",
+		Prompt:         "do the thing",
+		Role:           "developer",
+		Model:          "gpt-4",
+		CurrentNodeIdx: -1,
+		VisitedNodes:   make(map[string]bool),
+		storeKey:       workflow.RequirementExecutionKey("plan-b4", "req-b4"),
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	c.initReqExecution(context.Background(), exec, "semspec/plan-main")
+
+	if !exec.terminated {
+		t.Error("exec.terminated should be true after CreateBranch failure")
+	}
+	if exec.RequirementBranch != "" {
+		t.Errorf("exec.RequirementBranch = %q, want empty on failure", exec.RequirementBranch)
+	}
+	if got := c.errors.Load(); got != 1 {
+		t.Errorf("errors counter = %d, want 1 (markErrorLocked should have incremented)", got)
+	}
+	// Verify the attempt was made with the correct branch/base and that
+	// NOTHING was leaked — no worktree, no lingering branch. B4's failure
+	// mode was "warn and proceed with partial state," so the regression
+	// test must positively assert the absence of partial state.
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.createdBranchNames) != 1 || stub.createdBranchNames[0] != "semspec/requirement-req-b4" {
+		t.Errorf("createdBranchNames = %v, want [semspec/requirement-req-b4]", stub.createdBranchNames)
+	}
+	if len(stub.createdWorktreeIDs) != 0 {
+		t.Errorf("createdWorktreeIDs = %v, want empty on CreateBranch failure", stub.createdWorktreeIDs)
+	}
+	if len(stub.deletedBranchNames) != 0 {
+		t.Errorf("deletedBranchNames = %v, want empty — no branch was created successfully", stub.deletedBranchNames)
+	}
+	// exec must have been removed from activeExecs (cleanupExecutionLocked runs in markErrorLocked).
+	if _, stillActive := c.activeExecs.Get(exec.EntityID); stillActive {
+		t.Error("exec should have been removed from activeExecs after markErrorLocked → cleanupExecutionLocked")
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,8 +15,22 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// errCodeNeedsReconciliation is the JSON error_code returned when the main
+// repository is wedged in an inconsistent state (a merge restore failed and
+// self-heal could not recover). Callers match on this to distinguish a true
+// infrastructure catastrophe from a normal merge conflict or transient race.
+const errCodeNeedsReconciliation = "needs_reconciliation"
+
+// errSandboxNeedsReconciliation is a sentinel wrapped into errors returned by
+// internal handlers when the main repo is unrecoverable. handleMergeWorktree
+// and similar mutation entry points check errors.Is against it and translate
+// to 503 + errCodeNeedsReconciliation. Keeping it as a sentinel (vs a special
+// return bool) lets error-wrapping chains preserve the signal.
+var errSandboxNeedsReconciliation = errors.New("sandbox needs reconciliation")
 
 // Server handles sandbox HTTP API requests.
 // All file and command operations are scoped to a worktree identified by task_id.
@@ -32,6 +47,14 @@ type Server struct {
 	// state (checkout, merge, branch create). Without this, concurrent merges
 	// targeting different branches would race on the working directory.
 	repoMu sync.Mutex
+
+	// needsReconciliation is set when the main repo is left in an unrecoverable
+	// state — a merge's restore step failed AND self-heal (merge --abort /
+	// reset --hard) also failed. While set, merge and branch endpoints refuse
+	// requests with HTTP 503 + errCodeNeedsReconciliation so that plan
+	// execution halts rather than silently operating on a drifted HEAD.
+	// Cleared via POST /admin/reconcile.
+	needsReconciliation atomic.Bool
 }
 
 // taskIDMain is a reserved task_id that maps to the main workspace (repoPath)
@@ -90,6 +113,68 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /workspace/tasks", s.handleWorkspaceTasks)
 	mux.HandleFunc("GET /workspace/tree", s.handleWorkspaceTree)
 	mux.HandleFunc("GET /workspace/download", s.handleWorkspaceDownload)
+
+	// Admin: clear the needs-reconciliation flag after an operator has fixed
+	// the main repo manually. No auth — the sandbox is a local-network service
+	// bound to a single workspace.
+	mux.HandleFunc("POST /admin/reconcile", s.handleReconcile)
+}
+
+// refuseIfNeedsReconciliation returns true (and writes a 503 response) when the
+// repo is in needs-reconciliation state. Mutation endpoints that affect the
+// main repo must call this at entry so callers get a distinctive error_code
+// they can match on, not a generic 500 or a successful-looking result.
+func (s *Server) refuseIfNeedsReconciliation(w http.ResponseWriter) bool {
+	if !s.needsReconciliation.Load() {
+		return false
+	}
+	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+		"error":      "sandbox main repo requires operator reconciliation before further merges can proceed",
+		"error_code": errCodeNeedsReconciliation,
+	})
+	return true
+}
+
+// handleReconcile clears the needs-reconciliation flag after an operator has
+// manually fixed the main repo. Restricted to loopback (defense-in-depth —
+// matches the local-workspace posture of other sandbox endpoints but makes
+// the administrative surface explicit: even if the sandbox port ever gets
+// exposed, an external request can't flip the flag). The log record captures
+// the current HEAD + working-tree status so the operator's "I attest the
+// repo is healthy" signal is auditable after the fact.
+func (s *Server) handleReconcile(w http.ResponseWriter, r *http.Request) {
+	if !isLoopback(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "reconcile requires loopback")
+		return
+	}
+	head := s.currentHEAD(r.Context())
+	status, _ := gitOutput(r.Context(), s.repoPath, "status", "--porcelain")
+	was := s.needsReconciliation.Swap(false)
+	s.logger.Warn("needs-reconciliation flag cleared by operator",
+		"was_set", was,
+		"head", head,
+		"status_at_clear", strings.TrimSpace(status),
+	)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "cleared", "was_set": was})
+}
+
+// isLoopback reports whether the remote address refers to the loopback
+// interface. Accepts both IPv4 (127.0.0.0/8) and IPv6 ([::1]) forms, with
+// or without a port suffix. An empty remote addr (e.g. from httptest or a
+// unix socket) is treated as loopback.
+func isLoopback(remoteAddr string) bool {
+	if remoteAddr == "" {
+		return true
+	}
+	host := remoteAddr
+	if i := strings.LastIndex(remoteAddr, ":"); i >= 0 {
+		host = remoteAddr[:i]
+	}
+	host = strings.Trim(host, "[]")
+	if host == "::1" || host == "localhost" {
+		return true
+	}
+	return strings.HasPrefix(host, "127.")
 }
 
 // ---------------------------------------------------------------------------
@@ -248,6 +333,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // handleCreateWorktree creates a new git worktree for a task.
 // POST /worktree  {"task_id": "abc123"}
 func (s *Server) handleCreateWorktree(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfNeedsReconciliation(w) {
+		return
+	}
 	var req worktreeCreateRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
@@ -362,6 +450,9 @@ type mergeResponse struct {
 // them into the target branch (or the main repository's current branch) via --no-ff.
 // POST /worktree/{taskID}/merge  body (optional): {"target_branch": "...", "commit_message": "...", "trailers": {...}}
 func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfNeedsReconciliation(w) {
+		return
+	}
 	taskID := r.PathValue("taskID")
 	if !isValidID(taskID) {
 		writeError(w, http.StatusBadRequest, "invalid task_id")
@@ -385,25 +476,9 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	worktreePath := filepath.Join(s.worktreeRoot, taskID)
 	ctx := r.Context()
 
-	// Stage all changes.
-	if err := runGit(ctx, worktreePath, "add", "-A"); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to stage changes: "+err.Error())
-		return
-	}
-
-	// Build commit message with optional trailers.
-	commitMsg := req.CommitMessage
-	if commitMsg == "" {
-		commitMsg = fmt.Sprintf("agent: %s task completion", taskID)
-	}
-	commitMsg = appendTrailers(commitMsg, req.Trailers)
-
-	// Commit — skip if nothing to commit.
-	commitErr := runGit(ctx, worktreePath, "commit", "-m", commitMsg)
-	nothingToCommit := commitErr != nil && strings.Contains(commitErr.Error(), "nothing to commit")
-
-	if commitErr != nil && !nothingToCommit {
-		writeError(w, http.StatusInternalServerError, "failed to commit: "+commitErr.Error())
+	nothingToCommit, stageErr := stageAndCommitWorktree(ctx, worktreePath, taskID, req)
+	if stageErr != nil {
+		writeError(w, stageErr.status, stageErr.msg)
 		return
 	}
 
@@ -433,7 +508,7 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	s.repoMu.Unlock()
 
 	if mergeErr != nil {
-		writeError(w, http.StatusConflict, "merge conflict: "+mergeErr.Error())
+		writeMergeError(w, mergeErr)
 		return
 	}
 
@@ -446,6 +521,99 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, mergeResp)
+}
+
+// httpErrorInfo carries a status code + message for helpers that need to
+// report an HTTP error back through the handler.
+type httpErrorInfo struct {
+	status int
+	msg    string
+}
+
+// stageAndCommitWorktree stages all changes in the worktree and creates a
+// commit with the configured message and trailers. Returns nothingToCommit=true
+// when the index is clean (no-op case). The caller handles the nothing-to-
+// commit cleanup and the subsequent merge flow.
+func stageAndCommitWorktree(ctx context.Context, worktreePath, taskID string, req mergeRequest) (nothingToCommit bool, errInfo *httpErrorInfo) {
+	if err := runGit(ctx, worktreePath, "add", "-A"); err != nil {
+		return false, &httpErrorInfo{http.StatusInternalServerError, "failed to stage changes: " + err.Error()}
+	}
+	commitMsg := req.CommitMessage
+	if commitMsg == "" {
+		commitMsg = fmt.Sprintf("agent: %s task completion", taskID)
+	}
+	commitMsg = appendTrailers(commitMsg, req.Trailers)
+	commitErr := runGit(ctx, worktreePath, "commit", "-m", commitMsg)
+	if commitErr == nil {
+		return false, nil
+	}
+	if strings.Contains(commitErr.Error(), "nothing to commit") {
+		return true, nil
+	}
+	return false, &httpErrorInfo{http.StatusInternalServerError, "failed to commit: " + commitErr.Error()}
+}
+
+// writeMergeError writes the appropriate response for a mergeIntoMainRepo
+// failure. Catastrophic (needs-reconciliation) becomes 503 with a
+// distinguishing error_code; normal merge conflicts become 409.
+func writeMergeError(w http.ResponseWriter, mergeErr error) {
+	if errors.Is(mergeErr, errSandboxNeedsReconciliation) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error":      mergeErr.Error(),
+			"error_code": errCodeNeedsReconciliation,
+		})
+		return
+	}
+	writeError(w, http.StatusConflict, "merge conflict: "+mergeErr.Error())
+}
+
+// selfHealAfterFailedRestore attempts to return the main repo to origBranch
+// after a merge failed AND the initial `checkout origBranch` also failed
+// (typically: the failed merge left the working tree dirty with conflict
+// markers, and checkout refuses to overwrite). Tries `merge --abort` (clears
+// MERGE_HEAD and resets the index for partially-applied merges) then
+// `reset --hard origBranch` (forces the working tree and index to match
+// origBranch). Returns nil on success; on failure the caller must flip the
+// needs-reconciliation flag since the repo is now in an unknown state.
+// Must be called under s.repoMu.
+func (s *Server) selfHealAfterFailedRestore(ctx context.Context, origBranch string, restoreErr error) error {
+	// merge --abort is expected to succeed in the common case (conflict
+	// markers in working tree from the just-failed merge). Even if it fails
+	// because no merge is in progress, reset --hard below will force
+	// consistency, so we treat abort errors as non-fatal — but log at Info
+	// so the recovery sequence is visible without cranking the log level.
+	if abortErr := runGit(ctx, s.repoPath, "merge", "--abort"); abortErr != nil {
+		s.logger.Info("merge --abort during self-heal returned an error (continuing to reset --hard)",
+			"orig_branch", origBranch, "abort_error", abortErr, "restore_error", restoreErr,
+		)
+	}
+	if resetErr := runGit(ctx, s.repoPath, "reset", "--hard", origBranch); resetErr != nil {
+		return fmt.Errorf("reset --hard %s (HEAD=%s): %w", origBranch, s.currentHEAD(ctx), resetErr)
+	}
+	// reset --hard updated the working tree to match origBranch's tree but did
+	// not switch the branch pointer — HEAD is still on TargetBranch. Move it.
+	if err := runGit(ctx, s.repoPath, "checkout", origBranch); err != nil {
+		return fmt.Errorf("post-reset checkout %s (HEAD=%s): %w", origBranch, s.currentHEAD(ctx), err)
+	}
+	// Post-condition: don't trust the git commands to have done what we asked.
+	// Verify HEAD is actually on origBranch before returning nil, otherwise
+	// the caller would think the repo is healed when it's not — exactly the
+	// "lie about state" failure mode invariant A2 was added to prevent.
+	if head := s.currentHEAD(ctx); head != origBranch {
+		return fmt.Errorf("self-heal post-condition: HEAD=%s, want %s", head, origBranch)
+	}
+	return nil
+}
+
+// currentHEAD returns the short branch name of HEAD, or "<unknown>" on error.
+// Used in self-heal error messages so operators have the exact wedge state
+// without needing to exec into the container to run git themselves.
+func (s *Server) currentHEAD(ctx context.Context) string {
+	out, err := gitOutput(ctx, s.repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "<unknown>"
+	}
+	return strings.TrimSpace(out)
 }
 
 // mergeIntoMainRepo performs the checkout + merge + file-change-parse sequence.
@@ -473,9 +641,34 @@ func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req
 	mergeMsg = appendTrailers(mergeMsg, req.Trailers)
 
 	if err := runGit(ctx, s.repoPath, "merge", hash, "--no-ff", "-m", mergeMsg); err != nil {
-		// Restore original branch on merge failure.
+		// Restore original branch on merge failure. If the plain checkout
+		// fails — typically because the failed merge left conflict markers in
+		// tracked files — try to self-heal with `git merge --abort` followed
+		// by `git reset --hard <origBranch>`. Only if that also fails do we
+		// flip the needs-reconciliation flag, since at that point the repo is
+		// genuinely wedged (disk full, corrupt .git, etc.).
 		if origBranch != "" {
-			_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+			if restoreErr := runGit(ctx, s.repoPath, "checkout", origBranch); restoreErr != nil {
+				healErr := s.selfHealAfterFailedRestore(ctx, origBranch, restoreErr)
+				if healErr != nil {
+					s.needsReconciliation.Store(true)
+					s.logger.Error("Sandbox repo wedged — self-heal failed after restore failure; needs-reconciliation flag set",
+						"task_id", taskID,
+						"orig_branch", origBranch,
+						"merge_error", err,
+						"restore_error", restoreErr,
+						"self_heal_error", healErr,
+					)
+					return mergeResponse{}, fmt.Errorf("%w: merge=%v restore=%v heal=%v",
+						errSandboxNeedsReconciliation, err, restoreErr, healErr)
+				}
+				s.logger.Warn("Sandbox self-healed after failed merge-restore",
+					"task_id", taskID,
+					"orig_branch", origBranch,
+					"merge_error", err,
+					"restore_error", restoreErr,
+				)
+			}
 		}
 		return mergeResponse{}, err
 	}
@@ -503,6 +696,9 @@ type branchCreateRequest struct {
 // handleCreateBranch creates a git branch in the main repository.
 // POST /branch  {"name": "semspec/scenario-auth", "base": "HEAD"}
 func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfNeedsReconciliation(w) {
+		return
+	}
 	var req branchCreateRequest
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())

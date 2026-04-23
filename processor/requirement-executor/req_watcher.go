@@ -141,7 +141,11 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Create per-requirement branch for worktree isolation.
+	// Create per-requirement branch for worktree isolation. Isolation is a
+	// correctness precondition: without a dedicated branch, downstream task
+	// dispatch would pass an empty scenario_branch and the sandbox would merge
+	// every task into whatever HEAD points at, silently losing per-requirement
+	// isolation across the whole plan. Fail loud instead of warning-and-proceeding.
 	if c.sandbox != nil {
 		branchName := "semspec/requirement-" + exec.RequirementID
 		baseBranch := "HEAD"
@@ -149,12 +153,23 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 			baseBranch = planBranch
 		}
 		if err := c.sandbox.CreateBranch(ctx, branchName, baseBranch); err != nil {
-			c.logger.Warn("Failed to create requirement branch; worktrees will branch from HEAD",
+			c.logger.Error("Failed to create requirement branch; cannot proceed without isolation",
 				"branch", branchName, "base", baseBranch, "error", err)
-		} else {
-			exec.RequirementBranch = branchName
-			c.logger.Info("Requirement branch created", "branch", branchName, "base", baseBranch)
+			exec.mu.Lock()
+			defer exec.mu.Unlock()
+			c.markErrorLocked(ctx, exec, fmt.Sprintf("create requirement branch %q: %v", branchName, err))
+			return
 		}
+		c.logger.Info("Requirement branch created", "branch", branchName, "base", baseBranch)
+		// RequirementBranch is written inside the locked section below so
+		// the assignment is synchronized with readers in node-dispatch /
+		// completion-handler paths that acquire exec.mu. Writing it here
+		// unlocked would be a data race under the Go memory model even if
+		// the happens-before chain through the subsequent Lock is usually
+		// sufficient in practice.
+		exec.mu.Lock()
+		exec.RequirementBranch = branchName
+		exec.mu.Unlock()
 	}
 
 	// Load plan scope from PLAN_STATES.

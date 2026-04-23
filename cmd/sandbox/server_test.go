@@ -1365,6 +1365,203 @@ func TestMergeWorktree_NonexistentTargetBranch(t *testing.T) {
 	resp.Body.Close()
 }
 
+// TestMergeIntoMainRepo_RestoreFailure_SelfHeals_Returns409 exercises invariant
+// A2 (merge-success must be truthful) from docs/audit/task-11-worktree-invariants.md.
+//
+// Setup produces a scenario where `git checkout origBranch` WILL fail after
+// a merge conflict because the working tree is dirty with conflict markers:
+//   - main (origBranch): foo.txt = "A"
+//   - target-branch (from main): foo.txt = "B"
+//   - worktree agent/test (from main): foo.txt = "C"
+//
+// When the sandbox merges the worktree's commit into target-branch, git
+// conflicts three-way (ancestor=A, ours=B, theirs=C) and leaves the main repo
+// on target-branch with conflict markers in foo.txt. The restore step's
+// plain `checkout main` then fails because it would overwrite the dirty
+// working tree — so self-heal must kick in (`merge --abort` + `reset --hard`).
+//
+// Assertions: HTTP 409 (original merge-conflict error, not 503), the
+// needs-reconciliation flag stays clear, and the main repo is back on
+// origBranch with clean working tree matching the pre-merge A content.
+func TestMergeIntoMainRepo_RestoreFailure_SelfHeals_Returns409(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	// Seed main with foo.txt=A on top of the fixture's initial commit.
+	fooPath := filepath.Join(srv.repoPath, "foo.txt")
+	if err := os.WriteFile(fooPath, []byte("A\n"), 0o644); err != nil {
+		t.Fatalf("write foo.txt: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "foo.txt")
+	run(t, srv.repoPath, "git", "commit", "-m", "seed foo=A on main")
+
+	// Determine the actual default branch name ("main" or "master" depending on git config).
+	origBranch := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Create target-branch from main, then change foo.txt = B.
+	run(t, srv.repoPath, "git", "branch", "semspec/target-branch", origBranch)
+	run(t, srv.repoPath, "git", "checkout", "semspec/target-branch")
+	if err := os.WriteFile(fooPath, []byte("B\n"), 0o644); err != nil {
+		t.Fatalf("write foo=B: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "foo.txt")
+	run(t, srv.repoPath, "git", "commit", "-m", "target: foo=B")
+
+	// Return to origBranch so the worktree branches from origBranch (foo=A).
+	run(t, srv.repoPath, "git", "checkout", origBranch)
+
+	// Create a worktree via the API. It will branch from HEAD (origBranch, foo=A).
+	createWorktree(t, ts, "test-restore-fail")
+
+	// Have the worktree change foo.txt = C. Using /file keeps the test honest —
+	// the change goes through the sandbox's own write path.
+	writeResp := doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-restore-fail",
+		Path:    "foo.txt",
+		Content: "C\n",
+	})
+	writeResp.Body.Close()
+
+	// Merge into target-branch. Three-way: ancestor=A, ours=B (target-branch),
+	// theirs=C (worktree commit) → conflict on foo.txt.
+	resp := doRequest(t, ts, http.MethodPost, "/worktree/test-restore-fail/merge", mergeRequest{
+		TargetBranch:  "semspec/target-branch",
+		CommitMessage: "feat: conflicting change",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("merge: expected 409 conflict after self-heal, got %d", resp.StatusCode)
+	}
+	if srv.needsReconciliation.Load() {
+		t.Error("needs_reconciliation flag should be clear after successful self-heal")
+	}
+
+	// Repo must be back on origBranch with clean working tree matching pre-merge A content.
+	currentBranch := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	if currentBranch != origBranch {
+		t.Errorf("after self-heal, HEAD branch = %q, want %q", currentBranch, origBranch)
+	}
+	// Tracked files must be clean after self-heal — no conflict markers, no
+	// stranded index state. Ignore untracked test artifacts like .semspec/.
+	run(t, srv.repoPath, "git", "diff", "--quiet")
+	run(t, srv.repoPath, "git", "diff", "--cached", "--quiet")
+	gotFoo, err := os.ReadFile(fooPath)
+	if err != nil {
+		t.Fatalf("read foo.txt: %v", err)
+	}
+	if string(gotFoo) != "A\n" {
+		t.Errorf("foo.txt = %q, want %q (origBranch content)", string(gotFoo), "A\n")
+	}
+}
+
+// TestNeedsReconciliation_BlocksMergeAndBranchEndpoints verifies that once the
+// flag is set, mutation endpoints refuse with 503 + errCodeNeedsReconciliation
+// and the POST /admin/reconcile endpoint clears it.
+func TestNeedsReconciliation_BlocksMergeAndBranchEndpoints(t *testing.T) {
+	srv, ts := newTestServer(t)
+	srv.needsReconciliation.Store(true)
+
+	// /worktree (create) is blocked.
+	resp := doRequest(t, ts, http.MethodPost, "/worktree", worktreeCreateRequest{TaskID: "blocked-wt"})
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("create worktree while wedged: got %d, want 503", resp.StatusCode)
+	}
+	var wtBody map[string]string
+	decodeJSON(t, resp, &wtBody)
+	if wtBody["error_code"] != errCodeNeedsReconciliation {
+		t.Errorf("create worktree error_code = %q, want %q", wtBody["error_code"], errCodeNeedsReconciliation)
+	}
+
+	// /branch is blocked.
+	resp = doRequest(t, ts, http.MethodPost, "/branch", branchCreateRequest{Name: "semspec/blocked"})
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("create branch while wedged: got %d, want 503", resp.StatusCode)
+	}
+	var branchBody map[string]string
+	decodeJSON(t, resp, &branchBody)
+	if branchBody["error_code"] != errCodeNeedsReconciliation {
+		t.Errorf("create branch error_code = %q, want %q", branchBody["error_code"], errCodeNeedsReconciliation)
+	}
+
+	// /worktree/{id}/merge is blocked.
+	resp = doRequest(t, ts, http.MethodPost, "/worktree/any/merge", mergeRequest{})
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("merge while wedged: got %d, want 503", resp.StatusCode)
+	}
+
+	// Operator clears via POST /admin/reconcile.
+	resp = doRequest(t, ts, http.MethodPost, "/admin/reconcile", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("admin/reconcile: got %d, want 200", resp.StatusCode)
+	}
+	var clearBody map[string]any
+	decodeJSON(t, resp, &clearBody)
+	if was, _ := clearBody["was_set"].(bool); !was {
+		t.Errorf("admin/reconcile was_set = %v, want true", clearBody["was_set"])
+	}
+	if srv.needsReconciliation.Load() {
+		t.Error("needs_reconciliation should be false after admin/reconcile")
+	}
+
+	// After clearing, /branch accepts requests again.
+	resp = doRequest(t, ts, http.MethodPost, "/branch", branchCreateRequest{Name: "semspec/ok-after-clear"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("create branch after clear: got %d, want 201", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// TestReconcile_RejectsNonLoopback verifies that /admin/reconcile refuses
+// requests whose remote address is not loopback. Defense-in-depth: clearing
+// the needs-reconciliation flag is a trust-the-operator action, so even
+// though the sandbox is normally bound to a local network, the flag clear
+// must not be triggerable from an exposed port.
+func TestReconcile_RejectsNonLoopback(t *testing.T) {
+	srv, _ := newTestServer(t)
+	srv.needsReconciliation.Store(true)
+
+	// Construct a request whose RemoteAddr is a non-loopback IP. We can't
+	// use doRequest/httptest here because httptest always presents loopback;
+	// call the handler directly with a crafted *http.Request.
+	r := httptest.NewRequest(http.MethodPost, "/admin/reconcile", nil)
+	r.RemoteAddr = "203.0.113.42:51000" // TEST-NET-3, reserved for docs
+	w := httptest.NewRecorder()
+	srv.handleReconcile(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Errorf("reconcile from non-loopback: got %d, want 403", w.Code)
+	}
+	if !srv.needsReconciliation.Load() {
+		t.Error("needs_reconciliation should still be set after a rejected reconcile")
+	}
+}
+
+// TestIsLoopback exercises the remote-address classifier used to gate
+// /admin/reconcile. Table-driven because the input shapes (IPv4, IPv6,
+// port-present vs absent, empty) are easy to regress individually.
+func TestIsLoopback(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", true},                 // httptest / unix socket
+		{"127.0.0.1:51000", true},  // IPv4 loopback with port
+		{"127.0.0.1", true},        // IPv4 loopback without port
+		{"127.42.1.1:51000", true}, // anywhere in 127.0.0.0/8
+		{"[::1]:51000", true},      // IPv6 loopback with port
+		{"localhost:51000", true},  // hostname loopback
+		{"192.168.1.1:51000", false},
+		{"203.0.113.42:51000", false},
+		{"10.0.0.1:51000", false},
+		{"[2001:db8::1]:51000", false},
+	}
+	for _, tc := range cases {
+		if got := isLoopback(tc.in); got != tc.want {
+			t.Errorf("isLoopback(%q) = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestCleanupStaleWorktrees(t *testing.T) {
 	srv, ts := newTestServer(t)
 

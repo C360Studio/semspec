@@ -7,8 +7,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"time"
@@ -18,7 +20,19 @@ const (
 	// maxResponseBytes caps sandbox response bodies at 2 MB to prevent
 	// runaway output from filling agent memory.
 	maxResponseBytes = 2 * 1024 * 1024
+
+	// errCodeNeedsReconciliation matches the server-side constant. Returned
+	// in the response body's error_code field when the sandbox main repo is
+	// wedged in an unrecoverable state.
+	errCodeNeedsReconciliation = "needs_reconciliation"
 )
+
+// ErrNeedsReconciliation is returned when the sandbox server responds with
+// HTTP 503 + error_code=needs_reconciliation. Callers should use
+// errors.Is(err, sandbox.ErrNeedsReconciliation) to detect this condition
+// and MUST NOT retry — subsequent merge/branch requests will fail identically
+// until an operator clears the flag via POST /admin/reconcile.
+var ErrNeedsReconciliation = errors.New("sandbox needs reconciliation")
 
 // Client communicates with the sandbox server via HTTP.
 // All operations are scoped to a task ID that maps to a git worktree on the
@@ -195,6 +209,23 @@ func WithTrailer(key, value string) MergeOption {
 		}
 		o.trailers[key] = value
 	}
+}
+
+// TrailersFromOptions runs the given MergeOption list against the internal
+// options struct and returns the resulting trailer map. Intended for tests
+// in other packages that want to assert on provenance trailers applied to a
+// MergeWorktree call without exposing the unexported options type.
+func TrailersFromOptions(opts []MergeOption) map[string]string {
+	var o mergeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	if o.trailers == nil {
+		return map[string]string{}
+	}
+	out := make(map[string]string, len(o.trailers))
+	maps.Copy(out, o.trailers)
+	return out
 }
 
 // MergeWorktree commits all staged and unstaged changes inside the worktree,
@@ -507,11 +538,22 @@ func (c *Client) do(req *http.Request, result any) error {
 	}
 
 	if resp.StatusCode >= http.StatusBadRequest {
-		// Attempt to extract a structured error message from the response body.
+		// Attempt to extract a structured error message + error_code from the
+		// response body. error_code=needs_reconciliation signals the sandbox
+		// main repo is wedged and callers must not retry.
 		var errBody struct {
-			Error string `json:"error"`
+			Error     string `json:"error"`
+			ErrorCode string `json:"error_code"`
 		}
-		if jsonErr := json.Unmarshal(data, &errBody); jsonErr == nil && errBody.Error != "" {
+		_ = json.Unmarshal(data, &errBody)
+		msg := errBody.Error
+		if msg == "" {
+			msg = fmt.Sprintf("server error %d", resp.StatusCode)
+		}
+		if errBody.ErrorCode == errCodeNeedsReconciliation {
+			return fmt.Errorf("%w: server %d: %s", ErrNeedsReconciliation, resp.StatusCode, msg)
+		}
+		if errBody.Error != "" {
 			return fmt.Errorf("server error %d: %s", resp.StatusCode, errBody.Error)
 		}
 		return fmt.Errorf("server error %d", resp.StatusCode)
