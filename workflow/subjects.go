@@ -111,7 +111,7 @@ type QARequestedEvent struct {
 }
 
 // QAFailure describes a single test or job failure surfaced by qa-runner.
-// qa-reviewer consumes these to produce targeted ChangeProposals.
+// qa-reviewer consumes these to produce targeted PlanDecisions.
 type QAFailure struct {
 	JobName    string `json:"job_name"`
 	StepName   string `json:"step_name,omitempty"`
@@ -153,7 +153,7 @@ const (
 	// proceed to complete (or awaiting_review when gated).
 	QAVerdictApproved QAVerdict = "approved"
 	// QAVerdictNeedsChanges means qa-reviewer found issues fixable with a
-	// retry. ChangeProposals accompany this verdict.
+	// retry. PlanDecisions accompany this verdict.
 	QAVerdictNeedsChanges QAVerdict = "needs_changes"
 	// QAVerdictRejected means qa-reviewer escalates to human — plan cannot be
 	// salvaged by automated retry.
@@ -174,7 +174,7 @@ type QAVerdictDimensions struct {
 
 // QAVerdictEvent is published by qa-reviewer. plan-manager consumes it to
 // transition the plan to its terminal state (complete, awaiting_review, or
-// rejected) and to surface any emitted ChangeProposals.
+// rejected) and to surface any emitted PlanDecisions.
 type QAVerdictEvent struct {
 	Slug       string              `json:"slug"`
 	PlanID     string              `json:"plan_id"`
@@ -182,13 +182,13 @@ type QAVerdictEvent struct {
 	Verdict    QAVerdict           `json:"verdict"`
 	Summary    string              `json:"summary,omitempty"`
 	Dimensions QAVerdictDimensions `json:"dimensions,omitempty"`
-	// ChangeProposals carries fully-formed ChangeProposal objects for plan-manager to
+	// PlanDecisions carries fully-formed PlanDecision objects for plan-manager to
 	// persist. Populated by qa-reviewer when verdict is needs_changes. plan-manager
-	// writes them to the plan and fills ChangeProposalIDs from the assigned IDs.
-	ChangeProposals   []ChangeProposal `json:"change_proposals,omitempty"`
-	ChangeProposalIDs []string         `json:"change_proposal_ids,omitempty"`
-	ReviewerError     string           `json:"reviewer_error,omitempty"`
-	TraceID           string           `json:"trace_id,omitempty"`
+	// writes them to the plan and fills PlanDecisionIDs from the assigned IDs.
+	PlanDecisions   []PlanDecision `json:"plan_decisions,omitempty"`
+	PlanDecisionIDs []string       `json:"plan_decision_ids,omitempty"`
+	ReviewerError   string         `json:"reviewer_error,omitempty"`
+	TraceID         string         `json:"trace_id,omitempty"`
 }
 
 // Typed subject definitions for semspec domain events.

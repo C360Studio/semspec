@@ -1,6 +1,6 @@
 <script lang="ts">
 	/**
-	 * ChangeProposalFlow - Manages the ChangeProposal lifecycle UI.
+	 * PlanDecisionFlow - Manages the PlanDecision lifecycle UI.
 	 *
 	 * Displays existing proposals with status transitions and provides
 	 * a form to propose new changes against selected Requirements.
@@ -9,8 +9,8 @@
 
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { api } from '$lib/api/client';
-	import type { ChangeProposal, ChangeProposalStatus } from '$lib/types/change-proposal';
-	import { getChangeProposalStatusInfo } from '$lib/types/change-proposal';
+	import type { PlanDecision, PlanDecisionStatus } from '$lib/types/plan-decision';
+	import { getPlanDecisionStatusInfo } from '$lib/types/plan-decision';
 	import type { Requirement } from '$lib/types/requirement';
 
 	interface Props {
@@ -21,7 +21,7 @@
 	let { slug, requirements }: Props = $props();
 
 	// Proposals state
-	let proposals = $state<ChangeProposal[]>([]);
+	let proposals = $state<PlanDecision[]>([]);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -56,7 +56,7 @@
 		loading = true;
 		error = null;
 		try {
-			proposals = await api.changeProposals.list(planSlug);
+			proposals = await api.planDecisions.list(planSlug);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load change proposals';
 		} finally {
@@ -79,7 +79,7 @@
 		submitting = true;
 		formError = null;
 		try {
-			const created = await api.changeProposals.create(slug, {
+			const created = await api.planDecisions.create(slug, {
 				title: formTitle.trim(),
 				rationale: formRationale.trim(),
 				affected_requirement_ids: Array.from(formSelectedReqIds)
@@ -100,7 +100,7 @@
 	async function handleSubmitForReview(proposalId: string): Promise<void> {
 		actionLoading = { ...actionLoading, [proposalId]: true };
 		try {
-			const updated = await api.changeProposals.submit(slug, proposalId);
+			const updated = await api.planDecisions.submit(slug, proposalId);
 			proposals = proposals.map((p) => (p.id === proposalId ? updated : p));
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to submit for review';
@@ -115,7 +115,7 @@
 		if (!confirm('Accept this proposal? This will cascade dirty status to affected tasks.')) return;
 		actionLoading = { ...actionLoading, [proposalId]: true };
 		try {
-			const updated = await api.changeProposals.accept(slug, proposalId);
+			const updated = await api.planDecisions.accept(slug, proposalId);
 			proposals = proposals.map((p) => (p.id === proposalId ? updated : p));
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to accept proposal';
@@ -130,7 +130,7 @@
 		if (!confirm('Reject this proposal? This cannot be undone.')) return;
 		actionLoading = { ...actionLoading, [proposalId]: true };
 		try {
-			const updated = await api.changeProposals.reject(slug, proposalId);
+			const updated = await api.planDecisions.reject(slug, proposalId);
 			proposals = proposals.map((p) => (p.id === proposalId ? updated : p));
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to reject proposal';
@@ -141,8 +141,8 @@
 		}
 	}
 
-	function statusBadgeClass(status: ChangeProposalStatus): string {
-		const info = getChangeProposalStatusInfo(status);
+	function statusBadgeClass(status: PlanDecisionStatus): string {
+		const info = getPlanDecisionStatusInfo(status);
 		switch (info.color) {
 			case 'blue':
 				return 'badge-info';
@@ -275,7 +275,7 @@
 				<h4 class="section-heading">Open</h4>
 				<ul class="proposals-list" role="list">
 					{#each openProposals as proposal (proposal.id)}
-						{@const statusInfo = getChangeProposalStatusInfo(proposal.status)}
+						{@const statusInfo = getPlanDecisionStatusInfo(proposal.status)}
 						{@const isLoading = actionLoading[proposal.id]}
 
 						<li class="proposal-item">
@@ -346,7 +346,7 @@
 				</h4>
 				<ul class="proposals-list" role="list">
 					{#each closedProposals as proposal (proposal.id)}
-						{@const statusInfo = getChangeProposalStatusInfo(proposal.status)}
+						{@const statusInfo = getPlanDecisionStatusInfo(proposal.status)}
 						<li class="proposal-item closed">
 							<div class="proposal-header">
 								<span class="proposal-title">{proposal.title}</span>

@@ -177,13 +177,13 @@ func TestGenerateArchive(t *testing.T) {
 		},
 	}
 
-	changeProposals := []ChangeProposal{
+	changeProposals := []PlanDecision{
 		{
 			ID:             "cp-1",
 			PlanID:         PlanEntityID(slug),
 			Title:          "Add MFA support",
 			Rationale:      "Security audit recommended MFA",
-			Status:         ChangeProposalStatusAccepted,
+			Status:         PlanDecisionStatusAccepted,
 			ProposedBy:     "security-reviewer",
 			AffectedReqIDs: []string{"req-1"},
 			CreatedAt:      time.Now(),
@@ -191,13 +191,13 @@ func TestGenerateArchive(t *testing.T) {
 	}
 
 	plan := &Plan{
-		ID:              PlanEntityID(slug),
-		Slug:            slug,
-		Title:           "Archive Plan",
-		CreatedAt:       time.Now(),
-		Requirements:    requirements,
-		Scenarios:       scenarios,
-		ChangeProposals: changeProposals,
+		ID:            PlanEntityID(slug),
+		Slug:          slug,
+		Title:         "Archive Plan",
+		CreatedAt:     time.Now(),
+		Requirements:  requirements,
+		Scenarios:     scenarios,
+		PlanDecisions: changeProposals,
 	}
 
 	// Generate archive.

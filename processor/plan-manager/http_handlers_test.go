@@ -135,31 +135,31 @@ func TestHandleUpdatePlan_NotFound(t *testing.T) {
 // Change proposal handlers (previously untested)
 // ---------------------------------------------------------------------------
 
-func TestHandleGetChangeProposal(t *testing.T) {
+func TestHandleGetPlanDecision(t *testing.T) {
 	slug := "cp-get-plan"
-	proposalID := "change-proposal.cp-get-plan.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-get-plan.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-get-plan",
-			Title: "Add feature X", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
+			Title: "Add feature X", Status: workflow.PlanDecisionStatusProposed, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
-	c.handleGetChangeProposal(w, req, slug, proposalID)
+	c.handleGetPlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var got workflow.ChangeProposal
+	var got workflow.PlanDecision
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -172,56 +172,56 @@ func TestHandleGetChangeProposal(t *testing.T) {
 	}
 }
 
-func TestHandleGetChangeProposal_NotFound(t *testing.T) {
+func TestHandleGetPlanDecision_NotFound(t *testing.T) {
 	slug := "cp-get-notfound"
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/plan-decisions/nonexistent", nil)
 	w := httptest.NewRecorder()
 
-	c.handleGetChangeProposal(w, req, slug, "nonexistent")
+	c.handleGetPlanDecision(w, req, slug, "nonexistent")
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
 
-func TestHandleUpdateChangeProposal(t *testing.T) {
+func TestHandleUpdatePlanDecision(t *testing.T) {
 	slug := "cp-update-plan"
-	proposalID := "change-proposal.cp-update-plan.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-update-plan.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-update-plan",
 			Title: "Original title", Rationale: "Original rationale",
-			Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
+			Status: workflow.PlanDecisionStatusProposed, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
 	newTitle := "Updated title"
 	newRationale := "Updated rationale"
-	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{
+	body, _ := json.Marshal(UpdatePlanDecisionHTTPRequest{
 		Title:     &newTitle,
 		Rationale: &newRationale,
 	})
 
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	c.handleUpdateChangeProposal(w, req, slug, proposalID)
+	c.handleUpdatePlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var got workflow.ChangeProposal
+	var got workflow.PlanDecision
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -234,74 +234,74 @@ func TestHandleUpdateChangeProposal(t *testing.T) {
 	}
 }
 
-func TestHandleUpdateChangeProposal_InvalidStatus(t *testing.T) {
+func TestHandleUpdatePlanDecision_InvalidStatus(t *testing.T) {
 	slug := "cp-update-invalid-status"
-	proposalID := "change-proposal.cp-update-invalid-status.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-update-invalid-status.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-update-invalid-status",
-			Title: "Accepted proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
+			Title: "Accepted proposal", Status: workflow.PlanDecisionStatusAccepted, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
 	newTitle := "Try to change accepted"
-	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
+	body, _ := json.Marshal(UpdatePlanDecisionHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	c.handleUpdateChangeProposal(w, req, slug, proposalID)
+	c.handleUpdatePlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
 }
 
-func TestHandleUpdateChangeProposal_NotFound(t *testing.T) {
+func TestHandleUpdatePlanDecision_NotFound(t *testing.T) {
 	slug := "cp-update-notfound"
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
 	newTitle := "Nope"
-	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
+	body, _ := json.Marshal(UpdatePlanDecisionHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/change-proposals/nonexistent", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/plan-decisions/nonexistent", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	c.handleUpdateChangeProposal(w, req, slug, "nonexistent")
+	c.handleUpdatePlanDecision(w, req, slug, "nonexistent")
 
 	if w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNotFound)
 	}
 }
 
-func TestHandleDeleteChangeProposal_Success(t *testing.T) {
+func TestHandleDeletePlanDecision_Success(t *testing.T) {
 	slug := "cp-delete-success"
-	proposalID := "change-proposal.cp-delete-success.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-delete-success.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-delete-success",
-			Title: "To delete", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
+			Title: "To delete", Status: workflow.PlanDecisionStatusProposed, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
-	c.handleDeleteChangeProposal(w, req, slug, proposalID)
+	c.handleDeletePlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusNoContent {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusNoContent, w.Body.String())
@@ -312,29 +312,29 @@ func TestHandleDeleteChangeProposal_Success(t *testing.T) {
 	if !ok {
 		t.Fatal("plan not found in store after delete")
 	}
-	if len(stored.ChangeProposals) != 0 {
-		t.Errorf("expected 0 proposals after delete, got %d", len(stored.ChangeProposals))
+	if len(stored.PlanDecisions) != 0 {
+		t.Errorf("expected 0 proposals after delete, got %d", len(stored.PlanDecisions))
 	}
 }
 
-func TestHandleCreateChangeProposal_InvalidRequirementID(t *testing.T) {
+func TestHandleCreatePlanDecision_InvalidRequirementID(t *testing.T) {
 	slug := "cp-bad-req-id"
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
 	// Reference a requirement ID that does not exist in this plan.
-	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{
+	body, _ := json.Marshal(CreatePlanDecisionHTTPRequest{
 		Title:          "Change with missing req",
 		Rationale:      "Testing validation",
 		AffectedReqIDs: []string{"requirement.cp-bad-req-id.999"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	c.handleCreateChangeProposal(w, req, slug)
+	c.handleCreatePlanDecision(w, req, slug)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusBadRequest, w.Body.String())

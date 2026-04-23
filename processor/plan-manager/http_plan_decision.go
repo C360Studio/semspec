@@ -13,12 +13,12 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-// AcceptChangeProposalResponse is returned by POST .../accept.
-type AcceptChangeProposalResponse struct {
-	Proposal workflow.ChangeProposal `json:"proposal"`
+// AcceptPlanDecisionResponse is returned by POST .../accept.
+type AcceptPlanDecisionResponse struct {
+	Proposal workflow.PlanDecision `json:"proposal"`
 }
 
-// ChangeProposal HTTP request/response types
+// PlanDecision HTTP request/response types
 
 // RejectionDetail carries the human's rejection reason for a requirement.
 type RejectionDetail struct {
@@ -26,8 +26,8 @@ type RejectionDetail struct {
 	RejectScenarios bool   `json:"reject_scenarios"`
 }
 
-// CreateChangeProposalHTTPRequest is the HTTP request body for POST /plans/{slug}/change-proposals.
-type CreateChangeProposalHTTPRequest struct {
+// CreatePlanDecisionHTTPRequest is the HTTP request body for POST /plans/{slug}/plan-decisions.
+type CreatePlanDecisionHTTPRequest struct {
 	Title          string                     `json:"title"`
 	Rationale      string                     `json:"rationale,omitempty"`
 	ProposedBy     string                     `json:"proposed_by,omitempty"`
@@ -36,29 +36,29 @@ type CreateChangeProposalHTTPRequest struct {
 	AutoAccept     bool                       `json:"auto_accept,omitempty"` // skip review; deprecate + regenerate immediately
 }
 
-// UpdateChangeProposalHTTPRequest is the HTTP request body for PATCH /plans/{slug}/change-proposals/{proposalId}.
-type UpdateChangeProposalHTTPRequest struct {
+// UpdatePlanDecisionHTTPRequest is the HTTP request body for PATCH /plans/{slug}/plan-decisions/{proposalId}.
+type UpdatePlanDecisionHTTPRequest struct {
 	Title          *string  `json:"title,omitempty"`
 	Rationale      *string  `json:"rationale,omitempty"`
 	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
 }
 
-// ReviewChangeProposalHTTPRequest is the HTTP request body for POST .../accept or .../reject.
-type ReviewChangeProposalHTTPRequest struct {
+// ReviewPlanDecisionHTTPRequest is the HTTP request body for POST .../accept or .../reject.
+type ReviewPlanDecisionHTTPRequest struct {
 	ReviewedBy string `json:"reviewed_by,omitempty"`
 }
 
-// RejectChangeProposalHTTPRequest is the HTTP request body for POST .../reject.
-type RejectChangeProposalHTTPRequest struct {
+// RejectPlanDecisionHTTPRequest is the HTTP request body for POST .../reject.
+type RejectPlanDecisionHTTPRequest struct {
 	ReviewedBy string `json:"reviewed_by,omitempty"`
 	Reason     string `json:"reason,omitempty"`
 }
 
-// extractSlugChangeProposalAndAction extracts slug, proposalID, and action from paths like:
-// /plan-api/plans/{slug}/change-proposals/{proposalId}
-// /plan-api/plans/{slug}/change-proposals/{proposalId}/accept
-// /plan-api/plans/{slug}/change-proposals/{proposalId}/reject
-func extractSlugChangeProposalAndAction(path string) (slug, proposalID, action string) {
+// extractSlugPlanDecisionAndAction extracts slug, proposalID, and action from paths like:
+// /plan-api/plans/{slug}/plan-decisions/{proposalId}
+// /plan-api/plans/{slug}/plan-decisions/{proposalId}/accept
+// /plan-api/plans/{slug}/plan-decisions/{proposalId}/reject
+func extractSlugPlanDecisionAndAction(path string) (slug, proposalID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {
 		return "", "", ""
@@ -67,12 +67,12 @@ func extractSlugChangeProposalAndAction(path string) (slug, proposalID, action s
 	remainder := path[idx+len("/plans/"):]
 	parts := strings.Split(strings.TrimSuffix(remainder, "/"), "/")
 
-	// Need at least 3 parts: slug, "change-proposals", proposalID
+	// Need at least 3 parts: slug, "plan-decisions", proposalID
 	if len(parts) < 3 {
 		return "", "", ""
 	}
 
-	if parts[1] != "change-proposals" {
+	if parts[1] != "plan-decisions" {
 		return "", "", ""
 	}
 
@@ -86,29 +86,29 @@ func extractSlugChangeProposalAndAction(path string) (slug, proposalID, action s
 	return slug, proposalID, action
 }
 
-// handlePlanChangeProposals handles top-level change-proposal collection endpoints.
-func (c *Component) handlePlanChangeProposals(w http.ResponseWriter, r *http.Request, slug string) {
+// handlePlanPlanDecisions handles top-level plan-decision collection endpoints.
+func (c *Component) handlePlanPlanDecisions(w http.ResponseWriter, r *http.Request, slug string) {
 	switch r.Method {
 	case http.MethodGet:
-		c.handleListChangeProposals(w, r, slug)
+		c.handleListPlanDecisions(w, r, slug)
 	case http.MethodPost:
-		c.handleCreateChangeProposal(w, r, slug)
+		c.handleCreatePlanDecision(w, r, slug)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// handleChangeProposalByID handles change-proposal-specific endpoints: GET, PATCH, DELETE, and lifecycle actions.
-func (c *Component) handleChangeProposalByID(w http.ResponseWriter, r *http.Request, slug, proposalID, action string) {
+// handlePlanDecisionByID handles plan-decision-specific endpoints: GET, PATCH, DELETE, and lifecycle actions.
+func (c *Component) handlePlanDecisionByID(w http.ResponseWriter, r *http.Request, slug, proposalID, action string) {
 	switch action {
 	case "":
 		switch r.Method {
 		case http.MethodGet:
-			c.handleGetChangeProposal(w, r, slug, proposalID)
+			c.handleGetPlanDecision(w, r, slug, proposalID)
 		case http.MethodPatch:
-			c.handleUpdateChangeProposal(w, r, slug, proposalID)
+			c.handleUpdatePlanDecision(w, r, slug, proposalID)
 		case http.MethodDelete:
-			c.handleDeleteChangeProposal(w, r, slug, proposalID)
+			c.handleDeletePlanDecision(w, r, slug, proposalID)
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -117,41 +117,41 @@ func (c *Component) handleChangeProposalByID(w http.ResponseWriter, r *http.Requ
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		c.handleSubmitChangeProposal(w, r, slug, proposalID)
+		c.handleSubmitPlanDecision(w, r, slug, proposalID)
 	case "accept":
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		c.handleAcceptChangeProposal(w, r, slug, proposalID)
+		c.handleAcceptPlanDecision(w, r, slug, proposalID)
 	case "reject":
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		c.handleRejectChangeProposal(w, r, slug, proposalID)
+		c.handleRejectPlanDecision(w, r, slug, proposalID)
 	default:
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
 	}
 }
 
-// handleListChangeProposals handles GET /plans/{slug}/change-proposals.
-func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Request, slug string) {
+// handleListPlanDecisions handles GET /plans/{slug}/plan-decisions.
+func (c *Component) handleListPlanDecisions(w http.ResponseWriter, r *http.Request, slug string) {
 	plan, ok := c.plans.get(slug)
 	if !ok {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	proposals := plan.ChangeProposals
+	proposals := plan.PlanDecisions
 	if proposals == nil {
-		proposals = []workflow.ChangeProposal{}
+		proposals = []workflow.PlanDecision{}
 	}
 
 	// Optional filter by status. Allocate a new slice to avoid mutating the
 	// shared backing array from the planStore cache (shallow copy).
 	if statusFilter := r.URL.Query().Get("status"); statusFilter != "" {
-		var filtered []workflow.ChangeProposal
+		var filtered []workflow.PlanDecision
 		for _, p := range proposals {
 			if string(p.Status) == statusFilter {
 				filtered = append(filtered, p)
@@ -166,15 +166,15 @@ func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Req
 	}
 }
 
-// handleGetChangeProposal handles GET /plans/{slug}/change-proposals/{proposalId}.
-func (c *Component) handleGetChangeProposal(w http.ResponseWriter, _ *http.Request, slug, proposalID string) {
+// handleGetPlanDecision handles GET /plans/{slug}/plan-decisions/{proposalId}.
+func (c *Component) handleGetPlanDecision(w http.ResponseWriter, _ *http.Request, slug, proposalID string) {
 	plan, ok := c.plans.get(slug)
 	if !ok {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	proposal, _ := plan.FindChangeProposal(proposalID)
+	proposal, _ := plan.FindPlanDecision(proposalID)
 	if proposal == nil {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
@@ -186,11 +186,11 @@ func (c *Component) handleGetChangeProposal(w http.ResponseWriter, _ *http.Reque
 	}
 }
 
-// handleCreateChangeProposal handles POST /plans/{slug}/change-proposals.
-func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Request, slug string) {
+// handleCreatePlanDecision handles POST /plans/{slug}/plan-decisions.
+func (c *Component) handleCreatePlanDecision(w http.ResponseWriter, r *http.Request, slug string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req CreateChangeProposalHTTPRequest
+	var req CreatePlanDecisionHTTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -221,20 +221,20 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 
 	now := time.Now()
-	id := fmt.Sprintf("change-proposal.%s.%d", slug, len(plan.ChangeProposals)+1)
+	id := fmt.Sprintf("plan-decision.%s.%d", slug, len(plan.PlanDecisions)+1)
 
-	newProposal := workflow.ChangeProposal{
+	newProposal := workflow.PlanDecision{
 		ID:             id,
 		PlanID:         workflow.PlanEntityID(slug),
 		Title:          req.Title,
 		Rationale:      req.Rationale,
-		Status:         workflow.ChangeProposalStatusProposed,
+		Status:         workflow.PlanDecisionStatusProposed,
 		ProposedBy:     proposedBy,
 		AffectedReqIDs: req.AffectedReqIDs,
 		CreatedAt:      now,
 	}
 
-	plan.ChangeProposals = append(plan.ChangeProposals, newProposal)
+	plan.PlanDecisions = append(plan.PlanDecisions, newProposal)
 
 	if err := c.plans.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to save plan after creating change proposal", "slug", slug, "error", err)
@@ -247,7 +247,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	// Auto-accept: skip manual review, deprecate affected requirements, delete their
 	// scenarios, and trigger partial requirement regeneration immediately.
 	if req.AutoAccept && len(req.AffectedReqIDs) > 0 {
-		c.autoAcceptChangeProposal(r, c.plans, slug, &newProposal, req)
+		c.autoAcceptPlanDecision(r, c.plans, slug, &newProposal, req)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -257,15 +257,15 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// autoAcceptChangeProposal marks the proposal accepted, deprecates affected
+// autoAcceptPlanDecision marks the proposal accepted, deprecates affected
 // requirements, deletes their scenarios, and transitions the plan to "changed"
 // so the requirement-generator watches it and triggers partial regeneration.
-func (c *Component) autoAcceptChangeProposal(
+func (c *Component) autoAcceptPlanDecision(
 	r *http.Request,
 	ps *planStore,
 	slug string,
-	newProposal *workflow.ChangeProposal,
-	req CreateChangeProposalHTTPRequest,
+	newProposal *workflow.PlanDecision,
+	req CreatePlanDecisionHTTPRequest,
 ) {
 	plan, ok := ps.get(slug)
 	if !ok {
@@ -274,12 +274,12 @@ func (c *Component) autoAcceptChangeProposal(
 	}
 
 	// Mark proposal accepted and store rejection reasons for requirement-generator.
-	proposal, _ := plan.FindChangeProposal(newProposal.ID)
+	proposal, _ := plan.FindPlanDecision(newProposal.ID)
 	if proposal != nil {
 		now := time.Now()
-		proposal.Status = workflow.ChangeProposalStatusAccepted
+		proposal.Status = workflow.PlanDecisionStatusAccepted
 		proposal.DecidedAt = &now
-		newProposal.Status = workflow.ChangeProposalStatusAccepted
+		newProposal.Status = workflow.PlanDecisionStatusAccepted
 		newProposal.DecidedAt = &now
 		if len(req.Rejections) > 0 {
 			proposal.RejectionReasons = make(map[string]string, len(req.Rejections))
@@ -344,11 +344,11 @@ func deleteDeprecatedScenarios(plan *workflow.Plan, affected map[string]bool) {
 	plan.Scenarios = surviving
 }
 
-// handleUpdateChangeProposal handles PATCH /plans/{slug}/change-proposals/{proposalId}.
-func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+// handleUpdatePlanDecision handles PATCH /plans/{slug}/plan-decisions/{proposalId}.
+func (c *Component) handleUpdatePlanDecision(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req UpdateChangeProposalHTTPRequest
+	var req UpdatePlanDecisionHTTPRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
@@ -360,15 +360,15 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposal, idx := plan.FindChangeProposal(proposalID)
+	proposal, idx := plan.FindPlanDecision(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
 	// Only allow edits on proposed or under_review proposals
-	if proposal.Status != workflow.ChangeProposalStatusProposed &&
-		proposal.Status != workflow.ChangeProposalStatusUnderReview {
+	if proposal.Status != workflow.PlanDecisionStatusProposed &&
+		proposal.Status != workflow.PlanDecisionStatusUnderReview {
 		http.Error(w, "Can only update proposals in proposed or under_review status", http.StatusConflict)
 		return
 	}
@@ -395,27 +395,27 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// handleDeleteChangeProposal handles DELETE /plans/{slug}/change-proposals/{proposalId}.
-func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+// handleDeletePlanDecision handles DELETE /plans/{slug}/plan-decisions/{proposalId}.
+func (c *Component) handleDeletePlanDecision(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	plan, ok := c.plans.get(slug)
 	if !ok {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	_, idx := plan.FindChangeProposal(proposalID)
+	_, idx := plan.FindPlanDecision(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
 	// Only allow deletion of proposed proposals (not accepted/archived)
-	if plan.ChangeProposals[idx].Status != workflow.ChangeProposalStatusProposed {
+	if plan.PlanDecisions[idx].Status != workflow.PlanDecisionStatusProposed {
 		http.Error(w, "Can only delete proposals in proposed status", http.StatusConflict)
 		return
 	}
 
-	plan.ChangeProposals = append(plan.ChangeProposals[:idx], plan.ChangeProposals[idx+1:]...)
+	plan.PlanDecisions = append(plan.PlanDecisions[:idx], plan.PlanDecisions[idx+1:]...)
 
 	if err := c.plans.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to save plan after deleting change proposal", "slug", slug, "error", err)
@@ -426,28 +426,28 @@ func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSubmitChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/submit.
+// handleSubmitPlanDecision handles POST /plans/{slug}/plan-decisions/{proposalId}/submit.
 // Transitions proposal from proposed → under_review.
-func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+func (c *Component) handleSubmitPlanDecision(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	plan, ok := c.plans.get(slug)
 	if !ok {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	proposal, idx := plan.FindChangeProposal(proposalID)
+	proposal, idx := plan.FindPlanDecision(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
-	if !proposal.Status.CanTransitionTo(workflow.ChangeProposalStatusUnderReview) {
+	if !proposal.Status.CanTransitionTo(workflow.PlanDecisionStatusUnderReview) {
 		http.Error(w, "Cannot submit proposal in current status", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	proposal.Status = workflow.ChangeProposalStatusUnderReview
+	proposal.Status = workflow.PlanDecisionStatusUnderReview
 	proposal.ReviewedAt = &now
 
 	if err := c.plans.save(r.Context(), plan); err != nil {
@@ -462,12 +462,12 @@ func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// handleAcceptChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/accept.
+// handleAcceptPlanDecision handles POST /plans/{slug}/plan-decisions/{proposalId}/accept.
 // Transitions proposal to accepted and archives it.
-func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req ReviewChangeProposalHTTPRequest
+	var req ReviewPlanDecisionHTTPRequest
 	// Body is optional
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -477,19 +477,19 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposal, idx := plan.FindChangeProposal(proposalID)
+	proposal, idx := plan.FindPlanDecision(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
-	if !proposal.Status.CanTransitionTo(workflow.ChangeProposalStatusAccepted) {
+	if !proposal.Status.CanTransitionTo(workflow.PlanDecisionStatusAccepted) {
 		http.Error(w, "Cannot accept proposal in current status", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	proposal.Status = workflow.ChangeProposalStatusAccepted
+	proposal.Status = workflow.PlanDecisionStatusAccepted
 	proposal.DecidedAt = &now
 
 	if err := c.plans.save(r.Context(), plan); err != nil {
@@ -500,10 +500,10 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 
 	c.logger.Info("Change proposal accepted via REST API", "slug", slug, "proposal_id", proposalID)
 
-	// Publish cascade request to JetStream for async processing by change-proposal-handler.
+	// Publish cascade request to JetStream for async processing by plan-decision-handler.
 	// Detach from request cancellation — the ack round-trip must complete.
 	if c.natsClient != nil {
-		cascadeReq := &payloads.ChangeProposalCascadeRequest{
+		cascadeReq := &payloads.PlanDecisionCascadeRequest{
 			ProposalID: proposalID,
 			Slug:       slug,
 		}
@@ -514,7 +514,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 		} else {
 			pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 			defer pubCancel()
-			if err := c.natsClient.PublishToStream(pubCtx, "workflow.trigger.change-proposal-cascade", cascadeData); err != nil {
+			if err := c.natsClient.PublishToStream(pubCtx, "workflow.trigger.plan-decision-cascade", cascadeData); err != nil {
 				c.logger.Error("Failed to publish cascade request", "proposal_id", proposalID, "error", err)
 			} else {
 				c.logger.Info("Published cascade request", "slug", slug, "proposal_id", proposalID)
@@ -522,7 +522,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	resp := AcceptChangeProposalResponse{
+	resp := AcceptPlanDecisionResponse{
 		Proposal: *proposal,
 	}
 
@@ -533,11 +533,11 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 }
 
-// handleRejectChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/reject.
-func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
+// handleRejectPlanDecision handles POST /plans/{slug}/plan-decisions/{proposalId}/reject.
+func (c *Component) handleRejectPlanDecision(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req RejectChangeProposalHTTPRequest
+	var req RejectPlanDecisionHTTPRequest
 	// Body is optional for reject
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -547,19 +547,19 @@ func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposal, idx := plan.FindChangeProposal(proposalID)
+	proposal, idx := plan.FindPlanDecision(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
-	if !proposal.Status.CanTransitionTo(workflow.ChangeProposalStatusRejected) {
+	if !proposal.Status.CanTransitionTo(workflow.PlanDecisionStatusRejected) {
 		http.Error(w, "Cannot reject proposal in current status", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	proposal.Status = workflow.ChangeProposalStatusRejected
+	proposal.Status = workflow.PlanDecisionStatusRejected
 	proposal.DecidedAt = &now
 
 	if err := c.plans.save(r.Context(), plan); err != nil {

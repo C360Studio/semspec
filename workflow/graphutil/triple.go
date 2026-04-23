@@ -2,7 +2,7 @@
 // components. Centralising writeTriple and portSubject here removes the
 // verbatim copy that previously existed in review-orchestrator,
 // execution-orchestrator, scenario-executor, plan-coordinator, and
-// change-proposal-handler.
+// plan-decision-handler.
 package graphutil
 
 import (
@@ -193,7 +193,7 @@ func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string,
 // ReadEntitiesByPrefixMulti fetches all entities matching an ID prefix from
 // ENTITY_STATES via graph-ingest. Returns a map of entityID → predicate →
 // []values, preserving every value written for multi-valued predicates (e.g.
-// RequirementDependsOn, ScenarioThen, ChangeProposalMutates).
+// RequirementDependsOn, ScenarioThen, PlanDecisionMutates).
 func (tw *TripleWriter) ReadEntitiesByPrefixMulti(ctx context.Context, prefix string, limit int) (map[string]map[string][]string, error) {
 	if tw.NATSClient == nil {
 		return nil, fmt.Errorf("NATS client not configured")

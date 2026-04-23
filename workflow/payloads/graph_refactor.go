@@ -124,9 +124,9 @@ var ScenarioGeneratorRequestType = message.Type{
 	Version:  "v1",
 }
 
-// ChangeProposalReviewRequest is the typed payload dispatched to the change-proposal
-// reviewer (LLM or human gate) when a ChangeProposal enters the under_review state.
-type ChangeProposalReviewRequest struct {
+// PlanDecisionReviewRequest is the typed payload dispatched to the plan-decision
+// reviewer (LLM or human gate) when a PlanDecision enters the under_review state.
+type PlanDecisionReviewRequest struct {
 	ExecutionID string `json:"execution_id,omitempty"`
 	ProposalID  string `json:"proposal_id"`
 	PlanID      string `json:"plan_id"`
@@ -135,12 +135,12 @@ type ChangeProposalReviewRequest struct {
 }
 
 // Schema implements message.Payload.
-func (r *ChangeProposalReviewRequest) Schema() message.Type {
-	return ChangeProposalReviewRequestType
+func (r *PlanDecisionReviewRequest) Schema() message.Type {
+	return PlanDecisionReviewRequestType
 }
 
 // Validate implements message.Payload.
-func (r *ChangeProposalReviewRequest) Validate() error {
+func (r *PlanDecisionReviewRequest) Validate() error {
 	if r.ProposalID == "" {
 		return fmt.Errorf("proposal_id is required")
 	}
@@ -151,29 +151,29 @@ func (r *ChangeProposalReviewRequest) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler.
-func (r *ChangeProposalReviewRequest) MarshalJSON() ([]byte, error) {
-	type Alias ChangeProposalReviewRequest
+func (r *PlanDecisionReviewRequest) MarshalJSON() ([]byte, error) {
+	type Alias PlanDecisionReviewRequest
 	return json.Marshal((*Alias)(r))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *ChangeProposalReviewRequest) UnmarshalJSON(data []byte) error {
-	type Alias ChangeProposalReviewRequest
+func (r *PlanDecisionReviewRequest) UnmarshalJSON(data []byte) error {
+	type Alias PlanDecisionReviewRequest
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// ChangeProposalReviewRequestType is the message type for change proposal review requests.
-var ChangeProposalReviewRequestType = message.Type{
+// PlanDecisionReviewRequestType is the message type for change proposal review requests.
+var PlanDecisionReviewRequestType = message.Type{
 	Domain:   "workflow",
-	Category: "change-proposal-review-request",
+	Category: "plan-decision-review-request",
 	Version:  "v1",
 }
 
-// ChangeProposalCascadeRequest is the typed payload dispatched to the cascade handler
-// when a ChangeProposal is accepted. The cascade handler loads the proposal, traverses
+// PlanDecisionCascadeRequest is the typed payload dispatched to the cascade handler
+// when a PlanDecision is accepted. The cascade handler loads the proposal, traverses
 // Requirement → Scenario → Task edges, marks affected tasks dirty, and publishes
 // a task.dirty event with all affected task IDs.
-type ChangeProposalCascadeRequest struct {
+type PlanDecisionCascadeRequest struct {
 	ExecutionID string `json:"execution_id,omitempty"`
 	ProposalID  string `json:"proposal_id"`
 	Slug        string `json:"slug"`
@@ -181,12 +181,12 @@ type ChangeProposalCascadeRequest struct {
 }
 
 // Schema implements message.Payload.
-func (r *ChangeProposalCascadeRequest) Schema() message.Type {
-	return ChangeProposalCascadeRequestType
+func (r *PlanDecisionCascadeRequest) Schema() message.Type {
+	return PlanDecisionCascadeRequestType
 }
 
 // Validate implements message.Payload.
-func (r *ChangeProposalCascadeRequest) Validate() error {
+func (r *PlanDecisionCascadeRequest) Validate() error {
 	if r.ProposalID == "" {
 		return fmt.Errorf("proposal_id is required")
 	}
@@ -197,27 +197,27 @@ func (r *ChangeProposalCascadeRequest) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler.
-func (r *ChangeProposalCascadeRequest) MarshalJSON() ([]byte, error) {
-	type Alias ChangeProposalCascadeRequest
+func (r *PlanDecisionCascadeRequest) MarshalJSON() ([]byte, error) {
+	type Alias PlanDecisionCascadeRequest
 	return json.Marshal((*Alias)(r))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *ChangeProposalCascadeRequest) UnmarshalJSON(data []byte) error {
-	type Alias ChangeProposalCascadeRequest
+func (r *PlanDecisionCascadeRequest) UnmarshalJSON(data []byte) error {
+	type Alias PlanDecisionCascadeRequest
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// ChangeProposalCascadeRequestType is the message type for cascade handler requests.
-var ChangeProposalCascadeRequestType = message.Type{
+// PlanDecisionCascadeRequestType is the message type for cascade handler requests.
+var PlanDecisionCascadeRequestType = message.Type{
 	Domain:   "workflow",
-	Category: "change-proposal-cascade-request",
+	Category: "plan-decision-cascade-request",
 	Version:  "v1",
 }
 
-// ChangeProposalAcceptedEvent is the payload published after a cascade completes
-// successfully. It summarizes what was affected by the accepted ChangeProposal.
-type ChangeProposalAcceptedEvent struct {
+// PlanDecisionAcceptedEvent is the payload published after a cascade completes
+// successfully. It summarizes what was affected by the accepted PlanDecision.
+type PlanDecisionAcceptedEvent struct {
 	ProposalID             string   `json:"proposal_id"`
 	Slug                   string   `json:"slug"`
 	TraceID                string   `json:"trace_id,omitempty"`
@@ -226,12 +226,12 @@ type ChangeProposalAcceptedEvent struct {
 }
 
 // Schema implements message.Payload.
-func (p *ChangeProposalAcceptedEvent) Schema() message.Type {
-	return ChangeProposalAcceptedEventType
+func (p *PlanDecisionAcceptedEvent) Schema() message.Type {
+	return PlanDecisionAcceptedEventType
 }
 
 // Validate implements message.Payload.
-func (p *ChangeProposalAcceptedEvent) Validate() error {
+func (p *PlanDecisionAcceptedEvent) Validate() error {
 	if p.ProposalID == "" {
 		return fmt.Errorf("proposal_id is required")
 	}
@@ -239,21 +239,21 @@ func (p *ChangeProposalAcceptedEvent) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler.
-func (p *ChangeProposalAcceptedEvent) MarshalJSON() ([]byte, error) {
-	type Alias ChangeProposalAcceptedEvent
+func (p *PlanDecisionAcceptedEvent) MarshalJSON() ([]byte, error) {
+	type Alias PlanDecisionAcceptedEvent
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (p *ChangeProposalAcceptedEvent) UnmarshalJSON(data []byte) error {
-	type Alias ChangeProposalAcceptedEvent
+func (p *PlanDecisionAcceptedEvent) UnmarshalJSON(data []byte) error {
+	type Alias PlanDecisionAcceptedEvent
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
-// ChangeProposalAcceptedEventType is the message type for accepted events.
-var ChangeProposalAcceptedEventType = message.Type{
+// PlanDecisionAcceptedEventType is the message type for accepted events.
+var PlanDecisionAcceptedEventType = message.Type{
 	Domain:   "workflow",
-	Category: "change-proposal-accepted",
+	Category: "plan-decision-accepted",
 	Version:  "v1",
 }
 

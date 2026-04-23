@@ -9,7 +9,7 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-// CascadeEntity records the result of a ChangeProposal cascade.
+// CascadeEntity records the result of a PlanDecision cascade.
 // It implements the Graphable interface (EntityID + Triples).
 type CascadeEntity struct {
 	// Identity
@@ -73,21 +73,21 @@ func (e *CascadeEntity) Triples() []message.Triple {
 	now := time.Now()
 
 	triples := []message.Triple{
-		{Subject: id, Predicate: wf.Type, Object: "cascade", Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.Slug, Object: e.Slug, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.CascadeAffectedRequirements, Object: e.AffectedRequirementsCount, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.CascadeAffectedScenarios, Object: e.AffectedScenariosCount, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.Type, Object: "cascade", Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.Slug, Object: e.Slug, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.CascadeAffectedRequirements, Object: e.AffectedRequirementsCount, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.CascadeAffectedScenarios, Object: e.AffectedScenariosCount, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
 	}
 
 	// Optional scalar predicates — only emit when non-empty.
 	if e.Phase != "" {
-		triples = append(triples, message.Triple{Subject: id, Predicate: wf.Phase, Object: e.Phase, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0})
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.Phase, Object: e.Phase, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0})
 	}
 	if e.TraceID != "" {
-		triples = append(triples, message.Triple{Subject: id, Predicate: wf.TraceID, Object: e.TraceID, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0})
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.TraceID, Object: e.TraceID, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0})
 	}
 	if e.ErrorReason != "" {
-		triples = append(triples, message.Triple{Subject: id, Predicate: wf.ErrorReason, Object: e.ErrorReason, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0})
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.ErrorReason, Object: e.ErrorReason, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0})
 	}
 
 	// Relationship predicates — one triple per affected requirement entity ID.
@@ -98,7 +98,7 @@ func (e *CascadeEntity) Triples() []message.Triple {
 				Subject:    id,
 				Predicate:  wf.RelRequirement,
 				Object:     reqID,
-				Source:     "change-proposal-handler",
+				Source:     "plan-decision-handler",
 				Timestamp:  now,
 				Confidence: 1.0,
 			})

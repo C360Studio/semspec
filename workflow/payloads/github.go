@@ -104,7 +104,7 @@ var GitHubPRCreatedEventType = message.Type{
 }
 
 // GitHubPRFeedbackRequest is published by github-submitter when a PR receives
-// a CHANGES_REQUESTED review. plan-manager consumes this to create ChangeProposals
+// a CHANGES_REQUESTED review. plan-manager consumes this to create PlanDecisions
 // and re-trigger execution for affected requirements.
 type GitHubPRFeedbackRequest struct {
 	Slug     string            `json:"slug"`

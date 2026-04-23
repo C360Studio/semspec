@@ -376,8 +376,8 @@ func (s *planStore) writeChildTriples(ctx context.Context, tw *graphutil.TripleW
 			s.logger.Warn("Failed to write scenario triples", "slug", plan.Slug, "error", err)
 		}
 	}
-	if len(plan.ChangeProposals) > 0 {
-		if err := workflow.SaveChangeProposals(ctx, tw, plan.ChangeProposals, plan.Slug); err != nil {
+	if len(plan.PlanDecisions) > 0 {
+		if err := workflow.SavePlanDecisions(ctx, tw, plan.PlanDecisions, plan.Slug); err != nil {
 			s.logger.Warn("Failed to write change proposal triples", "slug", plan.Slug, "error", err)
 		}
 	}

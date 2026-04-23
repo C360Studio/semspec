@@ -666,32 +666,32 @@ const (
 	ScenarioUpdatedAt = "semspec.scenario.updated_at"
 )
 
-// ChangeProposal predicates define attributes for mid-stream change proposals.
+// PlanDecision predicates define attributes for mid-stream change proposals.
 const (
-	// ChangeProposalTitle is the proposal title.
-	ChangeProposalTitle = "semspec.change_proposal.title"
+	// PlanDecisionTitle is the proposal title.
+	PlanDecisionTitle = "semspec.plan_decision.title"
 
-	// ChangeProposalRationale explains why the change is needed.
-	ChangeProposalRationale = "semspec.change_proposal.rationale"
+	// PlanDecisionRationale explains why the change is needed.
+	PlanDecisionRationale = "semspec.plan_decision.rationale"
 
-	// ChangeProposalStatus is the proposal lifecycle status.
+	// PlanDecisionStatus is the proposal lifecycle status.
 	// Values: proposed, under_review, accepted, rejected, archived
-	ChangeProposalStatus = "semspec.change_proposal.status"
+	PlanDecisionStatus = "semspec.plan_decision.status"
 
-	// ChangeProposalProposedBy identifies who proposed the change (agent role or "user").
-	ChangeProposalProposedBy = "semspec.change_proposal.proposed_by"
+	// PlanDecisionProposedBy identifies who proposed the change (agent role or "user").
+	PlanDecisionProposedBy = "semspec.plan_decision.proposed_by"
 
-	// ChangeProposalPlan links to the parent plan entity.
-	ChangeProposalPlan = "semspec.change_proposal.plan"
+	// PlanDecisionPlan links to the parent plan entity.
+	PlanDecisionPlan = "semspec.plan_decision.plan"
 
-	// ChangeProposalMutates links to affected requirement entities.
-	ChangeProposalMutates = "semspec.change_proposal.mutates"
+	// PlanDecisionMutates links to affected requirement entities.
+	PlanDecisionMutates = "semspec.plan_decision.mutates"
 
-	// ChangeProposalCreatedAt is the RFC3339 creation timestamp.
-	ChangeProposalCreatedAt = "semspec.change_proposal.created_at"
+	// PlanDecisionCreatedAt is the RFC3339 creation timestamp.
+	PlanDecisionCreatedAt = "semspec.plan_decision.created_at"
 
-	// ChangeProposalDecidedAt is the RFC3339 decision timestamp.
-	ChangeProposalDecidedAt = "semspec.change_proposal.decided_at"
+	// PlanDecisionDecidedAt is the RFC3339 decision timestamp.
+	PlanDecisionDecidedAt = "semspec.plan_decision.decided_at"
 )
 
 // Standard metadata predicates aligned with Dublin Core.
@@ -1809,7 +1809,7 @@ func init() {
 	registerQuestionPredicates()
 	registerRequirementPredicates()
 	registerScenarioPredicates()
-	registerChangeProposalPredicates()
+	registerPlanDecisionPredicates()
 	registerAgenticPredicates()
 	registerReviewPredicates()
 	registerErrorCategoryPredicates()
@@ -1910,43 +1910,43 @@ func registerScenarioPredicates() {
 		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
 }
 
-func registerChangeProposalPredicates() {
-	vocabulary.Register(ChangeProposalTitle,
+func registerPlanDecisionPredicates() {
+	vocabulary.Register(PlanDecisionTitle,
 		vocabulary.WithDescription("Change proposal title"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"changeProposalTitle"))
 
-	vocabulary.Register(ChangeProposalRationale,
+	vocabulary.Register(PlanDecisionRationale,
 		vocabulary.WithDescription("Rationale for the change"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"changeProposalRationale"))
 
-	vocabulary.Register(ChangeProposalStatus,
+	vocabulary.Register(PlanDecisionStatus,
 		vocabulary.WithDescription("Proposal lifecycle status (proposed, under_review, accepted, rejected, archived)"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"changeProposalStatus"))
 
-	vocabulary.Register(ChangeProposalProposedBy,
+	vocabulary.Register(PlanDecisionProposedBy,
 		vocabulary.WithDescription("Who proposed the change (agent role or user)"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(vocabulary.ProvWasAttributedTo))
 
-	vocabulary.Register(ChangeProposalPlan,
+	vocabulary.Register(PlanDecisionPlan,
 		vocabulary.WithDescription("Link to parent plan entity"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"changeProposalPlan"))
 
-	vocabulary.Register(ChangeProposalMutates,
+	vocabulary.Register(PlanDecisionMutates,
 		vocabulary.WithDescription("Link to affected requirement entities"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"changeProposalMutates"))
 
-	vocabulary.Register(ChangeProposalCreatedAt,
+	vocabulary.Register(PlanDecisionCreatedAt,
 		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
 
-	vocabulary.Register(ChangeProposalDecidedAt,
+	vocabulary.Register(PlanDecisionDecidedAt,
 		vocabulary.WithDescription("Decision timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI(Namespace+"changeProposalDecidedAt"))

@@ -471,11 +471,11 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Route change-proposal-by-ID endpoints (e.g. /change-proposals/{proposalId}/accept).
-	if strings.HasPrefix(endpoint, "change-proposals/") {
-		_, proposalID, action := extractSlugChangeProposalAndAction(r.URL.Path)
+	// Route plan-decision-by-ID endpoints (e.g. /plan-decisions/{proposalId}/accept).
+	if strings.HasPrefix(endpoint, "plan-decisions/") {
+		_, proposalID, action := extractSlugPlanDecisionAndAction(r.URL.Path)
 		if proposalID != "" {
-			c.handleChangeProposalByID(w, r, slug, proposalID, action)
+			c.handlePlanDecisionByID(w, r, slug, proposalID, action)
 			return
 		}
 	}
@@ -514,7 +514,7 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		if handled := c.handleScenarioCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
-		if handled := c.handleChangeProposalCollectionEndpoint(w, r, slug, endpoint); handled {
+		if handled := c.handlePlanDecisionCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
 		if handled := c.handleTaskCollectionEndpoint(w, r, slug, endpoint); handled {
@@ -583,12 +583,12 @@ func (c *Component) handleScenarioCollectionEndpoint(w http.ResponseWriter, r *h
 	return true
 }
 
-// handleChangeProposalCollectionEndpoint routes change-proposal collection endpoints.
+// handlePlanDecisionCollectionEndpoint routes plan-decision collection endpoints.
 // Returns true when the endpoint was recognised and handled.
-func (c *Component) handleChangeProposalCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
+func (c *Component) handlePlanDecisionCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
 	switch endpoint {
-	case "change-proposals":
-		c.handlePlanChangeProposals(w, r, slug)
+	case "plan-decisions":
+		c.handlePlanPlanDecisions(w, r, slug)
 	default:
 		return false
 	}

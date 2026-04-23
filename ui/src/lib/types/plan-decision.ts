@@ -1,7 +1,7 @@
 /**
- * Types for ChangeProposals — mid-stream requirement mutation nodes from ADR-024.
+ * Types for PlanDecisions — mid-stream requirement mutation nodes from ADR-024.
  *
- * A ChangeProposal represents a proposed change to one or more Requirements.
+ * A PlanDecision represents a proposed change to one or more Requirements.
  * On acceptance, the reactive workflow cascades changes to affected Scenarios and Tasks.
  */
 
@@ -10,14 +10,14 @@
 // ============================================================================
 
 /**
- * ChangeProposal lifecycle status.
+ * PlanDecision lifecycle status.
  * - proposed: Submitted, awaiting review
  * - under_review: Being evaluated
  * - accepted: Approved, cascade in progress or complete
  * - rejected: Declined, no changes made
  * - archived: Historical record, no longer actionable
  */
-export type ChangeProposalStatus =
+export type PlanDecisionStatus =
 	| 'proposed'
 	| 'under_review'
 	| 'accepted'
@@ -31,12 +31,12 @@ export type ChangeProposalStatus =
 /**
  * A mid-stream change proposal that mutates one or more Requirements.
  */
-export interface ChangeProposal {
+export interface PlanDecision {
 	id: string;
 	plan_id: string;
 	title: string;
 	rationale: string;
-	status: ChangeProposalStatus;
+	status: PlanDecisionStatus;
 	proposed_by: string;
 	affected_requirement_ids: string[];
 	created_at: string;
@@ -51,7 +51,7 @@ export interface ChangeProposal {
 /**
  * Get display info for a change proposal status.
  */
-export function getChangeProposalStatusInfo(status: ChangeProposalStatus): {
+export function getPlanDecisionStatusInfo(status: PlanDecisionStatus): {
 	label: string;
 	color: 'blue' | 'orange' | 'green' | 'red' | 'gray';
 	icon: string;

@@ -1472,7 +1472,7 @@ MUST NOT skip submit_work or respond in prose. The pipeline will reject any loop
 {"verdict": "approved", "summary": "All 3 requirements are implemented. The plan goal is satisfied based on files modified and requirement coverage.", "dimensions": {"requirement_fulfillment": "All requirements have corresponding implementation files. No gaps detected."}}
 
 Needs-changes example (synthesis):
-{"verdict": "needs_changes", "summary": "Requirement REQ-2 appears unimplemented — no files modified correspond to its scope.", "dimensions": {"requirement_fulfillment": "REQ-1 and REQ-3 are covered. REQ-2 (payment error handling) has no matching implementation files."}, "change_proposals": [{"title": "Implement payment error handling for REQ-2", "rationale": "No files in the modified set address the payment failure path declared by REQ-2.", "affected_requirement_ids": ["req-2"], "rejection_type": "fixable"}]}
+{"verdict": "needs_changes", "summary": "Requirement REQ-2 appears unimplemented — no files modified correspond to its scope.", "dimensions": {"requirement_fulfillment": "REQ-1 and REQ-3 are covered. REQ-2 (payment error handling) has no matching implementation files."}, "plan_decisions": [{"title": "Implement payment error handling for REQ-2", "rationale": "No files in the modified set address the payment failure path declared by REQ-2.", "affected_requirement_ids": ["req-2"], "rejection_type": "fixable"}]}
 
 `)
 				case workflow.QALevelUnit:
@@ -1480,7 +1480,7 @@ Needs-changes example (synthesis):
 {"verdict": "approved", "summary": "All tests pass. Coverage is adequate for the risk surface. Assertions are specific and meaningful.", "dimensions": {"requirement_fulfillment": "All 4 requirements have passing test scenarios.", "coverage": "Core logic paths covered. Edge cases exercised. No obvious gaps.", "assertion_quality": "Assertions verify observable behavior, not implementation details.", "regression_surface": "Modified files are covered by existing tests. No untested behavior-sensitive changes."}}
 
 Needs-changes example (unit — tests failed):
-{"verdict": "needs_changes", "summary": "2 tests fail in the payment module. Coverage gap in error-path handling.", "dimensions": {"requirement_fulfillment": "REQ-1 and REQ-3 satisfied. REQ-2 has failing tests.", "coverage": "Happy path covered. Error paths in payment.go have no tests.", "assertion_quality": "Assertions are specific. One test in order_test.go asserts on a mutable timestamp — potential false positive.", "regression_surface": "Changes to auth middleware have no corresponding test regression."}, "change_proposals": [{"title": "Fix failing payment error tests", "rationale": "TestPaymentFailure and TestRefundTimeout fail with nil pointer dereference in payment.go:142.", "affected_requirement_ids": ["req-2"], "rejection_type": "fixable", "artifact_refs": [{"path": ".semspec/qa-artifacts/test.log", "type": "log", "purpose": "payment test failure output"}]}]}
+{"verdict": "needs_changes", "summary": "2 tests fail in the payment module. Coverage gap in error-path handling.", "dimensions": {"requirement_fulfillment": "REQ-1 and REQ-3 satisfied. REQ-2 has failing tests.", "coverage": "Happy path covered. Error paths in payment.go have no tests.", "assertion_quality": "Assertions are specific. One test in order_test.go asserts on a mutable timestamp — potential false positive.", "regression_surface": "Changes to auth middleware have no corresponding test regression."}, "plan_decisions": [{"title": "Fix failing payment error tests", "rationale": "TestPaymentFailure and TestRefundTimeout fail with nil pointer dereference in payment.go:142.", "affected_requirement_ids": ["req-2"], "rejection_type": "fixable", "artifact_refs": [{"path": ".semspec/qa-artifacts/test.log", "type": "log", "purpose": "payment test failure output"}]}]}
 
 `)
 				default:
@@ -1488,14 +1488,14 @@ Needs-changes example (unit — tests failed):
 {"verdict": "approved", "summary": "All integration flows pass. E2E flows complete successfully. No flakiness observed.", "dimensions": {"requirement_fulfillment": "All requirements satisfied with passing scenarios.", "coverage": "Integration flows declared by architect are all covered.", "assertion_quality": "Assertions verify observable API behavior and database state.", "regression_surface": "No regression detected in monitored endpoints.", "flake_judgment": "All failures are consistent across runs. No timing-dependent behavior observed."}}
 
 Needs-changes example (integration/full — flaky test):
-{"verdict": "needs_changes", "summary": "E2E checkout flow fails intermittently. Likely timing issue in payment confirmation polling.", "dimensions": {"requirement_fulfillment": "REQ-1 through REQ-3 satisfied. REQ-4 checkout flow is intermittently failing.", "coverage": "All declared integration flows covered.", "assertion_quality": "Assertions are correct for the stable tests.", "regression_surface": "No regression in unrelated flows.", "flake_judgment": "CheckoutE2E fails on 2 of 3 runs with timeout at payment confirmation step. Pattern suggests polling interval too short, not a genuine defect."}, "change_proposals": [{"title": "Increase checkout confirmation polling timeout", "rationale": "E2E test times out waiting for payment confirmation. Increasing poll interval or timeout should stabilize.", "affected_requirement_ids": ["req-4"], "rejection_type": "fixable"}]}
+{"verdict": "needs_changes", "summary": "E2E checkout flow fails intermittently. Likely timing issue in payment confirmation polling.", "dimensions": {"requirement_fulfillment": "REQ-1 through REQ-3 satisfied. REQ-4 checkout flow is intermittently failing.", "coverage": "All declared integration flows covered.", "assertion_quality": "Assertions are correct for the stable tests.", "regression_surface": "No regression in unrelated flows.", "flake_judgment": "CheckoutE2E fails on 2 of 3 runs with timeout at payment confirmation step. Pattern suggests polling interval too short, not a genuine defect."}, "plan_decisions": [{"title": "Increase checkout confirmation polling timeout", "rationale": "E2E test times out waiting for payment confirmation. Increasing poll interval or timeout should stabilize.", "affected_requirement_ids": ["req-4"], "rejection_type": "fixable"}]}
 
 `)
 				}
 
 				sb.WriteString("Verdict semantics:\n")
 				sb.WriteString("- `approved`: ship it — all assessed dimensions pass\n")
-				sb.WriteString("- `needs_changes`: specific fixable issues found — include change_proposals\n")
+				sb.WriteString("- `needs_changes`: specific fixable issues found — include plan_decisions\n")
 				sb.WriteString("- `rejected`: escalate to human — systemic failure, cannot be automatically retried\n\n")
 				sb.WriteString("Respond ONLY via the submit_work tool call. No markdown prose, no preamble, no explanation outside the tool call.")
 

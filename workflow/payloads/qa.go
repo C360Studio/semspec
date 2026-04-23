@@ -10,7 +10,7 @@ import (
 
 // QA phase payloads — target-project test execution gate between reviewing_rollup
 // and complete. qa-runner consumes QARequestedPayload and publishes QACompletedPayload.
-// qa-reviewer consumes QACompletedPayload (failure path) to emit ChangeProposals.
+// qa-reviewer consumes QACompletedPayload (failure path) to emit PlanDecisions.
 
 // QARequestedType is the message type for QA execution requests.
 var QARequestedType = message.Type{

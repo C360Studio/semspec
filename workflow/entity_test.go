@@ -24,7 +24,7 @@ func TestEntityID_SixParts(t *testing.T) {
 		{"question", QuestionEntityID("q-abc12345")},
 		{"requirement", RequirementEntityID("requirement.my-plan.1")},
 		{"scenario", ScenarioEntityID("scenario.my-plan.1")},
-		{"proposal", ChangeProposalEntityID("change-proposal.my-plan.1")},
+		{"proposal", PlanDecisionEntityID("plan-decision.my-plan.1")},
 		{"dag-node", DAGNodeEntityID("exec-id-with.dots", "node-1")},
 		{"project", ProjectEntityID("my-project")},
 		{"project-config", ProjectConfigEntityID("checklist")},

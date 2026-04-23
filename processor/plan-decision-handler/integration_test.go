@@ -1,9 +1,9 @@
 //go:build integration
 
-// Package changeproposalhandler provides integration tests for the change-proposal-handler.
+// Package changeproposalhandler provides integration tests for the plan-decision-handler.
 //
 // These tests require real NATS infrastructure via testcontainers (Docker).
-// Run with: go test -tags integration ./processor/change-proposal-handler/...
+// Run with: go test -tags integration ./processor/plan-decision-handler/...
 package changeproposalhandler
 
 import (
@@ -64,7 +64,7 @@ func setupIntegrationFixture(t *testing.T, nc *natsclient.Client, slug string) s
 			{ID: "sc-i1", RequirementID: "req-i1"},
 			{ID: "sc-i2", RequirementID: "req-i1"},
 		},
-		ChangeProposals: []workflow.ChangeProposal{
+		PlanDecisions: []workflow.PlanDecision{
 			{
 				ID:             proposalID,
 				AffectedReqIDs: []string{"req-i1"},
@@ -75,8 +75,8 @@ func setupIntegrationFixture(t *testing.T, nc *natsclient.Client, slug string) s
 	return proposalID
 }
 
-// buildCascadeMsg serialises a ChangeProposalCascadeRequest inside a BaseMessage envelope.
-func buildCascadeMsg(t *testing.T, req *payloads.ChangeProposalCascadeRequest) []byte {
+// buildCascadeMsg serialises a PlanDecisionCascadeRequest inside a BaseMessage envelope.
+func buildCascadeMsg(t *testing.T, req *payloads.PlanDecisionCascadeRequest) []byte {
 	t.Helper()
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "test-publisher")
 	data, err := json.Marshal(baseMsg)
@@ -103,9 +103,9 @@ func workflowStreamConfig() natsclient.TestStreamConfig {
 // ---------------------------------------------------------------------------
 
 // TestCascadeEndToEnd verifies that:
-//  1. The component consumes a ChangeProposalCascadeRequest from JetStream.
+//  1. The component consumes a PlanDecisionCascadeRequest from JetStream.
 //  2. It reads the plan from PLAN_STATES KV, locates the proposal, and runs cascade.
-//  3. It publishes a ChangeProposalAcceptedEvent on the accepted subject.
+//  3. It publishes a PlanDecisionAcceptedEvent on the accepted subject.
 func TestCascadeEndToEnd(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(workflowStreamConfig()),
@@ -166,7 +166,7 @@ func TestCascadeEndToEnd(t *testing.T) {
 	}
 
 	// Publish the cascade request.
-	req := &payloads.ChangeProposalCascadeRequest{
+	req := &payloads.PlanDecisionCascadeRequest{
 		ProposalID: proposalID,
 		Slug:       slug,
 		TraceID:    "trace-e2e-001",
@@ -197,9 +197,9 @@ func TestCascadeEndToEnd(t *testing.T) {
 		if err := json.Unmarshal(msgData, &baseMsg); err != nil {
 			t.Fatalf("unmarshal accepted BaseMessage: %v", err)
 		}
-		var evt payloads.ChangeProposalAcceptedEvent
+		var evt payloads.PlanDecisionAcceptedEvent
 		if err := json.Unmarshal(baseMsg.Payload, &evt); err != nil {
-			t.Fatalf("unmarshal ChangeProposalAcceptedEvent: %v", err)
+			t.Fatalf("unmarshal PlanDecisionAcceptedEvent: %v", err)
 		}
 		if evt.ProposalID != proposalID {
 			t.Errorf("AcceptedEvent.ProposalID = %q, want %q", evt.ProposalID, proposalID)
@@ -215,7 +215,7 @@ func TestCascadeEndToEnd(t *testing.T) {
 		}
 
 	case <-ctx.Done():
-		t.Fatal("timed out waiting for change_proposal.accepted event")
+		t.Fatal("timed out waiting for plan_decision.accepted event")
 	}
 }
 
@@ -267,7 +267,7 @@ func TestCascadeRequest_ProposalNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("JetStream: %v", err)
 	}
-	req := &payloads.ChangeProposalCascadeRequest{
+	req := &payloads.PlanDecisionCascadeRequest{
 		ProposalID: "cp-does-not-exist",
 		Slug:       slug,
 		TraceID:    "trace-missing-001",

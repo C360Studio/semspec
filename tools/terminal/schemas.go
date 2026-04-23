@@ -388,7 +388,7 @@ func qaReviewSchema() map[string]any {
 					},
 				},
 			},
-			"change_proposals": map[string]any{
+			"plan_decisions": map[string]any{
 				"type":        "array",
 				"description": "Structured change proposals. Populate ONLY when verdict is needs_changes. Each proposal targets a specific fixable defect that a developer can address in a subsequent execution cycle.",
 				"items": map[string]any{

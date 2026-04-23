@@ -13,7 +13,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-func TestExtractSlugChangeProposalAndAction(t *testing.T) {
+func TestExtractSlugPlanDecisionAndAction(t *testing.T) {
 	tests := []struct {
 		name           string
 		path           string
@@ -23,42 +23,42 @@ func TestExtractSlugChangeProposalAndAction(t *testing.T) {
 	}{
 		{
 			name:           "get proposal",
-			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1",
+			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1",
 			wantSlug:       "my-feature",
-			wantProposalID: "change-proposal.my-feature.1",
+			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "",
 		},
 		{
 			name:           "accept proposal",
-			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/accept",
+			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1/accept",
 			wantSlug:       "my-feature",
-			wantProposalID: "change-proposal.my-feature.1",
+			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "accept",
 		},
 		{
 			name:           "reject proposal",
-			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/reject",
+			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1/reject",
 			wantSlug:       "my-feature",
-			wantProposalID: "change-proposal.my-feature.1",
+			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "reject",
 		},
 		{
 			name:           "submit proposal",
-			path:           "/plan-api/plans/my-feature/change-proposals/change-proposal.my-feature.1/submit",
+			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1/submit",
 			wantSlug:       "my-feature",
-			wantProposalID: "change-proposal.my-feature.1",
+			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "submit",
 		},
 		{
 			name:           "invalid - missing segment",
-			path:           "/plan-api/plans/test-slug/other/change-proposal.test.1",
+			path:           "/plan-api/plans/test-slug/other/plan-decision.test.1",
 			wantSlug:       "",
 			wantProposalID: "",
 			wantAction:     "",
 		},
 		{
 			name:           "invalid - insufficient parts",
-			path:           "/plan-api/plans/test-slug/change-proposals",
+			path:           "/plan-api/plans/test-slug/plan-decisions",
 			wantSlug:       "",
 			wantProposalID: "",
 			wantAction:     "",
@@ -67,7 +67,7 @@ func TestExtractSlugChangeProposalAndAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotSlug, gotProposalID, gotAction := extractSlugChangeProposalAndAction(tt.path)
+			gotSlug, gotProposalID, gotAction := extractSlugPlanDecisionAndAction(tt.path)
 			if gotSlug != tt.wantSlug {
 				t.Errorf("slug = %q, want %q", gotSlug, tt.wantSlug)
 			}
@@ -81,35 +81,35 @@ func TestExtractSlugChangeProposalAndAction(t *testing.T) {
 	}
 }
 
-func TestHandleListChangeProposals(t *testing.T) {
+func TestHandleListPlanDecisions(t *testing.T) {
 	slug := "cp-list-plan"
-	proposals := []workflow.ChangeProposal{
+	proposals := []workflow.PlanDecision{
 		{
-			ID: "change-proposal.cp-list-plan.1", PlanID: "plan.cp-list-plan",
-			Title: "First proposal", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
+			ID: "plan-decision.cp-list-plan.1", PlanID: "plan.cp-list-plan",
+			Title: "First proposal", Status: workflow.PlanDecisionStatusProposed, ProposedBy: "user",
 		},
 		{
-			ID: "change-proposal.cp-list-plan.2", PlanID: "plan.cp-list-plan",
-			Title: "Second proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "agent",
+			ID: "plan-decision.cp-list-plan.2", PlanID: "plan.cp-list-plan",
+			Title: "Second proposal", Status: workflow.PlanDecisionStatusAccepted, ProposedBy: "agent",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
 	t.Run("list all", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals", nil)
+		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/plan-decisions", nil)
 		w := httptest.NewRecorder()
 
-		c.handleListChangeProposals(w, req, slug)
+		c.handleListPlanDecisions(w, req, slug)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
-		var got []workflow.ChangeProposal
+		var got []workflow.PlanDecision
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
@@ -120,16 +120,16 @@ func TestHandleListChangeProposals(t *testing.T) {
 
 	t.Run("filter by status", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/plan-api/plans/"+slug+"/change-proposals?status=proposed", nil)
+			"/plan-api/plans/"+slug+"/plan-decisions?status=proposed", nil)
 		w := httptest.NewRecorder()
 
-		c.handleListChangeProposals(w, req, slug)
+		c.handleListPlanDecisions(w, req, slug)
 
 		if w.Code != http.StatusOK {
 			t.Errorf("status = %d, want %d", w.Code, http.StatusOK)
 		}
 
-		var got []workflow.ChangeProposal
+		var got []workflow.PlanDecision
 		if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
@@ -139,7 +139,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 	})
 }
 
-func TestHandleCreateChangeProposal(t *testing.T) {
+func TestHandleCreatePlanDecision(t *testing.T) {
 	slug := "cp-create-plan"
 
 	// Seed a requirement so AffectedReqIDs validation passes.
@@ -153,23 +153,23 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 	c := setupTestComponent(t)
 	setupTestPlanWith(t, c, slug, []workflow.Requirement{seedReq}, nil)
 
-	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{
+	body, _ := json.Marshal(CreatePlanDecisionHTTPRequest{
 		Title:          "Expand scope of auth requirement",
 		Rationale:      "OAuth login was missed in original scope",
 		AffectedReqIDs: []string{"requirement.cp-create-plan.1"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	c.handleCreateChangeProposal(w, req, slug)
+	c.handleCreatePlanDecision(w, req, slug)
 
 	if w.Code != http.StatusCreated {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusCreated, w.Body.String())
 	}
 
-	var got workflow.ChangeProposal
+	var got workflow.PlanDecision
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -177,8 +177,8 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 	if got.Title != "Expand scope of auth requirement" {
 		t.Errorf("Title = %q, want %q", got.Title, "Expand scope of auth requirement")
 	}
-	if got.Status != workflow.ChangeProposalStatusProposed {
-		t.Errorf("Status = %q, want %q", got.Status, workflow.ChangeProposalStatusProposed)
+	if got.Status != workflow.PlanDecisionStatusProposed {
+		t.Errorf("Status = %q, want %q", got.Status, workflow.PlanDecisionStatusProposed)
 	}
 	if got.ProposedBy != "user" {
 		t.Errorf("ProposedBy = %q, want %q (default)", got.ProposedBy, "user")
@@ -188,179 +188,179 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 	}
 }
 
-func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
+func TestHandleCreatePlanDecision_MissingTitle(t *testing.T) {
 	slug := "cp-missing-title"
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
-	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{Rationale: "no title"})
+	body, _ := json.Marshal(CreatePlanDecisionHTTPRequest{Rationale: "no title"})
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	c.handleCreateChangeProposal(w, req, slug)
+	c.handleCreatePlanDecision(w, req, slug)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
-func TestHandleAcceptChangeProposal(t *testing.T) {
+func TestHandleAcceptPlanDecision(t *testing.T) {
 	slug := "cp-accept-plan"
-	proposalID := "change-proposal.cp-accept-plan.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-accept-plan.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-accept-plan",
-			Title: "Add OAuth", Status: workflow.ChangeProposalStatusUnderReview, ProposedBy: "user",
+			Title: "Add OAuth", Status: workflow.PlanDecisionStatusUnderReview, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
 
-	c.handleAcceptChangeProposal(w, req, slug, proposalID)
+	c.handleAcceptPlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusAccepted {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusAccepted, w.Body.String())
 	}
 
-	var resp AcceptChangeProposalResponse
+	var resp AcceptPlanDecisionResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if resp.Proposal.Status != workflow.ChangeProposalStatusAccepted {
-		t.Errorf("Status = %q, want %q", resp.Proposal.Status, workflow.ChangeProposalStatusAccepted)
+	if resp.Proposal.Status != workflow.PlanDecisionStatusAccepted {
+		t.Errorf("Status = %q, want %q", resp.Proposal.Status, workflow.PlanDecisionStatusAccepted)
 	}
 	if resp.Proposal.DecidedAt == nil {
 		t.Error("DecidedAt should be set after acceptance")
 	}
 }
 
-func TestHandleRejectChangeProposal(t *testing.T) {
+func TestHandleRejectPlanDecision(t *testing.T) {
 	slug := "cp-reject-plan"
-	proposalID := "change-proposal.cp-reject-plan.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-reject-plan.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-reject-plan",
-			Title: "Risky change", Status: workflow.ChangeProposalStatusUnderReview, ProposedBy: "agent",
+			Title: "Risky change", Status: workflow.PlanDecisionStatusUnderReview, ProposedBy: "agent",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/reject", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/reject", nil)
 	w := httptest.NewRecorder()
 
-	c.handleRejectChangeProposal(w, req, slug, proposalID)
+	c.handleRejectPlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var got workflow.ChangeProposal
+	var got workflow.PlanDecision
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if got.Status != workflow.ChangeProposalStatusRejected {
-		t.Errorf("Status = %q, want %q", got.Status, workflow.ChangeProposalStatusRejected)
+	if got.Status != workflow.PlanDecisionStatusRejected {
+		t.Errorf("Status = %q, want %q", got.Status, workflow.PlanDecisionStatusRejected)
 	}
 	if got.DecidedAt == nil {
 		t.Error("DecidedAt should be set after rejection")
 	}
 }
 
-func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
+func TestHandleAcceptPlanDecision_InvalidTransition(t *testing.T) {
 	slug := "cp-invalid-transition"
 
 	// A proposal already accepted cannot be accepted again.
-	proposalID := "change-proposal.cp-invalid-transition.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-invalid-transition.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-invalid-transition",
-			Title: "Already accepted", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
+			Title: "Already accepted", Status: workflow.PlanDecisionStatusAccepted, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
 
-	c.handleAcceptChangeProposal(w, req, slug, proposalID)
+	c.handleAcceptPlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)
 	}
 }
 
-func TestHandleSubmitChangeProposal(t *testing.T) {
+func TestHandleSubmitPlanDecision(t *testing.T) {
 	slug := "cp-submit-plan"
-	proposalID := "change-proposal.cp-submit-plan.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-submit-plan.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-submit-plan",
-			Title: "Pending proposal", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
+			Title: "Pending proposal", Status: workflow.PlanDecisionStatusProposed, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/submit", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/submit", nil)
 	w := httptest.NewRecorder()
 
-	c.handleSubmitChangeProposal(w, req, slug, proposalID)
+	c.handleSubmitPlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
 	}
 
-	var got workflow.ChangeProposal
+	var got workflow.PlanDecision
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 
-	if got.Status != workflow.ChangeProposalStatusUnderReview {
-		t.Errorf("Status = %q, want %q", got.Status, workflow.ChangeProposalStatusUnderReview)
+	if got.Status != workflow.PlanDecisionStatusUnderReview {
+		t.Errorf("Status = %q, want %q", got.Status, workflow.PlanDecisionStatusUnderReview)
 	}
 }
 
-func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
+func TestHandleDeletePlanDecision_NotProposed(t *testing.T) {
 	slug := "cp-delete-guard"
-	proposalID := "change-proposal.cp-delete-guard.1"
-	proposals := []workflow.ChangeProposal{
+	proposalID := "plan-decision.cp-delete-guard.1"
+	proposals := []workflow.PlanDecision{
 		{
 			ID: proposalID, PlanID: "plan.cp-delete-guard",
-			Title: "Accepted proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
+			Title: "Accepted proposal", Status: workflow.PlanDecisionStatusAccepted, ProposedBy: "user",
 		},
 	}
 
 	c := setupTestComponent(t)
 	plan := setupTestPlanWith(t, c, slug, nil, nil)
-	plan.ChangeProposals = proposals
+	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
-	c.handleDeleteChangeProposal(w, req, slug, proposalID)
+	c.handleDeletePlanDecision(w, req, slug, proposalID)
 
 	if w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusConflict)

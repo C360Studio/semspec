@@ -32,7 +32,7 @@ export interface AcceptanceCriterion {
  * - in_progress: Currently being executed
  * - completed: Successfully completed
  * - failed: Execution failed
- * - blocked: Blocked by an upstream dependency or ChangeProposal cascade
+ * - blocked: Blocked by an upstream dependency or PlanDecision cascade
  * - dirty: A parent Requirement changed; task needs re-evaluation
  */
 export type TaskStatus =

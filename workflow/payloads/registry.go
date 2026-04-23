@@ -55,9 +55,9 @@ func registerRequestPayloads() {
 		// Graph topology refactor payload types (ADR-024)
 		{RequirementGeneratorRequestType, "Requirement generator request from reactive workflow engine", func() any { return &RequirementGeneratorRequest{} }},
 		{ScenarioGeneratorRequestType, "Scenario generator request from reactive workflow engine", func() any { return &ScenarioGeneratorRequest{} }},
-		{ChangeProposalReviewRequestType, "Change proposal review request from reactive workflow engine", func() any { return &ChangeProposalReviewRequest{} }},
-		{ChangeProposalCascadeRequestType, "Change proposal cascade request from reactive workflow engine", func() any { return &ChangeProposalCascadeRequest{} }},
-		{ChangeProposalAcceptedEventType, "Change proposal accepted event with cascade summary", func() any { return &ChangeProposalAcceptedEvent{} }},
+		{PlanDecisionReviewRequestType, "Change proposal review request from reactive workflow engine", func() any { return &PlanDecisionReviewRequest{} }},
+		{PlanDecisionCascadeRequestType, "Change proposal cascade request from reactive workflow engine", func() any { return &PlanDecisionCascadeRequest{} }},
+		{PlanDecisionAcceptedEventType, "Change proposal accepted event with cascade summary", func() any { return &PlanDecisionAcceptedEvent{} }},
 		// Scenario orchestration and execution (Phase 4)
 		{ScenarioOrchestrationTriggerType, "Scenario orchestration trigger for plan execution", func() any { return &ScenarioOrchestrationTrigger{} }},
 		{ScenarioExecutionRequestType, "Scenario execution request from scenario-orchestrator", func() any { return &ScenarioExecutionRequest{} }},

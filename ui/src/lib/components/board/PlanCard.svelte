@@ -37,7 +37,7 @@
 		).length
 	);
 
-	// Count dirty tasks (need re-evaluation after a ChangeProposal cascade)
+	// Count dirty tasks (need re-evaluation after a PlanDecision cascade)
 	const dirtyTaskCount = $derived(
 		tasks.filter((t) => t.status === 'dirty').length
 	);

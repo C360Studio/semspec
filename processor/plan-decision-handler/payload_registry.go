@@ -81,7 +81,7 @@ func (c *Component) publishEntity(ctx context.Context, entity interface {
 		UpdatedAt:  time.Now(),
 	}
 
-	msg := message.NewBaseMessage(CascadePayloadType, payload, "change-proposal-handler")
+	msg := message.NewBaseMessage(CascadePayloadType, payload, "plan-decision-handler")
 	data, err := json.Marshal(msg)
 	if err != nil {
 		c.logger.Warn("Failed to marshal entity for graph ingest",

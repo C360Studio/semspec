@@ -531,13 +531,13 @@
         "plan_state_bucket": "PLAN_STATES"
       }
     },
-    "change-proposal-handler": {
-      "name": "change-proposal-handler",
+    "plan-decision-handler": {
+      "name": "plan-decision-handler",
       "type": "processor",
       "enabled": true,
       "config": {
         "stream_name": "WORKFLOW",
-        "consumer_name": "change-proposal-handler",
+        "consumer_name": "plan-decision-handler",
         "trigger_subject": "workflow.trigger.change-proposal-cascade",
         "accepted_subject": "workflow.events.change-proposal.accepted",
         "timeout_seconds": 120,

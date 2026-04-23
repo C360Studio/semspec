@@ -140,7 +140,7 @@ func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Pl
 }
 
 // findRejectionReasons collects per-requirement rejection reasons from accepted
-// ChangeProposals, filtered to only the deprecated requirement IDs. Walks
+// PlanDecisions, filtered to only the deprecated requirement IDs. Walks
 // proposals in reverse (most recent first) and falls back to the proposal's
 // rationale when per-requirement reasons are not set.
 func findRejectionReasons(plan *workflow.Plan, deprecatedIDs []string) map[string]string {
@@ -152,9 +152,9 @@ func findRejectionReasons(plan *workflow.Plan, deprecatedIDs []string) map[strin
 	reasons := make(map[string]string, len(deprecatedIDs))
 
 	// Walk proposals in reverse (most recent first).
-	for i := len(plan.ChangeProposals) - 1; i >= 0; i-- {
-		cp := &plan.ChangeProposals[i]
-		if cp.Status != workflow.ChangeProposalStatusAccepted {
+	for i := len(plan.PlanDecisions) - 1; i >= 0; i-- {
+		cp := &plan.PlanDecisions[i]
+		if cp.Status != workflow.PlanDecisionStatusAccepted {
 			continue
 		}
 		for _, id := range cp.AffectedReqIDs {

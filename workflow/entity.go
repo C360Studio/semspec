@@ -82,9 +82,9 @@ func ScenarioEntityID(id string) string {
 	return fmt.Sprintf("%s.wf.plan.scenario.%s", EntityPrefix(), HashInstanceID(id))
 }
 
-// ChangeProposalEntityID returns the entity ID for a change proposal.
+// PlanDecisionEntityID returns the entity ID for a change proposal.
 // Format: {org}.{platform}.wf.plan.proposal.{hash}
-func ChangeProposalEntityID(id string) string {
+func PlanDecisionEntityID(id string) string {
 	return fmt.Sprintf("%s.wf.plan.proposal.%s", EntityPrefix(), HashInstanceID(id))
 }
 
@@ -143,9 +143,9 @@ var ScenarioEntityType = message.Type{
 	Version:  "v1",
 }
 
-// ChangeProposalEntityType is the message type for change proposal entity payloads.
-var ChangeProposalEntityType = message.Type{
-	Domain:   "change-proposal",
+// PlanDecisionEntityType is the message type for change proposal entity payloads.
+var PlanDecisionEntityType = message.Type{
+	Domain:   "plan-decision",
 	Category: "entity",
 	Version:  "v1",
 }
@@ -228,7 +228,7 @@ var workflowEntityTypes = []struct {
 	{"question", "Question entity payload for graph ingestion", QuestionEntityType},
 	{"requirement", "Requirement entity payload for graph ingestion", RequirementEntityType},
 	{"scenario", "Scenario entity payload for graph ingestion", ScenarioEntityType},
-	{"change-proposal", "ChangeProposal entity payload for graph ingestion", ChangeProposalEntityType},
+	{"plan-decision", "PlanDecision entity payload for graph ingestion", PlanDecisionEntityType},
 	{"dag-node", "DAG execution node entity payload for graph ingestion", DAGNodeEntityType},
 }
 

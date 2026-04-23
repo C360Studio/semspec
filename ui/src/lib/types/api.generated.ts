@@ -4,582 +4,6 @@
  */
 
 export interface paths {
-    "/api/project/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve configuration file
-         * @description Sets the approved_at timestamp on the specified configuration file
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Name of the configuration file to approve */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ApproveRequest"];
-                };
-            };
-            responses: {
-                /** @description Approval result with timestamp and overall approval state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ApproveResponse"];
-                    };
-                };
-                /** @description Invalid file name */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Configuration file not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/checklist": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get checklist
-         * @description Returns the current checklist.json with quality gate checks
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Current checklist */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Checklist"];
-                    };
-                };
-                /** @description checklist.json not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update checklist
-         * @description Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description New checks array */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ChecklistUpdateRequest"];
-                };
-            };
-            responses: {
-                /** @description Updated checklist */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Checklist"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description checklist.json not found — run init first */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/api/project/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update project config
-         * @description Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Fields to update (all optional) */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ConfigUpdateRequest"];
-                };
-            };
-            responses: {
-                /** @description Updated project config */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProjectConfig"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description project.json not found — run init first */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Cannot change org/platform after plans exist */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/api/project/detect": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Detect project stack
-         * @description Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Detected project stack */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["DetectionResult"];
-                    };
-                };
-                /** @description Detection failed */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/generate-standards": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate project standards
-         * @description Generates a set of project standards rules based on the detected stack and existing documentation
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Detection result and existing documentation content */
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["GenerateStandardsRequest"];
-                };
-            };
-            responses: {
-                /** @description Generated standards rules with token estimate */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["GenerateStandardsResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/init": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Initialize project
-         * @description Writes confirmed project metadata, checklist, and standards to disk under .semspec/
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Confirmed project metadata, checklist, and standards */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["InitRequest"];
-                };
-            };
-            responses: {
-                /** @description List of files written during initialization */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["InitResponse"];
-                    };
-                };
-                /** @description Invalid request (missing required fields) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Failed to write configuration files */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/scaffold": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Scaffold project files
-         * @description Creates marker files for the selected languages and frameworks
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Selected languages and frameworks to scaffold */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ScaffoldRequest"];
-                };
-            };
-            responses: {
-                /** @description List of files created during scaffolding */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ScaffoldResponse"];
-                    };
-                };
-                /** @description Missing languages in request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/standards": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get standards
-         * @description Returns the current standards.json with project rules
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Current standards */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Standards"];
-                    };
-                };
-                /** @description standards.json not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update standards
-         * @description Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description New rules array */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["StandardsUpdateRequest"];
-                };
-            };
-            responses: {
-                /** @description Updated standards */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Standards"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description standards.json not found — run init first */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/api/project/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get project status
-         * @description Returns the current project initialization status, including which config files exist and their approval state
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Current project initialization status */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["InitStatus"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/project/wizard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get wizard options
-         * @description Returns the supported languages and frameworks available in the setup wizard
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Supported languages and frameworks for the wizard */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WizardResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/config/{name}": {
         parameters: {
             query?: never;
@@ -1950,6 +1374,582 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/project-manager/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve configuration file
+         * @description Sets the approved_at timestamp on the specified configuration file
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Name of the configuration file to approve */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ApproveRequest"];
+                };
+            };
+            responses: {
+                /** @description Approval result with timestamp and overall approval state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ApproveResponse"];
+                    };
+                };
+                /** @description Invalid file name */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Configuration file not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/project-manager/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get checklist
+         * @description Returns the current checklist.json with quality gate checks
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current checklist */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Checklist"];
+                    };
+                };
+                /** @description checklist.json not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update checklist
+         * @description Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description New checks array */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ChecklistUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated checklist */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Checklist"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description checklist.json not found — run init first */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/project-manager/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update project config
+         * @description Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Fields to update (all optional) */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ConfigUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated project config */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectConfig"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description project.json not found — run init first */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Cannot change org/platform after plans exist */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/project-manager/detect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Detect project stack
+         * @description Runs filesystem-based stack detection and returns the detected languages, frameworks, tools, and documentation files
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Detected project stack */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DetectionResult"];
+                    };
+                };
+                /** @description Detection failed */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/project-manager/generate-standards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate project standards
+         * @description Generates a set of project standards rules based on the detected stack and existing documentation
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Detection result and existing documentation content */
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["GenerateStandardsRequest"];
+                };
+            };
+            responses: {
+                /** @description Generated standards rules with token estimate */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GenerateStandardsResponse"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/project-manager/init": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Initialize project
+         * @description Writes confirmed project metadata, checklist, and standards to disk under .semspec/
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Confirmed project metadata, checklist, and standards */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["InitRequest"];
+                };
+            };
+            responses: {
+                /** @description List of files written during initialization */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InitResponse"];
+                    };
+                };
+                /** @description Invalid request (missing required fields) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Failed to write configuration files */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/project-manager/scaffold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scaffold project files
+         * @description Creates marker files for the selected languages and frameworks
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Selected languages and frameworks to scaffold */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScaffoldRequest"];
+                };
+            };
+            responses: {
+                /** @description List of files created during scaffolding */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScaffoldResponse"];
+                    };
+                };
+                /** @description Missing languages in request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/project-manager/standards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get standards
+         * @description Returns the current standards.json with project rules
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current standards */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Standards"];
+                    };
+                };
+                /** @description standards.json not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update standards
+         * @description Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description New rules array */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StandardsUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated standards */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Standards"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description standards.json not found — run init first */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/project-manager/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get project status
+         * @description Returns the current project initialization status, including which config files exist and their approval state
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current project initialization status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["InitStatus"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/project-manager/wizard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get wizard options
+         * @description Returns the supported languages and frameworks available in the setup wizard
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Supported languages and frameworks for the wizard */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["WizardResponse"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/stats": {
         parameters: {
             query?: never;
@@ -2396,6 +2396,8 @@ export interface components {
             name?: string | null;
             org?: string | null;
             platform?: string | null;
+            qa_level?: string | null;
+            qa_test_command?: string | null;
         };
         CreatePlanRequest: {
             description: string;
@@ -2716,25 +2718,20 @@ export interface components {
                     choice: string;
                     rationale: string;
                 }[];
+                test_surface?: {
+                    e2e_flows?: {
+                        actor: string;
+                        steps: string[];
+                        success_criteria: string[];
+                    }[];
+                    integration_flows?: {
+                        components_involved: string[];
+                        description: string;
+                        name: string;
+                        scenario_refs?: string[];
+                    }[];
+                } | null;
             } | null;
-            change_proposals?: {
-                affected_requirement_ids: string[];
-                /** Format: date-time */
-                created_at: string;
-                /** Format: date-time */
-                decided_at?: string | null;
-                id: string;
-                plan_id: string;
-                proposed_by: string;
-                rationale: string;
-                rejection_reasons?: {
-                    [key: string]: string;
-                };
-                /** Format: date-time */
-                reviewed_at?: string | null;
-                status: string;
-                title: string;
-            }[];
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2765,7 +2762,53 @@ export interface components {
                     verdict?: string;
                 }[];
             } | null;
+            plan_decisions?: {
+                affected_requirement_ids: string[];
+                artifact_references?: {
+                    path: string;
+                    purpose?: string;
+                    type: string;
+                }[];
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                decided_at?: string | null;
+                id: string;
+                kind?: string;
+                plan_id: string;
+                proposed_by: string;
+                rationale: string;
+                rejection_reasons?: {
+                    [key: string]: string;
+                };
+                /** Format: date-time */
+                reviewed_at?: string | null;
+                status: string;
+                title: string;
+            }[];
             project_id: string;
+            qa_level?: string;
+            qa_run?: {
+                artifacts?: {
+                    path: string;
+                    purpose?: string;
+                    type: string;
+                }[];
+                /** Format: date-time */
+                completed_at: string;
+                duration_ms: number;
+                failures?: {
+                    job_name: string;
+                    log_excerpt?: string;
+                    message?: string;
+                    step_name?: string;
+                    test_name?: string;
+                }[];
+                passed: boolean;
+                run_id: string;
+                runner_error?: string;
+                trace_id?: string;
+            } | null;
             requirements?: {
                 /** Format: date-time */
                 created_at: string;
@@ -2848,25 +2891,20 @@ export interface components {
                     choice: string;
                     rationale: string;
                 }[];
+                test_surface?: {
+                    e2e_flows?: {
+                        actor: string;
+                        steps: string[];
+                        success_criteria: string[];
+                    }[];
+                    integration_flows?: {
+                        components_involved: string[];
+                        description: string;
+                        name: string;
+                        scenario_refs?: string[];
+                    }[];
+                } | null;
             } | null;
-            change_proposals?: {
-                affected_requirement_ids: string[];
-                /** Format: date-time */
-                created_at: string;
-                /** Format: date-time */
-                decided_at?: string | null;
-                id: string;
-                plan_id: string;
-                proposed_by: string;
-                rationale: string;
-                rejection_reasons?: {
-                    [key: string]: string;
-                };
-                /** Format: date-time */
-                reviewed_at?: string | null;
-                status: string;
-                title: string;
-            }[];
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2903,7 +2941,53 @@ export interface components {
                     verdict?: string;
                 }[];
             } | null;
+            plan_decisions?: {
+                affected_requirement_ids: string[];
+                artifact_references?: {
+                    path: string;
+                    purpose?: string;
+                    type: string;
+                }[];
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                decided_at?: string | null;
+                id: string;
+                kind?: string;
+                plan_id: string;
+                proposed_by: string;
+                rationale: string;
+                rejection_reasons?: {
+                    [key: string]: string;
+                };
+                /** Format: date-time */
+                reviewed_at?: string | null;
+                status: string;
+                title: string;
+            }[];
             project_id: string;
+            qa_level?: string;
+            qa_run?: {
+                artifacts?: {
+                    path: string;
+                    purpose?: string;
+                    type: string;
+                }[];
+                /** Format: date-time */
+                completed_at: string;
+                duration_ms: number;
+                failures?: {
+                    job_name: string;
+                    log_excerpt?: string;
+                    message?: string;
+                    step_name?: string;
+                    test_name?: string;
+                }[];
+                passed: boolean;
+                run_id: string;
+                runner_error?: string;
+                trace_id?: string;
+            } | null;
             requirements?: {
                 /** Format: date-time */
                 created_at: string;
@@ -2965,6 +3049,8 @@ export interface components {
             name: string;
             org?: string;
             platform?: string;
+            qa_level?: string;
+            qa_test_command?: string;
             repository?: {
                 default_branch?: string;
                 url?: string;

@@ -93,8 +93,8 @@ export { getRequirementStatusInfo } from './requirement';
 export type { Scenario, ScenarioStatus } from './scenario';
 export { getScenarioStatusInfo } from './scenario';
 
-export type { ChangeProposal, ChangeProposalStatus } from './change-proposal';
-export { getChangeProposalStatusInfo } from './change-proposal';
+export type { PlanDecision, PlanDecisionStatus } from './plan-decision';
+export { getPlanDecisionStatusInfo } from './plan-decision';
 
 // ============================================================================
 // Question types (Knowledge Gap Resolution Protocol)

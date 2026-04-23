@@ -805,7 +805,7 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 // needs_changes → StatusRejected with summary as LastError.
 // rejected      → StatusRejected with summary as LastError (escalation variant;
 // in Phase 6 qa-reviewer will distinguish this from needs_changes by whether
-// ChangeProposals can salvage the plan, but the transition is the same).
+// PlanDecisions can salvage the plan, but the transition is the same).
 func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) MutationResponse {
 	var req workflow.QAVerdictEvent
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -858,17 +858,17 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 		plan.LastErrorAt = &now
 		plan.Status = workflow.StatusRejected
 
-		// Persist ChangeProposals emitted by qa-reviewer so the UI and retry
+		// Persist PlanDecisions emitted by qa-reviewer so the UI and retry
 		// flow can surface which proposals accompany this rejection.
-		if len(req.ChangeProposals) > 0 {
-			plan.ChangeProposals = append(plan.ChangeProposals, req.ChangeProposals...)
+		if len(req.PlanDecisions) > 0 {
+			plan.PlanDecisions = append(plan.PlanDecisions, req.PlanDecisions...)
 			c.logger.Info("QA verdict — persisted change proposals",
-				"slug", req.Slug, "count", len(req.ChangeProposals))
+				"slug", req.Slug, "count", len(req.PlanDecisions))
 		}
 
 		c.logger.Warn("QA verdict — plan rejected",
 			"slug", req.Slug, "verdict", req.Verdict, "level", req.Level,
-			"change_proposal_ids", req.ChangeProposalIDs, "summary", req.Summary)
+			"plan_decision_ids", req.PlanDecisionIDs, "summary", req.Summary)
 	}
 
 	if err := ps.save(ctx, plan); err != nil {
@@ -989,7 +989,7 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 }
 
 // handleGitHubPRFeedbackMutation handles plan.mutation.github.pr_feedback.
-// Routes PR review comments to affected requirements via ChangeProposals and
+// Routes PR review comments to affected requirements via PlanDecisions and
 // re-triggers execution.
 func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []byte) MutationResponse {
 	// Unwrap BaseMessage envelope.
@@ -1052,20 +1052,20 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 		}
 	}
 
-	// Create ChangeProposal(s) for audit trail.
+	// Create PlanDecision(s) for audit trail.
 	now := time.Now()
 	for _, reqID := range affectedReqIDs {
-		proposalID := fmt.Sprintf("change-proposal.%s.pr-feedback.%d.%s", req.Slug, req.ReviewID, reqID)
+		proposalID := fmt.Sprintf("plan-decision.%s.pr-feedback.%d.%s", req.Slug, req.ReviewID, reqID)
 		rationale := fmt.Sprintf("PR review feedback from @%s (review %d)", req.Reviewer, req.ReviewID)
 		if req.Body != "" {
 			rationale += ": " + req.Body
 		}
-		plan.ChangeProposals = append(plan.ChangeProposals, workflow.ChangeProposal{
+		plan.PlanDecisions = append(plan.PlanDecisions, workflow.PlanDecision{
 			ID:             proposalID,
 			PlanID:         workflow.PlanEntityID(req.Slug),
 			Title:          fmt.Sprintf("PR feedback round %d", plan.GitHub.PRRevision+1),
 			Rationale:      rationale,
-			Status:         workflow.ChangeProposalStatusAccepted,
+			Status:         workflow.PlanDecisionStatusAccepted,
 			ProposedBy:     "github-pr-review",
 			AffectedReqIDs: []string{reqID},
 			CreatedAt:      now,

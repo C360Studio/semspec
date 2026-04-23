@@ -13,7 +13,7 @@
  * Requirement status in the plan lifecycle.
  * - active: Currently valid and in scope
  * - deprecated: No longer relevant but kept for history
- * - superseded: Replaced by another Requirement via a ChangeProposal
+ * - superseded: Replaced by another Requirement via a PlanDecision
  */
 export type RequirementStatus = 'active' | 'deprecated' | 'superseded';
 

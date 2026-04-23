@@ -173,7 +173,7 @@ Artifacts from every QA run land at `.semspec/qa-artifacts/{plan-slug}/{run-id}/
   playwright traces, screenshots, etc.)
 
 The verdict has three outcomes: `approved` (plan → `complete`), `needs_changes`
-(plan → `rejected` with `ChangeProposals` describing what to fix), or
+(plan → `rejected` with `PlanDecisions` describing what to fix), or
 `rejected` (plan → `rejected`, escalation to human).
 
 See [ADR-031](adr/ADR-031-qa-test-execution.md) for the full design rationale.

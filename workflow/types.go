@@ -273,7 +273,7 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusReviewingQA:
 		// reviewing_qa → complete (QA passed, auto_approve_review=true, no GitHub)
 		// reviewing_qa → awaiting_review (QA passed, auto_approve_review=false or GitHub)
-		// reviewing_qa → rejected (QA failed — qa-reviewer emits ChangeProposals)
+		// reviewing_qa → rejected (QA failed — qa-reviewer emits PlanDecisions)
 		return target == StatusComplete || target == StatusAwaitingReview || target == StatusRejected
 	case StatusAwaitingReview:
 		// awaiting_review → complete (human approves: PR merge / UI / HTTP)
@@ -380,11 +380,11 @@ type GitHubMetadata struct {
 
 // PlanFiles tracks which files exist for a plan.
 type PlanFiles struct {
-	HasPlan            bool `json:"has_plan"`
-	HasTasks           bool `json:"has_tasks"`
-	HasRequirements    bool `json:"has_requirements"`
-	HasScenarios       bool `json:"has_scenarios"`
-	HasChangeProposals bool `json:"has_change_proposals"`
+	HasPlan          bool `json:"has_plan"`
+	HasTasks         bool `json:"has_tasks"`
+	HasRequirements  bool `json:"has_requirements"`
+	HasScenarios     bool `json:"has_scenarios"`
+	HasPlanDecisions bool `json:"has_plan_decisions"`
 }
 
 // Spec represents a specification in .semspec/specs/{name}/.
@@ -550,13 +550,13 @@ type Plan struct {
 	// Nil when SkipArchitecture is true or before the phase completes.
 	Architecture *ArchitectureDocument `json:"architecture,omitempty"`
 
-	// Requirements, Scenarios, and ChangeProposals are populated when the plan
+	// Requirements, Scenarios, and PlanDecisions are populated when the plan
 	// is written to the PLAN_STATES KV bucket so downstream watchers have
 	// everything they need without follow-up queries.
-	// Not persisted to graph triples — use SaveRequirements/SaveScenarios/SaveChangeProposals for that.
-	Requirements    []Requirement    `json:"requirements,omitempty"`
-	Scenarios       []Scenario       `json:"scenarios,omitempty"`
-	ChangeProposals []ChangeProposal `json:"change_proposals,omitempty"`
+	// Not persisted to graph triples — use SaveRequirements/SaveScenarios/SavePlanDecisions for that.
+	Requirements  []Requirement  `json:"requirements,omitempty"`
+	Scenarios     []Scenario     `json:"scenarios,omitempty"`
+	PlanDecisions []PlanDecision `json:"plan_decisions,omitempty"`
 
 	// GitHub contains GitHub integration metadata for plans originating from
 	// GitHub issues (ADR-031). Nil for non-GitHub plans.
@@ -718,12 +718,12 @@ func (p *Plan) ScenariosForRequirement(reqID string) []Scenario {
 	return out
 }
 
-// FindChangeProposal returns a pointer into p.ChangeProposals and its index by ID.
+// FindPlanDecision returns a pointer into p.PlanDecisions and its index by ID.
 // Returns nil, -1 when the proposal is not found.
-func (p *Plan) FindChangeProposal(id string) (*ChangeProposal, int) {
-	for i := range p.ChangeProposals {
-		if p.ChangeProposals[i].ID == id {
-			return &p.ChangeProposals[i], i
+func (p *Plan) FindPlanDecision(id string) (*PlanDecision, int) {
+	for i := range p.PlanDecisions {
+		if p.PlanDecisions[i].ID == id {
+			return &p.PlanDecisions[i], i
 		}
 	}
 	return nil, -1
@@ -820,7 +820,7 @@ func (s RequirementStatus) CanTransitionTo(target RequirementStatus) bool {
 	case RequirementStatusActive:
 		return target == RequirementStatusDeprecated || target == RequirementStatusSuperseded
 	case RequirementStatusSuperseded:
-		// Can revert supersession if ChangeProposal is rolled back
+		// Can revert supersession if PlanDecision is rolled back
 		return target == RequirementStatusActive
 	case RequirementStatusDeprecated:
 		return false // Terminal state
@@ -901,64 +901,113 @@ type Scenario struct {
 	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
-// ChangeProposalStatus represents the lifecycle state of a change proposal.
-type ChangeProposalStatus string
+// PlanDecisionStatus represents the lifecycle state of a plan decision.
+type PlanDecisionStatus string
 
 const (
-	// ChangeProposalStatusProposed indicates the proposal has been submitted for review.
-	ChangeProposalStatusProposed ChangeProposalStatus = "proposed"
+	// PlanDecisionStatusProposed indicates the decision has been raised for review.
+	PlanDecisionStatusProposed PlanDecisionStatus = "proposed"
 
-	// ChangeProposalStatusUnderReview indicates the proposal is being reviewed.
-	ChangeProposalStatusUnderReview ChangeProposalStatus = "under_review"
+	// PlanDecisionStatusUnderReview indicates the decision is being reviewed.
+	PlanDecisionStatusUnderReview PlanDecisionStatus = "under_review"
 
-	// ChangeProposalStatusAccepted indicates the proposal was accepted.
-	ChangeProposalStatusAccepted ChangeProposalStatus = "accepted"
+	// PlanDecisionStatusAccepted indicates the decision was accepted.
+	// For Kind=requirement_change this triggers cascade; for
+	// Kind=execution_exhausted it marks the record as human-acknowledged
+	// without prescribing a plan mutation.
+	PlanDecisionStatusAccepted PlanDecisionStatus = "accepted"
 
-	// ChangeProposalStatusRejected indicates the proposal was rejected.
-	ChangeProposalStatusRejected ChangeProposalStatus = "rejected"
+	// PlanDecisionStatusRejected indicates the decision was rejected.
+	PlanDecisionStatusRejected PlanDecisionStatus = "rejected"
 
-	// ChangeProposalStatusArchived indicates the proposal has been archived.
-	ChangeProposalStatusArchived ChangeProposalStatus = "archived"
+	// PlanDecisionStatusArchived indicates the decision has been archived —
+	// either terminally resolved or auto-closed by plan-manager when the
+	// subject requirement reached a non-failed terminal state.
+	PlanDecisionStatusArchived PlanDecisionStatus = "archived"
 )
 
-// String returns the string representation of the change proposal status.
-func (s ChangeProposalStatus) String() string {
+// String returns the string representation of the plan decision status.
+func (s PlanDecisionStatus) String() string {
 	return string(s)
 }
 
-// IsValid returns true if the change proposal status is valid.
-func (s ChangeProposalStatus) IsValid() bool {
+// IsValid returns true if the plan decision status is valid.
+func (s PlanDecisionStatus) IsValid() bool {
 	switch s {
-	case ChangeProposalStatusProposed, ChangeProposalStatusUnderReview,
-		ChangeProposalStatusAccepted, ChangeProposalStatusRejected, ChangeProposalStatusArchived:
+	case PlanDecisionStatusProposed, PlanDecisionStatusUnderReview,
+		PlanDecisionStatusAccepted, PlanDecisionStatusRejected, PlanDecisionStatusArchived:
 		return true
 	default:
 		return false
 	}
 }
 
-// CanTransitionTo returns true if this change proposal status can transition to the target.
-func (s ChangeProposalStatus) CanTransitionTo(target ChangeProposalStatus) bool {
+// CanTransitionTo returns true if this plan decision status can transition to the target.
+func (s PlanDecisionStatus) CanTransitionTo(target PlanDecisionStatus) bool {
 	switch s {
-	case ChangeProposalStatusProposed:
+	case PlanDecisionStatusProposed:
 		// proposed → under_review (manual review flow)
 		// proposed → accepted (auto-accept shortcut, skips review)
-		return target == ChangeProposalStatusUnderReview || target == ChangeProposalStatusAccepted
-	case ChangeProposalStatusUnderReview:
-		return target == ChangeProposalStatusAccepted || target == ChangeProposalStatusRejected
-	case ChangeProposalStatusAccepted:
-		return target == ChangeProposalStatusArchived
-	case ChangeProposalStatusRejected:
-		return target == ChangeProposalStatusArchived
-	case ChangeProposalStatusArchived:
+		// proposed → archived (auto-close when subject requirement resolves)
+		return target == PlanDecisionStatusUnderReview ||
+			target == PlanDecisionStatusAccepted ||
+			target == PlanDecisionStatusArchived
+	case PlanDecisionStatusUnderReview:
+		return target == PlanDecisionStatusAccepted ||
+			target == PlanDecisionStatusRejected ||
+			target == PlanDecisionStatusArchived
+	case PlanDecisionStatusAccepted:
+		return target == PlanDecisionStatusArchived
+	case PlanDecisionStatusRejected:
+		return target == PlanDecisionStatusArchived
+	case PlanDecisionStatusArchived:
 		return false // Terminal state
 	default:
 		return false
 	}
 }
 
+// PlanDecisionKind narrows the intent of a PlanDecision so downstream handlers
+// (cascade, UI, plan-manager auto-close) dispatch correctly. Same container,
+// two distinct semantics:
+//
+//	requirement_change  — something proposes to mutate the plan's requirements
+//	                      (e.g. qa-reviewer needs_changes). Accept runs cascade.
+//	execution_exhausted — a requirement exhausted its retry budget and needs a
+//	                      human to decide next step. Accept is acknowledgement
+//	                      only; the actual remedy is taken via existing retry /
+//	                      force-complete / reject endpoints.
+type PlanDecisionKind string
+
+const (
+	// PlanDecisionKindRequirementChange marks a decision proposing a plan
+	// mutation (e.g. qa-reviewer emitted needs_changes). Accept runs cascade.
+	PlanDecisionKindRequirementChange PlanDecisionKind = "requirement_change"
+	// PlanDecisionKindExecutionExhausted marks a decision recording a
+	// requirement exhausting its retry budget. Accept is acknowledgement
+	// only; the remedy comes from existing retry/force-complete/reject
+	// endpoints, and plan-manager auto-archives the decision when the
+	// subject requirement reaches a non-failed terminal state.
+	PlanDecisionKindExecutionExhausted PlanDecisionKind = "execution_exhausted"
+)
+
+// String returns the string representation of the plan decision kind.
+func (k PlanDecisionKind) String() string {
+	return string(k)
+}
+
+// IsValid reports whether the kind is a known value.
+func (k PlanDecisionKind) IsValid() bool {
+	switch k {
+	case PlanDecisionKindRequirementChange, PlanDecisionKindExecutionExhausted:
+		return true
+	default:
+		return false
+	}
+}
+
 // ArtifactRef is a reference to a QA artifact (log, screenshot, trace, coverage report)
-// attached to a ChangeProposal. Helps the human reviewer understand why the change is needed.
+// attached to a PlanDecision. Helps the human reviewer understand why the change is needed.
 type ArtifactRef struct {
 	// Path is the workspace-relative path to the artifact.
 	Path string `json:"path"`
@@ -968,19 +1017,27 @@ type ArtifactRef struct {
 	Purpose string `json:"purpose,omitempty"`
 }
 
-// ChangeProposal represents a mid-stream proposal to mutate one or more Requirements.
-type ChangeProposal struct {
-	ID               string               `json:"id"`
-	PlanID           string               `json:"plan_id"`
-	Title            string               `json:"title"`
-	Rationale        string               `json:"rationale"`
-	Status           ChangeProposalStatus `json:"status"`
-	ProposedBy       string               `json:"proposed_by"`
-	AffectedReqIDs   []string             `json:"affected_requirement_ids"`
-	RejectionReasons map[string]string    `json:"rejection_reasons,omitempty"`
-	// ArtifactReferences links QA artifacts (logs, screenshots, traces) to this proposal.
-	// Populated by qa-reviewer when verdict is needs_changes so the human reviewer
-	// can see why the change is needed.
+// PlanDecision records any human-gated decision about a plan. Two kinds exist
+// today: requirement_change (proposed plan mutation, e.g. qa-reviewer flagged
+// needs_changes) and execution_exhausted (a requirement exhausted its retry
+// budget and needs a human to choose next step). The container is shared;
+// cascade/UI/plan-manager dispatch on Kind.
+type PlanDecision struct {
+	ID     string `json:"id"`
+	PlanID string `json:"plan_id"`
+	// Kind narrows the intent. Defaults to requirement_change for back-compat
+	// with old records that predate the Kind field.
+	Kind             PlanDecisionKind   `json:"kind,omitempty"`
+	Title            string             `json:"title"`
+	Rationale        string             `json:"rationale"`
+	Status           PlanDecisionStatus `json:"status"`
+	ProposedBy       string             `json:"proposed_by"`
+	AffectedReqIDs   []string           `json:"affected_requirement_ids"`
+	RejectionReasons map[string]string  `json:"rejection_reasons,omitempty"`
+	// ArtifactReferences links artifacts (logs, screenshots, traces, trajectory
+	// steps) to this decision. Populated by qa-reviewer on needs_changes and
+	// by requirement-executor on retry exhaustion so the human reviewer can
+	// see why the decision was raised.
 	ArtifactReferences []ArtifactRef `json:"artifact_references,omitempty"`
 	CreatedAt          time.Time     `json:"created_at"`
 	ReviewedAt         *time.Time    `json:"reviewed_at,omitempty"`

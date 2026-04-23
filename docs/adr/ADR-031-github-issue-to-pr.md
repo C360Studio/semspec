@@ -261,7 +261,7 @@ PR merge, UI approve button, and the existing `POST /plans/{slug}/complete` endp
 to publish this mutation when plan is in `awaiting_review`).
 
 **What stays alive during `awaiting_review`:** Plan branch, EXECUTION\_STATES KV entries,
-PLAN\_STATES metadata, ChangeProposal history. No worktrees (ephemeral, created fresh from branch
+PLAN\_STATES metadata, PlanDecision history. No worktrees (ephemeral, created fresh from branch
 HEAD on re-execution).
 
 ### 4. PR feedback loop
@@ -281,7 +281,7 @@ If CHANGES_REQUESTED:
   5. Publish GitHubPRFeedbackRequest to JetStream (batched)
   6. plan-manager (single writer):
      a. Map file-scoped comments → requirements via FilesModified reverse index
-     b. Create ChangeProposal(s) per affected requirement (audit trail)
+     b. Create PlanDecision(s) per affected requirement (audit trail)
      c. Append unmapped comments to plan.Context
      d. Reset affected requirement executions by ID
      e. Increment PRRevision, update LastProcessedReviewID
@@ -350,7 +350,7 @@ type PRReviewComment struct {
 }
 ```
 
-**New mutation: `plan.mutation.github.pr_feedback`** — on plan-manager. Creates ChangeProposals,
+**New mutation: `plan.mutation.github.pr_feedback`** — on plan-manager. Creates PlanDecisions,
 resets executions, transitions `awaiting_review → ready_for_execution`.
 
 **GitHubMetadata extensions:**

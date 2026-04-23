@@ -49,7 +49,7 @@ Tier 1 — Component Tests (no LLM):
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
   reactive-execution  - Tests full reactive execution lifecycle: decomposition → node dispatch → completion
-  change-proposal     - Tests ChangeProposal CRUD, status transitions, cascade response, and error handling
+  plan-decision     - Tests PlanDecision CRUD, status transitions, cascade response, and error handling
   sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
   agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   graph-sources       - Tests graph source registry: semsource readiness, GraphQL entity indexing
@@ -143,7 +143,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  questions-api       Tests Q&A HTTP API endpoints (list, get, answer)")
 			fmt.Println("  scenario-execution  Tests Requirement/Scenario CRUD and reactive workflow trigger")
 			fmt.Println("  reactive-execution  Tests full reactive execution: decomposition → dispatch → completion")
-			fmt.Println("  change-proposal     Tests ChangeProposal CRUD, status transitions, cascade, and error handling")
+			fmt.Println("  plan-decision     Tests PlanDecision CRUD, status transitions, cascade, and error handling")
 			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
 			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 			fmt.Println("  graph-sources       Tests graph source registry: semsource readiness, GraphQL entities")
@@ -190,7 +190,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewQuestionsAPIScenario(cfg),
 		scenarios.NewScenarioExecutionScenario(cfg),
 		scenarios.NewReactiveExecutionScenario(cfg),
-		scenarios.NewChangeProposalScenario(cfg),
+		scenarios.NewPlanDecisionScenario(cfg),
 		scenarios.NewSandboxLifecycleScenario(cfg),
 		// Graph source registry (ADR-032)
 		scenarios.NewGraphSourcesScenario(cfg),

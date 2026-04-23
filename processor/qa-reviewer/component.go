@@ -618,16 +618,16 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		verdict.PlanID = plan.ID
 	}
 
-	// Build ChangeProposals when verdict is needs_changes.
-	if workflow.QAVerdict(result.Verdict) == workflow.QAVerdictNeedsChanges && len(result.ChangeProposals) > 0 {
+	// Build PlanDecisions when verdict is needs_changes.
+	if workflow.QAVerdict(result.Verdict) == workflow.QAVerdictNeedsChanges && len(result.PlanDecisions) > 0 {
 		now := time.Now()
-		for _, cp := range result.ChangeProposals {
-			proposal := workflow.ChangeProposal{
-				ID:             fmt.Sprintf("change-proposal.%s.qa.%s", slug, uuid.New().String()[:8]),
+		for _, cp := range result.PlanDecisions {
+			proposal := workflow.PlanDecision{
+				ID:             fmt.Sprintf("plan-decision.%s.qa.%s", slug, uuid.New().String()[:8]),
 				PlanID:         workflow.PlanEntityID(slug),
 				Title:          cp.Title,
 				Rationale:      cp.Rationale,
-				Status:         workflow.ChangeProposalStatusProposed,
+				Status:         workflow.PlanDecisionStatusProposed,
 				ProposedBy:     "qa-reviewer",
 				AffectedReqIDs: cp.AffectedReqIDs,
 				CreatedAt:      now,
@@ -639,8 +639,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 					Purpose: ar.Purpose,
 				})
 			}
-			verdict.ChangeProposals = append(verdict.ChangeProposals, proposal)
-			verdict.ChangeProposalIDs = append(verdict.ChangeProposalIDs, proposal.ID)
+			verdict.PlanDecisions = append(verdict.PlanDecisions, proposal)
+			verdict.PlanDecisionIDs = append(verdict.PlanDecisionIDs, proposal.ID)
 		}
 	}
 
@@ -858,11 +858,11 @@ type qaReviewOutput struct {
 		FlakeJudgment          string `json:"flake_judgment"`
 	} `json:"dimensions"`
 
-	ChangeProposals []qaChangeProposal `json:"change_proposals"`
+	PlanDecisions []qaPlanDecision `json:"plan_decisions"`
 }
 
-// qaChangeProposal is a single change proposal from the agent's submit_work output.
-type qaChangeProposal struct {
+// qaPlanDecision is a single change proposal from the agent's submit_work output.
+type qaPlanDecision struct {
 	Title          string   `json:"title"`
 	Rationale      string   `json:"rationale"`
 	AffectedReqIDs []string `json:"affected_requirement_ids"`

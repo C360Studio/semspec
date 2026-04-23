@@ -130,8 +130,8 @@ type Component struct {
 	// the retry_count on each execution) via trajectory data.
 	retriesExhausted atomic.Int64
 	errors           atomic.Int64
-	lastActivityMu        sync.RWMutex
-	lastActivity          time.Time
+	lastActivityMu   sync.RWMutex
+	lastActivity     time.Time
 }
 
 // NewComponent creates a new requirement-executor from raw JSON config.

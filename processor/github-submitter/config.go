@@ -37,7 +37,7 @@ type Config struct {
 	MaxPRRevisions int `json:"max_pr_revisions" schema:"type:int,description:Max PR feedback revision rounds,category:advanced,default:3"`
 
 	// AutoAcceptFeedback when true auto-accepts PR feedback and re-executes.
-	// When false, creates ChangeProposals in proposed status requiring manual accept.
+	// When false, creates PlanDecisions in proposed status requiring manual accept.
 	AutoAcceptFeedback *bool `json:"auto_accept_feedback" schema:"type:bool,description:Auto-accept PR feedback and re-execute,category:advanced,default:true"`
 
 	// PlanStateBucket is the KV bucket for plan state.

@@ -24,7 +24,7 @@ import type { ContextBuildResponse } from '$lib/types/context';
 import type { Trajectory, TrajectoryListResponse, TrajectoryFilter } from '$lib/types/trajectory';
 import type { Requirement } from '$lib/types/requirement';
 import type { Scenario } from '$lib/types/scenario';
-import type { ChangeProposal } from '$lib/types/change-proposal';
+import type { PlanDecision } from '$lib/types/plan-decision';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -487,14 +487,14 @@ export const api = {
 			request<void>(`/plan-manager/plans/${slug}/scenarios/${scenarioId}`, { method: 'DELETE' })
 	},
 
-	changeProposals: {
+	planDecisions: {
 		/** List all change proposals for a plan */
 		list: (slug: string) =>
-			request<ChangeProposal[]>(`/plan-manager/plans/${slug}/change-proposals`),
+			request<PlanDecision[]>(`/plan-manager/plans/${slug}/plan-decisions`),
 
 		/** Get a single change proposal by ID */
 		get: (slug: string, proposalId: string) =>
-			request<ChangeProposal>(`/plan-manager/plans/${slug}/change-proposals/${proposalId}`),
+			request<PlanDecision>(`/plan-manager/plans/${slug}/plan-decisions/${proposalId}`),
 
 		/** Create a new change proposal */
 		create: (
@@ -506,29 +506,29 @@ export const api = {
 				affected_requirement_ids: string[];
 			}
 		) =>
-			request<ChangeProposal>(`/plan-manager/plans/${slug}/change-proposals`, {
+			request<PlanDecision>(`/plan-manager/plans/${slug}/plan-decisions`, {
 				method: 'POST',
 				body: data
 			}),
 
 		/** Submit a change proposal for review */
 		submit: (slug: string, proposalId: string) =>
-			request<ChangeProposal>(
-				`/plan-manager/plans/${slug}/change-proposals/${proposalId}/submit`,
+			request<PlanDecision>(
+				`/plan-manager/plans/${slug}/plan-decisions/${proposalId}/submit`,
 				{ method: 'POST' }
 			),
 
 		/** Accept a change proposal */
 		accept: (slug: string, proposalId: string) =>
-			request<ChangeProposal>(
-				`/plan-manager/plans/${slug}/change-proposals/${proposalId}/accept`,
+			request<PlanDecision>(
+				`/plan-manager/plans/${slug}/plan-decisions/${proposalId}/accept`,
 				{ method: 'POST' }
 			),
 
 		/** Reject a change proposal */
 		reject: (slug: string, proposalId: string, reason?: string) =>
-			request<ChangeProposal>(
-				`/plan-manager/plans/${slug}/change-proposals/${proposalId}/reject`,
+			request<PlanDecision>(
+				`/plan-manager/plans/${slug}/plan-decisions/${proposalId}/reject`,
 				{ method: 'POST', body: reason ? { reason } : {} }
 			)
 	},

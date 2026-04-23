@@ -1,4 +1,4 @@
-// Package changeproposalhandler provides unit tests for the change-proposal-handler component.
+// Package changeproposalhandler provides unit tests for the plan-decision-handler component.
 //
 // Test coverage:
 //   - Config defaults and validation
@@ -66,7 +66,7 @@ func (m *mockMsg) TermWithReason(_ string) error             { return nil }
 func (m *mockMsg) Metadata() (*jetstream.MsgMetadata, error) { return nil, nil }
 func (m *mockMsg) Headers() nats.Header                      { return nil }
 func (m *mockMsg) Subject() string {
-	return "workflow.trigger.change-proposal-cascade"
+	return "workflow.trigger.plan-decision-cascade"
 }
 func (m *mockMsg) Reply() string { return "" }
 
@@ -74,9 +74,9 @@ func (m *mockMsg) Reply() string { return "" }
 // Helpers
 // ---------------------------------------------------------------------------
 
-// buildValidCascadeMsg wraps a valid ChangeProposalCascadeRequest in a BaseMessage
+// buildValidCascadeMsg wraps a valid PlanDecisionCascadeRequest in a BaseMessage
 // and returns the marshalled bytes.
-func buildValidCascadeMsg(t *testing.T, req *payloads.ChangeProposalCascadeRequest) []byte {
+func buildValidCascadeMsg(t *testing.T, req *payloads.PlanDecisionCascadeRequest) []byte {
 	t.Helper()
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "test")
 	data, err := json.Marshal(baseMsg)
@@ -96,7 +96,7 @@ func buildRawEnvelope(payload string) []byte {
 func newTestComponent(repoRoot string) *Component {
 	cfg := DefaultConfig()
 	return &Component{
-		name:     "change-proposal-handler",
+		name:     "plan-decision-handler",
 		config:   cfg,
 		logger:   slog.Default(),
 		repoRoot: repoRoot,
@@ -250,7 +250,7 @@ func TestHandleMessage_MalformedPayload(t *testing.T) {
 	c := newTestComponent(t.TempDir())
 
 	// Valid envelope structure but the payload field is a JSON string, not an object.
-	// json.Unmarshal into ChangeProposalCascadeRequest will fail.
+	// json.Unmarshal into PlanDecisionCascadeRequest will fail.
 	data := buildRawEnvelope(`"not-an-object"`)
 	msg := newMockMsg(data)
 
@@ -299,7 +299,7 @@ func TestHandleMessage_ProposalNotFound_Naks(t *testing.T) {
 	c := newTestComponent(t.TempDir())
 	// natsClient is nil — handleCascadeRequest returns an error immediately.
 
-	req := &payloads.ChangeProposalCascadeRequest{
+	req := &payloads.PlanDecisionCascadeRequest{
 		ProposalID: "cp-nonexistent",
 		Slug:       "no-such-plan",
 	}
@@ -325,7 +325,7 @@ func TestHandleCascadeRequest_NilNATSClient(t *testing.T) {
 	c := newTestComponent(t.TempDir())
 	// natsClient is nil — set by newTestComponent intentionally.
 
-	req := &payloads.ChangeProposalCascadeRequest{
+	req := &payloads.PlanDecisionCascadeRequest{
 		ProposalID: "cp-missing",
 		Slug:       "no-such-plan",
 	}
@@ -340,7 +340,7 @@ func TestHandleCascadeRequest_NilNATSClient(t *testing.T) {
 // tasks are dirtied.
 //
 // Note: the caller of handleCascadeRequest calls publishAcceptedEvent which requires a live
-// natsClient. Because cascade.ChangeProposal returns early when
+// natsClient. Because cascade.PlanDecision returns early when
 // AffectedReqIDs is empty the cascade succeeds before reaching the publish
 // step, so the nil-natsClient panic is triggered. We use defer/recover here
 // to assert the filesystem state was not modified before the publish attempt.
@@ -349,11 +349,11 @@ func TestHandleCascadeRequest_NilNATSClient(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMeta(t *testing.T) {
-	c := &Component{name: "change-proposal-handler"}
+	c := &Component{name: "plan-decision-handler"}
 	meta := c.Meta()
 
-	if meta.Name != "change-proposal-handler" {
-		t.Errorf("Meta.Name = %q, want %q", meta.Name, "change-proposal-handler")
+	if meta.Name != "plan-decision-handler" {
+		t.Errorf("Meta.Name = %q, want %q", meta.Name, "plan-decision-handler")
 	}
 	if meta.Type != "processor" {
 		t.Errorf("Meta.Type = %q, want %q", meta.Type, "processor")
@@ -367,7 +367,7 @@ func TestMeta(t *testing.T) {
 }
 
 func TestHealth_NotRunning(t *testing.T) {
-	c := &Component{name: "change-proposal-handler", logger: slog.Default()}
+	c := &Component{name: "plan-decision-handler", logger: slog.Default()}
 
 	health := c.Health()
 
@@ -380,7 +380,7 @@ func TestHealth_NotRunning(t *testing.T) {
 }
 
 func TestHealth_Running(t *testing.T) {
-	c := &Component{name: "change-proposal-handler", logger: slog.Default()}
+	c := &Component{name: "plan-decision-handler", logger: slog.Default()}
 
 	c.mu.Lock()
 	c.running = true

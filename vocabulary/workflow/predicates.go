@@ -159,7 +159,7 @@ const (
 )
 
 // Cascade-specific predicates.
-// These predicates record impact metrics produced by ChangeProposal cascade logic.
+// These predicates record impact metrics produced by PlanDecision cascade logic.
 const (
 	// CascadeAffectedRequirements is the count of requirements affected by a cascade.
 	CascadeAffectedRequirements = "workflow.cascade.affected_requirements"
@@ -411,17 +411,17 @@ func registerDAGNodePredicates() {
 
 func registerCascadePredicates() {
 	vocabulary.Register(CascadeAffectedRequirements,
-		vocabulary.WithDescription("Count of requirements affected by a ChangeProposal cascade"),
+		vocabulary.WithDescription("Count of requirements affected by a PlanDecision cascade"),
 		vocabulary.WithDataType("int"),
 		vocabulary.WithIRI(Namespace+"cascadeAffectedRequirements"))
 
 	vocabulary.Register(CascadeAffectedScenarios,
-		vocabulary.WithDescription("Count of scenarios affected by a ChangeProposal cascade"),
+		vocabulary.WithDescription("Count of scenarios affected by a PlanDecision cascade"),
 		vocabulary.WithDataType("int"),
 		vocabulary.WithIRI(Namespace+"cascadeAffectedScenarios"))
 
 	vocabulary.Register(CascadeTasksDirtied,
-		vocabulary.WithDescription("Count of tasks marked dirty by a ChangeProposal cascade"),
+		vocabulary.WithDescription("Count of tasks marked dirty by a PlanDecision cascade"),
 		vocabulary.WithDataType("int"),
 		vocabulary.WithIRI(Namespace+"cascadeTasksDirtied"))
 }

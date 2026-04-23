@@ -112,7 +112,7 @@ func renderSpecFile(plan *Plan, req *Requirement, scenarios []Scenario) string {
 
 // GenerateArchive generates an archive Markdown document summarising a completed plan.
 // The document is written to .semspec/archive/{slug}.md.
-// The plan must include inline Requirements, Scenarios, and ChangeProposals (as stored
+// The plan must include inline Requirements, Scenarios, and PlanDecisions (as stored
 // in the plan cache).
 // Returns the file path written.
 func GenerateArchive(ctx context.Context, plan *Plan, repoRoot string) (string, error) {
@@ -123,7 +123,7 @@ func GenerateArchive(ctx context.Context, plan *Plan, repoRoot string) (string, 
 		return "", err
 	}
 
-	content := renderArchive(plan, plan.Requirements, plan.Scenarios, plan.ChangeProposals)
+	content := renderArchive(plan, plan.Requirements, plan.Scenarios, plan.PlanDecisions)
 
 	archiveDir := paths.ArchivePath(repoRoot)
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
@@ -139,7 +139,7 @@ func GenerateArchive(ctx context.Context, plan *Plan, repoRoot string) (string, 
 }
 
 // renderArchive renders the archive Markdown for a plan.
-func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario, changeProposals []ChangeProposal) string {
+func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario, changeProposals []PlanDecision) string {
 	var b strings.Builder
 
 	b.WriteString("# Archive: ")
@@ -155,7 +155,7 @@ func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario,
 	renderArchiveTimeline(&b, plan)
 	renderArchiveRequirements(&b, requirements, scenarios)
 	renderArchiveScenarios(&b, scenarios)
-	renderArchiveChangeProposals(&b, changeProposals)
+	renderArchivePlanDecisions(&b, changeProposals)
 
 	return b.String()
 }
@@ -212,7 +212,7 @@ func renderArchiveScenarios(b *strings.Builder, scenarios []Scenario) {
 	b.WriteString(fmt.Sprintf("- Passing: %d\n- Failing: %d\n- Pending: %d\n- Skipped: %d\n", passing, failing, pending, skipped))
 }
 
-func renderArchiveChangeProposals(b *strings.Builder, changeProposals []ChangeProposal) {
+func renderArchivePlanDecisions(b *strings.Builder, changeProposals []PlanDecision) {
 	if len(changeProposals) == 0 {
 		return
 	}

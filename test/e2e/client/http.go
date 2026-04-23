@@ -2216,8 +2216,8 @@ func (c *HTTPClient) DeleteScenario(ctx context.Context, slug, scenarioID string
 // Change Proposal Methods
 // ============================================================================
 
-// ChangeProposal represents a workflow.ChangeProposal as returned by the HTTP API.
-type ChangeProposal struct {
+// PlanDecision represents a workflow.PlanDecision as returned by the HTTP API.
+type PlanDecision struct {
 	ID             string     `json:"id"`
 	PlanID         string     `json:"plan_id"`
 	Title          string     `json:"title"`
@@ -2230,37 +2230,37 @@ type ChangeProposal struct {
 	DecidedAt      *time.Time `json:"decided_at,omitempty"`
 }
 
-// CascadeResult summarizes the effect of accepting a ChangeProposal.
+// CascadeResult summarizes the effect of accepting a PlanDecision.
 type CascadeResult struct {
 	AffectedRequirementIDs []string `json:"AffectedRequirementIDs"`
 	AffectedScenarioIDs    []string `json:"AffectedScenarioIDs"`
 }
 
-// AcceptChangeProposalResponse is the response from POST .../accept.
-type AcceptChangeProposalResponse struct {
-	Proposal ChangeProposal `json:"proposal"`
+// AcceptPlanDecisionResponse is the response from POST .../accept.
+type AcceptPlanDecisionResponse struct {
+	Proposal PlanDecision   `json:"proposal"`
 	Cascade  *CascadeResult `json:"cascade,omitempty"`
 }
 
-// CreateChangeProposalRequest is the request body for creating a change proposal.
-type CreateChangeProposalRequest struct {
+// CreatePlanDecisionRequest is the request body for creating a change proposal.
+type CreatePlanDecisionRequest struct {
 	Title          string   `json:"title"`
 	Rationale      string   `json:"rationale,omitempty"`
 	ProposedBy     string   `json:"proposed_by,omitempty"`
 	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
 }
 
-// UpdateChangeProposalRequest is the request body for updating a change proposal.
-type UpdateChangeProposalRequest struct {
+// UpdatePlanDecisionRequest is the request body for updating a change proposal.
+type UpdatePlanDecisionRequest struct {
 	Title          *string  `json:"title,omitempty"`
 	Rationale      *string  `json:"rationale,omitempty"`
 	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
 }
 
-// CreateChangeProposal creates a new change proposal for a plan.
-// POST /plan-manager/plans/{slug}/change-proposals
-func (c *HTTPClient) CreateChangeProposal(ctx context.Context, slug string, req *CreateChangeProposalRequest) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals", c.baseURL, slug)
+// CreatePlanDecision creates a new change proposal for a plan.
+// POST /plan-manager/plans/{slug}/plan-decisions
+func (c *HTTPClient) CreatePlanDecision(ctx context.Context, slug string, req *CreatePlanDecisionRequest) (*PlanDecision, int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions", c.baseURL, slug)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2288,7 +2288,7 @@ func (c *HTTPClient) CreateChangeProposal(ctx context.Context, slug string, req 
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var proposal ChangeProposal
+	var proposal PlanDecision
 	if err := json.Unmarshal(body, &proposal); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
@@ -2296,10 +2296,10 @@ func (c *HTTPClient) CreateChangeProposal(ctx context.Context, slug string, req 
 	return &proposal, resp.StatusCode, nil
 }
 
-// GetChangeProposal retrieves a single change proposal by ID.
-// GET /plan-manager/plans/{slug}/change-proposals/{proposalID}
-func (c *HTTPClient) GetChangeProposal(ctx context.Context, slug, proposalID string) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+// GetPlanDecision retrieves a single change proposal by ID.
+// GET /plan-manager/plans/{slug}/plan-decisions/{proposalID}
+func (c *HTTPClient) GetPlanDecision(ctx context.Context, slug, proposalID string) (*PlanDecision, int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions/%s", c.baseURL, slug, proposalID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -2321,7 +2321,7 @@ func (c *HTTPClient) GetChangeProposal(ctx context.Context, slug, proposalID str
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var proposal ChangeProposal
+	var proposal PlanDecision
 	if err := json.Unmarshal(body, &proposal); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
@@ -2329,11 +2329,11 @@ func (c *HTTPClient) GetChangeProposal(ctx context.Context, slug, proposalID str
 	return &proposal, resp.StatusCode, nil
 }
 
-// ListChangeProposals lists all change proposals for a plan.
-// GET /plan-manager/plans/{slug}/change-proposals
+// ListPlanDecisions lists all change proposals for a plan.
+// GET /plan-manager/plans/{slug}/plan-decisions
 // Optional status filter: "proposed", "under_review", "accepted", "rejected", "archived"
-func (c *HTTPClient) ListChangeProposals(ctx context.Context, slug, statusFilter string) ([]*ChangeProposal, error) {
-	rawURL := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals", c.baseURL, slug)
+func (c *HTTPClient) ListPlanDecisions(ctx context.Context, slug, statusFilter string) ([]*PlanDecision, error) {
+	rawURL := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions", c.baseURL, slug)
 	if statusFilter != "" {
 		rawURL += "?status=" + statusFilter
 	}
@@ -2358,7 +2358,7 @@ func (c *HTTPClient) ListChangeProposals(ctx context.Context, slug, statusFilter
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var proposals []*ChangeProposal
+	var proposals []*PlanDecision
 	if err := json.Unmarshal(body, &proposals); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
@@ -2366,10 +2366,10 @@ func (c *HTTPClient) ListChangeProposals(ctx context.Context, slug, statusFilter
 	return proposals, nil
 }
 
-// UpdateChangeProposal updates a change proposal's fields.
-// PATCH /plan-manager/plans/{slug}/change-proposals/{proposalID}
-func (c *HTTPClient) UpdateChangeProposal(ctx context.Context, slug, proposalID string, req *UpdateChangeProposalRequest) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+// UpdatePlanDecision updates a change proposal's fields.
+// PATCH /plan-manager/plans/{slug}/plan-decisions/{proposalID}
+func (c *HTTPClient) UpdatePlanDecision(ctx context.Context, slug, proposalID string, req *UpdatePlanDecisionRequest) (*PlanDecision, int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions/%s", c.baseURL, slug, proposalID)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -2397,7 +2397,7 @@ func (c *HTTPClient) UpdateChangeProposal(ctx context.Context, slug, proposalID 
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var proposal ChangeProposal
+	var proposal PlanDecision
 	if err := json.Unmarshal(body, &proposal); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
@@ -2405,11 +2405,11 @@ func (c *HTTPClient) UpdateChangeProposal(ctx context.Context, slug, proposalID 
 	return &proposal, resp.StatusCode, nil
 }
 
-// DeleteChangeProposal deletes a change proposal (only allowed when status is "proposed").
-// DELETE /plan-manager/plans/{slug}/change-proposals/{proposalID}
+// DeletePlanDecision deletes a change proposal (only allowed when status is "proposed").
+// DELETE /plan-manager/plans/{slug}/plan-decisions/{proposalID}
 // Returns the HTTP status code.
-func (c *HTTPClient) DeleteChangeProposal(ctx context.Context, slug, proposalID string) (int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals/%s", c.baseURL, slug, proposalID)
+func (c *HTTPClient) DeletePlanDecision(ctx context.Context, slug, proposalID string) (int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions/%s", c.baseURL, slug, proposalID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
 	if err != nil {
@@ -2430,10 +2430,10 @@ func (c *HTTPClient) DeleteChangeProposal(ctx context.Context, slug, proposalID 
 	return resp.StatusCode, nil
 }
 
-// SubmitChangeProposal transitions a proposal from "proposed" to "under_review".
-// POST /plan-manager/plans/{slug}/change-proposals/{proposalID}/submit
-func (c *HTTPClient) SubmitChangeProposal(ctx context.Context, slug, proposalID string) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals/%s/submit", c.baseURL, slug, proposalID)
+// SubmitPlanDecision transitions a proposal from "proposed" to "under_review".
+// POST /plan-manager/plans/{slug}/plan-decisions/{proposalID}/submit
+func (c *HTTPClient) SubmitPlanDecision(ctx context.Context, slug, proposalID string) (*PlanDecision, int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions/%s/submit", c.baseURL, slug, proposalID)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, http.NoBody)
 	if err != nil {
@@ -2455,7 +2455,7 @@ func (c *HTTPClient) SubmitChangeProposal(ctx context.Context, slug, proposalID 
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var proposal ChangeProposal
+	var proposal PlanDecision
 	if err := json.Unmarshal(body, &proposal); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
@@ -2463,11 +2463,11 @@ func (c *HTTPClient) SubmitChangeProposal(ctx context.Context, slug, proposalID 
 	return &proposal, resp.StatusCode, nil
 }
 
-// AcceptChangeProposal transitions a proposal from "under_review" to "accepted"
+// AcceptPlanDecision transitions a proposal from "under_review" to "accepted"
 // and triggers the cascade that marks affected tasks dirty.
-// POST /plan-manager/plans/{slug}/change-proposals/{proposalID}/accept
-func (c *HTTPClient) AcceptChangeProposal(ctx context.Context, slug, proposalID, reviewedBy string) (*AcceptChangeProposalResponse, int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals/%s/accept", c.baseURL, slug, proposalID)
+// POST /plan-manager/plans/{slug}/plan-decisions/{proposalID}/accept
+func (c *HTTPClient) AcceptPlanDecision(ctx context.Context, slug, proposalID, reviewedBy string) (*AcceptPlanDecisionResponse, int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions/%s/accept", c.baseURL, slug, proposalID)
 
 	type acceptBody struct {
 		ReviewedBy string `json:"reviewed_by,omitempty"`
@@ -2500,7 +2500,7 @@ func (c *HTTPClient) AcceptChangeProposal(ctx context.Context, slug, proposalID,
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var acceptResp AcceptChangeProposalResponse
+	var acceptResp AcceptPlanDecisionResponse
 	if err := json.Unmarshal(body, &acceptResp); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
@@ -2508,10 +2508,10 @@ func (c *HTTPClient) AcceptChangeProposal(ctx context.Context, slug, proposalID,
 	return &acceptResp, resp.StatusCode, nil
 }
 
-// RejectChangeProposal transitions a proposal from "under_review" to "rejected".
-// POST /plan-manager/plans/{slug}/change-proposals/{proposalID}/reject
-func (c *HTTPClient) RejectChangeProposal(ctx context.Context, slug, proposalID, reviewedBy, reason string) (*ChangeProposal, int, error) {
-	url := fmt.Sprintf("%s/plan-manager/plans/%s/change-proposals/%s/reject", c.baseURL, slug, proposalID)
+// RejectPlanDecision transitions a proposal from "under_review" to "rejected".
+// POST /plan-manager/plans/{slug}/plan-decisions/{proposalID}/reject
+func (c *HTTPClient) RejectPlanDecision(ctx context.Context, slug, proposalID, reviewedBy, reason string) (*PlanDecision, int, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/plan-decisions/%s/reject", c.baseURL, slug, proposalID)
 
 	type rejectBody struct {
 		ReviewedBy string `json:"reviewed_by,omitempty"`
@@ -2545,7 +2545,7 @@ func (c *HTTPClient) RejectChangeProposal(ctx context.Context, slug, proposalID,
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var proposal ChangeProposal
+	var proposal PlanDecision
 	if err := json.Unmarshal(body, &proposal); err != nil {
 		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}

@@ -55,7 +55,7 @@ type TriggerPayload struct {
 	SystemPrompt     string   `json:"system_prompt,omitempty"`   // Provider-aware system prompt for the agentic loop
 	ScenarioBranch   string   `json:"scenario_branch,omitempty"` // Target branch for worktree merges (e.g. "semspec/scenario-auth")
 
-	// ChangeProposal-specific fields
+	// PlanDecision-specific fields
 	ProposalID string `json:"proposal_id,omitempty"`
 
 	// Data holds any additional custom fields as raw JSON (kept for extensibility)

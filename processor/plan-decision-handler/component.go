@@ -1,13 +1,13 @@
-// Package changeproposalhandler provides the change-proposal-handler component.
-// It reacts to accepted ChangeProposal events by running the cascade logic
+// Package changeproposalhandler provides the plan-decision-handler component.
+// It reacts to accepted PlanDecision events by running the cascade logic
 // asynchronously — isolating dirty-marking and cancellation from the HTTP handler
 // that manages the proposal lifecycle.
 //
 // Flow:
-//  1. plan-api accepts a ChangeProposal and publishes a ChangeProposalCascadeRequest.
+//  1. plan-api accepts a PlanDecision and publishes a PlanDecisionCascadeRequest.
 //  2. This component consumes the request from JetStream.
-//  3. It loads the proposal, runs cascade.ChangeProposal, and publishes
-//     a change_proposal.accepted event to JetStream.
+//  3. It loads the proposal, runs cascade.PlanDecision, and publishes
+//     a plan_decision.accepted event to JetStream.
 //  4. For each affected scenario that has a running loop, it publishes a
 //     cancellation Signal to agent.signal.cancel.<loopID> via Core NATS.
 package changeproposalhandler
@@ -34,7 +34,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// Component implements the change-proposal-handler processor.
+// Component implements the plan-decision-handler processor.
 type Component struct {
 	name         string
 	config       Config
@@ -56,7 +56,7 @@ type Component struct {
 	lastActivity      time.Time
 }
 
-// NewComponent creates a new change-proposal-handler processor.
+// NewComponent creates a new plan-decision-handler processor.
 func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
 	var config Config
 	if err := json.Unmarshal(rawConfig, &config); err != nil {
@@ -97,7 +97,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		}
 	}
 
-	const name = "change-proposal-handler"
+	const name = "plan-decision-handler"
 	logger := deps.GetLogger()
 	return &Component{
 		name:       name,
@@ -115,7 +115,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
-	c.logger.Debug("initialized change-proposal-handler",
+	c.logger.Debug("initialized plan-decision-handler",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
 		"trigger_subject", c.config.TriggerSubject)
@@ -156,7 +156,7 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("consume cascade triggers: %w", err)
 	}
 
-	c.logger.Info("change-proposal-handler started",
+	c.logger.Info("plan-decision-handler started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
 		"subject", c.config.TriggerSubject)
@@ -183,7 +183,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.requestsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Unwrap BaseMessage envelope to reach the ChangeProposalCascadeRequest payload.
+	// Unwrap BaseMessage envelope to reach the PlanDecisionCascadeRequest payload.
 	var baseMsg struct {
 		Payload json.RawMessage `json:"payload"`
 	}
@@ -193,9 +193,9 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	var req payloads.ChangeProposalCascadeRequest
+	var req payloads.PlanDecisionCascadeRequest
 	if err := json.Unmarshal(baseMsg.Payload, &req); err != nil {
-		c.logger.Error("failed to parse ChangeProposalCascadeRequest", "error", err)
+		c.logger.Error("failed to parse PlanDecisionCascadeRequest", "error", err)
 		_ = msg.Term()
 		return
 	}
@@ -245,7 +245,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // handleCascadeRequest executes the cascade and returns the result.
 // The caller is responsible for publishing the accepted event and ACK ordering.
-func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) (*cascade.Result, error) {
+func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.PlanDecisionCascadeRequest) (*cascade.Result, error) {
 	if c.natsClient == nil {
 		return nil, fmt.Errorf("NATS client not available")
 	}
@@ -267,10 +267,10 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	}
 
 	// Locate the target proposal by its raw ID (KV stores raw IDs, not hashed).
-	var target *workflow.ChangeProposal
-	for i := range plan.ChangeProposals {
-		if plan.ChangeProposals[i].ID == req.ProposalID {
-			target = &plan.ChangeProposals[i]
+	var target *workflow.PlanDecision
+	for i := range plan.PlanDecisions {
+		if plan.PlanDecisions[i].ID == req.ProposalID {
+			target = &plan.PlanDecisions[i]
 			break
 		}
 	}
@@ -279,7 +279,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	}
 
 	// Run the cascade: pure business logic, no I/O.
-	result, err := cascade.ChangeProposal(target, plan.Scenarios)
+	result, err := cascade.PlanDecision(target, plan.Scenarios)
 	if err != nil {
 		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}
@@ -315,9 +315,9 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	return result, nil
 }
 
-// publishAcceptedEvent publishes a change_proposal.accepted event to JetStream.
-func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.ChangeProposalCascadeRequest, result *cascade.Result) error {
-	evt := &payloads.ChangeProposalAcceptedEvent{
+// publishAcceptedEvent publishes a plan_decision.accepted event to JetStream.
+func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.PlanDecisionCascadeRequest, result *cascade.Result) error {
+	evt := &payloads.PlanDecisionAcceptedEvent{
 		ProposalID:             req.ProposalID,
 		Slug:                   req.Slug,
 		TraceID:                req.TraceID,
@@ -325,7 +325,7 @@ func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.Chan
 		AffectedScenarioIDs:    result.AffectedScenarioIDs,
 	}
 
-	baseMsg := message.NewBaseMessage(evt.Schema(), evt, "change-proposal-handler")
+	baseMsg := message.NewBaseMessage(evt.Schema(), evt, "plan-decision-handler")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal accepted event: %w", err)
@@ -352,7 +352,7 @@ func (c *Component) publishCancellationSignal(ctx context.Context, scenarioID, p
 		Reason: fmt.Sprintf("change proposal %s accepted; scenario re-queued for execution", proposalID),
 	}
 
-	baseMsg := message.NewBaseMessage(sig.Schema(), sig, "change-proposal-handler")
+	baseMsg := message.NewBaseMessage(sig.Schema(), sig, "plan-decision-handler")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Warn("failed to marshal cancellation signal",
@@ -388,7 +388,7 @@ func (c *Component) Stop(_ time.Duration) error {
 	}
 
 	c.running = false
-	c.logger.Info("change-proposal-handler stopped",
+	c.logger.Info("plan-decision-handler stopped",
 		"requests_processed", c.requestsProcessed.Load(),
 		"requests_failed", c.requestsFailed.Load())
 
@@ -398,9 +398,9 @@ func (c *Component) Stop(_ time.Duration) error {
 // Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
-		Name:        "change-proposal-handler",
+		Name:        "plan-decision-handler",
 		Type:        "processor",
-		Description: "Handles accepted ChangeProposal cascade: dirty-marks affected scenarios and tasks, cancels running scenario loops",
+		Description: "Handles accepted PlanDecision cascade: dirty-marks affected scenarios and tasks, cancels running scenario loops",
 		Version:     "0.1.0",
 	}
 }

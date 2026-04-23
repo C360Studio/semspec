@@ -10,7 +10,7 @@
 
 ## Problem Statement
 
-ADR-024 introduced Requirements, Scenarios, and ChangeProposals as first-class graph entities. ADR-025 defined reactive execution where `decompose_task` produces Tasks at execution time, not during planning. The backend types, reactive workflows, and payload registrations all exist.
+ADR-024 introduced Requirements, Scenarios, and PlanDecisions as first-class graph entities. ADR-025 defined reactive execution where `decompose_task` produces Tasks at execution time, not during planning. The backend types, reactive workflows, and payload registrations all exist.
 
 But the pipeline is disconnected in two critical places:
 
@@ -26,7 +26,7 @@ The result: a new developer sees a UI that doesn't match the architecture docs, 
 |----------|--------|-----------|
 | Auto-cascade trigger | Event-driven from `handlePlanApprovedEvent` | Single wiring point; reuses existing event infrastructure |
 | Requirement/Scenario generation | Sequential, not parallel | Scenarios depend on Requirements; can't parallelize |
-| Human gates | Plan approval only; requirements/scenarios are reviewable but don't block | Reduce friction; ChangeProposals handle mid-stream corrections |
+| Human gates | Plan approval only; requirements/scenarios are reviewable but don't block | Reduce friction; PlanDecisions handle mid-stream corrections |
 | UI action bar | Replace multi-step approve flow with single Execute button | Matches ADR-025: planning produces Requirements + Scenarios, execution handles the rest |
 | Phase display | Remove from primary flow; available as retrospective view post-execution | Phases are derived views per ADR-025, not prescriptive |
 | Legacy compatibility | Remove old Generate Phases/Tasks buttons entirely | No migration path needed; no production users on old flow |
@@ -182,7 +182,7 @@ If these processors don't exist yet, implement them:
 - Plan creation and review flow (plan-review-loop stays as-is)
 - `decompose_task` tool implementation (ADR-025 scope)
 - `dag-execution-loop` and `scenario-execution-loop` reactive workflows
-- ChangeProposal lifecycle (ADR-024 scope)
+- PlanDecision lifecycle (ADR-024 scope)
 - Graph-first architecture
 - NATS JetStream messaging
 - KV bucket state management

@@ -173,9 +173,9 @@ const (
 	DispatchFailed = "failed"
 )
 
-// ChangeProposal workflow phases.
+// PlanDecision workflow phases.
 //
-// Components: change-proposal-reviewer (LLM or human gate)
+// Components: plan-decision-reviewer (LLM or human gate)
 //
 // Phase flow (Participant pattern):
 //
@@ -184,32 +184,32 @@ const (
 //	  accepted -> cascading -> cascade_complete -> archived
 //	  rejected -> archived
 const (
-	// ChangeProposalReviewing indicates the proposal is ready for review.
-	ChangeProposalReviewing = "reviewing"
+	// PlanDecisionReviewing indicates the proposal is ready for review.
+	PlanDecisionReviewing = "reviewing"
 
-	// ChangeProposalReviewingDispatched indicates dispatch to the reviewer.
-	ChangeProposalReviewingDispatched = "reviewing_dispatched"
+	// PlanDecisionReviewingDispatched indicates dispatch to the reviewer.
+	PlanDecisionReviewingDispatched = "reviewing_dispatched"
 
-	// ChangeProposalReviewed is set by the reviewer when review completes.
-	ChangeProposalReviewed = "reviewed"
+	// PlanDecisionReviewed is set by the reviewer when review completes.
+	PlanDecisionReviewed = "reviewed"
 
-	// ChangeProposalEvaluated indicates the review has been evaluated.
-	ChangeProposalEvaluated = "evaluated"
+	// PlanDecisionEvaluated indicates the review has been evaluated.
+	PlanDecisionEvaluated = "evaluated"
 
-	// ChangeProposalCascading indicates an accepted proposal is cascading dirty status.
-	ChangeProposalCascading = "cascading"
+	// PlanDecisionCascading indicates an accepted proposal is cascading dirty status.
+	PlanDecisionCascading = "cascading"
 
-	// ChangeProposalCascadeComplete indicates cascade completed successfully.
-	ChangeProposalCascadeComplete = "cascade_complete"
+	// PlanDecisionCascadeComplete indicates cascade completed successfully.
+	PlanDecisionCascadeComplete = "cascade_complete"
 
-	// ChangeProposalArchived is the terminal phase for both accepted and rejected proposals.
-	ChangeProposalArchived = "archived"
+	// PlanDecisionArchived is the terminal phase for both accepted and rejected proposals.
+	PlanDecisionArchived = "archived"
 
-	// ChangeProposalReviewerFailed indicates the reviewer component failed.
-	ChangeProposalReviewerFailed = "reviewer_failed"
+	// PlanDecisionReviewerFailed indicates the reviewer component failed.
+	PlanDecisionReviewerFailed = "reviewer_failed"
 
-	// ChangeProposalCascadeFailed indicates the cascade action failed.
-	ChangeProposalCascadeFailed = "cascade_failed"
+	// PlanDecisionCascadeFailed indicates the cascade action failed.
+	PlanDecisionCascadeFailed = "cascade_failed"
 )
 
 // Verdict constants shared across workflows.

@@ -27,8 +27,8 @@ evaluating semspec as a BMAD/OpenSpec replacement exposed three gaps:
 | Scenario-to-Task cardinality | Many-to-many (Task SATISFIES multiple Scenarios) | Integration tasks are real; 1:1 creates busywork |
 | Migration strategy | CLI command, run once, not idempotent | Greenfield only, rerun against clean state on failure |
 | LLM prompt pipeline | Configurable, default to pipeline | Target is qwen 14b class; quality > latency |
-| ChangeProposal scope | One proposal can MUTATE multiple Requirements | Real changes rarely respect 1:1 boundaries |
-| ChangeProposal processing | Reactive workflow (OODA loop) | Consistent with ADR-005 pattern; cascade is a rule action |
+| PlanDecision scope | One proposal can MUTATE multiple Requirements | Real changes rarely respect 1:1 boundaries |
+| PlanDecision processing | Reactive workflow (OODA loop) | Consistent with ADR-005 pattern; cascade is a rule action |
 
 ## Target Node Hierarchy
 
@@ -39,7 +39,7 @@ Plan
   |           +-- Task(s)     <- SATISFIES edge (many-to-many)
   |                 +-- Execution
   +-- Phase(s)                <- Organizational view, references Tasks
-  +-- ChangeProposal(s)       <- Lifecycle node, mutates Requirements on acceptance
+  +-- PlanDecision(s)       <- Lifecycle node, mutates Requirements on acceptance
 ```
 
 ## Generation Sequence
@@ -77,7 +77,7 @@ type Requirement struct {
 Edges:
 - `BELONGS_TO` -> Plan
 - `HAS_SCENARIO` -> Scenario (one or many)
-- `SUPERSEDED_BY` -> Requirement (via ChangeProposal)
+- `SUPERSEDED_BY` -> Requirement (via PlanDecision)
 
 ### Scenario
 
@@ -99,15 +99,15 @@ Edges:
 - `SATISFIED_BY` -> Task (many-to-many via Task.ScenarioIDs)
 - `VALIDATED_BY` -> Execution result
 
-### ChangeProposal
+### PlanDecision
 
 ```go
-type ChangeProposal struct {
-    ID             string               // "change-proposal.{plan_slug}.{sequence}"
+type PlanDecision struct {
+    ID             string               // "plan-decision.{plan_slug}.{sequence}"
     PlanID         string
     Title          string
     Rationale      string
-    Status         ChangeProposalStatus // proposed, under_review, accepted, rejected, archived
+    Status         PlanDecisionStatus // proposed, under_review, accepted, rejected, archived
     ProposedBy     string               // agent role or "user"
     AffectedReqIDs []string             // multiple Requirements per proposal
     CreatedAt      time.Time
@@ -127,7 +127,7 @@ Edges:
 
 - Remove: embedded `AcceptanceCriteria` field (after migration)
 - Add: `ScenarioIDs []string` (many-to-many SATISFIES edge)
-- Add: `dirty` status (set by ChangeProposal acceptance cascade)
+- Add: `dirty` status (set by PlanDecision acceptance cascade)
 - Add: `blocked` status (explicit, set by dependency resolution)
 - Keep: `PhaseID` reference (already reference-based)
 
@@ -143,9 +143,9 @@ created -> drafted -> reviewed -> approved
   -> implementing -> complete
 ```
 
-## ChangeProposal Reactive Workflow
+## PlanDecision Reactive Workflow
 
-The ChangeProposal lifecycle is an OODA loop processed by the reactive engine, consistent
+The PlanDecision lifecycle is an OODA loop processed by the reactive engine, consistent
 with ADR-005. This is NOT inline API logic and NOT a standalone processor component.
 
 ### OODA Mapping
@@ -160,12 +160,12 @@ Act:      Cascade dirty status through graph, publish events
 ### Reactive Rules
 
 ```
-KV key pattern: change-proposal.*
-Trigger subject: workflow.trigger.change-proposal-loop
+KV key pattern: plan-decision.*
+Trigger subject: workflow.trigger.plan-decision-loop
 
 Rules:
   accept-trigger          -> populate state from proposal payload
-  dispatch-review         -> workflow.async.change-proposal-reviewer (LLM or human gate)
+  dispatch-review         -> workflow.async.plan-decision-reviewer (LLM or human gate)
   review-completed        -> evaluate verdict
   handle-accepted         -> execute cascade (graph traversal + dirty marking)
   handle-rejected         -> archive proposal, no graph mutations
@@ -175,7 +175,7 @@ Rules:
 
 ### Cascade Logic (handle-accepted rule action)
 
-1. Load ChangeProposal from KV state
+1. Load PlanDecision from KV state
 2. For each Requirement in `AffectedReqIDs`:
    a. Publish `requirement.updated` event
    b. Query `HAS_SCENARIO` edges to find affected Scenarios
@@ -184,10 +184,10 @@ Rules:
    a. Set status to `dirty`
    b. Persist updated task
 4. Publish `task.dirty` event with all affected task IDs
-5. Publish `change_proposal.accepted` event
+5. Publish `plan_decision.accepted` event
 6. Set proposal status to `archived`
 
-### What Triggers a ChangeProposal?
+### What Triggers a PlanDecision?
 
 Three sources, all publish to the same trigger subject:
 
@@ -209,11 +209,11 @@ requirement.updated                { planId, requirementId, changeProposalId }
 scenario.created                   { requirementId, scenarioId }
 scenario.status.updated            { scenarioId, status }
 task.dirty                         { taskIds[], scenarioIds[], requirementIds[], changeProposalId }
-change_proposal.created            { planId, proposalId }
-change_proposal.accepted           { planId, proposalId, affectedTaskIds[] }
-change_proposal.rejected           { planId, proposalId }
-workflow.trigger.change-proposal-loop   { proposalId, planId }
-workflow.async.change-proposal-reviewer { proposalId, planId, affectedReqIDs }
+plan_decision.created            { planId, proposalId }
+plan_decision.accepted           { planId, proposalId, affectedTaskIds[] }
+plan_decision.rejected           { planId, proposalId }
+workflow.trigger.plan-decision-loop   { proposalId, planId }
+workflow.async.plan-decision-reviewer { proposalId, planId, affectedReqIDs }
 ```
 
 ### Modified Subjects
@@ -226,10 +226,10 @@ workflow.async.change-proposal-reviewer { proposalId, planId, affectedReqIDs }
 ### Phase 1: Foundation (Node Types + Vocabulary)
 
 Files touched:
-- `workflow/types.go` — Requirement, Scenario, ChangeProposal structs + status enums
+- `workflow/types.go` — Requirement, Scenario, PlanDecision structs + status enums
 - `workflow/types.go` — `dirty`, `blocked` TaskStatus + transitions
 - `workflow/types.go` — `requirements_generated`, `scenarios_generated` PlanStatus + transitions
-- `vocabulary/semspec/predicates.go` — requirement, scenario, change-proposal predicates
+- `vocabulary/semspec/predicates.go` — requirement, scenario, plan-decision predicates
 - `workflow/plan.go` — SaveRequirements, LoadRequirements, SaveScenarios, LoadScenarios, etc.
 
 Validation: unit tests for type transitions, serialization round-trips.
@@ -239,13 +239,13 @@ Validation: unit tests for type transitions, serialization round-trips.
 Files touched:
 - `processor/workflow-api/http_requirement.go` — Requirement CRUD handlers (new file)
 - `processor/workflow-api/http_scenario.go` — Scenario CRUD handlers (new file)
-- `processor/workflow-api/http_change_proposal.go` — ChangeProposal lifecycle handlers (new file)
+- `processor/workflow-api/http_plan_decision.go` — PlanDecision lifecycle handlers (new file)
 - `processor/workflow-api/http.go` — route registration
 - `workflow/reactive/payloads.go` — new payload structs
 - `workflow/reactive/payloads_registry.go` — payload registration
 - `ui/src/lib/types/requirement.ts` — TypeScript types (new file)
 - `ui/src/lib/types/scenario.ts` — TypeScript types (new file)
-- `ui/src/lib/types/change-proposal.ts` — TypeScript types (new file)
+- `ui/src/lib/types/plan-decision.ts` — TypeScript types (new file)
 - `ui/src/lib/api/client.ts` — API client methods
 
 Validation: handler tests, TypeScript compiles.
@@ -276,12 +276,12 @@ Files touched:
 
 Validation: mock LLM e2e test with new fixture format.
 
-### Phase 5: ChangeProposal Lifecycle + Cascade
+### Phase 5: PlanDecision Lifecycle + Cascade
 
 Files touched:
-- `workflow/reactive/change_proposal.go` — reactive workflow rules (new file)
-- `workflow/reactive/change_proposal_actions.go` — cascade logic (new file)
-- `configs/semspec.json` — change-proposal-loop configuration
+- `workflow/reactive/plan_decision.go` — reactive workflow rules (new file)
+- `workflow/reactive/plan_decision_actions.go` — cascade logic (new file)
+- `configs/semspec.json` — plan-decision-loop configuration
 
 Validation: integration test — create proposal -> accept -> verify dirty cascade.
 
@@ -290,7 +290,7 @@ Validation: integration test — create proposal -> accept -> verify dirty casca
 Files touched:
 - `ui/src/lib/components/plan/RequirementPanel.svelte` — new component
 - `ui/src/lib/components/plan/ScenarioDetail.svelte` — new component
-- `ui/src/lib/components/plan/ChangeProposalFlow.svelte` — new component
+- `ui/src/lib/components/plan/PlanDecisionFlow.svelte` — new component
 - `ui/src/lib/components/plan/TaskDetail.svelte` — show linked Scenarios
 - `ui/src/lib/components/plan/PlanNavTree.svelte` — dirty indicator + requirement view
 - `ui/src/lib/components/board/PlanCard.svelte` — dirty task count
@@ -310,7 +310,7 @@ Files touched:
 | Risk | Mitigation |
 |------|------------|
 | Multi-step LLM pipeline increases planning latency | Pipeline is default but configurable; single-shot available |
-| ChangeProposal cascade could dirty many tasks | Cascade publishes a single batched event; UI handles bulk dirty state |
+| PlanDecision cascade could dirty many tasks | Cascade publishes a single batched event; UI handles bulk dirty state |
 | Many-to-many Task-Scenario edges complicate queries | Indexed via ScenarioIDs on Task; graph traversal is bounded by plan scope |
 | Migration assumes greenfield | Acceptable — no legacy data to protect |
 
@@ -320,5 +320,5 @@ Files touched:
 2. Phase 2 — API surface enables parallel UI work
 3. Phase 3 — migration unblocks new planning flow
 4. Phase 4 — planning flow is the user-facing payoff
-5. Phase 5 — ChangeProposal is the BMAD/OpenSpec differentiator
+5. Phase 5 — PlanDecision is the BMAD/OpenSpec differentiator
 6. Phase 6 — UI shows graph state; graph must be correct first

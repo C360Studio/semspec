@@ -67,7 +67,7 @@ func TestParseQAReviewResult(t *testing.T) {
 		},
 		{
 			name:        "JSON with change proposals array",
-			input:       `{"verdict":"needs_changes","summary":"fix x","change_proposals":[{"title":"fix","rationale":"r","affected_requirement_ids":["r-1"],"rejection_type":"fixable"}]}`,
+			input:       `{"verdict":"needs_changes","summary":"fix x","plan_decisions":[{"title":"fix","rationale":"r","affected_requirement_ids":["r-1"],"rejection_type":"fixable"}]}`,
 			wantVerdict: "needs_changes",
 			wantSummary: "fix x",
 			wantCPCount: 1,
@@ -118,8 +118,8 @@ func TestParseQAReviewResult(t *testing.T) {
 			if got.Summary != tt.wantSummary {
 				t.Errorf("Summary = %q, want %q", got.Summary, tt.wantSummary)
 			}
-			if len(got.ChangeProposals) != tt.wantCPCount {
-				t.Errorf("ChangeProposals count = %d, want %d", len(got.ChangeProposals), tt.wantCPCount)
+			if len(got.PlanDecisions) != tt.wantCPCount {
+				t.Errorf("PlanDecisions count = %d, want %d", len(got.PlanDecisions), tt.wantCPCount)
 			}
 			if tt.wantFulfilled != "" && got.Dimensions.RequirementFulfillment != tt.wantFulfilled {
 				t.Errorf("RequirementFulfillment = %q, want %q",

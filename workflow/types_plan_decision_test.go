@@ -6,16 +6,16 @@ import (
 	"time"
 )
 
-func TestChangeProposalStatus_IsValid(t *testing.T) {
+func TestPlanDecisionStatus_IsValid(t *testing.T) {
 	tests := []struct {
-		status ChangeProposalStatus
+		status PlanDecisionStatus
 		want   bool
 	}{
-		{ChangeProposalStatusProposed, true},
-		{ChangeProposalStatusUnderReview, true},
-		{ChangeProposalStatusAccepted, true},
-		{ChangeProposalStatusRejected, true},
-		{ChangeProposalStatusArchived, true},
+		{PlanDecisionStatusProposed, true},
+		{PlanDecisionStatusUnderReview, true},
+		{PlanDecisionStatusAccepted, true},
+		{PlanDecisionStatusRejected, true},
+		{PlanDecisionStatusArchived, true},
 		{"", false},
 		{"unknown", false},
 		{"Proposed", false},
@@ -24,39 +24,42 @@ func TestChangeProposalStatus_IsValid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(string(tt.status), func(t *testing.T) {
 			if got := tt.status.IsValid(); got != tt.want {
-				t.Errorf("ChangeProposalStatus(%q).IsValid() = %v, want %v", tt.status, got, tt.want)
+				t.Errorf("PlanDecisionStatus(%q).IsValid() = %v, want %v", tt.status, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestChangeProposalStatus_CanTransitionTo(t *testing.T) {
+func TestPlanDecisionStatus_CanTransitionTo(t *testing.T) {
 	tests := []struct {
-		from ChangeProposalStatus
-		to   ChangeProposalStatus
+		from PlanDecisionStatus
+		to   PlanDecisionStatus
 		want bool
 	}{
 		// proposed transitions
-		{ChangeProposalStatusProposed, ChangeProposalStatusUnderReview, true},
-		{ChangeProposalStatusProposed, ChangeProposalStatusAccepted, true}, // auto-accept shortcut
-		{ChangeProposalStatusProposed, ChangeProposalStatusRejected, false},
-		{ChangeProposalStatusProposed, ChangeProposalStatusArchived, false},
+		{PlanDecisionStatusProposed, PlanDecisionStatusUnderReview, true},
+		{PlanDecisionStatusProposed, PlanDecisionStatusAccepted, true}, // auto-accept shortcut
+		{PlanDecisionStatusProposed, PlanDecisionStatusRejected, false},
+		// proposed → archived supports plan-manager auto-closing decisions
+		// whose subject requirement reaches a non-failed terminal state
+		// (item 4 design: exhaustion decisions aren't accepted, they archive).
+		{PlanDecisionStatusProposed, PlanDecisionStatusArchived, true},
 		// under_review transitions
-		{ChangeProposalStatusUnderReview, ChangeProposalStatusAccepted, true},
-		{ChangeProposalStatusUnderReview, ChangeProposalStatusRejected, true},
-		{ChangeProposalStatusUnderReview, ChangeProposalStatusProposed, false},
-		{ChangeProposalStatusUnderReview, ChangeProposalStatusArchived, false},
+		{PlanDecisionStatusUnderReview, PlanDecisionStatusAccepted, true},
+		{PlanDecisionStatusUnderReview, PlanDecisionStatusRejected, true},
+		{PlanDecisionStatusUnderReview, PlanDecisionStatusProposed, false},
+		{PlanDecisionStatusUnderReview, PlanDecisionStatusArchived, true},
 		// accepted transitions
-		{ChangeProposalStatusAccepted, ChangeProposalStatusArchived, true},
-		{ChangeProposalStatusAccepted, ChangeProposalStatusProposed, false},
-		{ChangeProposalStatusAccepted, ChangeProposalStatusRejected, false},
+		{PlanDecisionStatusAccepted, PlanDecisionStatusArchived, true},
+		{PlanDecisionStatusAccepted, PlanDecisionStatusProposed, false},
+		{PlanDecisionStatusAccepted, PlanDecisionStatusRejected, false},
 		// rejected transitions
-		{ChangeProposalStatusRejected, ChangeProposalStatusArchived, true},
-		{ChangeProposalStatusRejected, ChangeProposalStatusProposed, false},
-		{ChangeProposalStatusRejected, ChangeProposalStatusAccepted, false},
+		{PlanDecisionStatusRejected, PlanDecisionStatusArchived, true},
+		{PlanDecisionStatusRejected, PlanDecisionStatusProposed, false},
+		{PlanDecisionStatusRejected, PlanDecisionStatusAccepted, false},
 		// archived is terminal
-		{ChangeProposalStatusArchived, ChangeProposalStatusProposed, false},
-		{ChangeProposalStatusArchived, ChangeProposalStatusAccepted, false},
+		{PlanDecisionStatusArchived, PlanDecisionStatusProposed, false},
+		{PlanDecisionStatusArchived, PlanDecisionStatusAccepted, false},
 	}
 
 	for _, tt := range tests {
@@ -68,17 +71,17 @@ func TestChangeProposalStatus_CanTransitionTo(t *testing.T) {
 	}
 }
 
-func TestChangeProposal_JSONRoundTrip(t *testing.T) {
+func TestPlanDecision_JSONRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	reviewedAt := now.Add(1 * time.Hour)
 	decidedAt := now.Add(2 * time.Hour)
 
-	proposal := ChangeProposal{
-		ID:             "change-proposal.my-plan.1",
+	proposal := PlanDecision{
+		ID:             "plan-decision.my-plan.1",
 		PlanID:         "semspec.local.project.default.plan.my-plan",
 		Title:          "Expand authentication scope",
 		Rationale:      "OAuth support is needed for enterprise customers",
-		Status:         ChangeProposalStatusProposed,
+		Status:         PlanDecisionStatusProposed,
 		ProposedBy:     "user",
 		AffectedReqIDs: []string{"requirement.my-plan.1", "requirement.my-plan.2"},
 		CreatedAt:      now,
@@ -91,7 +94,7 @@ func TestChangeProposal_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("json.Marshal() error: %v", err)
 	}
 
-	var got ChangeProposal
+	var got PlanDecision
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("json.Unmarshal() error: %v", err)
 	}
@@ -133,14 +136,14 @@ func TestChangeProposal_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestChangeProposal_JSONRoundTrip_NilOptionalFields(t *testing.T) {
+func TestPlanDecision_JSONRoundTrip_NilOptionalFields(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
-	proposal := ChangeProposal{
-		ID:             "change-proposal.my-plan.2",
+	proposal := PlanDecision{
+		ID:             "plan-decision.my-plan.2",
 		PlanID:         "semspec.local.project.default.plan.my-plan",
 		Title:          "Add logging requirement",
 		Rationale:      "Audit trail needed",
-		Status:         ChangeProposalStatusProposed,
+		Status:         PlanDecisionStatusProposed,
 		ProposedBy:     "agent",
 		AffectedReqIDs: []string{"requirement.my-plan.3"},
 		CreatedAt:      now,
@@ -151,7 +154,7 @@ func TestChangeProposal_JSONRoundTrip_NilOptionalFields(t *testing.T) {
 		t.Fatalf("json.Marshal() error: %v", err)
 	}
 
-	var got ChangeProposal
+	var got PlanDecision
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("json.Unmarshal() error: %v", err)
 	}

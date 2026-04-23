@@ -32,7 +32,7 @@ into a TaskDAG at runtime.
 CRUD for Given/When/Then scenarios. Scenarios are acceptance criteria attached to requirements,
 validated at review time. Filter by `?requirement_id=`.
 
-### Change Proposals — `/plan-api/plans/{slug}/change-proposals`
+### Change Proposals — `/plan-api/plans/{slug}/plan-decisions`
 
 Submit, review, accept, or reject requirement changes after a plan is approved.
 Accepting triggers dirty cascade to affected scenarios and tasks.

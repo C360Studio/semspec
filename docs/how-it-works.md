@@ -73,9 +73,9 @@ Specialized tools exist only for things bash cannot do.
 | `web_search` | `BRAVE_SEARCH_API_KEY` set |
 | `http_request` | Always registered; persists fetched content to graph as `source.web.*` entities |
 
-### ChangeProposal Cancellation
+### PlanDecision Cancellation
 
-When a ChangeProposal is accepted during reactive execution, running scenario loops are cancelled
+When a PlanDecision is accepted during reactive execution, running scenario loops are cancelled
 via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Scenarios are
 re-queued for fresh execution with the updated behavioral contracts.
 
@@ -105,7 +105,7 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 │  │               requirement-generator, scenario-gen)   │
 │  ├── Execution   (scenario-orchestrator,                 │
 │  │               requirement-executor, execution-manager,│
-│  │               qa-reviewer, change-proposal-handler)    │
+│  │               qa-reviewer, plan-decision-handler)    │
 │  └── Support     (plan-manager, project-manager,        │
 │                   question-manager, etc.)                │
 └─────────────────────────────────────────────────────────┘
@@ -328,11 +328,11 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │
 │                          scoped by qa_level (synthesis/unit/          │
 │                          integration/full)                           │
-│  change-proposal-handler  ChangeProposal OODA loop and cascade      │
+│  plan-decision-handler  PlanDecision OODA loop and cascade      │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Support ─────────────────────────────────────────────────┐
-│  plan-manager         Requirement/Scenario/ChangeProposal HTTP API;  │
+│  plan-manager         Requirement/Scenario/PlanDecision HTTP API;  │
 │                        owns PLAN_STATES writes and event handling    │
 │  project-manager      Project management HTTP API                    │
 │  workflow-validator   Document structure validation (request/reply)  │

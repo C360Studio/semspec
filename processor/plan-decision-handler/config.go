@@ -8,22 +8,22 @@ import (
 	"github.com/c360studio/semstreams/component"
 )
 
-// handlerSchema defines the configuration schema for the change-proposal-handler.
+// handlerSchema defines the configuration schema for the plan-decision-handler.
 var handlerSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
-// Config holds configuration for the change-proposal-handler component.
+// Config holds configuration for the plan-decision-handler component.
 type Config struct {
 	// StreamName is the JetStream stream for consuming cascade trigger messages.
 	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for cascade trigger messages,category:basic,default:WORKFLOW"`
 
 	// ConsumerName is the durable consumer name for cascade trigger consumption.
-	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name,category:basic,default:change-proposal-handler"`
+	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name,category:basic,default:plan-decision-handler"`
 
-	// TriggerSubject is the subject on which ChangeProposalCascadeRequests arrive.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject for cascade trigger messages,category:basic,default:workflow.trigger.change-proposal-cascade"`
+	// TriggerSubject is the subject on which PlanDecisionCascadeRequests arrive.
+	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject for cascade trigger messages,category:basic,default:workflow.trigger.plan-decision-cascade"`
 
 	// AcceptedSubject is the subject to which the accepted event is published after cascade.
-	AcceptedSubject string `json:"accepted_subject" schema:"type:string,description:Subject for publishing accepted events after cascade,category:advanced,default:workflow.events.change-proposal.accepted"`
+	AcceptedSubject string `json:"accepted_subject" schema:"type:string,description:Subject for publishing accepted events after cascade,category:advanced,default:workflow.events.plan-decision.accepted"`
 
 	// TimeoutSeconds is the maximum seconds allowed for a single cascade run.
 	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Cascade timeout in seconds,category:advanced,default:120,min:10,max:600"`
@@ -36,18 +36,18 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		StreamName:      "WORKFLOW",
-		ConsumerName:    "change-proposal-handler",
-		TriggerSubject:  "workflow.trigger.change-proposal-cascade",
-		AcceptedSubject: "workflow.events.change-proposal.accepted",
+		ConsumerName:    "plan-decision-handler",
+		TriggerSubject:  "workflow.trigger.plan-decision-cascade",
+		AcceptedSubject: "workflow.events.plan-decision.accepted",
 		TimeoutSeconds:  120,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
 					Name:        "cascade-triggers",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.change-proposal-cascade",
+					Subject:     "workflow.trigger.plan-decision-cascade",
 					StreamName:  "WORKFLOW",
-					Description: "Receive cascade requests when a ChangeProposal is accepted",
+					Description: "Receive cascade requests when a PlanDecision is accepted",
 					Required:    true,
 				},
 			},
@@ -55,7 +55,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "accepted-events",
 					Type:        "nats",
-					Subject:     "workflow.events.change-proposal.accepted",
+					Subject:     "workflow.events.plan-decision.accepted",
 					Description: "Publish accepted event with cascade summary after dirty marking",
 					Required:    false,
 				},

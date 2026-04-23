@@ -2110,65 +2110,6 @@ components:
                         - actors
                         - integrations
                     type: object
-                change_proposals:
-                    items:
-                        properties:
-                            affected_requirement_ids:
-                                items:
-                                    type: string
-                                type: array
-                            artifact_references:
-                                items:
-                                    properties:
-                                        path:
-                                            type: string
-                                        purpose:
-                                            type: string
-                                        type:
-                                            type: string
-                                    required:
-                                        - path
-                                        - type
-                                    type: object
-                                type: array
-                            created_at:
-                                format: date-time
-                                type: string
-                            decided_at:
-                                format: date-time
-                                nullable: true
-                                type: string
-                            id:
-                                type: string
-                            plan_id:
-                                type: string
-                            proposed_by:
-                                type: string
-                            rationale:
-                                type: string
-                            rejection_reasons:
-                                additionalProperties:
-                                    type: string
-                                type: object
-                            reviewed_at:
-                                format: date-time
-                                nullable: true
-                                type: string
-                            status:
-                                type: string
-                            title:
-                                type: string
-                        required:
-                            - id
-                            - plan_id
-                            - title
-                            - rationale
-                            - status
-                            - proposed_by
-                            - affected_requirement_ids
-                            - created_at
-                        type: object
-                    type: array
                 context:
                     type: string
                 created_at:
@@ -2235,6 +2176,67 @@ components:
                                 type: object
                             type: array
                     type: object
+                plan_decisions:
+                    items:
+                        properties:
+                            affected_requirement_ids:
+                                items:
+                                    type: string
+                                type: array
+                            artifact_references:
+                                items:
+                                    properties:
+                                        path:
+                                            type: string
+                                        purpose:
+                                            type: string
+                                        type:
+                                            type: string
+                                    required:
+                                        - path
+                                        - type
+                                    type: object
+                                type: array
+                            created_at:
+                                format: date-time
+                                type: string
+                            decided_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            id:
+                                type: string
+                            kind:
+                                type: string
+                            plan_id:
+                                type: string
+                            proposed_by:
+                                type: string
+                            rationale:
+                                type: string
+                            rejection_reasons:
+                                additionalProperties:
+                                    type: string
+                                type: object
+                            reviewed_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            status:
+                                type: string
+                            title:
+                                type: string
+                        required:
+                            - id
+                            - plan_id
+                            - title
+                            - rationale
+                            - status
+                            - proposed_by
+                            - affected_requirement_ids
+                            - created_at
+                        type: object
+                    type: array
                 project_id:
                     type: string
                 qa_level:
@@ -2575,65 +2577,6 @@ components:
                         - actors
                         - integrations
                     type: object
-                change_proposals:
-                    items:
-                        properties:
-                            affected_requirement_ids:
-                                items:
-                                    type: string
-                                type: array
-                            artifact_references:
-                                items:
-                                    properties:
-                                        path:
-                                            type: string
-                                        purpose:
-                                            type: string
-                                        type:
-                                            type: string
-                                    required:
-                                        - path
-                                        - type
-                                    type: object
-                                type: array
-                            created_at:
-                                format: date-time
-                                type: string
-                            decided_at:
-                                format: date-time
-                                nullable: true
-                                type: string
-                            id:
-                                type: string
-                            plan_id:
-                                type: string
-                            proposed_by:
-                                type: string
-                            rationale:
-                                type: string
-                            rejection_reasons:
-                                additionalProperties:
-                                    type: string
-                                type: object
-                            reviewed_at:
-                                format: date-time
-                                nullable: true
-                                type: string
-                            status:
-                                type: string
-                            title:
-                                type: string
-                        required:
-                            - id
-                            - plan_id
-                            - title
-                            - rationale
-                            - status
-                            - proposed_by
-                            - affected_requirement_ids
-                            - created_at
-                        type: object
-                    type: array
                 context:
                     type: string
                 created_at:
@@ -2717,6 +2660,67 @@ components:
                                 type: object
                             type: array
                     type: object
+                plan_decisions:
+                    items:
+                        properties:
+                            affected_requirement_ids:
+                                items:
+                                    type: string
+                                type: array
+                            artifact_references:
+                                items:
+                                    properties:
+                                        path:
+                                            type: string
+                                        purpose:
+                                            type: string
+                                        type:
+                                            type: string
+                                    required:
+                                        - path
+                                        - type
+                                    type: object
+                                type: array
+                            created_at:
+                                format: date-time
+                                type: string
+                            decided_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            id:
+                                type: string
+                            kind:
+                                type: string
+                            plan_id:
+                                type: string
+                            proposed_by:
+                                type: string
+                            rationale:
+                                type: string
+                            rejection_reasons:
+                                additionalProperties:
+                                    type: string
+                                type: object
+                            reviewed_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            status:
+                                type: string
+                            title:
+                                type: string
+                        required:
+                            - id
+                            - plan_id
+                            - title
+                            - rationale
+                            - status
+                            - proposed_by
+                            - affected_requirement_ids
+                            - created_at
+                        type: object
+                    type: array
                 project_id:
                     type: string
                 qa_level:

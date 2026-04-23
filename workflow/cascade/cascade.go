@@ -1,5 +1,5 @@
 // Package cascade implements the dirty-cascade logic applied when a
-// ChangeProposal is accepted, marking affected scenarios for re-execution.
+// PlanDecision is accepted, marking affected scenarios for re-execution.
 package cascade
 
 import (
@@ -8,13 +8,13 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// Result summarizes the effect of accepting a ChangeProposal.
+// Result summarizes the effect of accepting a PlanDecision.
 type Result struct {
 	AffectedRequirementIDs []string
 	AffectedScenarioIDs    []string
 }
 
-// ChangeProposal executes the dirty cascade when a ChangeProposal is accepted.
+// PlanDecision executes the dirty cascade when a PlanDecision is accepted.
 //
 // Steps:
 //  1. Filter scenarios to those whose RequirementID is in proposal.AffectedReqIDs.
@@ -23,7 +23,7 @@ type Result struct {
 // The function is pure business logic — it performs no I/O and can be tested
 // without any infrastructure. The caller is responsible for loading the plan
 // from KV and passing the current scenario list.
-func ChangeProposal(proposal *workflow.ChangeProposal, scenarios []workflow.Scenario) (*Result, error) {
+func PlanDecision(proposal *workflow.PlanDecision, scenarios []workflow.Scenario) (*Result, error) {
 	if proposal == nil {
 		return nil, fmt.Errorf("proposal is nil")
 	}

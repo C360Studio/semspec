@@ -37,7 +37,7 @@ In the current model (even after ADR-001), the planning step asks an LLM to deco
 
 **Premature decomposition.** The LLM is making implementation decisions before agents have examined the codebase, discovered blockers, or encountered the actual complexity of the work. Tasks generated upfront are frequently wrong in scope, sequence, or even relevance.
 
-**Brittle change handling.** When a ChangeProposal mutates a Requirement, Tasks generated from the old Scenario become dirty. But the correct replacement Tasks still can't be known until an agent actually decomposes against the new Scenario at execution time. Static regeneration just repeats the same premature decomposition problem.
+**Brittle change handling.** When a PlanDecision mutates a Requirement, Tasks generated from the old Scenario become dirty. But the correct replacement Tasks still can't be known until an agent actually decomposes against the new Scenario at execution time. Static regeneration just repeats the same premature decomposition problem.
 
 **Context window waste.** Small local models (qwen 14b class) are asked to reason about implementation detail during planning, consuming context on decisions that would be better made at the moment of execution when full codebase context is available.
 
@@ -126,11 +126,11 @@ Both topologies are expressed as different DAG shapes. The execution engine does
 
 ---
 
-### ChangeProposal Integration
+### PlanDecision Integration
 
-ChangeProposal becomes significantly more powerful under reactive execution:
+PlanDecision becomes significantly more powerful under reactive execution:
 
-When a ChangeProposal is accepted:
+When a PlanDecision is accepted:
 1. Target Requirements are mutated
 2. Affected Scenarios are updated or replaced
 3. Any Tasks that were executing against old Scenarios receive a cancellation signal via `agent.signal.*`
@@ -193,7 +193,7 @@ agent.dag.{dagId}             — DAG ready for execution (new)
 
 - Requirements node type (ADR-001)
 - Scenario node type (ADR-001)
-- ChangeProposal lifecycle (ADR-001)
+- PlanDecision lifecycle (ADR-001)
 - Governance filter chain
 - KV bucket state management
 - The knowledge graph as shared agent memory
@@ -247,7 +247,7 @@ Agents composing tools at runtime could gradually accumulate capabilities beyond
 ### Phase 3: `create_tool` and advanced topology
 - Implement `create_tool` executor with tree-scoped registration
 - Implement horizontal topology (ensemble execution)
-- Implement ChangeProposal integration with running loop cancellation
+- Implement PlanDecision integration with running loop cancellation
 - Watchdog processor for orphaned loops
 
 ### Phase 4: Observability
@@ -266,7 +266,7 @@ Agents composing tools at runtime could gradually accumulate capabilities beyond
 - [ ] Governance filter validates DAG structure, spawn depth, tool scope
 - [ ] Planning step produces Requirements + Scenarios only (no Tasks)
 - [ ] Execution orchestrator drives reactive Scenario loop
-- [ ] ChangeProposal acceptance cancels affected running loops and re-queues Scenarios
+- [ ] PlanDecision acceptance cancels affected running loops and re-queues Scenarios
 - [ ] Watchdog terminates orphaned loops
 - [ ] Board view renders correctly from retrospective Phase grouping
 - [ ] Existing alpha tests pass

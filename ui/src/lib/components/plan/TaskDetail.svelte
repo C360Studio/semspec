@@ -193,7 +193,7 @@
 					</span>
 				{/if}
 				{#if task.status === 'blocked'}
-					<span class="status-indicator blocked" title="Blocked by upstream dependency or ChangeProposal cascade">
+					<span class="status-indicator blocked" title="Blocked by upstream dependency or PlanDecision cascade">
 						<Icon name="lock" size={12} />
 						Blocked
 					</span>

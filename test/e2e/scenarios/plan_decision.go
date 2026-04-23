@@ -1,6 +1,6 @@
 package scenarios
 
-// ChangeProposalScenario tests the change-proposal lifecycle and cascade behavior.
+// PlanDecisionScenario tests the plan-decision lifecycle and cascade behavior.
 //
 // Scope:
 //
@@ -8,10 +8,10 @@ package scenarios
 //     baseline; the acceptance cascade needs requirements to traverse.
 //
 //  2. Change-proposal CRUD:
-//     - Create (POST .../change-proposals)
-//     - Get    (GET  .../change-proposals/{id})
-//     - List   (GET  .../change-proposals)
-//     - Update (PATCH .../change-proposals/{id})
+//     - Create (POST .../plan-decisions)
+//     - Get    (GET  .../plan-decisions/{id})
+//     - List   (GET  .../plan-decisions)
+//     - Update (PATCH .../plan-decisions/{id})
 //
 //  3. Status transition — happy path:
 //     - Submit  (proposed → under_review)
@@ -43,31 +43,31 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// ChangeProposalScenario tests the change-proposal lifecycle and cascade behavior.
-type ChangeProposalScenario struct {
+// PlanDecisionScenario tests the plan-decision lifecycle and cascade behavior.
+type PlanDecisionScenario struct {
 	name        string
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
 }
 
-// NewChangeProposalScenario creates a new change proposal scenario.
-func NewChangeProposalScenario(cfg *config.Config) *ChangeProposalScenario {
-	return &ChangeProposalScenario{
-		name:        "change-proposal",
-		description: "Tests ChangeProposal CRUD, status transitions, cascade response, and error handling",
+// NewPlanDecisionScenario creates a new change proposal scenario.
+func NewPlanDecisionScenario(cfg *config.Config) *PlanDecisionScenario {
+	return &PlanDecisionScenario{
+		name:        "plan-decision",
+		description: "Tests PlanDecision CRUD, status transitions, cascade response, and error handling",
 		config:      cfg,
 	}
 }
 
 // Name returns the scenario name.
-func (s *ChangeProposalScenario) Name() string { return s.name }
+func (s *PlanDecisionScenario) Name() string { return s.name }
 
 // Description returns the scenario description.
-func (s *ChangeProposalScenario) Description() string { return s.description }
+func (s *PlanDecisionScenario) Description() string { return s.description }
 
 // Setup prepares the scenario environment.
-func (s *ChangeProposalScenario) Setup(ctx context.Context) error {
+func (s *PlanDecisionScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
@@ -76,8 +76,8 @@ func (s *ChangeProposalScenario) Setup(ctx context.Context) error {
 	return nil
 }
 
-// Execute runs all change-proposal stages in sequence.
-func (s *ChangeProposalScenario) Execute(ctx context.Context) (*Result, error) {
+// Execute runs all plan-decision stages in sequence.
+func (s *PlanDecisionScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
 
@@ -145,7 +145,7 @@ func (s *ChangeProposalScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ChangeProposalScenario) Teardown(_ context.Context) error {
+func (s *PlanDecisionScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
@@ -153,28 +153,28 @@ func (s *ChangeProposalScenario) Teardown(_ context.Context) error {
 // Internal helpers — carry test-local state via Result.Details
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) planSlug(result *Result) (string, bool) {
+func (s *PlanDecisionScenario) planSlug(result *Result) (string, bool) {
 	if result == nil {
 		return "", false
 	}
 	return result.GetDetailString("plan_slug")
 }
 
-func (s *ChangeProposalScenario) storedProposalID(result *Result) (string, bool) {
+func (s *PlanDecisionScenario) storedProposalID(result *Result) (string, bool) {
 	if result == nil {
 		return "", false
 	}
 	return result.GetDetailString("proposal_id")
 }
 
-func (s *ChangeProposalScenario) storedRejectProposalID(result *Result) (string, bool) {
+func (s *PlanDecisionScenario) storedRejectProposalID(result *Result) (string, bool) {
 	if result == nil {
 		return "", false
 	}
 	return result.GetDetailString("reject_proposal_id")
 }
 
-func (s *ChangeProposalScenario) storedRequirementID(result *Result) (string, bool) {
+func (s *PlanDecisionScenario) storedRequirementID(result *Result) (string, bool) {
 	if result == nil {
 		return "", false
 	}
@@ -185,7 +185,7 @@ func (s *ChangeProposalScenario) storedRequirementID(result *Result) (string, bo
 // Plan bootstrap stages
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageCreatePlan(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageCreatePlan(ctx context.Context, result *Result) error {
 	resp, err := s.http.CreatePlan(ctx, "change proposal lifecycle test")
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
@@ -211,7 +211,7 @@ func (s *ChangeProposalScenario) stageCreatePlan(ctx context.Context, result *Re
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageApprovePlan(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, ok := s.planSlug(result)
 	if !ok {
 		return fmt.Errorf("plan_slug not set by create-plan stage")
@@ -229,7 +229,7 @@ func (s *ChangeProposalScenario) stageApprovePlan(ctx context.Context, result *R
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageCreateRequirements(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageCreateRequirements(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
 	req1 := &client.CreateRequirementRequest{
@@ -266,19 +266,19 @@ func (s *ChangeProposalScenario) stageCreateRequirements(ctx context.Context, re
 // Change-proposal CRUD stages
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageProposalCreate(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalCreate(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	reqID, _ := s.storedRequirementID(result)
 	reqID2, _ := result.GetDetailString("requirement_id_2")
 
-	req := &client.CreateChangeProposalRequest{
+	req := &client.CreatePlanDecisionRequest{
 		Title:          "Extend token expiry to 24 hours",
 		Rationale:      "Mobile clients need longer sessions to avoid frequent re-login",
 		ProposedBy:     "e2e-test",
 		AffectedReqIDs: []string{reqID, reqID2},
 	}
 
-	proposal, status, err := s.http.CreateChangeProposal(ctx, slug, req)
+	proposal, status, err := s.http.CreatePlanDecision(ctx, slug, req)
 	if err != nil {
 		return fmt.Errorf("create change proposal: %w", err)
 	}
@@ -306,11 +306,11 @@ func (s *ChangeProposalScenario) stageProposalCreate(ctx context.Context, result
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageProposalGet(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalGet(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedProposalID(result)
 
-	proposal, status, err := s.http.GetChangeProposal(ctx, slug, proposalID)
+	proposal, status, err := s.http.GetPlanDecision(ctx, slug, proposalID)
 	if err != nil {
 		return fmt.Errorf("get change proposal: %w", err)
 	}
@@ -328,12 +328,12 @@ func (s *ChangeProposalScenario) stageProposalGet(ctx context.Context, result *R
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageProposalList(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalList(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedProposalID(result)
 
 	// List without filter — must contain our proposal.
-	proposals, err := s.http.ListChangeProposals(ctx, slug, "")
+	proposals, err := s.http.ListPlanDecisions(ctx, slug, "")
 	if err != nil {
 		return fmt.Errorf("list change proposals: %w", err)
 	}
@@ -356,16 +356,16 @@ func (s *ChangeProposalScenario) stageProposalList(ctx context.Context, result *
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageProposalUpdate(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalUpdate(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedProposalID(result)
 
 	updatedTitle := "Extend token expiry to 48 hours"
-	req := &client.UpdateChangeProposalRequest{
+	req := &client.UpdatePlanDecisionRequest{
 		Title: &updatedTitle,
 	}
 
-	proposal, status, err := s.http.UpdateChangeProposal(ctx, slug, proposalID, req)
+	proposal, status, err := s.http.UpdatePlanDecision(ctx, slug, proposalID, req)
 	if err != nil {
 		return fmt.Errorf("update change proposal: %w", err)
 	}
@@ -385,11 +385,11 @@ func (s *ChangeProposalScenario) stageProposalUpdate(ctx context.Context, result
 // Happy-path status transitions + cascade
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageProposalSubmit(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalSubmit(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedProposalID(result)
 
-	proposal, status, err := s.http.SubmitChangeProposal(ctx, slug, proposalID)
+	proposal, status, err := s.http.SubmitPlanDecision(ctx, slug, proposalID)
 	if err != nil {
 		return fmt.Errorf("submit change proposal: %w", err)
 	}
@@ -407,11 +407,11 @@ func (s *ChangeProposalScenario) stageProposalSubmit(ctx context.Context, result
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageProposalAccept(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalAccept(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedProposalID(result)
 
-	acceptResp, status, err := s.http.AcceptChangeProposal(ctx, slug, proposalID, "e2e-reviewer")
+	acceptResp, status, err := s.http.AcceptPlanDecision(ctx, slug, proposalID, "e2e-reviewer")
 	if err != nil {
 		return fmt.Errorf("accept change proposal: %w", err)
 	}
@@ -434,12 +434,12 @@ func (s *ChangeProposalScenario) stageProposalAccept(ctx context.Context, result
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageCascadeVerify(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageCascadeVerify(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedProposalID(result)
 
 	// Re-fetch the accepted proposal to confirm it persists as accepted.
-	proposal, status, err := s.http.GetChangeProposal(ctx, slug, proposalID)
+	proposal, status, err := s.http.GetPlanDecision(ctx, slug, proposalID)
 	if err != nil {
 		return fmt.Errorf("get accepted proposal: %w", err)
 	}
@@ -497,18 +497,18 @@ func (s *ChangeProposalScenario) stageCascadeVerify(ctx context.Context, result 
 // Rejection path
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageRejectProposalCreate(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageRejectProposalCreate(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	reqID, _ := s.storedRequirementID(result)
 
-	req := &client.CreateChangeProposalRequest{
+	req := &client.CreatePlanDecisionRequest{
 		Title:          "Remove rate limiting (to be rejected)",
 		Rationale:      "This proposal exists only to be rejected by the test",
 		ProposedBy:     "e2e-test",
 		AffectedReqIDs: []string{reqID},
 	}
 
-	proposal, status, err := s.http.CreateChangeProposal(ctx, slug, req)
+	proposal, status, err := s.http.CreatePlanDecision(ctx, slug, req)
 	if err != nil {
 		return fmt.Errorf("create rejection proposal: %w", err)
 	}
@@ -520,11 +520,11 @@ func (s *ChangeProposalScenario) stageRejectProposalCreate(ctx context.Context, 
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageRejectProposalSubmit(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageRejectProposalSubmit(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedRejectProposalID(result)
 
-	proposal, status, err := s.http.SubmitChangeProposal(ctx, slug, proposalID)
+	proposal, status, err := s.http.SubmitPlanDecision(ctx, slug, proposalID)
 	if err != nil {
 		return fmt.Errorf("submit rejection proposal: %w", err)
 	}
@@ -538,11 +538,11 @@ func (s *ChangeProposalScenario) stageRejectProposalSubmit(ctx context.Context, 
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageRejectProposalReject(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageRejectProposalReject(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	proposalID, _ := s.storedRejectProposalID(result)
 
-	proposal, status, err := s.http.RejectChangeProposal(
+	proposal, status, err := s.http.RejectPlanDecision(
 		ctx, slug, proposalID,
 		"e2e-reviewer",
 		"Removing rate limiting violates security requirements",
@@ -568,11 +568,11 @@ func (s *ChangeProposalScenario) stageRejectProposalReject(ctx context.Context, 
 // Status-filter list stage
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageListByStatus(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageListByStatus(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
 	// Filter for "accepted" — should find the main proposal.
-	accepted, err := s.http.ListChangeProposals(ctx, slug, "accepted")
+	accepted, err := s.http.ListPlanDecisions(ctx, slug, "accepted")
 	if err != nil {
 		return fmt.Errorf("list accepted proposals: %w", err)
 	}
@@ -586,7 +586,7 @@ func (s *ChangeProposalScenario) stageListByStatus(ctx context.Context, result *
 	}
 
 	// Filter for "rejected" — should find the rejection proposal.
-	rejected, err := s.http.ListChangeProposals(ctx, slug, "rejected")
+	rejected, err := s.http.ListPlanDecisions(ctx, slug, "rejected")
 	if err != nil {
 		return fmt.Errorf("list rejected proposals: %w", err)
 	}
@@ -607,10 +607,10 @@ func (s *ChangeProposalScenario) stageListByStatus(ctx context.Context, result *
 // Guard-rail / error-handling stages
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageErrorMissingTitle(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageErrorMissingTitle(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
-	_, status, _ := s.http.CreateChangeProposal(ctx, slug, &client.CreateChangeProposalRequest{
+	_, status, _ := s.http.CreatePlanDecision(ctx, slug, &client.CreatePlanDecisionRequest{
 		Title: "", // deliberately empty
 	})
 	if status != 400 {
@@ -621,10 +621,10 @@ func (s *ChangeProposalScenario) stageErrorMissingTitle(ctx context.Context, res
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageErrorInvalidRequirement(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageErrorInvalidRequirement(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
-	_, status, _ := s.http.CreateChangeProposal(ctx, slug, &client.CreateChangeProposalRequest{
+	_, status, _ := s.http.CreatePlanDecision(ctx, slug, &client.CreatePlanDecisionRequest{
 		Title:          "Valid title",
 		AffectedReqIDs: []string{"requirement.nonexistent.99999"},
 	})
@@ -636,10 +636,10 @@ func (s *ChangeProposalScenario) stageErrorInvalidRequirement(ctx context.Contex
 	return nil
 }
 
-func (s *ChangeProposalScenario) stageError404Proposal(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageError404Proposal(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
-	_, status, _ := s.http.GetChangeProposal(ctx, slug, "change-proposal.nonexistent.99999")
+	_, status, _ := s.http.GetPlanDecision(ctx, slug, "plan-decision.nonexistent.99999")
 	if status != 404 {
 		return fmt.Errorf("expected HTTP 404 for non-existent proposal, got %d", status)
 	}
@@ -650,12 +650,12 @@ func (s *ChangeProposalScenario) stageError404Proposal(ctx context.Context, resu
 
 // stageErrorDoubleSubmit attempts to submit an already-under_review proposal,
 // which should return 409.
-func (s *ChangeProposalScenario) stageErrorDoubleSubmit(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageErrorDoubleSubmit(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
 	// Create a fresh proposal so we can leave it in "under_review".
 	reqID, _ := s.storedRequirementID(result)
-	proposal, status, err := s.http.CreateChangeProposal(ctx, slug, &client.CreateChangeProposalRequest{
+	proposal, status, err := s.http.CreatePlanDecision(ctx, slug, &client.CreatePlanDecisionRequest{
 		Title:          "Double-submit guard test proposal",
 		AffectedReqIDs: []string{reqID},
 	})
@@ -664,13 +664,13 @@ func (s *ChangeProposalScenario) stageErrorDoubleSubmit(ctx context.Context, res
 	}
 
 	// First submit — succeeds.
-	_, status, err = s.http.SubmitChangeProposal(ctx, slug, proposal.ID)
+	_, status, err = s.http.SubmitPlanDecision(ctx, slug, proposal.ID)
 	if err != nil || status != 200 {
 		return fmt.Errorf("first submit: HTTP %d: %v", status, err)
 	}
 
 	// Second submit — must return 409 (CanTransitionTo guard).
-	_, status, _ = s.http.SubmitChangeProposal(ctx, slug, proposal.ID)
+	_, status, _ = s.http.SubmitPlanDecision(ctx, slug, proposal.ID)
 	if status != 409 {
 		return fmt.Errorf("expected HTTP 409 for double-submit, got %d", status)
 	}
@@ -682,12 +682,12 @@ func (s *ChangeProposalScenario) stageErrorDoubleSubmit(ctx context.Context, res
 
 // stageErrorDeleteNonProposed verifies that a proposal not in "proposed" status
 // returns 409 on DELETE.
-func (s *ChangeProposalScenario) stageErrorDeleteNonProposed(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageErrorDeleteNonProposed(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 
 	// The already-accepted proposal must not be deletable.
 	proposalID, _ := s.storedProposalID(result)
-	status, _ := s.http.DeleteChangeProposal(ctx, slug, proposalID)
+	status, _ := s.http.DeletePlanDecision(ctx, slug, proposalID)
 	if status != 409 {
 		return fmt.Errorf("expected HTTP 409 when deleting accepted proposal, got %d", status)
 	}
@@ -700,12 +700,12 @@ func (s *ChangeProposalScenario) stageErrorDeleteNonProposed(ctx context.Context
 // Delete stage
 // ---------------------------------------------------------------------------
 
-func (s *ChangeProposalScenario) stageProposalDelete(ctx context.Context, result *Result) error {
+func (s *PlanDecisionScenario) stageProposalDelete(ctx context.Context, result *Result) error {
 	slug, _ := s.planSlug(result)
 	reqID, _ := s.storedRequirementID(result)
 
 	// Create a fresh "proposed" proposal to delete.
-	proposal, status, err := s.http.CreateChangeProposal(ctx, slug, &client.CreateChangeProposalRequest{
+	proposal, status, err := s.http.CreatePlanDecision(ctx, slug, &client.CreatePlanDecisionRequest{
 		Title:          "Temporary proposal to be deleted",
 		AffectedReqIDs: []string{reqID},
 	})
@@ -714,7 +714,7 @@ func (s *ChangeProposalScenario) stageProposalDelete(ctx context.Context, result
 	}
 
 	// Delete it.
-	status, err = s.http.DeleteChangeProposal(ctx, slug, proposal.ID)
+	status, err = s.http.DeletePlanDecision(ctx, slug, proposal.ID)
 	if err != nil {
 		return fmt.Errorf("delete proposal: %w", err)
 	}
@@ -723,7 +723,7 @@ func (s *ChangeProposalScenario) stageProposalDelete(ctx context.Context, result
 	}
 
 	// Verify 404 after deletion.
-	_, getStatus, _ := s.http.GetChangeProposal(ctx, slug, proposal.ID)
+	_, getStatus, _ := s.http.GetPlanDecision(ctx, slug, proposal.ID)
 	if getStatus != 404 {
 		return fmt.Errorf("expected 404 after delete, got %d", getStatus)
 	}

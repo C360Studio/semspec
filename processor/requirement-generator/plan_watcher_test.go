@@ -9,7 +9,7 @@ import (
 func TestFindRejectionReasons(t *testing.T) {
 	tests := []struct {
 		name          string
-		proposals     []workflow.ChangeProposal
+		proposals     []workflow.PlanDecision
 		deprecatedIDs []string
 		want          map[string]string
 	}{
@@ -21,10 +21,10 @@ func TestFindRejectionReasons(t *testing.T) {
 		},
 		{
 			name: "per-requirement reasons from accepted proposal",
-			proposals: []workflow.ChangeProposal{
+			proposals: []workflow.PlanDecision{
 				{
 					ID:             "cp-1",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1", "req-2"},
 					RejectionReasons: map[string]string{
 						"req-1": "too broad",
@@ -40,10 +40,10 @@ func TestFindRejectionReasons(t *testing.T) {
 		},
 		{
 			name: "fallback to rationale when no per-requirement reasons",
-			proposals: []workflow.ChangeProposal{
+			proposals: []workflow.PlanDecision{
 				{
 					ID:             "cp-1",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1"},
 					Rationale:      "requirements are unclear",
 				},
@@ -55,10 +55,10 @@ func TestFindRejectionReasons(t *testing.T) {
 		},
 		{
 			name: "filters to only deprecated IDs",
-			proposals: []workflow.ChangeProposal{
+			proposals: []workflow.PlanDecision{
 				{
 					ID:             "cp-1",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1", "req-2", "req-3"},
 					RejectionReasons: map[string]string{
 						"req-1": "reason-1",
@@ -74,10 +74,10 @@ func TestFindRejectionReasons(t *testing.T) {
 		},
 		{
 			name: "skips non-accepted proposals",
-			proposals: []workflow.ChangeProposal{
+			proposals: []workflow.PlanDecision{
 				{
 					ID:             "cp-1",
-					Status:         workflow.ChangeProposalStatusRejected,
+					Status:         workflow.PlanDecisionStatusRejected,
 					AffectedReqIDs: []string{"req-1"},
 					RejectionReasons: map[string]string{
 						"req-1": "should not appear",
@@ -85,7 +85,7 @@ func TestFindRejectionReasons(t *testing.T) {
 				},
 				{
 					ID:             "cp-2",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1"},
 					RejectionReasons: map[string]string{
 						"req-1": "correct reason",
@@ -99,10 +99,10 @@ func TestFindRejectionReasons(t *testing.T) {
 		},
 		{
 			name: "most recent accepted proposal wins",
-			proposals: []workflow.ChangeProposal{
+			proposals: []workflow.PlanDecision{
 				{
 					ID:             "cp-1",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1"},
 					RejectionReasons: map[string]string{
 						"req-1": "old reason",
@@ -110,7 +110,7 @@ func TestFindRejectionReasons(t *testing.T) {
 				},
 				{
 					ID:             "cp-2",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1"},
 					RejectionReasons: map[string]string{
 						"req-1": "newer reason",
@@ -124,10 +124,10 @@ func TestFindRejectionReasons(t *testing.T) {
 		},
 		{
 			name: "collects reasons across multiple proposals",
-			proposals: []workflow.ChangeProposal{
+			proposals: []workflow.PlanDecision{
 				{
 					ID:             "cp-1",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-1"},
 					RejectionReasons: map[string]string{
 						"req-1": "reason for req-1",
@@ -135,7 +135,7 @@ func TestFindRejectionReasons(t *testing.T) {
 				},
 				{
 					ID:             "cp-2",
-					Status:         workflow.ChangeProposalStatusAccepted,
+					Status:         workflow.PlanDecisionStatusAccepted,
 					AffectedReqIDs: []string{"req-2"},
 					RejectionReasons: map[string]string{
 						"req-2": "reason for req-2",
@@ -153,7 +153,7 @@ func TestFindRejectionReasons(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			plan := &workflow.Plan{
-				ChangeProposals: tt.proposals,
+				PlanDecisions: tt.proposals,
 			}
 			got := findRejectionReasons(plan, tt.deprecatedIDs)
 
