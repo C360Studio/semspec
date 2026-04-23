@@ -119,7 +119,7 @@ common errors.
 ```
 plan → architecture → requirements → scenarios → decompose → TDD pipeline [developer → validator → reviewer]
                                                             → requirement review
-                                                            → plan rollup review
+                                                            → qa review
 ```
 
 **Plan** — Communicate intent: goal, context, scope. The pipeline is self-coordinating — each
@@ -144,9 +144,13 @@ oversized tasks escalate to humans.
 **Requirement Review** — After all DAG nodes for a requirement complete, a reviewer runs against
 the full changeset and returns per-scenario verdicts: `approved`, `needs_changes`, or `escalate`.
 
-**Plan Rollup Review** — After all requirements complete, a rollup reviewer synthesizes all requirement
-outcomes into a final summary and overall verdict. The plan transitions through `reviewing_rollup`
-before reaching `complete`. The rollup gate counts completed requirements, not scenarios.
+**QA Review** — After all requirements complete, qa-reviewer synthesizes requirement outcomes
+into a final release-readiness verdict. The plan transitions through `reviewing_qa` (or directly
+to `complete` when `qa_level=none`) before reaching `complete`. The gate counts completed
+requirements, not scenarios. Inputs vary by `qa_level`: `synthesis` reads plan+impl only;
+`unit`/`integration`/`full` first route through `ready_for_qa` so sandbox or qa-runner can run
+project tests, then feed results into the reviewer. The older `reviewing_rollup` stage is kept
+for in-flight plans on upgrade but no new code emits it.
 
 **Rules Engine** — Declarative JSON rules in `configs/rules/` react to graph entity state changes.
 Components write workflow phases; rules handle terminal transitions — approved tasks trigger the
