@@ -496,6 +496,100 @@ func TestServerError_NeedsReconciliation_ReturnsTypedError(t *testing.T) {
 	assert.Contains(t, err.Error(), "reconciliation")
 }
 
+// TestMergeBranches_ClientSuccess verifies the client decodes a 200 merge-
+// branches response into a typed MergeBranchesResult with the commit list
+// preserved in input order.
+func TestMergeBranches_ClientSuccess(t *testing.T) {
+	var gotBody struct {
+		Target   string            `json:"target"`
+		Base     string            `json:"base"`
+		Branches []string          `json:"branches"`
+		Trailers map[string]string `json:"trailers"`
+	}
+	want := MergeBranchesResult{
+		Status: "merged",
+		Target: "semspec/plan-demo",
+		MergeCommits: []MergeBranchesCommit{
+			{Branch: "semspec/requirement-r1", Commit: "aaa111"},
+			{Branch: "semspec/requirement-r2", Commit: "bbb222"},
+		},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/git/merge-branches", r.URL.Path)
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&gotBody))
+		respond(t, w, http.StatusOK, want)
+	}))
+	defer srv.Close()
+
+	got, err := newTestClient(t, srv).MergeBranches(context.Background(), MergeBranchesRequest{
+		Target:   "semspec/plan-demo",
+		Base:     "main",
+		Branches: []string{"semspec/requirement-r1", "semspec/requirement-r2"},
+		Trailers: map[string]string{"Plan-Slug": "demo"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "merged", got.Status)
+	assert.Equal(t, "semspec/plan-demo", got.Target)
+	require.Len(t, got.MergeCommits, 2)
+	assert.Equal(t, "semspec/requirement-r1", got.MergeCommits[0].Branch)
+	assert.Equal(t, "aaa111", got.MergeCommits[0].Commit)
+	assert.Equal(t, []string{"semspec/requirement-r1", "semspec/requirement-r2"}, gotBody.Branches)
+}
+
+// TestMergeBranches_ClientConflict verifies a 409 response is mapped to
+// ErrMergeBranchesConflict and the structured payload (partial merges,
+// conflicting branch name) is returned to the caller so plan-manager can
+// surface it without inspecting HTTP status codes.
+func TestMergeBranches_ClientConflict(t *testing.T) {
+	payload := MergeBranchesResult{
+		Status:            "conflict",
+		Target:            "semspec/plan-demo",
+		MergeCommits:      []MergeBranchesCommit{{Branch: "semspec/requirement-r1", Commit: "aaa111"}},
+		ConflictingBranch: "semspec/requirement-r2",
+		Error:             "merge conflict on foo.txt",
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusConflict, payload)
+	}))
+	defer srv.Close()
+
+	got, err := newTestClient(t, srv).MergeBranches(context.Background(), MergeBranchesRequest{
+		Target:   "semspec/plan-demo",
+		Branches: []string{"semspec/requirement-r1", "semspec/requirement-r2"},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrMergeBranchesConflict), "expected ErrMergeBranchesConflict; got %v", err)
+
+	// Structured payload is returned alongside the error so callers can
+	// inspect which branch conflicted + which ones landed cleanly.
+	require.NotNil(t, got)
+	assert.Equal(t, "conflict", got.Status)
+	assert.Equal(t, "semspec/requirement-r2", got.ConflictingBranch)
+	require.Len(t, got.MergeCommits, 1)
+	assert.Equal(t, "semspec/requirement-r1", got.MergeCommits[0].Branch)
+}
+
+// TestMergeBranches_ClientNeedsReconciliation verifies that the catastrophic
+// 503 path propagates as ErrNeedsReconciliation, not as a conflict — callers
+// must not retry or confuse it with a plain merge failure.
+func TestMergeBranches_ClientNeedsReconciliation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusServiceUnavailable, map[string]string{
+			"error":      "sandbox wedged",
+			"error_code": "needs_reconciliation",
+		})
+	}))
+	defer srv.Close()
+
+	_, err := newTestClient(t, srv).MergeBranches(context.Background(), MergeBranchesRequest{
+		Target:   "semspec/plan-demo",
+		Branches: []string{"semspec/requirement-r1"},
+	})
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrNeedsReconciliation), "expected ErrNeedsReconciliation; got %v", err)
+	assert.False(t, errors.Is(err, ErrMergeBranchesConflict), "must not conflate 503 with merge conflict")
+}
+
 func TestContextCancellation(t *testing.T) {
 	// Server that blocks indefinitely — cancelled context should abort the request.
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {

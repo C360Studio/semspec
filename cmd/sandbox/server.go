@@ -102,6 +102,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /git/diff", s.handleGitDiff)
 	mux.HandleFunc("POST /git/branch-diff", s.handleGitBranchDiff)
 	mux.HandleFunc("POST /git/branch-file-diff", s.handleGitBranchFileDiff)
+	mux.HandleFunc("POST /git/merge-branches", s.handleMergeBranches)
 
 	// Command execution (scoped to worktree).
 	mux.HandleFunc("POST /exec", s.handleExec)
@@ -731,6 +732,160 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created", "branch": req.Name})
+}
+
+// mergeBranchesRequest is the JSON body for POST /git/merge-branches. It
+// assembles a set of source branches onto a target branch via sequential
+// `git merge --no-ff`, providing the plan-level merge step required by
+// invariant B1 in docs/audit/task-11-worktree-invariants.md.
+type mergeBranchesRequest struct {
+	Target   string            `json:"target"`
+	Base     string            `json:"base,omitempty"` // default: HEAD
+	Branches []string          `json:"branches"`
+	Trailers map[string]string `json:"trailers,omitempty"`
+}
+
+type mergeBranchesCommit struct {
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
+}
+
+// mergeBranchesResponse reports the outcome. status="merged" with
+// HTTP 200 on full success; status="conflict" with HTTP 409 when a source
+// branch cannot merge cleanly. MergeCommits lists branches that landed
+// before the conflict, preserving partial-progress visibility without
+// shipping half-baked state to callers.
+type mergeBranchesResponse struct {
+	Status            string                `json:"status"`
+	Target            string                `json:"target"`
+	MergeCommits      []mergeBranchesCommit `json:"merge_commits,omitempty"`
+	ConflictingBranch string                `json:"conflicting_branch,omitempty"`
+	Error             string                `json:"error,omitempty"`
+}
+
+// handleMergeBranchesConflict writes the 409 (or catastrophic 503) response
+// when a source branch fails to merge into the plan-level target. Prior
+// successful merges stay on the target branch so partial progress remains
+// inspectable; the caller's view (origBranch) is restored so the sandbox
+// doesn't appear stranded on a half-assembled branch.
+func (s *Server) handleMergeBranchesConflict(
+	ctx context.Context,
+	w http.ResponseWriter,
+	target, conflictingBranch, origBranch string,
+	commits []mergeBranchesCommit,
+	mergeErr error,
+) {
+	if abortErr := runGit(ctx, s.repoPath, "merge", "--abort"); abortErr != nil {
+		if healErr := s.selfHealAfterFailedRestore(ctx, origBranch, abortErr); healErr != nil {
+			s.needsReconciliation.Store(true)
+			s.logger.Error("Sandbox repo wedged during merge-branches conflict self-heal",
+				"target", target,
+				"conflicting_branch", conflictingBranch,
+				"merge_error", mergeErr,
+				"abort_error", abortErr,
+				"self_heal_error", healErr,
+			)
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+				"error":      fmt.Sprintf("sandbox wedged after merge-branches conflict: merge=%v abort=%v heal=%v", mergeErr, abortErr, healErr),
+				"error_code": errCodeNeedsReconciliation,
+			})
+			return
+		}
+	}
+	_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+	writeJSON(w, http.StatusConflict, mergeBranchesResponse{
+		Status:            "conflict",
+		Target:            target,
+		MergeCommits:      commits,
+		ConflictingBranch: conflictingBranch,
+		Error:             mergeErr.Error(),
+	})
+}
+
+// handleMergeBranches creates (or force-resets) the target branch from the
+// specified base, then sequentially merges each source branch into it via
+// --no-ff. On conflict the target is left at the last-successful state and
+// the repo is restored to the caller's original HEAD; plan-manager surfaces
+// the conflict to humans. Only a full self-heal failure (extremely rare —
+// implies disk corruption) trips the needs_reconciliation flag.
+func (s *Server) handleMergeBranches(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfNeedsReconciliation(w) {
+		return
+	}
+	var req mergeBranchesRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.Target == "" || !isValidBranchName(req.Target) {
+		writeError(w, http.StatusBadRequest, "invalid or missing target branch name")
+		return
+	}
+	if len(req.Branches) == 0 {
+		writeError(w, http.StatusBadRequest, "branches must be non-empty")
+		return
+	}
+	for _, b := range req.Branches {
+		if !isValidBranchName(b) {
+			writeError(w, http.StatusBadRequest, "invalid source branch name: "+b)
+			return
+		}
+	}
+	base := req.Base
+	if base == "" {
+		base = "HEAD"
+	}
+
+	ctx := r.Context()
+	s.repoMu.Lock()
+	defer s.repoMu.Unlock()
+
+	// Validate base exists before we touch anything.
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", base); err != nil {
+		writeError(w, http.StatusBadRequest, "base ref does not exist: "+base)
+		return
+	}
+
+	origBranch := s.currentHEAD(ctx)
+
+	// Checkout -B creates-or-resets the target branch from base. This makes
+	// the endpoint idempotent: calling it again after a prior success or
+	// conflict re-does the assembly from scratch rather than failing with
+	// "branch already exists."
+	if err := runGit(ctx, s.repoPath, "checkout", "-B", req.Target, base); err != nil {
+		// Haven't touched anything yet — best-effort restore of origBranch.
+		_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+		writeError(w, http.StatusInternalServerError, "create target branch: "+err.Error())
+		return
+	}
+
+	var commits []mergeBranchesCommit
+	for _, branch := range req.Branches {
+		if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", branch); err != nil {
+			_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+			writeError(w, http.StatusBadRequest, "source branch does not exist: "+branch)
+			return
+		}
+		msg := fmt.Sprintf("merge: %s into %s", branch, req.Target)
+		msg = appendTrailers(msg, req.Trailers)
+
+		if mergeErr := runGit(ctx, s.repoPath, "merge", branch, "--no-ff", "-m", msg); mergeErr != nil {
+			s.handleMergeBranchesConflict(ctx, w, req.Target, branch, origBranch, commits, mergeErr)
+			return
+		}
+		sha, _ := gitOutput(ctx, s.repoPath, "rev-parse", "HEAD")
+		commits = append(commits, mergeBranchesCommit{
+			Branch: branch,
+			Commit: strings.TrimSpace(sha),
+		})
+	}
+
+	_ = runGit(ctx, s.repoPath, "checkout", origBranch)
+	writeJSON(w, http.StatusOK, mergeBranchesResponse{
+		Status:       "merged",
+		Target:       req.Target,
+		MergeCommits: commits,
+	})
 }
 
 // fileEntry matches tools/sandbox.FileEntry for JSON serialization.

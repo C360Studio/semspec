@@ -1562,6 +1562,154 @@ func TestIsLoopback(t *testing.T) {
 	}
 }
 
+// TestMergeBranches_HappyPath ships invariant B1 from
+// docs/audit/task-11-worktree-invariants.md: every plan needs to land its
+// requirement work somewhere humans can see. /git/merge-branches creates (or
+// resets) the target branch from a base ref, then sequentially merges each
+// source branch into it with --no-ff. All-green means the plan branch now
+// contains the aggregate work.
+func TestMergeBranches_HappyPath(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Set up two requirement branches, each modifying a disjoint file so
+	// merges don't conflict. Each branch has exactly one commit past base.
+	seedBranch := func(branchName, filePath, content string) {
+		run(t, srv.repoPath, "git", "checkout", "-B", branchName, base)
+		if err := os.WriteFile(filepath.Join(srv.repoPath, filePath), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", filePath, err)
+		}
+		run(t, srv.repoPath, "git", "add", filePath)
+		run(t, srv.repoPath, "git", "commit", "-m", "feat: "+branchName)
+	}
+	seedBranch("semspec/requirement-r1", "r1.go", "package r1\n")
+	seedBranch("semspec/requirement-r2", "r2.go", "package r2\n")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/merge-branches", mergeBranchesRequest{
+		Target:   "semspec/plan-demo",
+		Base:     base,
+		Branches: []string{"semspec/requirement-r1", "semspec/requirement-r2"},
+		Trailers: map[string]string{"Plan-Slug": "demo"},
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("merge-branches: got %d, want 200; body=%s", resp.StatusCode, body)
+	}
+	var got mergeBranchesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if got.Status != "merged" {
+		t.Errorf("status = %q, want %q", got.Status, "merged")
+	}
+	if got.Target != "semspec/plan-demo" {
+		t.Errorf("target = %q, want %q", got.Target, "semspec/plan-demo")
+	}
+	if len(got.MergeCommits) != 2 {
+		t.Fatalf("merge_commits len = %d, want 2", len(got.MergeCommits))
+	}
+	// Ordering must match input — callers rely on this for provenance.
+	if got.MergeCommits[0].Branch != "semspec/requirement-r1" {
+		t.Errorf("first merge = %q, want semspec/requirement-r1", got.MergeCommits[0].Branch)
+	}
+
+	// Plan branch must exist on disk and contain both files.
+	run(t, srv.repoPath, "git", "checkout", "semspec/plan-demo")
+	for _, f := range []string{"r1.go", "r2.go"} {
+		if _, err := os.Stat(filepath.Join(srv.repoPath, f)); err != nil {
+			t.Errorf("%s not on plan branch after merge: %v", f, err)
+		}
+	}
+
+	// HEAD must be restored to base when the request completes — callers do
+	// not expect the endpoint to leave the repo on an unrelated branch.
+	run(t, srv.repoPath, "git", "checkout", base)
+	if head := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD")); head != base {
+		t.Errorf("HEAD after merge-branches = %q, want %q", head, base)
+	}
+
+	// Commit trailers must be present on each merge commit.
+	logOut := runOutput(t, srv.repoPath, "git", "log", "semspec/plan-demo", "--format=%B")
+	if !strings.Contains(logOut, "Plan-Slug: demo") {
+		t.Errorf("merge commits missing Plan-Slug trailer; log=\n%s", logOut)
+	}
+}
+
+// TestMergeBranches_ConflictSelfHealsAndReturns409 covers the failure case:
+// two requirement branches modify the same line of the same file. The second
+// merge conflicts; the sandbox must self-heal the target branch back to
+// base-plus-successfully-merged-branches and return 409 with the conflicting
+// branch name so plan-manager can surface it to a human.
+func TestMergeBranches_ConflictSelfHealsAndReturns409(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Seed shared.txt = "A" on base so both reqs fork from a common ancestor.
+	sharedPath := filepath.Join(srv.repoPath, "shared.txt")
+	if err := os.WriteFile(sharedPath, []byte("A\n"), 0o644); err != nil {
+		t.Fatalf("write shared: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "shared.txt")
+	run(t, srv.repoPath, "git", "commit", "-m", "seed shared=A")
+
+	// Both requirements modify the SAME line — three-way merge with conflict.
+	seedBranch := func(branchName, content string) {
+		run(t, srv.repoPath, "git", "checkout", "-B", branchName, base)
+		if err := os.WriteFile(sharedPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write shared: %v", err)
+		}
+		run(t, srv.repoPath, "git", "add", "shared.txt")
+		run(t, srv.repoPath, "git", "commit", "-m", "feat: "+branchName)
+	}
+	seedBranch("semspec/requirement-rB", "B\n")
+	seedBranch("semspec/requirement-rC", "C\n")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/merge-branches", mergeBranchesRequest{
+		Target:   "semspec/plan-conflict",
+		Base:     base,
+		Branches: []string{"semspec/requirement-rB", "semspec/requirement-rC"},
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("merge-branches conflict: got %d, want 409; body=%s", resp.StatusCode, body)
+	}
+	var got mergeBranchesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got.Status != "conflict" {
+		t.Errorf("status = %q, want %q", got.Status, "conflict")
+	}
+	if got.ConflictingBranch != "semspec/requirement-rC" {
+		t.Errorf("conflicting_branch = %q, want semspec/requirement-rC", got.ConflictingBranch)
+	}
+	if len(got.MergeCommits) != 1 || got.MergeCommits[0].Branch != "semspec/requirement-rB" {
+		t.Errorf("expected first req to have merged before conflict; merge_commits=%v", got.MergeCommits)
+	}
+
+	// Sandbox must not be wedged — merge-branches conflict is a normal
+	// caller-actionable error, not a catastrophe. needs_reconciliation stays clear.
+	if srv.needsReconciliation.Load() {
+		t.Error("needs_reconciliation should be clear after a plain merge conflict")
+	}
+
+	// HEAD must be restored to base (not stranded on the partially-merged target).
+	if head := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD")); head != base {
+		t.Errorf("HEAD after conflict = %q, want %q", head, base)
+	}
+
+	// Tracked working tree must be clean — no lingering conflict markers.
+	run(t, srv.repoPath, "git", "diff", "--quiet")
+	run(t, srv.repoPath, "git", "diff", "--cached", "--quiet")
+}
+
 func TestCleanupStaleWorktrees(t *testing.T) {
 	srv, ts := newTestServer(t)
 

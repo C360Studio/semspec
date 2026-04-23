@@ -270,6 +270,113 @@ func (c *Client) CreateBranch(ctx context.Context, name, base string) error {
 	return nil
 }
 
+// MergeBranchesCommit identifies a merge commit produced by MergeBranches.
+type MergeBranchesCommit struct {
+	Branch string `json:"branch"`
+	Commit string `json:"commit"`
+}
+
+// MergeBranchesRequest describes a plan-level branch assembly: create the
+// target branch from base (force-reset if it exists) and sequentially merge
+// each source branch into it with --no-ff.
+type MergeBranchesRequest struct {
+	Target   string
+	Base     string // empty = HEAD
+	Branches []string
+	Trailers map[string]string
+}
+
+// MergeBranchesResult reports the outcome. Status is "merged" on full
+// success or "conflict" when a source branch could not merge cleanly.
+// MergeCommits carries any branches that landed before the conflict, so the
+// caller can surface partial progress to humans without re-deriving it
+// from git log.
+type MergeBranchesResult struct {
+	Status            string                `json:"status"`
+	Target            string                `json:"target"`
+	MergeCommits      []MergeBranchesCommit `json:"merge_commits,omitempty"`
+	ConflictingBranch string                `json:"conflicting_branch,omitempty"`
+	Error             string                `json:"error,omitempty"`
+}
+
+// ErrMergeBranchesConflict is returned when a source branch cannot merge
+// cleanly into the target. Callers inspect the embedded MergeBranchesResult
+// for the conflicting branch name and the list of merges that did land.
+// This is a normal caller-actionable error — it does NOT imply the sandbox
+// is wedged (use errors.Is(err, ErrNeedsReconciliation) for that).
+var ErrMergeBranchesConflict = errors.New("merge-branches conflict")
+
+// MergeBranches assembles a set of source branches onto a target branch via
+// sequential --no-ff merges. Used by plan-manager at plan-complete time to
+// land every completed requirement branch on a plan branch (invariant B1).
+// Returns a wrapped ErrMergeBranchesConflict on 409 so callers can surface
+// the structured conflict payload without retrying the request. Other
+// non-2xx responses (including the catastrophic 503 needs_reconciliation
+// path) return the normal wrapped client error.
+// Server route: POST /git/merge-branches
+func (c *Client) MergeBranches(ctx context.Context, req MergeBranchesRequest) (*MergeBranchesResult, error) {
+	body := struct {
+		Target   string            `json:"target"`
+		Base     string            `json:"base,omitempty"`
+		Branches []string          `json:"branches"`
+		Trailers map[string]string `json:"trailers,omitempty"`
+	}{
+		Target:   req.Target,
+		Base:     req.Base,
+		Branches: req.Branches,
+		Trailers: req.Trailers,
+	}
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("merge branches: marshal: %w", err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/git/merge-branches", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("merge branches: build request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("merge branches: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("merge branches: read response: %w", err)
+	}
+
+	var result MergeBranchesResult
+	// 200 and 409 both carry structured JSON payloads the caller needs.
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusConflict {
+		if err := json.Unmarshal(raw, &result); err != nil {
+			return nil, fmt.Errorf("merge branches: decode %d response: %w", resp.StatusCode, err)
+		}
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return &result, nil
+	case http.StatusConflict:
+		return &result, fmt.Errorf("%w: target=%s conflicting_branch=%s",
+			ErrMergeBranchesConflict, result.Target, result.ConflictingBranch)
+	}
+
+	// Extract error + error_code from the generic error body shape.
+	var errBody struct {
+		Error     string `json:"error"`
+		ErrorCode string `json:"error_code"`
+	}
+	_ = json.Unmarshal(raw, &errBody)
+	if errBody.ErrorCode == errCodeNeedsReconciliation {
+		return nil, fmt.Errorf("merge branches: %w: server %d: %s",
+			ErrNeedsReconciliation, resp.StatusCode, errBody.Error)
+	}
+	msg := errBody.Error
+	if msg == "" {
+		msg = fmt.Sprintf("server error %d", resp.StatusCode)
+	}
+	return nil, fmt.Errorf("merge branches: server error %d: %s", resp.StatusCode, msg)
+}
+
 // DeleteBranch force-deletes a branch. Used during restructure retries to
 // discard polluted state and start fresh.
 // Server route: DELETE /branch/{name}

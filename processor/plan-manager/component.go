@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
@@ -39,6 +40,13 @@ type Component struct {
 
 	// workspace proxies read-only workspace requests to the sandbox server.
 	workspace *workspaceProxy
+
+	// sandbox is the typed HTTP client used for plan-level git operations
+	// like merging completed requirement branches into a plan branch at
+	// plan-complete time (invariant B1). nil when SandboxURL is unset — in
+	// that case the plan-level merge step is skipped and the plan completes
+	// without a PlanBranch, which is the pre-B1 behavior.
+	sandbox *sandbox.Client
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -161,6 +169,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient: deps.NATSClient,
 		logger:     logger,
 		workspace:  newWorkspaceProxy(config.SandboxURL),
+		sandbox:    sandbox.NewClient(config.SandboxURL),
 	}, nil
 }
 

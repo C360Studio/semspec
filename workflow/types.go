@@ -577,6 +577,19 @@ type Plan struct {
 	// Nil for synthesis-level plans (no executor run) and plans that have not
 	// yet reached reviewing_qa.
 	QARun *QARun `json:"qa_run,omitempty"`
+
+	// PlanBranch is the git branch onto which plan-manager merged every
+	// completed requirement branch at plan-complete time (invariant B1 of
+	// docs/audit/task-11-worktree-invariants.md). Empty on plans that
+	// completed before B1 landed or when the sandbox is disabled; otherwise
+	// points at "semspec/plan-<slug>" and contains the assembled work
+	// ready for human review + merge-to-main.
+	PlanBranch string `json:"plan_branch,omitempty"`
+
+	// PlanMergeCommit is the SHA of the final merge commit on PlanBranch
+	// (the merge of the last requirement branch). Lets the UI link to a
+	// single verifiable commit without having to re-walk the branch.
+	PlanMergeCommit string `json:"plan_merge_commit,omitempty"`
 }
 
 // QARun carries the executor result persisted on the plan at reviewing_qa.

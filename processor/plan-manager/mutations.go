@@ -848,8 +848,27 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 		if !current.CanTransitionTo(target) {
 			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → %s", current, target)}
 		}
+		// B1: assemble every completed requirement branch onto a plan branch
+		// before marking the plan complete. A merge conflict here leaves the
+		// plan in its current state with a LastError the UI can surface — the
+		// work is done, but humans need to resolve the conflicts before the
+		// plan can honestly be called "complete."
+		if err := c.assembleRequirementBranches(ctx, plan); err != nil {
+			plan.LastError = fmt.Sprintf("plan-level merge failed: %v", err)
+			now := time.Now()
+			plan.LastErrorAt = &now
+			if saveErr := ps.save(ctx, plan); saveErr != nil {
+				c.logger.Error("Failed to persist LastError after plan merge failure",
+					"slug", req.Slug, "error", saveErr)
+			}
+			c.logger.Error("QA verdict approved but plan-level merge failed — plan stays in current state",
+				"slug", req.Slug, "current_status", current, "error", err)
+			return MutationResponse{Success: false, Error: plan.LastError}
+		}
 		plan.Status = target
-		c.logger.Info("QA verdict approved", "slug", req.Slug, "level", req.Level, "target", target)
+		c.logger.Info("QA verdict approved",
+			"slug", req.Slug, "level", req.Level, "target", target,
+			"plan_branch", plan.PlanBranch, "plan_merge_commit", plan.PlanMergeCommit)
 
 	case workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:
 		if !current.CanTransitionTo(workflow.StatusRejected) {
