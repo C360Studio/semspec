@@ -4,6 +4,8 @@
 
 	interface Props {
 		entry: TrajectoryEntry;
+		/** Applies tighter padding and smaller type. Does NOT gate expansion —
+		 * expansion is always available when the entry has a preview payload. */
 		compact?: boolean;
 	}
 
@@ -56,6 +58,8 @@
 	class:has-error={hasError}
 	class:model-call={isModelCall}
 	class:tool-call={!isModelCall}
+	data-testid="trajectory-entry"
+	data-step-type={entry.step_type}
 >
 	<div class="card-header">
 		<div class="header-left">
@@ -80,11 +84,17 @@
 			{#if hasError}
 				<Icon name="alert-circle" size={14} class="error-icon" />
 			{/if}
-			{#if hasPreview && !compact}
+			{#if hasPreview}
+				<!-- `compact` controls styling only (tighter padding/type);
+					 expansion is always allowed when there's something to show.
+					 Previously both were coupled, so the plan-page timeline
+					 couldn't reveal prompt/response/tool args (bug #7.10). -->
 				<button
 					class="expand-btn"
 					onclick={toggleExpanded}
 					title={expanded ? 'Collapse' : 'Expand preview'}
+					data-testid="entry-expand-btn"
+					aria-expanded={expanded}
 				>
 					<Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} />
 				</button>
@@ -139,8 +149,8 @@
 		</div>
 	{/if}
 
-	{#if expanded && hasPreview && !compact}
-		<div class="preview-block">
+	{#if expanded && hasPreview}
+		<div class="preview-block" data-testid="entry-preview">
 			{#if entry.tool_arguments}
 				<div class="arguments-label">Arguments</div>
 				<pre class="preview-text">{JSON.stringify(entry.tool_arguments, null, 2)}</pre>
