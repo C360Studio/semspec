@@ -61,6 +61,7 @@ type TaskPhaseRequest struct {
 	TestsPassed      *bool    `json:"tests_passed,omitempty"`
 	ValidationPassed *bool    `json:"validation_passed,omitempty"`
 	ErrorReason      string   `json:"error_reason,omitempty"`
+	ErrorClass       string   `json:"error_class,omitempty"`
 	EscalationReason string   `json:"escalation_reason,omitempty"`
 	// Routing task IDs (set when dispatching to agentic loop)
 	DeveloperTaskID string `json:"developer_task_id,omitempty"`
@@ -105,6 +106,7 @@ type ReqPhaseRequest struct {
 	ReviewVerdict  string `json:"review_verdict,omitempty"`
 	ReviewFeedback string `json:"review_feedback,omitempty"`
 	ErrorReason    string `json:"error_reason,omitempty"`
+	ErrorClass     string `json:"error_class,omitempty"`
 	// Routing
 	DecomposerTaskID  string `json:"decomposer_task_id,omitempty"`
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`
@@ -282,6 +284,9 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 	if req.ErrorReason != "" {
 		exec.ErrorReason = req.ErrorReason
 	}
+	if req.ErrorClass != "" {
+		exec.ErrorClass = req.ErrorClass
+	}
 	if req.EscalationReason != "" {
 		exec.EscalationReason = req.EscalationReason
 	}
@@ -424,6 +429,9 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 	}
 	if req.ErrorReason != "" {
 		exec.ErrorReason = req.ErrorReason
+	}
+	if req.ErrorClass != "" {
+		exec.ErrorClass = req.ErrorClass
 	}
 	if req.DecomposerTaskID != "" {
 		exec.DecomposerTaskID = req.DecomposerTaskID

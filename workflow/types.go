@@ -593,6 +593,16 @@ type Plan struct {
 	// UI link to a single verifiable commit without having to re-walk the
 	// branch.
 	AssembledMergeCommit string `json:"assembled_merge_commit,omitempty"`
+
+	// InfraHealth reports whether the sandbox and related infrastructure
+	// are believed healthy enough for this plan to make progress. See
+	// workflow.InfraHealthHealthy / InfraHealthDegraded / InfraHealthCritical.
+	// Empty is treated as healthy (pre-Phase-5 default). plan-manager
+	// flips it to degraded on first infrastructure-class task error and
+	// to critical when a retry would be futile — Phase 5 retry endpoints
+	// refuse with 409 in that state until an operator has cleared the
+	// underlying cause (e.g. sandbox /admin/reconcile).
+	InfraHealth string `json:"infra_health,omitempty"`
 }
 
 // QARun carries the executor result persisted on the plan at reviewing_qa.

@@ -1723,8 +1723,10 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *requirementExecut
 	}
 	exec.terminated = true
 
+	errClass := workflow.ClassifyErrorReason(reason)
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseError, map[string]any{
 		"error_reason": reason,
+		"error_class":  errClass,
 	}); err != nil {
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseError, "error", err)
 	}

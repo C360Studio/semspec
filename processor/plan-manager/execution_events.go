@@ -108,7 +108,52 @@ func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jet
 		c.autoArchiveExhaustionDecisions(ctx, slug, reqExec.RequirementID, "requirement completed after exhaustion")
 	}
 
+	// Phase 5 infra_health tracking: when a requirement errors with the
+	// infrastructure class, the plan has observed evidence that the sandbox
+	// (or related infra) is not fully healthy. Advancing to InfraHealthCritical
+	// deliberately — plan-manager can distinguish a transient one-off
+	// ("degraded") from a persistent wedge ("critical") only with additional
+	// signal (e.g. sandbox /admin/reconcile state, see follow-up). For MVP,
+	// any infrastructure-class failure promotes to critical so retry endpoints
+	// refuse with 409 until an operator has explicitly cleared the plan.
+	if reqExec.Stage == "error" && reqExec.ErrorClass == workflow.ErrorClassInfrastructure {
+		c.markPlanInfraCritical(ctx, slug, reqExec.RequirementID, reqExec.ErrorReason)
+	}
+
 	c.checkPlanConvergence(ctx, bucket, slug)
+}
+
+// markPlanInfraCritical flips the plan's InfraHealth to critical after an
+// infrastructure-class requirement error. Idempotent — already-critical
+// plans are not re-saved. The UI and retry endpoints key off this so
+// neither operates against a sandbox known to be wedged.
+func (c *Component) markPlanInfraCritical(ctx context.Context, slug, reqID, reason string) {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+	if ps == nil {
+		return
+	}
+	plan, ok := ps.get(slug)
+	if !ok {
+		return
+	}
+	if plan.InfraHealth == workflow.InfraHealthCritical {
+		return
+	}
+	prior := plan.InfraHealth
+	plan.InfraHealth = workflow.InfraHealthCritical
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Warn("Failed to persist InfraHealth=critical",
+			"slug", slug, "requirement_id", reqID, "error", err)
+		return
+	}
+	c.logger.Warn("Plan infrastructure health escalated to critical",
+		"slug", slug,
+		"requirement_id", reqID,
+		"prior_infra_health", prior,
+		"error_reason", reason,
+	)
 }
 
 // autoArchiveExhaustionDecisions archives open ExecutionExhausted decisions

@@ -70,6 +70,7 @@ type TaskExecution struct {
 
 	// Terminal annotations
 	ErrorReason      string `json:"error_reason,omitempty"`
+	ErrorClass       string `json:"error_class,omitempty"` // "agent" | "infrastructure" — see ErrorClassAgent / ErrorClassInfrastructure
 	EscalationReason string `json:"escalation_reason,omitempty"`
 
 	// Timestamps
@@ -151,6 +152,7 @@ type RequirementExecution struct {
 	ReviewVerdict  string `json:"review_verdict,omitempty"`
 	ReviewFeedback string `json:"review_feedback,omitempty"`
 	ErrorReason    string `json:"error_reason,omitempty"`
+	ErrorClass     string `json:"error_class,omitempty"` // "agent" | "infrastructure" (see ClassifyErrorReason)
 
 	// Retry
 	RetryCount int `json:"retry_count,omitempty"`

@@ -932,10 +932,12 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 
 	exec.Stage = phaseError
 	exec.ErrorReason = reason
+	exec.ErrorClass = workflow.ClassifyErrorReason(reason)
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorClass, exec.ErrorClass)
 	c.syncToStore(ctx, exec)
 
 	c.errors.Add(1)

@@ -57,6 +57,12 @@ const (
 	// ErrorReason is a human-readable description of why the execution failed.
 	ErrorReason = "workflow.execution.error_reason"
 
+	// ErrorClass categorizes the failure as "agent" (LLM produced bad code,
+	// merge conflict) or "infrastructure" (sandbox wedged, NATS down).
+	// Consumers use this to decide whether a retry is worth attempting.
+	// See workflow.ClassifyErrorReason.
+	ErrorClass = "workflow.execution.error_class"
+
 	// AgentID is the agentic loop ID assigned to this execution stage.
 	AgentID = "workflow.execution.agent_id"
 

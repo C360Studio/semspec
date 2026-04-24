@@ -498,6 +498,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodPost, func() { c.handleUnarchivePlan(w, r, slug) })
 	case "retry":
 		requireMethod(w, r, http.MethodPost, func() { c.handleRetryPlan(w, r, slug) })
+	case "infra-reconcile":
+		requireMethod(w, r, http.MethodPost, func() { c.handleInfraReconcile(w, r, slug) })
 	case "complete":
 		requireMethod(w, r, http.MethodPost, func() { c.handleForceCompletePlan(w, r, slug) })
 	case "reject":
@@ -1233,6 +1235,19 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 		return
 	}
 
+	// Phase 5 infra gate: a plan known to be wedged against a broken
+	// sandbox cannot be retried without first clearing the condition.
+	// Retrying would burn tokens against infra that's guaranteed to fail
+	// in the same way — exactly the waste the audit flagged. Operators
+	// clear this via POST /plans/{slug}/infra-reconcile after fixing the
+	// underlying sandbox (e.g. the sandbox's own /admin/reconcile).
+	if plan.InfraHealth == workflow.InfraHealthCritical {
+		writeJSONError(w,
+			"plan infrastructure is marked critical — resolve via /plans/{slug}/infra-reconcile after fixing the underlying sandbox before retrying",
+			http.StatusConflict)
+		return
+	}
+
 	// Reset requirement executions via execution-manager mutations.
 	resetCount, err := c.resetRequirementExecutions(r.Context(), slug, req.Scope, req.RequirementIDs)
 	if err != nil {
@@ -1374,6 +1389,44 @@ func (c *Component) triggerScenarioOrchestrator(ctx context.Context, plan *workf
 	}
 
 	return c.natsClient.PublishToStream(ctx, subject, data)
+}
+
+// handleInfraReconcile handles POST /plans/{slug}/infra-reconcile.
+// Clears an elevated InfraHealth state on the plan — a human attestation
+// that the underlying infrastructure (typically a wedged sandbox) has
+// been fixed and plan-level retry can proceed. Returns 200 with the
+// prior state whether or not it was actually elevated. Paired with
+// sandbox POST /admin/reconcile: that call clears the sandbox's wedged
+// flag; this call tells plan-manager to stop refusing retry.
+func (c *Component) handleInfraReconcile(w http.ResponseWriter, r *http.Request, slug string) {
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+		return
+	}
+	prior := plan.InfraHealth
+	if prior == "" {
+		// Already healthy — idempotent no-op. Avoid a spurious KV write.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "cleared", "prior": ""})
+		return
+	}
+	plan.InfraHealth = ""
+	if err := c.savePlanCached(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to persist cleared InfraHealth",
+			"slug", slug, "prior", prior, "error", err)
+		http.Error(w, "Failed to clear infra state", http.StatusInternalServerError)
+		return
+	}
+	c.logger.Warn("Plan infrastructure health cleared by operator",
+		"slug", slug, "prior_infra_health", prior)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{"status": "cleared", "prior": prior})
 }
 
 // handleForceCompletePlan handles POST /plans/{slug}/complete.

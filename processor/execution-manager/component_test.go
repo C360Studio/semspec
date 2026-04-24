@@ -971,6 +971,35 @@ func TestMergeWorktree_OmitsEmptyTrailers(t *testing.T) {
 	}
 }
 
+// TestMarkErrorLocked_ClassifiesAgentVsInfrastructure pins Phase 5's
+// cross-layer error classification: exec.ErrorClass must be populated from
+// the reason string so plan-manager (and the retry UX) can distinguish
+// "agent failure — retry might help" from "infrastructure wedged — retry
+// is futile until operator intervenes." Drift between the INFRASTRUCTURE:
+// prefix writer (markApprovedLocked) and the classifier leaves the system
+// silently misclassifying failures.
+func TestMarkErrorLocked_ClassifiesAgentVsInfrastructure(t *testing.T) {
+	c := newTestComponent(t)
+
+	agentExec := newTestExec("plan", "task-agent")
+	c.activeExecs.Set(agentExec.EntityID, agentExec)
+	agentExec.mu.Lock()
+	c.markErrorLocked(testCtx(t), agentExec, "merge_failed: conflict on foo.go")
+	agentExec.mu.Unlock()
+	if agentExec.ErrorClass != workflow.ErrorClassAgent {
+		t.Errorf("agent-class ErrorClass = %q, want %q", agentExec.ErrorClass, workflow.ErrorClassAgent)
+	}
+
+	infraExec := newTestExec("plan", "task-infra")
+	c.activeExecs.Set(infraExec.EntityID, infraExec)
+	infraExec.mu.Lock()
+	c.markErrorLocked(testCtx(t), infraExec, "INFRASTRUCTURE: merge_failed: sandbox needs reconciliation")
+	infraExec.mu.Unlock()
+	if infraExec.ErrorClass != workflow.ErrorClassInfrastructure {
+		t.Errorf("infra-class ErrorClass = %q, want %q", infraExec.ErrorClass, workflow.ErrorClassInfrastructure)
+	}
+}
+
 // TestMarkApprovedLocked_MergeNeedsReconciliation_SkipsRetry pins invariant
 // A2 from docs/audit/task-11-worktree-invariants.md: when the sandbox
 // signals it is wedged (ErrNeedsReconciliation), mergeWorktree must not
