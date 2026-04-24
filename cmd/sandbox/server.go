@@ -103,6 +103,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /git/branch-diff", s.handleGitBranchDiff)
 	mux.HandleFunc("POST /git/branch-file-diff", s.handleGitBranchFileDiff)
 	mux.HandleFunc("POST /git/merge-branches", s.handleMergeBranches)
+	mux.HandleFunc("POST /git/ancestry", s.handleGitAncestry)
 
 	// Command execution (scoped to worktree).
 	mux.HandleFunc("POST /exec", s.handleExec)
@@ -741,12 +742,44 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 
 	// Serialize branch creation against main repo.
 	s.repoMu.Lock()
-	err := runGit(ctx, s.repoPath, "branch", req.Name, base)
-	s.repoMu.Unlock()
+	defer s.repoMu.Unlock()
 
-	if err != nil {
+	if err := runGit(ctx, s.repoPath, "branch", req.Name, base); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
-			writeJSON(w, http.StatusOK, map[string]string{"status": "exists"})
+			// Invariant A3: "already exists" is only a benign no-op when the
+			// existing branch points at the same commit the caller asked
+			// for. Otherwise the caller is about to operate against stale
+			// content and we must refuse. Pre-A3 behavior (always
+			// "status: exists" regardless of where the branch pointed)
+			// was a silent base-ref drift risk called out in
+			// docs/audit/task-11-worktree-invariants.md.
+			existingSHA, shaErr := gitOutput(ctx, s.repoPath, "rev-parse", req.Name)
+			if shaErr != nil {
+				writeError(w, http.StatusInternalServerError,
+					"branch already exists but rev-parse failed: "+shaErr.Error())
+				return
+			}
+			expectedSHA, expErr := gitOutput(ctx, s.repoPath, "rev-parse", base)
+			if expErr != nil {
+				writeError(w, http.StatusBadRequest, "base ref does not exist: "+base)
+				return
+			}
+			existing := strings.TrimSpace(existingSHA)
+			expected := strings.TrimSpace(expectedSHA)
+			if existing == expected {
+				writeJSON(w, http.StatusOK, map[string]string{
+					"status": "exists",
+					"branch": req.Name,
+					"commit": existing,
+				})
+				return
+			}
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error":           fmt.Sprintf("branch %q exists at a different commit than requested base %q", req.Name, base),
+				"branch":          req.Name,
+				"existing_commit": existing,
+				"expected_commit": expected,
+			})
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "failed to create branch: "+err.Error())
@@ -783,6 +816,58 @@ type mergeBranchesResponse struct {
 	MergeCommits      []mergeBranchesCommit `json:"merge_commits,omitempty"`
 	ConflictingBranch string                `json:"conflicting_branch,omitempty"`
 	Error             string                `json:"error,omitempty"`
+}
+
+// ancestryRequest is the JSON body for POST /git/ancestry.
+type ancestryRequest struct {
+	Ancestor   string `json:"ancestor"`
+	Descendant string `json:"descendant"`
+}
+
+// ancestryResponse reports whether the two refs exist and whether
+// `git merge-base --is-ancestor <ancestor> <descendant>` holds. Used by
+// plan-manager's /git-audit endpoint (invariant C3) to detect divergence
+// between what EXECUTION_STATES claims and what git actually holds —
+// e.g. a requirement branch that never made it into the assembled plan
+// branch despite the plan claiming complete.
+type ancestryResponse struct {
+	AncestorExists   bool `json:"ancestor_exists"`
+	DescendantExists bool `json:"descendant_exists"`
+	IsAncestor       bool `json:"is_ancestor"`
+}
+
+// handleGitAncestry answers the primitive C3 needs: "is X an ancestor of Y,
+// and do both exist?" No mutation, no lock required — multiple concurrent
+// audits on the same repo are safe. Unknown refs are reported via the
+// exists flags rather than HTTP errors, so callers can render a structured
+// report without pre-flighting each ref.
+func (s *Server) handleGitAncestry(w http.ResponseWriter, r *http.Request) {
+	var req ancestryRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
+		return
+	}
+	if req.Ancestor == "" || req.Descendant == "" {
+		writeError(w, http.StatusBadRequest, "ancestor and descendant required")
+		return
+	}
+	ctx := r.Context()
+	resp := ancestryResponse{}
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", req.Ancestor); err == nil {
+		resp.AncestorExists = true
+	}
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", req.Descendant); err == nil {
+		resp.DescendantExists = true
+	}
+	if resp.AncestorExists && resp.DescendantExists {
+		// git merge-base --is-ancestor exits 0 when the relationship holds,
+		// non-zero otherwise. Any non-zero here is an honest "not an
+		// ancestor" rather than an error.
+		if err := runGit(ctx, s.repoPath, "merge-base", "--is-ancestor", req.Ancestor, req.Descendant); err == nil {
+			resp.IsAncestor = true
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // handleMergeBranchesConflict writes the 409 (or catastrophic 503) response

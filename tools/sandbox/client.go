@@ -377,6 +377,34 @@ func (c *Client) MergeBranches(ctx context.Context, req MergeBranchesRequest) (*
 	return nil, fmt.Errorf("merge branches: server error %d: %s", resp.StatusCode, msg)
 }
 
+// AncestryResult reports the three-way answer from GET /git/ancestry:
+// whether each ref resolves, and whether the ancestor/descendant relation
+// holds. All three fields are primitive — callers can render structured
+// audit reports without catching HTTP errors for missing refs.
+type AncestryResult struct {
+	AncestorExists   bool `json:"ancestor_exists"`
+	DescendantExists bool `json:"descendant_exists"`
+	IsAncestor       bool `json:"is_ancestor"`
+}
+
+// Ancestry answers "is ancestor an ancestor of descendant, and do both
+// exist?" Read-only — no branch creation or index mutation. Used by the
+// C3 divergence-detector endpoint to verify every completed requirement
+// branch actually landed on the plan's AssembledBranch (or on HEAD when
+// the plan didn't go through B1 assembly).
+// Server route: POST /git/ancestry
+func (c *Client) Ancestry(ctx context.Context, ancestor, descendant string) (*AncestryResult, error) {
+	body := struct {
+		Ancestor   string `json:"ancestor"`
+		Descendant string `json:"descendant"`
+	}{Ancestor: ancestor, Descendant: descendant}
+	var result AncestryResult
+	if err := c.doJSON(ctx, http.MethodPost, "/git/ancestry", body, &result); err != nil {
+		return nil, fmt.Errorf("ancestry: %w", err)
+	}
+	return &result, nil
+}
+
 // DeleteBranch force-deletes a branch. Used during restructure retries to
 // discard polluted state and start fresh.
 // Server route: DELETE /branch/{name}

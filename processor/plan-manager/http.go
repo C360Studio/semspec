@@ -506,6 +506,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodPost, func() { c.handleRejectPlan(w, r, slug) })
 	case "branches":
 		requireMethod(w, r, http.MethodGet, func() { c.handlePlanBranches(w, r, slug) })
+	case "git-audit":
+		requireMethod(w, r, http.MethodGet, func() { c.handleGitAudit(w, r, slug) })
 	default:
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
@@ -1082,6 +1084,14 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 			http.Error(w, "Failed to archive plan", http.StatusInternalServerError)
 			return
 		}
+		// Invariant D3: prune per-requirement branches at archive time so
+		// the sandbox repo doesn't accumulate "semspec/requirement-*"
+		// branches indefinitely across plan cycles. Best-effort — an archive
+		// must not fail because the sandbox is unreachable, so errors are
+		// logged but do not reverse the archive transition. The assembled
+		// plan branch (semspec/plan-<slug>) is NOT pruned: it's the
+		// human-reviewable artifact the rest of the audit trail points at.
+		c.pruneRequirementBranches(r.Context(), plan)
 		c.logger.Info("Plan archived via REST API", "slug", slug)
 	} else {
 		// Hard delete — graph tombstone + cache/KV eviction.

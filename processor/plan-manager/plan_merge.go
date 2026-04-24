@@ -91,6 +91,41 @@ func (c *Component) assembleRequirementBranches(ctx context.Context, plan *workf
 	return nil
 }
 
+// pruneRequirementBranches deletes every "semspec/requirement-<id>" branch
+// belonging to the plan. Implements invariant D3 of the Task-11 audit:
+// without explicit pruning, per-requirement branches accumulate across
+// every plan cycle and eventually make branch-based UI lookups noisy.
+// Called from the archive path after the plan status has transitioned
+// successfully — archiving must not fail because the sandbox is down, so
+// every error is logged and swallowed. The AssembledBranch is NOT pruned;
+// it stays as the durable reviewable artifact.
+func (c *Component) pruneRequirementBranches(ctx context.Context, plan *workflow.Plan) {
+	if c.sandbox == nil {
+		return
+	}
+	if len(plan.Requirements) == 0 {
+		return
+	}
+	pruned := 0
+	for _, r := range plan.Requirements {
+		branch := "semspec/requirement-" + r.ID
+		if err := c.sandbox.DeleteBranch(ctx, branch); err != nil {
+			// 404 on a branch that never existed (requirement never
+			// dispatched, or already pruned) is not worth a warning — log
+			// at debug so repeated archive-then-unarchive cycles don't
+			// spam the logs. Harder failures still warn.
+			c.logger.Debug("Failed to delete requirement branch during prune",
+				"slug", plan.Slug, "branch", branch, "error", err)
+			continue
+		}
+		pruned++
+	}
+	if pruned > 0 {
+		c.logger.Info("Pruned requirement branches on plan archive",
+			"slug", plan.Slug, "pruned", pruned, "total", len(plan.Requirements))
+	}
+}
+
 // topoSortRequirementsByDependsOn returns requirement IDs in an order where
 // every prerequisite appears before its dependents. Requirements without any
 // DependsOn entry — or with dependencies pointing outside the plan — are

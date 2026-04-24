@@ -1186,6 +1186,108 @@ func TestCreateBranch(t *testing.T) {
 	}
 }
 
+// TestCreateBranch_ExistsAtDifferentBase_Returns409 pins invariant A3:
+// attempting to create a branch that already exists at a different commit
+// than the requested base must refuse with 409, not silently return "exists."
+// The audit flagged the pre-A3 behavior as a base-ref drift hazard — a
+// caller would think the branch was freshly created from their requested
+// base when it actually pointed somewhere else entirely.
+func TestCreateBranch_ExistsAtDifferentBase_Returns409(t *testing.T) {
+	srv, ts := newTestServer(t)
+	baseBranch := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Seed an additional commit on base so the two "base refs" in the
+	// test are distinguishable.
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "v1.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "v1.txt")
+	run(t, srv.repoPath, "git", "commit", "-m", "v1")
+	baseSHA := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "HEAD"))
+
+	// Create the branch at baseSHA — fine.
+	resp := doRequest(t, ts, http.MethodPost, "/branch", branchCreateRequest{
+		Name: "semspec/test-drift", Base: baseSHA,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first create: got %d, want 201", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Move base forward, then attempt to create the same branch again at
+	// the new SHA. The branch still points at baseSHA — this is the
+	// "drift" case A3 must refuse.
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "v2.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "v2.txt")
+	run(t, srv.repoPath, "git", "commit", "-m", "v2")
+	newBaseSHA := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "HEAD"))
+
+	resp2 := doRequest(t, ts, http.MethodPost, "/branch", branchCreateRequest{
+		Name: "semspec/test-drift", Base: newBaseSHA,
+	})
+	defer resp2.Body.Close()
+	if resp2.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("drift create: got %d, want 409; body=%s", resp2.StatusCode, body)
+	}
+	var body map[string]string
+	decodeJSON(t, resp2, &body)
+	if body["existing_commit"] != baseSHA {
+		t.Errorf("existing_commit = %q, want %q", body["existing_commit"], baseSHA)
+	}
+	if body["expected_commit"] != newBaseSHA {
+		t.Errorf("expected_commit = %q, want %q", body["expected_commit"], newBaseSHA)
+	}
+
+	// The existing branch must not have been moved — 409 is refuse-semantics,
+	// not reset-semantics. Operators who want overwrite go through DeleteBranch
+	// first.
+	stillAt := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "semspec/test-drift"))
+	if stillAt != baseSHA {
+		t.Errorf("existing branch was moved by rejected create; now at %s, want %s", stillAt, baseSHA)
+	}
+	_ = baseBranch
+}
+
+// TestCreateBranch_ExistsAtSameBase_Returns200Exists confirms A3 preserves
+// the benign case: the branch exists AND points where the caller asked it
+// to. Pre-A3 callers relied on this idempotency and it must still work.
+func TestCreateBranch_ExistsAtSameBase_Returns200Exists(t *testing.T) {
+	srv, ts := newTestServer(t)
+	baseSHA := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "HEAD"))
+
+	// Create at baseSHA.
+	resp := doRequest(t, ts, http.MethodPost, "/branch", branchCreateRequest{
+		Name: "semspec/test-idem", Base: baseSHA,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first create: got %d, want 201", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Second create at the same SHA must return 200 exists — no drift,
+	// no churn, the caller's assumption holds.
+	resp2 := doRequest(t, ts, http.MethodPost, "/branch", branchCreateRequest{
+		Name: "semspec/test-idem", Base: baseSHA,
+	})
+	if resp2.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp2.Body)
+		resp2.Body.Close()
+		t.Fatalf("idempotent create: got %d, want 200; body=%s", resp2.StatusCode, body)
+	}
+	var body map[string]string
+	decodeJSON(t, resp2, &body)
+	if body["status"] != "exists" {
+		t.Errorf("status = %q, want %q", body["status"], "exists")
+	}
+	if body["commit"] != baseSHA {
+		t.Errorf("commit = %q, want %q", body["commit"], baseSHA)
+	}
+	_ = srv
+}
+
 func TestCreateWorktreeWithBaseBranch(t *testing.T) {
 	srv, ts := newTestServer(t)
 
@@ -1766,6 +1868,92 @@ func TestMergeBranches_DetachedHEADRestore(t *testing.T) {
 	abbr := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
 	if abbr != "HEAD" {
 		t.Errorf("HEAD should still be detached after restore, abbrev = %q", abbr)
+	}
+}
+
+// TestGitAncestry covers the C3 divergence-detector primitive.
+// Case 1: ancestor is on descendant — is_ancestor=true.
+// Case 2: ancestor is NOT on descendant — is_ancestor=false but both exist.
+// Case 3: ancestor ref missing — ancestor_exists=false, no error.
+// Case 4: descendant ref missing — descendant_exists=false, no error.
+//
+// The endpoint must be read-only and must never return 5xx on refs that
+// don't exist — callers rely on the structured flags to render audit
+// reports without catching HTTP errors.
+func TestGitAncestry(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// Seed "ancestor-branch" with one commit past base, then "descendant-branch"
+	// containing ancestor-branch's commit plus more.
+	run(t, srv.repoPath, "git", "checkout", "-B", "anc", base)
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "a.go"), []byte("package a\n"), 0o644); err != nil {
+		t.Fatalf("write a: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "a.go")
+	run(t, srv.repoPath, "git", "commit", "-m", "anc")
+
+	run(t, srv.repoPath, "git", "checkout", "-B", "desc", "anc")
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "b.go"), []byte("package b\n"), 0o644); err != nil {
+		t.Fatalf("write b: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "b.go")
+	run(t, srv.repoPath, "git", "commit", "-m", "desc")
+
+	// A sibling branch starting from base — NOT an ancestor of desc.
+	run(t, srv.repoPath, "git", "checkout", "-B", "sibling", base)
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "c.go"), []byte("package c\n"), 0o644); err != nil {
+		t.Fatalf("write c: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "c.go")
+	run(t, srv.repoPath, "git", "commit", "-m", "sibling")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	call := func(anc, desc string) ancestryResponse {
+		t.Helper()
+		resp := doRequest(t, ts, http.MethodPost, "/git/ancestry", ancestryRequest{
+			Ancestor: anc, Descendant: desc,
+		})
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("ancestry(%s, %s): %d; body=%s", anc, desc, resp.StatusCode, body)
+		}
+		var out ancestryResponse
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return out
+	}
+
+	// Case 1: anc IS an ancestor of desc.
+	got := call("anc", "desc")
+	if !got.AncestorExists || !got.DescendantExists || !got.IsAncestor {
+		t.Errorf("anc→desc: %+v, want all true", got)
+	}
+
+	// Case 2: sibling exists, NOT an ancestor of desc.
+	got = call("sibling", "desc")
+	if !got.AncestorExists || !got.DescendantExists {
+		t.Errorf("sibling→desc: exists flags wrong: %+v", got)
+	}
+	if got.IsAncestor {
+		t.Errorf("sibling should not be an ancestor of desc: %+v", got)
+	}
+
+	// Case 3: missing ancestor.
+	got = call("does-not-exist", "desc")
+	if got.AncestorExists {
+		t.Errorf("missing ancestor should have AncestorExists=false: %+v", got)
+	}
+	if got.IsAncestor {
+		t.Errorf("missing ancestor should have IsAncestor=false: %+v", got)
+	}
+
+	// Case 4: missing descendant.
+	got = call("anc", "does-not-exist")
+	if got.DescendantExists {
+		t.Errorf("missing descendant should have DescendantExists=false: %+v", got)
 	}
 }
 

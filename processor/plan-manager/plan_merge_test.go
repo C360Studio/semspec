@@ -256,6 +256,80 @@ func TestAssembleRequirementBranches_NoRequirements(t *testing.T) {
 	// response would have produced an error above.
 }
 
+// TestPruneRequirementBranches_DeletesPerRequirement verifies invariant D3:
+// after a plan archives, every semspec/requirement-<id> branch is deleted
+// so branch lists stay tidy across plan cycles. The AssembledBranch is not
+// in the plan.Requirements slice so is implicitly preserved.
+func TestPruneRequirementBranches_DeletesPerRequirement(t *testing.T) {
+	var deleted []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("unexpected method %s", r.Method)
+			http.Error(w, "wrong method", http.StatusMethodNotAllowed)
+			return
+		}
+		// Branch name is in the path: /branch/<name>
+		name := r.URL.Path[len("/branch/"):]
+		deleted = append(deleted, name)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := newTestComponentWithSandbox(t, srv.URL)
+	plan := &workflow.Plan{
+		Slug: "archive-me",
+		Requirements: []workflow.Requirement{
+			{ID: "r1"},
+			{ID: "r2"},
+			{ID: "r3"},
+		},
+	}
+
+	c.pruneRequirementBranches(context.Background(), plan)
+
+	want := []string{"semspec/requirement-r1", "semspec/requirement-r2", "semspec/requirement-r3"}
+	if len(deleted) != len(want) {
+		t.Fatalf("deleted = %v, want %v", deleted, want)
+	}
+	for i, w := range want {
+		if deleted[i] != w {
+			t.Errorf("deleted[%d] = %q, want %q", i, deleted[i], w)
+		}
+	}
+}
+
+// TestPruneRequirementBranches_SandboxErrorsAreSwallowed confirms the
+// best-effort contract: archiving must not fail because a branch delete
+// fails. The audit rationale is that archive is a terminal operator
+// action — failing it because of transient sandbox trouble would strand
+// the plan in a non-archivable state, which is worse than leaking branches.
+func TestPruneRequirementBranches_SandboxErrorsAreSwallowed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error": "sandbox exploded"}`, http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	c := newTestComponentWithSandbox(t, srv.URL)
+	plan := &workflow.Plan{
+		Slug: "archive-failing",
+		Requirements: []workflow.Requirement{
+			{ID: "r1"},
+		},
+	}
+	// Should not panic, should not return anything the caller has to handle.
+	c.pruneRequirementBranches(context.Background(), plan)
+}
+
+// TestPruneRequirementBranches_NoSandboxIsNoOp verifies the helper is safe
+// to call when plan-manager has no sandbox client — matches pre-B1 no-op
+// posture and lets tests exercise archive paths without mocking the sandbox.
+func TestPruneRequirementBranches_NoSandboxIsNoOp(_ *testing.T) {
+	c := &Component{name: "plan-manager"}
+	c.logger = slog.Default()
+	plan := &workflow.Plan{Slug: "x", Requirements: []workflow.Requirement{{ID: "r1"}}}
+	c.pruneRequirementBranches(context.Background(), plan)
+}
+
 func TestAssembleRequirementBranches_NeedsReconciliation(t *testing.T) {
 	stub := newStubMergeBranchesServer(t, http.StatusServiceUnavailable, map[string]string{
 		"error":      "sandbox wedged",
