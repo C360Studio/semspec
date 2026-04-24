@@ -590,6 +590,28 @@ func TestMergeBranches_ClientNeedsReconciliation(t *testing.T) {
 	assert.False(t, errors.Is(err, ErrMergeBranchesConflict), "must not conflate 503 with merge conflict")
 }
 
+// TestCreateBranch_A3Conflict_ReturnsTypedError pins the client-side
+// mapping of A3's 409 refusal to ErrBranchExistsAtDifferentBase. Callers
+// (req_watcher) rely on errors.Is to detect the stale-branch case and
+// trigger the delete-and-recreate recovery — string-parsing the error
+// would be fragile.
+func TestCreateBranch_A3Conflict_ReturnsTypedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		respond(t, w, http.StatusConflict, map[string]string{
+			"error":           "branch exists at different commit",
+			"branch":          "semspec/requirement-r1",
+			"existing_commit": "aaa",
+			"expected_commit": "bbb",
+		})
+	}))
+	defer srv.Close()
+
+	err := newTestClient(t, srv).CreateBranch(context.Background(), "semspec/requirement-r1", "main")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, ErrBranchExistsAtDifferentBase),
+		"expected ErrBranchExistsAtDifferentBase, got %v", err)
+}
+
 func TestContextCancellation(t *testing.T) {
 	// Server that blocks indefinitely — cancelled context should abort the request.
 	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {

@@ -34,6 +34,11 @@ type stubSandbox struct {
 	createdBranchNames []string
 	deleteWorktreeErr  error
 	createBranchErr    error
+	// createBranchErrOnce, when set, is returned on the FIRST CreateBranch
+	// call and then cleared — subsequent calls return nil. Used to simulate
+	// a stale-branch-on-retry scenario where the first create is refused
+	// and the second (after delete) succeeds.
+	createBranchErrOnce error
 }
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, taskID string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
@@ -54,6 +59,11 @@ func (s *stubSandbox) CreateBranch(_ context.Context, branch, _ string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createdBranchNames = append(s.createdBranchNames, branch)
+	if s.createBranchErrOnce != nil {
+		err := s.createBranchErrOnce
+		s.createBranchErrOnce = nil
+		return err
+	}
 	return s.createBranchErr
 }
 
@@ -843,6 +853,64 @@ func TestInitReqExecution_CreateBranchFailure_MarksError(t *testing.T) {
 	// exec must have been removed from activeExecs (cleanupExecutionLocked runs in markErrorLocked).
 	if _, stillActive := c.activeExecs.Get(exec.EntityID); stillActive {
 		t.Error("exec should have been removed from activeExecs after markErrorLocked → cleanupExecutionLocked")
+	}
+}
+
+// TestInitReqExecution_StaleBranchFromPriorAttempt_DeletesAndRecreates
+// closes the Phase 5 review-driven gap: A3 strict CreateBranch started
+// returning ErrBranchExistsAtDifferentBase when a prior failed attempt
+// left a stale per-requirement branch behind. The plan-level /retry path
+// deletes the req KV entry (handleReqResetMutation), triggering a fresh
+// initReqExecution. Without this hardening, that second call would
+// errors-out with 409 and mark the requirement errored — a retry would
+// never make forward progress.
+//
+// Expected behavior: on 409 from CreateBranch, delete the stale branch
+// and retry CreateBranch at the requested base. The execution should
+// proceed normally (no markErrorLocked), with the branch recorded on
+// exec.RequirementBranch.
+func TestInitReqExecution_StaleBranchFromPriorAttempt_DeletesAndRecreates(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{
+		createBranchErrOnce: fmt.Errorf("wrap: %w", sandbox.ErrBranchExistsAtDifferentBase),
+	}
+	c.sandbox = stub
+
+	exec := &requirementExecution{
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.plan-retry-req-retry",
+		Slug:           "plan-retry",
+		RequirementID:  "req-retry",
+		Prompt:         "do the thing",
+		Role:           "developer",
+		Model:          "gpt-4",
+		CurrentNodeIdx: -1,
+		VisitedNodes:   make(map[string]bool),
+		storeKey:       workflow.RequirementExecutionKey("plan-retry", "req-retry"),
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	c.initReqExecution(context.Background(), exec, "semspec/plan-main")
+
+	if exec.terminated {
+		t.Error("exec.terminated = true; recovery via delete-and-recreate should have succeeded")
+	}
+	if c.errors.Load() != 0 {
+		t.Errorf("errors counter = %d, want 0 (recovery not a real error)", c.errors.Load())
+	}
+	if exec.RequirementBranch != "semspec/requirement-req-retry" {
+		t.Errorf("exec.RequirementBranch = %q, want %q — recreate must set it",
+			exec.RequirementBranch, "semspec/requirement-req-retry")
+	}
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	// Expect: CreateBranch called twice (fail, then succeed after delete).
+	if len(stub.createdBranchNames) != 2 {
+		t.Errorf("createdBranchNames = %v, want 2 calls (fail + retry)", stub.createdBranchNames)
+	}
+	// Expect: DeleteBranch called once between the two CreateBranch calls.
+	if len(stub.deletedBranchNames) != 1 || stub.deletedBranchNames[0] != "semspec/requirement-req-retry" {
+		t.Errorf("deletedBranchNames = %v, want [semspec/requirement-req-retry]", stub.deletedBranchNames)
 	}
 }
 

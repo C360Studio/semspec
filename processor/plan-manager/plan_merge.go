@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
@@ -110,11 +111,20 @@ func (c *Component) pruneRequirementBranches(ctx context.Context, plan *workflow
 	for _, r := range plan.Requirements {
 		branch := "semspec/requirement-" + r.ID
 		if err := c.sandbox.DeleteBranch(ctx, branch); err != nil {
-			// 404 on a branch that never existed (requirement never
-			// dispatched, or already pruned) is not worth a warning — log
-			// at debug so repeated archive-then-unarchive cycles don't
-			// spam the logs. Harder failures still warn.
-			c.logger.Debug("Failed to delete requirement branch during prune",
+			// Split by severity: a 404 is the benign case (branch never
+			// existed — requirement not dispatched, or already pruned
+			// from a prior archive) and goes to Debug so archive-unarchive
+			// cycles don't spam. Any other error (sandbox 5xx, unreachable,
+			// 503 needs_reconciliation) indicates a live problem an
+			// operator would want to see — goes to Warn so default-level
+			// logs surface the "branches accumulating because prune keeps
+			// failing against live infra" signal.
+			if strings.Contains(err.Error(), "server error 404") {
+				c.logger.Debug("Requirement branch already absent during prune",
+					"slug", plan.Slug, "branch", branch)
+				continue
+			}
+			c.logger.Warn("Failed to delete requirement branch during prune",
 				"slug", plan.Slug, "branch", branch, "error", err)
 			continue
 		}

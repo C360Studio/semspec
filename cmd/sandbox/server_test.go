@@ -1871,21 +1871,16 @@ func TestMergeBranches_DetachedHEADRestore(t *testing.T) {
 	}
 }
 
-// TestGitAncestry covers the C3 divergence-detector primitive.
-// Case 1: ancestor is on descendant — is_ancestor=true.
-// Case 2: ancestor is NOT on descendant — is_ancestor=false but both exist.
-// Case 3: ancestor ref missing — ancestor_exists=false, no error.
-// Case 4: descendant ref missing — descendant_exists=false, no error.
+// setupAncestryFixture seeds three branches for ancestry tests:
+//   - "anc": one commit past base
+//   - "desc": branched from "anc", with an extra commit (anc IS an ancestor)
+//   - "sibling": branched from base with its own commit (NOT an ancestor of desc)
 //
-// The endpoint must be read-only and must never return 5xx on refs that
-// don't exist — callers rely on the structured flags to render audit
-// reports without catching HTTP errors.
-func TestGitAncestry(t *testing.T) {
-	srv, ts := newTestServer(t)
+// Returns a helper that POSTs /git/ancestry and decodes the response.
+func setupAncestryFixture(t *testing.T, srv *Server, ts *httptest.Server) func(anc, desc string) ancestryResponse {
+	t.Helper()
 	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
 
-	// Seed "ancestor-branch" with one commit past base, then "descendant-branch"
-	// containing ancestor-branch's commit plus more.
 	run(t, srv.repoPath, "git", "checkout", "-B", "anc", base)
 	if err := os.WriteFile(filepath.Join(srv.repoPath, "a.go"), []byte("package a\n"), 0o644); err != nil {
 		t.Fatalf("write a: %v", err)
@@ -1900,7 +1895,6 @@ func TestGitAncestry(t *testing.T) {
 	run(t, srv.repoPath, "git", "add", "b.go")
 	run(t, srv.repoPath, "git", "commit", "-m", "desc")
 
-	// A sibling branch starting from base — NOT an ancestor of desc.
 	run(t, srv.repoPath, "git", "checkout", "-B", "sibling", base)
 	if err := os.WriteFile(filepath.Join(srv.repoPath, "c.go"), []byte("package c\n"), 0o644); err != nil {
 		t.Fatalf("write c: %v", err)
@@ -1909,7 +1903,7 @@ func TestGitAncestry(t *testing.T) {
 	run(t, srv.repoPath, "git", "commit", "-m", "sibling")
 	run(t, srv.repoPath, "git", "checkout", base)
 
-	call := func(anc, desc string) ancestryResponse {
+	return func(anc, desc string) ancestryResponse {
 		t.Helper()
 		resp := doRequest(t, ts, http.MethodPost, "/git/ancestry", ancestryRequest{
 			Ancestor: anc, Descendant: desc,
@@ -1925,14 +1919,22 @@ func TestGitAncestry(t *testing.T) {
 		}
 		return out
 	}
+}
 
-	// Case 1: anc IS an ancestor of desc.
+// TestGitAncestry covers the four canonical C3 primitive cases:
+// real ancestor, sibling (not ancestor), missing ancestor, missing
+// descendant. The endpoint must be read-only and must never return 5xx
+// on refs that don't exist — callers rely on the structured flags to
+// render audit reports without catching HTTP errors.
+func TestGitAncestry(t *testing.T) {
+	srv, ts := newTestServer(t)
+	call := setupAncestryFixture(t, srv, ts)
+
 	got := call("anc", "desc")
 	if !got.AncestorExists || !got.DescendantExists || !got.IsAncestor {
 		t.Errorf("anc→desc: %+v, want all true", got)
 	}
 
-	// Case 2: sibling exists, NOT an ancestor of desc.
 	got = call("sibling", "desc")
 	if !got.AncestorExists || !got.DescendantExists {
 		t.Errorf("sibling→desc: exists flags wrong: %+v", got)
@@ -1941,7 +1943,6 @@ func TestGitAncestry(t *testing.T) {
 		t.Errorf("sibling should not be an ancestor of desc: %+v", got)
 	}
 
-	// Case 3: missing ancestor.
 	got = call("does-not-exist", "desc")
 	if got.AncestorExists {
 		t.Errorf("missing ancestor should have AncestorExists=false: %+v", got)
@@ -1950,10 +1951,33 @@ func TestGitAncestry(t *testing.T) {
 		t.Errorf("missing ancestor should have IsAncestor=false: %+v", got)
 	}
 
-	// Case 4: missing descendant.
 	got = call("anc", "does-not-exist")
 	if got.DescendantExists {
 		t.Errorf("missing descendant should have DescendantExists=false: %+v", got)
+	}
+}
+
+// TestGitAncestry_SelfAncestry pins the behavior plan-manager's
+// git-audit pre-B1 fallback relies on: asking Ancestry(X, X) against an
+// existing ref returns all-true, and against a missing ref returns
+// all-false. This lets the C3 endpoint double as "does X exist?"
+// without a dedicated BranchExists route. If merge-base ever stops
+// treating a commit as its own ancestor (it won't per spec, but a
+// future refactor could change the endpoint's shape), this test fails
+// loudly at the exact layer that would otherwise silently break plan
+// audits.
+func TestGitAncestry_SelfAncestry(t *testing.T) {
+	srv, ts := newTestServer(t)
+	call := setupAncestryFixture(t, srv, ts)
+
+	got := call("anc", "anc")
+	if !got.AncestorExists || !got.DescendantExists || !got.IsAncestor {
+		t.Errorf("self-ancestry must be all-true for existing ref: %+v", got)
+	}
+
+	got = call("does-not-exist", "does-not-exist")
+	if got.AncestorExists || got.DescendantExists {
+		t.Errorf("self-ancestry on missing ref must have both exists=false: %+v", got)
 	}
 }
 

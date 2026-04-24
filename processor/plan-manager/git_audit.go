@@ -97,10 +97,17 @@ func (c *Component) buildGitAuditReport(ctx context.Context, plan *workflow.Plan
 			Branch:        branch,
 		}
 		if !checkAncestry {
-			// Only probe existence: ancestry-vs-self is trivially true and
-			// would mask a missing branch.
+			// Self-ancestry trick: asking Ancestry(X, X) against a real
+			// sandbox yields AncestorExists=true iff X resolves. It lets
+			// us reuse the same endpoint for "does this branch exist?"
+			// without adding a dedicated BranchExists route. Behavior is
+			// pinned by TestGitAncestry_SelfAncestry in cmd/sandbox.
 			res, err := c.sandbox.Ancestry(ctx, branch, branch)
 			if err != nil {
+				// ExistsInSandbox stays at its zero value (false) on
+				// sandbox-unreachable. That's "we couldn't verify" rather
+				// than "the branch is definitely absent" — Notes carries
+				// the distinction for humans reading the report.
 				finding.Notes = "sandbox unreachable: " + err.Error()
 				report.Healthy = false
 			} else {
@@ -115,6 +122,8 @@ func (c *Component) buildGitAuditReport(ctx context.Context, plan *workflow.Plan
 		}
 		res, err := c.sandbox.Ancestry(ctx, branch, descendant)
 		if err != nil {
+			// Same zero-value semantics as the existence-only branch —
+			// ExistsInSandbox=false here means "unverified," not "absent."
 			finding.Notes = "sandbox unreachable: " + err.Error()
 			report.Healthy = false
 			report.Findings = append(report.Findings, finding)

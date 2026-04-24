@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -33,6 +34,14 @@ const (
 // and MUST NOT retry — subsequent merge/branch requests will fail identically
 // until an operator clears the flag via POST /admin/reconcile.
 var ErrNeedsReconciliation = errors.New("sandbox needs reconciliation")
+
+// ErrBranchExistsAtDifferentBase is returned by CreateBranch when invariant
+// A3 refuses the request: the branch already exists but points at a different
+// commit than the requested base. Callers who want to reset the branch to
+// the new base must DeleteBranch first (explicit intent), then retry
+// CreateBranch. Requirement-executor's init path does this automatically
+// when a prior failed attempt left a stale branch behind.
+var ErrBranchExistsAtDifferentBase = errors.New("branch exists at different base")
 
 // Client communicates with the sandbox server via HTTP.
 // All operations are scoped to a task ID that maps to a git worktree on the
@@ -257,7 +266,18 @@ func (c *Client) MergeWorktree(ctx context.Context, taskID string, opts ...Merge
 }
 
 // CreateBranch creates a git branch in the main repository.
-// Returns nil if the branch already exists.
+//
+// Returns nil when the branch is created OR when it already exists AT THE
+// REQUESTED BASE (idempotent — the caller's precondition is satisfied
+// either way).
+//
+// Returns a wrapped ErrBranchExistsAtDifferentBase when the branch exists
+// but points at a different commit than the requested base. Invariant A3
+// from the task-11 worktree audit: silent reuse of a drifted branch was
+// how stale content could leak into a new requirement execution. Callers
+// that genuinely want to reset the branch must DeleteBranch first and
+// then retry CreateBranch — explicit intent.
+//
 // Server route: POST /branch  body: {"name": branchName, "base": baseRef}
 func (c *Client) CreateBranch(ctx context.Context, name, base string) error {
 	body := struct {
@@ -265,6 +285,12 @@ func (c *Client) CreateBranch(ctx context.Context, name, base string) error {
 		Base string `json:"base,omitempty"`
 	}{Name: name, Base: base}
 	if err := c.doJSON(ctx, http.MethodPost, "/branch", body, nil); err != nil {
+		// server error 409 is A3's "exists at different base" refusal.
+		// Surface it as a typed sentinel so callers can errors.Is-match
+		// without string parsing.
+		if strings.Contains(err.Error(), "server error 409") {
+			return fmt.Errorf("create branch %q: %w", name, ErrBranchExistsAtDifferentBase)
+		}
 		return fmt.Errorf("create branch: %w", err)
 	}
 	return nil

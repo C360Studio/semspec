@@ -13,9 +13,11 @@ package requirementexecutor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -152,7 +154,24 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 		if planBranch != "" {
 			baseBranch = planBranch
 		}
-		if err := c.sandbox.CreateBranch(ctx, branchName, baseBranch); err != nil {
+		err := c.sandbox.CreateBranch(ctx, branchName, baseBranch)
+		// A3 now refuses with ErrBranchExistsAtDifferentBase when a stale
+		// branch survives from a prior failed attempt (plan-level /retry
+		// deletes the req KV entry, re-triggering initReqExecution on a
+		// branch that still holds the old attempt's commits). That stale
+		// branch is dead context — delete and recreate at the requested
+		// base. Genuine retry-without-progress is the whole reason this
+		// path exists.
+		if errors.Is(err, sandbox.ErrBranchExistsAtDifferentBase) {
+			c.logger.Info("Stale requirement branch detected from prior attempt — resetting",
+				"branch", branchName, "base", baseBranch)
+			if delErr := c.sandbox.DeleteBranch(ctx, branchName); delErr != nil {
+				c.logger.Warn("Failed to delete stale requirement branch before recreate",
+					"branch", branchName, "error", delErr)
+			}
+			err = c.sandbox.CreateBranch(ctx, branchName, baseBranch)
+		}
+		if err != nil {
 			c.logger.Error("Failed to create requirement branch; cannot proceed without isolation",
 				"branch", branchName, "base", baseBranch, "error", err)
 			exec.mu.Lock()
