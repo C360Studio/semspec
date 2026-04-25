@@ -36,7 +36,6 @@ import (
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 
 	"github.com/c360studio/semspec/llm"
-	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
@@ -51,6 +50,7 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	ssmodel "github.com/c360studio/semstreams/model"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -115,7 +115,7 @@ type Component struct {
 	// Lesson system — writes/reads through graph pipeline (no direct KV dependency).
 	lessonWriter    *lessons.Writer
 	errorCategories *workflow.ErrorCategoryRegistry
-	modelRegistry   *model.Registry
+	modelRegistry   ssmodel.RegistryReader
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -191,12 +191,13 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	logger = logger.With("component", componentName)
 
 	c := &Component{
-		config:       cfg,
-		natsClient:   deps.NATSClient,
-		logger:       logger,
-		platform:     deps.Platform,
-		sandbox:      newWorktreeManager(cfg.SandboxURL),
-		indexingGate: workflow.NewIndexingGate(cfg.GraphGatewayURL, logger),
+		config:        cfg,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
+		platform:      deps.Platform,
+		modelRegistry: deps.ModelRegistry,
+		sandbox:       newWorktreeManager(cfg.SandboxURL),
+		indexingGate:  workflow.NewIndexingGate(cfg.GraphGatewayURL, logger),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -444,8 +445,6 @@ func (c *Component) initLessonsAndConfig() {
 	} else {
 		c.errorCategories = reg
 	}
-
-	c.modelRegistry = model.NewDefaultRegistry()
 
 	// Load project checklist so developer prompts show the actual quality gates.
 	checklistPath := filepath.Join(repoRoot, ".semspec", "checklist.json")

@@ -32,6 +32,7 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	ssmodel "github.com/c360studio/semstreams/model"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -61,7 +62,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	modelRegistry *model.Registry
+	modelRegistry ssmodel.RegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
 
@@ -126,7 +127,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
-		modelRegistry: model.Global(),
+		modelRegistry: deps.ModelRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
 	}, nil
@@ -467,7 +468,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
-	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	modelName := c.modelRegistry.Resolve(capability)
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
@@ -933,7 +934,7 @@ func (c *Component) resolveProvider() prompt.Provider {
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
-	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	modelName := c.modelRegistry.Resolve(capability)
 	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
 		return prompt.Provider(endpoint.Provider)
 	}
