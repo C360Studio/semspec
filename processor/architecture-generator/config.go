@@ -22,6 +22,11 @@ type Config struct {
 	// generation when the agent loop fails or output cannot be parsed.
 	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on generation failure,category:basic,default:2"`
 
+	// RetryBackoffMs is the floor of the jittered delay before re-dispatching
+	// after a generation failure. See workflow/dispatchretry for semantics.
+	// Default 200ms; non-positive values fall back to the default.
+	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between generation retries (ms),category:advanced,default:200"`
+
 	// Ports defines the component's port configuration.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }
@@ -32,6 +37,7 @@ func DefaultConfig() Config {
 		DefaultCapability:    "architecture",
 		PlanStateBucket:      "PLAN_STATES",
 		MaxGenerationRetries: 2,
+		RetryBackoffMs:       200,
 	}
 }
 

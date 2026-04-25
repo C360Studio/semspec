@@ -28,6 +28,7 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -53,13 +54,6 @@ const (
 	subjectArchitectureTask = "agent.task.architecture-generation"
 )
 
-// retryEntry holds the retry count and the original plan data so that
-// retries can re-dispatch with the same arguments plus the previous error.
-type retryEntry struct {
-	count int
-	plan  *workflow.Plan
-}
-
 // Component implements the architecture-generator processor.
 type Component struct {
 	name       string
@@ -77,8 +71,8 @@ type Component struct {
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 
-	// retryState tracks per-plan retry attempts. Keyed by slug.
-	retryState sync.Map
+	// retry tracks per-plan attempts keyed by slug; payload is *workflow.Plan.
+	retry *dispatchretry.State
 
 	// Metrics
 	triggersProcessed  atomic.Int64
@@ -109,6 +103,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.MaxGenerationRetries == 0 {
 		config.MaxGenerationRetries = defaults.MaxGenerationRetries
+	}
+	if config.RetryBackoffMs <= 0 {
+		config.RetryBackoffMs = defaults.RetryBackoffMs
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -141,6 +138,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: deps.ModelRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		retry: dispatchretry.New(dispatchretry.Config{
+			MaxRetries: config.MaxGenerationRetries,
+			BackoffMs:  config.RetryBackoffMs,
+		}),
 	}, nil
 }
 
@@ -294,7 +295,7 @@ func (c *Component) processArchitecturePhase(ctx context.Context, plan *workflow
 		return
 	}
 
-	c.retryState.Store(plan.Slug, &retryEntry{count: 0, plan: plan})
+	c.retry.Track(plan.Slug, plan)
 	c.dispatchArchitectureGenerator(ctx, plan, "")
 }
 
@@ -308,6 +309,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("archgen-%s-%s", plan.Slug, uuid.New().String())
+	c.retry.SetActiveLoop(plan.Slug, taskID)
 
 	// Build requirement summaries for the prompt.
 	reqSummaries := make([]prompts.RequirementSummary, len(plan.Requirements))
@@ -507,6 +509,13 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
 	c.updateLastActivity()
 
+	// Stale loop guard: drop completions from older dispatches that race a retry.
+	if c.retry.IsStaleLoop(slug, loop.TaskID) {
+		c.logger.Debug("Dropping stale architecture loop completion (task ID mismatch)",
+			"slug", slug, "loop_task_id", loop.TaskID, "loop_id", loop.ID)
+		return
+	}
+
 	if loop.Outcome != agentic.OutcomeSuccess {
 		c.generationsFailed.Add(1)
 		loopErrorMsg := loop.Error
@@ -543,7 +552,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"current_status", status,
 				"loop_id", loop.ID)
-			c.retryState.Delete(slug)
+			c.retry.Clear(slug)
 			return
 		}
 	}
@@ -556,7 +565,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"error", err,
 				"loop_id", loop.ID)
-			c.retryState.Delete(slug)
+			c.retry.Clear(slug)
 			return
 		}
 		c.generationsFailed.Add(1)
@@ -567,7 +576,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	// Clean up retry state on success.
-	c.retryState.Delete(slug)
+	c.retry.Clear(slug)
 
 	c.logger.Info("Architecture generated via agentic-dispatch and mutation accepted",
 		"slug", slug,
@@ -580,12 +589,11 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // retryOrFail attempts to re-dispatch architecture generation with the error
 // message appended to the prompt. When the maximum retry count is exceeded it
 // sends a generation.failed mutation to reject the plan.
+//
+// On cold start (no in-memory retry entry), reconstruct from PLAN_STATES and
+// Track before Tick — the helper is unaware of NATS/KV by design.
 func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
-	var entry *retryEntry
-	if v, ok := c.retryState.Load(slug); ok {
-		entry = v.(*retryEntry)
-	} else {
-		// Restart recovery: reconstruct from PLAN_STATES.
+	if _, ok := c.retry.Snapshot(slug); !ok {
 		plan, err := c.loadPlanFromKV(ctx, slug)
 		if err != nil {
 			c.logger.Warn("retryOrFail: no retry state and PLAN_STATES recovery failed, failing immediately",
@@ -593,31 +601,40 @@ func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
 			c.sendGenerationFailed(ctx, slug, errorMsg)
 			return
 		}
-		c.logger.Info("Recovered plan from PLAN_STATES after restart",
-			"slug", slug)
-		entry = &retryEntry{count: 0, plan: plan}
-		c.retryState.Store(slug, entry)
+		c.logger.Info("Recovered plan from PLAN_STATES after restart", "slug", slug)
+		c.retry.Track(slug, plan)
 	}
 
-	entry.count++
-	if entry.count > c.config.MaxGenerationRetries {
+	entry, retryOK := c.retry.Tick(ctx, slug)
+	if entry == nil {
+		if ctx.Err() != nil {
+			c.logger.Debug("retryOrFail aborted during backoff", "slug", slug, "error", ctx.Err())
+			return
+		}
+		c.logger.Warn("retryOrFail: lost retry context, failing immediately", "slug", slug)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
+	}
+
+	plan, _ := entry.Payload.(*workflow.Plan)
+
+	if !retryOK {
 		c.logger.Warn("Architecture generation exhausted retries",
 			"slug", slug,
-			"attempts", entry.count,
+			"attempts", entry.Count,
 			"max", c.config.MaxGenerationRetries,
 			"last_error", errorMsg)
-		c.retryState.Delete(slug)
 		c.sendGenerationFailed(ctx, slug, errorMsg)
 		return
 	}
 
 	c.logger.Info("Retrying architecture generation",
 		"slug", slug,
-		"attempt", entry.count,
+		"attempt", entry.Count,
 		"max", c.config.MaxGenerationRetries,
 		"previous_error", errorMsg)
 
-	c.dispatchArchitectureGenerator(ctx, entry.plan, errorMsg)
+	c.dispatchArchitectureGenerator(ctx, plan, errorMsg)
 }
 
 // sendGenerationFailed publishes plan.mutation.generation.failed to reject the plan.
