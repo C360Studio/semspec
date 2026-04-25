@@ -756,6 +756,22 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 // error appended to the prompt when the retry budget is not exhausted,
 // otherwise marks the requirement failed.
 //
+// Why not workflow/dispatchretry: unlike the planning-phase processors
+// (qa-reviewer, plan-reviewer, planner, requirement/scenario/architecture
+// generators) which each migrated to the dispatchretry helper in WS2,
+// requirement-executor stores DecomposerAttempt + DecomposerLastError on
+// the persistent requirementExecution struct that is checkpointed to
+// EXECUTION_STATES KV. The counter survives process restarts via that
+// persistence, which dispatchretry — an in-memory map keyed by string —
+// cannot match without a separate KV-write path. Adding backoff here
+// would also need to coordinate with the per-execution lock the caller
+// holds, complicating the contract.
+//
+// If a retry-storm risk emerges in the executor path, evaluate either
+// (a) folding backoff into dispatchDecomposerLocked itself with an
+// explicit ctx-cancellable sleep, or (b) extending dispatchretry with
+// a "snapshot-write hook" that callers wire to their persistence layer.
+//
 // Caller must hold exec.mu.
 func (c *Component) retryOrFailDecomposerLocked(ctx context.Context, exec *requirementExecution, errorMsg string) {
 	if exec.DecomposerAttempt <= c.config.MaxDecomposerRetries {
