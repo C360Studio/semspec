@@ -24,6 +24,7 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -43,9 +44,11 @@ const (
 	subjectReviewTask = "agent.task.reviewer"
 )
 
-// reviewRetryEntry holds the context needed to re-dispatch a review on failure.
-type reviewRetryEntry struct {
-	count       int
+// reviewRetryPayload carries the per-key context retryOrFail needs to
+// re-dispatch a review attempt: the plan JSON to re-prompt with, and the
+// round (R1=draft review, R2=scenario review). Stored as the Payload field
+// of a dispatchretry.Entry; round comes back via type assertion on retry.
+type reviewRetryPayload struct {
 	planContent string
 	round       reviewRound
 }
@@ -62,8 +65,8 @@ type Component struct {
 	lessonWriter    *lessons.Writer
 	errorCategories *workflow.ErrorCategoryRegistry
 
-	// Retry state: slug → *reviewRetryEntry
-	retryState sync.Map
+	// retry tracks per-plan attempts keyed by slug; payload is *reviewRetryPayload.
+	retry *dispatchretry.State
 
 	// Lifecycle
 	running   bool
@@ -97,6 +100,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.MaxReviewRetries == 0 {
 		config.MaxReviewRetries = defaults.MaxReviewRetries
+	}
+	if config.RetryBackoffMs <= 0 {
+		config.RetryBackoffMs = defaults.RetryBackoffMs
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -140,6 +146,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		assembler:       assembler,
 		lessonWriter:    &lessons.Writer{TW: tw, Logger: logger},
 		errorCategories: errorCats,
+		retry: dispatchretry.New(dispatchretry.Config{
+			MaxRetries: config.MaxReviewRetries,
+			BackoffMs:  config.RetryBackoffMs,
+		}),
 	}, nil
 }
 
@@ -253,6 +263,13 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		round = reviewRound(int(r))
 	}
 
+	// Stale loop guard: drop completions from older dispatches that race a retry.
+	if c.retry.IsStaleLoop(slug, loop.TaskID) {
+		c.logger.Debug("Dropping stale review loop completion (task ID mismatch)",
+			"slug", slug, "loop_task_id", loop.TaskID, "loop_id", loop.ID, "round", round)
+		return
+	}
+
 	// Stale completion guard: if the plan has moved past reviewing state,
 	// our result is stale — discard without sending mutations.
 	if planJSON, loadErr := c.loadPlanContentFromKV(ctx, slug); loadErr == nil {
@@ -264,7 +281,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 					"slug", slug,
 					"current_status", status,
 					"loop_id", loop.ID)
-				c.retryState.Delete(slug)
+				c.retry.Clear(slug)
 				return
 			}
 		}
@@ -297,7 +314,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	// Successful parse — clear retry state.
-	c.retryState.Delete(slug)
+	c.retry.Clear(slug)
 
 	c.logger.Info("Review agent complete",
 		"slug", slug,
@@ -324,10 +341,12 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	c.updateLastActivity()
 
 	// Seed retry state so retryOrFail can re-dispatch with the same params.
-	// Use LoadOrStore to avoid resetting the counter on retry re-dispatches.
-	c.retryState.LoadOrStore(slug, &reviewRetryEntry{count: 0, planContent: planContent, round: round})
+	// Track is no-op when the entry already exists (e.g. on retry re-entry),
+	// preserving the running count.
+	c.retry.Track(slug, &reviewRetryPayload{planContent: planContent, round: round})
 
 	taskID := fmt.Sprintf("review-%s-r%d-%s", slug, round, uuid.New().String())
+	c.retry.SetActiveLoop(slug, taskID)
 
 	// Load role-filtered standards for the fragment pipeline.
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
@@ -427,12 +446,11 @@ func (c *Component) availableToolNames() []string {
 // retryOrFail attempts to re-dispatch the review with the error appended to the
 // prompt as context. When MaxReviewRetries is exhausted it falls through to
 // sendGenerationFailed which rejects the plan.
+//
+// On cold start (no in-memory entry), reload plan from PLAN_STATES and Track
+// before Tick — the dispatchretry helper is unaware of NATS/KV by design.
 func (c *Component) retryOrFail(ctx context.Context, slug string, round reviewRound, errorMsg string) {
-	var entry *reviewRetryEntry
-	if v, ok := c.retryState.Load(slug); ok {
-		entry = v.(*reviewRetryEntry)
-	} else {
-		// Restart recovery: reload plan from PLAN_STATES.
+	if _, ok := c.retry.Snapshot(slug); !ok {
 		planContent, err := c.loadPlanContentFromKV(ctx, slug)
 		if err != nil {
 			c.logger.Warn("retryOrFail: no retry state and PLAN_STATES recovery failed, failing immediately",
@@ -442,19 +460,30 @@ func (c *Component) retryOrFail(ctx context.Context, slug string, round reviewRo
 			return
 		}
 		c.logger.Info("Recovered plan from PLAN_STATES after restart", "slug", slug)
-		entry = &reviewRetryEntry{count: 0, planContent: planContent, round: round}
-		c.retryState.Store(slug, entry)
+		c.retry.Track(slug, &reviewRetryPayload{planContent: planContent, round: round})
 	}
 
-	entry.count++
-	if entry.count > c.config.MaxReviewRetries {
+	entry, retryOK := c.retry.Tick(ctx, slug)
+	if entry == nil {
+		if ctx.Err() != nil {
+			c.logger.Debug("retryOrFail aborted during backoff", "slug", slug, "error", ctx.Err())
+			return
+		}
+		c.logger.Warn("retryOrFail: lost retry context, failing immediately", "slug", slug)
+		c.reviewsFailed.Add(1)
+		c.sendGenerationFailed(ctx, slug, round, errorMsg)
+		return
+	}
+
+	payload, _ := entry.Payload.(*reviewRetryPayload)
+
+	if !retryOK {
 		c.logger.Warn("Review exhausted retries",
 			"slug", slug,
 			"round", round,
-			"attempts", entry.count,
+			"attempts", entry.Count,
 			"max", c.config.MaxReviewRetries,
 			"last_error", errorMsg)
-		c.retryState.Delete(slug)
 		c.reviewsFailed.Add(1)
 		c.sendGenerationFailed(ctx, slug, round, errorMsg)
 		return
@@ -463,11 +492,11 @@ func (c *Component) retryOrFail(ctx context.Context, slug string, round reviewRo
 	c.logger.Info("Retrying review",
 		"slug", slug,
 		"round", round,
-		"attempt", entry.count,
+		"attempt", entry.Count,
 		"max", c.config.MaxReviewRetries,
 		"previous_error", errorMsg)
 
-	c.dispatchReviewer(ctx, slug, entry.planContent, entry.round)
+	c.dispatchReviewer(ctx, slug, payload.planContent, payload.round)
 }
 
 // loadPlanContentFromKV reads a plan from PLAN_STATES and returns its JSON

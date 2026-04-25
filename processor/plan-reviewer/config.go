@@ -29,6 +29,11 @@ type Config struct {
 	// the agent loop fails or the output cannot be parsed. Default 2.
 	MaxReviewRetries int `json:"max_review_retries" schema:"type:integer,description:Max retries on review failure (parse error or loop failure),category:advanced,default:2"`
 
+	// RetryBackoffMs is the floor of the jittered delay before re-dispatching
+	// after a review failure. See workflow/dispatchretry for semantics.
+	// Default 200ms; non-positive values fall back to the default.
+	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between review retries (ms),category:advanced,default:200"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -39,6 +44,7 @@ func DefaultConfig() Config {
 		DefaultCapability: "plan_review",
 		PlanStateBucket:   "PLAN_STATES",
 		MaxReviewRetries:  2,
+		RetryBackoffMs:    200,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{},
 			Outputs: []component.PortDefinition{
