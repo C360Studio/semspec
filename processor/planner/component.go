@@ -26,6 +26,7 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -66,9 +67,8 @@ type Component struct {
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
 
-	// Retry state
-	retryCount      sync.Map // slug → int (retry attempts per plan)
-	pendingDispatch sync.Map // slug → *planDispatchContext (preserved for retry)
+	// retry tracks per-plan attempts keyed by slug; payload is *planDispatchContext.
+	retry *dispatchretry.State
 
 	// Lifecycle
 	running   bool
@@ -98,6 +98,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.MaxGenerationRetries == 0 {
 		config.MaxGenerationRetries = defaults.MaxGenerationRetries
+	}
+	if config.RetryBackoffMs <= 0 {
+		config.RetryBackoffMs = defaults.RetryBackoffMs
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -130,6 +133,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: deps.ModelRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		retry: dispatchretry.New(dispatchretry.Config{
+			MaxRetries: config.MaxGenerationRetries,
+			BackoffMs:  config.RetryBackoffMs,
+		}),
 	}, nil
 }
 
@@ -323,6 +330,13 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
 	c.updateLastActivity()
 
+	// Stale loop guard: drop completions from older dispatches that race a retry.
+	if c.retry.IsStaleLoop(slug, loop.TaskID) {
+		c.logger.Debug("Dropping stale planning loop completion (task ID mismatch)",
+			"slug", slug, "loop_task_id", loop.TaskID, "loop_id", loop.ID)
+		return
+	}
+
 	if loop.Outcome != agentic.OutcomeSuccess {
 		errMsg := loop.Error
 		if errMsg == "" {
@@ -341,8 +355,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"current_status", status,
 				"loop_id", loop.ID)
-			c.retryCount.Delete(slug)
-			c.pendingDispatch.Delete(slug)
+			c.retry.Clear(slug)
 			return
 		}
 	}
@@ -400,8 +413,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"error", errMsg,
 				"loop_id", loop.ID)
-			c.retryCount.Delete(slug)
-			c.pendingDispatch.Delete(slug)
+			c.retry.Clear(slug)
 			return
 		}
 
@@ -411,8 +423,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	// Success — clear retry state.
-	c.retryCount.Delete(slug)
-	c.pendingDispatch.Delete(slug)
+	c.retry.Clear(slug)
 
 	c.plansGenerated.Add(1)
 	c.logger.Info("Plan drafted via agentic-dispatch and mutation accepted",
@@ -424,24 +435,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // The agent explores the codebase using bash and graph tools, then produces
 // a Goal/Context/Scope plan. Running through the agentic loop gives it real
 // tool execution, trajectory tracking, and codebase visibility.
-func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {
-	// Gate on semsource readiness — agents need graph data for codebase context.
-	// Block up to readiness budget (SEMSOURCE_READINESS_BUDGET), then proceed anyway.
-	c.waitForGraphReady(ctx, slug)
-
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-	c.pendingDispatch.Store(slug, &planDispatchContext{
-		Title:            title,
-		IsRevision:       isRevision,
-		PreviousPlanJSON: previousPlanJSON,
-		RevisionPrompt:   revisionPrompt,
-	})
-
-	taskID := fmt.Sprintf("plan-%s-%s", slug, uuid.New().String())
-
-	// Build user prompt.
-	var userPrompt string
+// buildPlannerUserPrompt assembles the per-turn user prompt for the planning
+// agent. Composes the revision-context preamble (when retrying after a
+// reviewer rejection) with the optional previous-error retry note.
+func buildPlannerUserPrompt(title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) string {
 	if isRevision && revisionPrompt != "" {
 		var sb []byte
 		if previousPlanJSON != "" {
@@ -455,13 +452,39 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 			sb = append(sb, previousError...)
 			sb = append(sb, "\n\nPlease try again, addressing the issue above."...)
 		}
-		userPrompt = string(sb)
-	} else if title != "" {
-		userPrompt = prompts.PlannerPromptWithTitle(title)
-		if previousError != "" {
-			userPrompt += "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n" + previousError + "\n\nPlease try again, addressing the issue above."
-		}
+		return string(sb)
 	}
+	if title == "" {
+		return ""
+	}
+	prompt := prompts.PlannerPromptWithTitle(title)
+	if previousError != "" {
+		prompt += "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n" + previousError + "\n\nPlease try again, addressing the issue above."
+	}
+	return prompt
+}
+
+func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {
+	// Gate on semsource readiness — agents need graph data for codebase context.
+	// Block up to readiness budget (SEMSOURCE_READINESS_BUDGET), then proceed anyway.
+	c.waitForGraphReady(ctx, slug)
+
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+	// Track records the dispatch context for retry re-dispatch. No-op when
+	// an entry already exists (retry re-entry preserves the running count
+	// and the original revision context).
+	c.retry.Track(slug, &planDispatchContext{
+		Title:            title,
+		IsRevision:       isRevision,
+		PreviousPlanJSON: previousPlanJSON,
+		RevisionPrompt:   revisionPrompt,
+	})
+
+	taskID := fmt.Sprintf("plan-%s-%s", slug, uuid.New().String())
+	c.retry.SetActiveLoop(slug, taskID)
+
+	userPrompt := buildPlannerUserPrompt(title, isRevision, previousPlanJSON, revisionPrompt, previousError)
 
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
@@ -679,54 +702,76 @@ func extractJSON(s string) string {
 
 // retryOrFail increments the retry counter for this slug and re-dispatches
 // with error feedback if under the limit, otherwise signals permanent failure.
+//
+// On cold start (no in-memory entry), reconstruct dispatch context from
+// PLAN_STATES and Track before Tick — the dispatchretry helper is unaware
+// of NATS/KV by design.
 func (c *Component) retryOrFail(ctx context.Context, slug, errMsg string) {
-	val, _ := c.retryCount.LoadOrStore(slug, 0)
-	count := val.(int) + 1
-	c.retryCount.Store(slug, count)
+	if _, ok := c.retry.Snapshot(slug); !ok {
+		pdc := c.recoverDispatchContext(ctx, slug, errMsg)
+		c.retry.Track(slug, pdc)
+	}
 
-	if count <= c.config.MaxGenerationRetries {
-		dc, _ := c.pendingDispatch.Load(slug)
-		pdc, _ := dc.(*planDispatchContext)
-		if pdc == nil {
-			// Restart recovery: reconstruct from PLAN_STATES.
-			if plan, err := c.loadPlanFromKV(ctx, slug); err == nil {
-				c.logger.Info("Recovered plan context from PLAN_STATES after restart",
-					"slug", slug)
-				isRevision := plan.Goal != "" && len(plan.ReviewFindings) > 0
-				pdc = &planDispatchContext{Title: plan.Title, IsRevision: isRevision}
-				if isRevision {
-					planJSON, _ := json.Marshal(plan)
-					pdc.PreviousPlanJSON = string(planJSON)
-					findings := plan.ReviewFormattedFindings
-					if findings == "" {
-						findings = plan.ReviewSummary
-					}
-					pdc.RevisionPrompt = fmt.Sprintf("## REVISION REQUEST (iteration %d)\n\nThe reviewer rejected your previous plan. Address ALL findings below.\n\n%s", plan.ReviewIteration, findings)
-				}
-			} else {
-				c.logger.Warn("Retry requested but no dispatch context found — dispatching as fresh plan",
-					"slug", slug, "attempt", count, "kv_error", err)
-				pdc = &planDispatchContext{}
-			}
+	entry, retryOK := c.retry.Tick(ctx, slug)
+	if entry == nil {
+		if ctx.Err() != nil {
+			c.logger.Debug("retryOrFail aborted during backoff", "slug", slug, "error", ctx.Err())
+			return
 		}
-		c.logger.Warn("Retrying plan generation",
-			"slug", slug,
-			"attempt", count,
-			"max", c.config.MaxGenerationRetries,
-			"is_revision", pdc.IsRevision,
-			"reason", errMsg)
-		go c.dispatchPlanner(ctx, slug, pdc.Title, pdc.IsRevision, pdc.PreviousPlanJSON, pdc.RevisionPrompt, errMsg)
+		c.logger.Warn("retryOrFail: lost retry context, failing immediately", "slug", slug)
+		c.generationsFailed.Add(1)
+		c.sendGenerationFailed(ctx, slug, errMsg)
 		return
 	}
 
-	c.generationsFailed.Add(1)
-	c.retryCount.Delete(slug)
-	c.pendingDispatch.Delete(slug)
-	c.logger.Error("Plan generation failed after max retries",
+	pdc, _ := entry.Payload.(*planDispatchContext)
+	if pdc == nil {
+		pdc = &planDispatchContext{}
+	}
+
+	if !retryOK {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Plan generation failed after max retries",
+			"slug", slug,
+			"max_retries", c.config.MaxGenerationRetries,
+			"error", errMsg)
+		c.sendGenerationFailed(ctx, slug, errMsg)
+		return
+	}
+
+	c.logger.Warn("Retrying plan generation",
 		"slug", slug,
-		"max_retries", c.config.MaxGenerationRetries,
-		"error", errMsg)
-	c.sendGenerationFailed(ctx, slug, errMsg)
+		"attempt", entry.Count,
+		"max", c.config.MaxGenerationRetries,
+		"is_revision", pdc.IsRevision,
+		"reason", errMsg)
+	go c.dispatchPlanner(ctx, slug, pdc.Title, pdc.IsRevision, pdc.PreviousPlanJSON, pdc.RevisionPrompt, errMsg)
+}
+
+// recoverDispatchContext reconstructs the dispatch context from PLAN_STATES.
+// Used when a retry fires after a process restart wiped the in-memory state.
+// Returns an empty context as a last resort so the caller can still re-dispatch.
+func (c *Component) recoverDispatchContext(ctx context.Context, slug, errMsg string) *planDispatchContext {
+	plan, err := c.loadPlanFromKV(ctx, slug)
+	if err != nil {
+		c.logger.Warn("Retry requested but no dispatch context found — dispatching as fresh plan",
+			"slug", slug, "kv_error", err, "reason", errMsg)
+		return &planDispatchContext{}
+	}
+	c.logger.Info("Recovered plan context from PLAN_STATES after restart", "slug", slug)
+	pdc := &planDispatchContext{Title: plan.Title}
+	pdc.IsRevision = plan.Goal != "" && len(plan.ReviewFindings) > 0
+	if !pdc.IsRevision {
+		return pdc
+	}
+	planJSON, _ := json.Marshal(plan)
+	pdc.PreviousPlanJSON = string(planJSON)
+	findings := plan.ReviewFormattedFindings
+	if findings == "" {
+		findings = plan.ReviewSummary
+	}
+	pdc.RevisionPrompt = fmt.Sprintf("## REVISION REQUEST (iteration %d)\n\nThe reviewer rejected your previous plan. Address ALL findings below.\n\n%s", plan.ReviewIteration, findings)
+	return pdc
 }
 
 // sendGenerationFailed publishes a plan.mutation.generation.failed mutation to
@@ -816,9 +861,8 @@ func (c *Component) Stop(_ time.Duration) error {
 		cancel()
 	}
 
-	// Clear retry state to avoid orphaned entries on restart.
-	c.retryCount.Range(func(key, _ any) bool { c.retryCount.Delete(key); return true })
-	c.pendingDispatch.Range(func(key, _ any) bool { c.pendingDispatch.Delete(key); return true })
+	// Retry state goes away with the component instance — no explicit clear
+	// needed. cancel() above already wakes any in-flight Tick() backoff.
 
 	c.logger.Info("planner stopped",
 		"triggers_processed", c.triggersProcessed.Load(),

@@ -16,6 +16,11 @@ type Config struct {
 	// rejecting the plan. Set to 0 to disable retries.
 	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on loop failure or parse error,category:basic,default:2"`
 
+	// RetryBackoffMs is the floor of the jittered delay before re-dispatching
+	// after a planning failure. See workflow/dispatchretry for semantics.
+	// Default 200ms; non-positive values fall back to the default.
+	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between planning retries (ms),category:advanced,default:200"`
+
 	// DefaultCapability is the model capability to use for planning.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for planning,category:basic,default:planning"`
 
@@ -32,6 +37,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		MaxGenerationRetries: 2,
+		RetryBackoffMs:       200,
 		DefaultCapability:    "planning",
 	}
 }
