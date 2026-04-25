@@ -26,6 +26,7 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -50,13 +51,13 @@ const (
 	subjectScenarioGeneratorTask = "agent.task.scenario-generation"
 )
 
-// retryEntry holds the retry count and the original dispatch parameters for a
-// single requirement so that retries can re-dispatch with the same arguments
-// plus the previous error message.
-type retryEntry struct {
-	count          int
+// scenarioRetryPayload is the per-key context retryOrFail needs to re-dispatch
+// scenario generation: the original request and reviewFindings (preserved
+// across error retries per ADR-029 H1). Stored as the Payload field of a
+// dispatchretry.Entry under the composite "slug/requirementID" key.
+type scenarioRetryPayload struct {
 	req            *payloads.ScenarioGeneratorRequest
-	reviewFindings string // preserved across error retries (ADR-029)
+	reviewFindings string
 }
 
 // Component implements the scenario-generator processor.
@@ -76,9 +77,9 @@ type Component struct {
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 
-	// retryState tracks per-requirement retry attempts and the data needed to
-	// re-dispatch. Keyed by "slug/requirementID".
-	retryState sync.Map
+	// retry tracks per-requirement attempts. Keyed by "slug/requirementID";
+	// payload is *scenarioRetryPayload.
+	retry *dispatchretry.State
 
 	// Metrics
 	triggersProcessed  atomic.Int64
@@ -162,6 +163,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.MaxGenerationRetries == 0 {
 		config.MaxGenerationRetries = defaults.MaxGenerationRetries
 	}
+	if config.RetryBackoffMs <= 0 {
+		config.RetryBackoffMs = defaults.RetryBackoffMs
+	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -190,6 +194,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: deps.ModelRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		retry: dispatchretry.New(dispatchretry.Config{
+			MaxRetries: config.MaxGenerationRetries,
+			BackoffMs:  config.RetryBackoffMs,
+		}),
 	}, nil
 }
 
@@ -277,6 +285,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, req.RequirementID, uuid.New().String())
+	c.retry.SetActiveLoop(req.Slug+"/"+req.RequirementID, taskID)
 
 	params := prompts.ScenarioGeneratorParams{
 		PlanGoal:            req.PlanGoal,
@@ -470,6 +479,15 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 // to plan-manager via plan.mutation.scenarios.generated.
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug, requirementID string) {
 	c.updateLastActivity()
+	key := slug + "/" + requirementID
+
+	// Stale loop guard: drop completions from older dispatches that race a retry.
+	if c.retry.IsStaleLoop(key, loop.TaskID) {
+		c.logger.Debug("Dropping stale scenario loop completion (task ID mismatch)",
+			"slug", slug, "requirement_id", requirementID,
+			"loop_task_id", loop.TaskID, "loop_id", loop.ID)
+		return
+	}
 
 	if loop.Outcome != agentic.OutcomeSuccess {
 		c.generationsFailed.Add(1)
@@ -510,7 +528,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"requirement_id", requirementID,
 				"current_status", status,
 				"loop_id", loop.ID)
-			c.retryState.Delete(slug + "/" + requirementID)
+			c.retry.Clear(key)
 			return
 		}
 	}
@@ -531,7 +549,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"requirement_id", requirementID,
 				"error", err,
 				"loop_id", loop.ID)
-			c.retryState.Delete(slug + "/" + requirementID)
+			c.retry.Clear(key)
 			return
 		}
 		c.generationsFailed.Add(1)
@@ -545,7 +563,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	// Clean up retry state on success.
-	c.retryState.Delete(slug + "/" + requirementID)
+	c.retry.Clear(key)
 
 	c.scenariosGenerated.Add(int64(len(scenarios)))
 	c.logger.Info("Scenarios generated via agentic-dispatch and mutation accepted",
@@ -558,35 +576,48 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // retryOrFail attempts to re-dispatch scenario generation with the error
 // message appended to the prompt. When the maximum retry count is exceeded it
 // calls sendGenerationFailed to mark the plan rejected.
+//
+// Unlike other migrated components, scenario-generator has no PLAN_STATES
+// recovery path — the dispatch payload (request + reviewFindings) cannot be
+// reconstructed from the plan alone (we'd lose architecture context, etc.).
+// If the entry is missing on retry, fail-closed.
 func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, errorMsg string) {
 	key := slug + "/" + requirementID
 
-	var entry *retryEntry
-	if v, ok := c.retryState.Load(key); ok {
-		entry = v.(*retryEntry)
-	} else {
-		// No stored state — cannot retry without dispatch params; fail immediately.
+	if _, ok := c.retry.Snapshot(key); !ok {
 		c.logger.Warn("retryOrFail: no retry state found, failing immediately",
 			"slug", slug, "requirement_id", requirementID)
 		c.sendGenerationFailed(ctx, slug, errorMsg)
 		return
 	}
 
-	entry.count++
-	c.retryState.Store(key, entry)
-
-	maxRetries := c.config.MaxGenerationRetries
-	if maxRetries == 0 {
-		maxRetries = 2
+	entry, retryOK := c.retry.Tick(ctx, key)
+	if entry == nil {
+		if ctx.Err() != nil {
+			c.logger.Debug("retryOrFail aborted during backoff",
+				"slug", slug, "requirement_id", requirementID, "error", ctx.Err())
+			return
+		}
+		c.logger.Warn("retryOrFail: lost retry context, failing immediately",
+			"slug", slug, "requirement_id", requirementID)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
 	}
 
-	if entry.count > maxRetries {
-		c.retryState.Delete(key)
+	payload, _ := entry.Payload.(*scenarioRetryPayload)
+	if payload == nil {
+		c.logger.Warn("retryOrFail: payload type mismatch, failing immediately",
+			"slug", slug, "requirement_id", requirementID)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
+	}
+
+	if !retryOK {
 		c.logger.Error("Scenario generation exceeded max retries, failing plan",
 			"slug", slug,
 			"requirement_id", requirementID,
-			"attempts", entry.count,
-			"max_retries", maxRetries,
+			"attempts", entry.Count,
+			"max_retries", c.config.MaxGenerationRetries,
 			"error", errorMsg)
 		c.sendGenerationFailed(ctx, slug, errorMsg)
 		return
@@ -595,13 +626,13 @@ func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, errorM
 	c.logger.Warn("Retrying scenario generation with feedback",
 		"slug", slug,
 		"requirement_id", requirementID,
-		"attempt", entry.count+1,
-		"max_retries", maxRetries,
+		"attempt", entry.Count,
+		"max_retries", c.config.MaxGenerationRetries,
 		"error", errorMsg)
 
 	// Preserve review findings across error retries so the agent continues to
 	// address completeness gaps flagged by the reviewer (ADR-029 H1).
-	c.dispatchScenarioGenerator(ctx, entry.req, errorMsg, entry.reviewFindings)
+	c.dispatchScenarioGenerator(ctx, payload.req, errorMsg, payload.reviewFindings)
 }
 
 // loadPlanFromKV reads a plan from the PLAN_STATES KV bucket. Used to check

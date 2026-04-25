@@ -82,7 +82,7 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 		}
 
 		key := plan.Slug + "/" + req.ID
-		c.retryState.Store(key, &retryEntry{count: 0, req: genReq, reviewFindings: plan.ReviewFormattedFindings})
+		c.retry.Track(key, &scenarioRetryPayload{req: genReq, reviewFindings: plan.ReviewFormattedFindings})
 		c.dispatchScenarioGenerator(ctx, genReq, "", plan.ReviewFormattedFindings)
 	}
 }
