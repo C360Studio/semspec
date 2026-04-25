@@ -24,6 +24,14 @@ type Config struct {
 	// After exhausting retries the plan is rejected (fail-closed). Default 2.
 	MaxReviewRetries int `json:"max_review_retries" schema:"type:integer,description:Max retries on QA review failure,category:advanced,default:2"`
 
+	// RetryBackoffMs is the floor of the jittered delay before re-dispatching
+	// after a QA review failure. Effective per-attempt sleep is in
+	// [RetryBackoffMs, 2*RetryBackoffMs). Default 200ms — short enough to keep
+	// happy-path latency invisible, long enough to keep parse-failure storms
+	// from saturating agentic-dispatch and the LLM endpoint. Set to 1 to
+	// effectively disable in tests; non-positive values fall back to the default.
+	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between QA review retries (ms),category:advanced,default:200"`
+
 	// Ports defines the component's port configuration.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }
@@ -34,6 +42,7 @@ func DefaultConfig() Config {
 		DefaultCapability: "qa",
 		PlanStateBucket:   "PLAN_STATES",
 		MaxReviewRetries:  2,
+		RetryBackoffMs:    200,
 	}
 }
 

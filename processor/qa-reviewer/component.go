@@ -31,6 +31,7 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semstreams/agentic"
@@ -59,12 +60,6 @@ const (
 	stepQAReviewing = "qa-reviewing"
 )
 
-// retryEntry holds the context needed to re-dispatch a QA review on failure.
-type retryEntry struct {
-	count int
-	plan  *workflow.Plan
-}
-
 // Component implements the qa-reviewer processor.
 type Component struct {
 	name       string
@@ -76,8 +71,9 @@ type Component struct {
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
 
-	// retryState tracks in-flight reviews: slug → *retryEntry.
-	retryState sync.Map
+	// retry tracks in-flight reviews: slug → retry state. The payload stored
+	// per slug is *workflow.Plan — fetched on retry to rebuild the dispatch.
+	retry *dispatchretry.State
 
 	// Lifecycle
 	running   bool
@@ -113,6 +109,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.MaxReviewRetries == 0 {
 		config.MaxReviewRetries = defaults.MaxReviewRetries
 	}
+	if config.RetryBackoffMs <= 0 {
+		config.RetryBackoffMs = defaults.RetryBackoffMs
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -144,6 +143,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: deps.ModelRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		retry: dispatchretry.New(dispatchretry.Config{
+			MaxRetries: config.MaxReviewRetries,
+			BackoffMs:  config.RetryBackoffMs,
+		}),
 	}, nil
 }
 
@@ -351,12 +354,12 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 // Idempotency: PLAN_STATES KV PUTs fire on every plan revision bump — status
 // changes, ExecutionSummary updates, LastError annotations, SSE notifications.
 // Without dedup we would respawn a review (and a full LLM dispatch) on every
-// unrelated plan write while the slug sits in ready_for_qa. retryState doubles
-// as the in-flight marker: presence means "review started; skip duplicate
-// trigger." Dispatch-path lifecycle clears it on terminal verdict or retry
-// exhaustion.
+// unrelated plan write while the slug sits in ready_for_qa. The dispatchretry
+// State doubles as the in-flight marker: presence means "review started; skip
+// duplicate trigger." Dispatch-path lifecycle clears it on terminal verdict or
+// retry exhaustion.
 func (c *Component) processReview(ctx context.Context, plan *workflow.Plan, qaRun *workflow.QARun) {
-	if _, loaded := c.retryState.LoadOrStore(plan.Slug, &retryEntry{count: 0, plan: plan}); loaded {
+	if _, fresh := c.retry.Track(plan.Slug, plan); !fresh {
 		c.logger.Debug("QA review already in flight — dropping duplicate trigger",
 			"slug", plan.Slug)
 		return
@@ -366,7 +369,7 @@ func (c *Component) processReview(ctx context.Context, plan *workflow.Plan, qaRu
 	if err := c.publishQAStart(ctx, plan, qaRun); err != nil {
 		c.logger.Error("Failed to claim plan for QA review",
 			"slug", plan.Slug, "error", err)
-		c.retryState.Delete(plan.Slug)
+		c.retry.Clear(plan.Slug)
 		c.reviewsFailed.Add(1)
 		c.publishFailClosedVerdict(ctx, plan, fmt.Sprintf("qa.start mutation failed: %v", err))
 		return
@@ -425,12 +428,16 @@ func (c *Component) publishQAStart(ctx context.Context, plan *workflow.Plan, qaR
 // dispatchReviewer dispatches the QA reviewer LLM agent via agentic-dispatch.
 // Test data, if any, lives on plan.QARun (populated by plan-manager before the
 // reviewing_qa transition). Synthesis-level plans have QARun == nil.
+//
+// Caller contract: c.retry must already track plan.Slug (placed by
+// processReview's Track on initial dispatch; preserved through retryOrFail's
+// Tick on retries). dispatchReviewer records the new loop's task ID so
+// handleLoopCompletion can drop stale completions from older loops.
 func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
 	c.updateLastActivity()
 
-	c.retryState.Store(plan.Slug, &retryEntry{count: 0, plan: plan})
-
 	taskID := fmt.Sprintf("qa-review-%s-%s", plan.Slug, uuid.New().String())
+	c.retry.SetActiveLoop(plan.Slug, taskID)
 
 	// Build QAReviewContext.
 	qrc := buildQAReviewContext(plan)
@@ -546,6 +553,16 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
 	c.updateLastActivity()
 
+	// Stale loop guard: drop completion events from older dispatches. retryOrFail
+	// re-dispatches with a fresh task ID; if a slow stale loop completes after
+	// the new one starts, processing it would double-fire retryOrFail and the
+	// retry storm reappears.
+	if c.retry.IsStaleLoop(slug, loop.TaskID) {
+		c.logger.Debug("Dropping stale QA loop completion (task ID mismatch)",
+			"slug", slug, "loop_task_id", loop.TaskID, "loop_id", loop.ID)
+		return
+	}
+
 	// Stale completion guard: if the plan has moved past reviewing state, discard.
 	var currentPlan *workflow.Plan
 	if planJSON, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
@@ -553,7 +570,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		if status != workflow.StatusReviewingRollup && status != workflow.StatusReviewingQA {
 			c.logger.Warn("Plan not in reviewing state, discarding stale QA review result",
 				"slug", slug, "current_status", status, "loop_id", loop.ID)
-			c.retryState.Delete(slug)
+			c.retry.Clear(slug)
 			return
 		}
 		currentPlan = planJSON
@@ -578,30 +595,36 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	// Load retry entry before deleting it — we need the plan ref.
+	// Recover plan from retry payload when KV load above failed.
 	plan := currentPlan
-	if v, ok := c.retryState.Load(slug); ok {
-		if entry, ok2 := v.(*retryEntry); ok2 {
-			if plan == nil {
-				plan = entry.plan
+	if plan == nil {
+		if snap, ok := c.retry.Snapshot(slug); ok {
+			if p, ok2 := snap.Payload.(*workflow.Plan); ok2 {
+				plan = p
 			}
 		}
 	}
 
 	// Successful parse — clear retry state.
-	c.retryState.Delete(slug)
+	c.retry.Clear(slug)
 
 	hadTestData := plan != nil && plan.QARun != nil
 	c.logger.Info("QA reviewer agent complete",
 		"slug", slug, "verdict", result.Verdict, "summary", result.Summary,
 		"had_test_data", hadTestData)
 
+	verdict := buildQAVerdictEvent(slug, plan, result)
+	c.recordQARejectionLesson(ctx, slug, result)
+	c.publishQAVerdict(ctx, verdict)
+}
+
+// buildQAVerdictEvent assembles the QAVerdictEvent published to plan-manager.
+// Pure function — no NATS, no I/O.
+func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutput) *workflow.QAVerdictEvent {
 	level := workflow.QALevelSynthesis
 	if plan != nil {
 		level = plan.EffectiveQALevel()
 	}
-
-	// Build verdict event.
 	verdict := &workflow.QAVerdictEvent{
 		Slug:    slug,
 		Level:   level,
@@ -618,59 +641,63 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	if plan != nil {
 		verdict.PlanID = plan.ID
 	}
-
-	// Build PlanDecisions when verdict is needs_changes.
-	if workflow.QAVerdict(result.Verdict) == workflow.QAVerdictNeedsChanges && len(result.PlanDecisions) > 0 {
-		now := time.Now()
-		for _, cp := range result.PlanDecisions {
-			proposal := workflow.PlanDecision{
-				ID:             fmt.Sprintf("plan-decision.%s.qa.%s", slug, uuid.New().String()[:8]),
-				PlanID:         workflow.PlanEntityID(slug),
-				Title:          cp.Title,
-				Rationale:      cp.Rationale,
-				Status:         workflow.PlanDecisionStatusProposed,
-				ProposedBy:     "qa-reviewer",
-				AffectedReqIDs: cp.AffectedReqIDs,
-				CreatedAt:      now,
-			}
-			for _, ar := range cp.ArtifactRefs {
-				proposal.ArtifactReferences = append(proposal.ArtifactReferences, workflow.ArtifactRef{
-					Path:    ar.Path,
-					Type:    ar.Type,
-					Purpose: ar.Purpose,
-				})
-			}
-			verdict.PlanDecisions = append(verdict.PlanDecisions, proposal)
-			verdict.PlanDecisionIDs = append(verdict.PlanDecisionIDs, proposal.ID)
-		}
+	if workflow.QAVerdict(result.Verdict) != workflow.QAVerdictNeedsChanges || len(result.PlanDecisions) == 0 {
+		return verdict
 	}
-
-	// Write a lesson when the verdict is needs_changes so future runs benefit.
-	if workflow.QAVerdict(result.Verdict) == workflow.QAVerdictNeedsChanges && c.lessonWriter != nil {
-		// TODO: expose a lesson-emission API in lessons.Writer for qa-reviewer patterns.
-		// For now, record a summary-level lesson tagged to the qa-reviewer role.
-		lesson := workflow.Lesson{
-			Source:     "qa-review",
-			ScenarioID: slug,
-			Summary:    fmt.Sprintf("QA rejection: %s", result.Summary),
-			Role:       string(prompt.RolePlanQAReviewer),
+	now := time.Now()
+	for _, cp := range result.PlanDecisions {
+		proposal := workflow.PlanDecision{
+			ID:             fmt.Sprintf("plan-decision.%s.qa.%s", slug, uuid.New().String()[:8]),
+			PlanID:         workflow.PlanEntityID(slug),
+			Title:          cp.Title,
+			Rationale:      cp.Rationale,
+			Status:         workflow.PlanDecisionStatusProposed,
+			ProposedBy:     "qa-reviewer",
+			AffectedReqIDs: cp.AffectedReqIDs,
+			CreatedAt:      now,
 		}
-		if err := c.lessonWriter.RecordLesson(context.WithoutCancel(ctx), lesson); err != nil {
-			c.logger.Warn("Failed to record qa-reviewer lesson", "slug", slug, "error", err)
+		for _, ar := range cp.ArtifactRefs {
+			proposal.ArtifactReferences = append(proposal.ArtifactReferences, workflow.ArtifactRef{
+				Path:    ar.Path,
+				Type:    ar.Type,
+				Purpose: ar.Purpose,
+			})
 		}
+		verdict.PlanDecisions = append(verdict.PlanDecisions, proposal)
+		verdict.PlanDecisionIDs = append(verdict.PlanDecisionIDs, proposal.ID)
 	}
+	return verdict
+}
 
-	c.publishQAVerdict(ctx, verdict)
+// recordQARejectionLesson persists a role-scoped lesson when the verdict
+// is needs_changes, so future qa-reviewer prompts learn from the rejection.
+// No-op when lesson writing is disabled or the verdict is approval.
+func (c *Component) recordQARejectionLesson(ctx context.Context, slug string, result *qaReviewOutput) {
+	if workflow.QAVerdict(result.Verdict) != workflow.QAVerdictNeedsChanges || c.lessonWriter == nil {
+		return
+	}
+	lesson := workflow.Lesson{
+		Source:     "qa-review",
+		ScenarioID: slug,
+		Summary:    fmt.Sprintf("QA rejection: %s", result.Summary),
+		Role:       string(prompt.RolePlanQAReviewer),
+	}
+	if err := c.lessonWriter.RecordLesson(context.WithoutCancel(ctx), lesson); err != nil {
+		c.logger.Warn("Failed to record qa-reviewer lesson", "slug", slug, "error", err)
+	}
 }
 
 // retryOrFail attempts to re-dispatch the QA review. When MaxReviewRetries is
 // exhausted it publishes a fail-closed rejected verdict.
 func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
-	var entry *retryEntry
-	if v, ok := c.retryState.Load(slug); ok {
-		entry = v.(*retryEntry)
-	} else {
-		// No retry state — we've lost context. Fail closed immediately.
+	entry, retryOK := c.retry.Tick(ctx, slug)
+	if entry == nil {
+		// Either no retry state (fail-closed without payload) or ctx canceled
+		// during backoff (graceful shutdown — don't fire a verdict).
+		if ctx.Err() != nil {
+			c.logger.Debug("retryOrFail aborted during backoff", "slug", slug, "error", ctx.Err())
+			return
+		}
 		c.logger.Warn("retryOrFail: no retry state for slug, failing immediately", "slug", slug)
 		c.reviewsFailed.Add(1)
 		c.publishQAVerdict(ctx, &workflow.QAVerdictEvent{
@@ -683,22 +710,22 @@ func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
 		return
 	}
 
-	entry.count++
-	if entry.count > c.config.MaxReviewRetries {
+	plan, _ := entry.Payload.(*workflow.Plan)
+
+	if !retryOK {
 		c.logger.Warn("QA review exhausted retries",
-			"slug", slug, "attempts", entry.count, "max", c.config.MaxReviewRetries,
+			"slug", slug, "attempts", entry.Count, "max", c.config.MaxReviewRetries,
 			"last_error", errorMsg)
-		c.retryState.Delete(slug)
 		c.reviewsFailed.Add(1)
-		c.publishFailClosedVerdict(ctx, entry.plan, errorMsg)
+		c.publishFailClosedVerdict(ctx, plan, errorMsg)
 		return
 	}
 
 	c.logger.Info("Retrying QA review",
-		"slug", slug, "attempt", entry.count, "max", c.config.MaxReviewRetries,
+		"slug", slug, "attempt", entry.Count, "max", c.config.MaxReviewRetries,
 		"previous_error", errorMsg)
 
-	c.dispatchReviewer(ctx, entry.plan)
+	c.dispatchReviewer(ctx, plan)
 }
 
 // publishFailClosedVerdict publishes a rejected verdict when the LLM agent fails.
