@@ -26,12 +26,17 @@ test.describe('@t0 @smoke health check', () => {
 	test('navigates to new plan form', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
-		// Switch to Plans mode if Feed is active (auto-switches when loops exist)
+		// LeftPanel auto-switches to Feed mode when loops exist (c50c87f).
+		// Under mock stack, earlier @t0 specs create plans that spawn loops, so
+		// this test routinely lands on Feed. Click Plans and wait for the
+		// aria-checked flip before asserting on Plans-mode UI — otherwise the
+		// getByTitle('New Plan') query hits a stale DOM where PlansList isn't
+		// mounted yet.
 		const plansRadio = page.getByRole('radio', { name: 'Plans' });
-		if ((await plansRadio.getAttribute('aria-checked')) === 'false') {
+		if ((await plansRadio.getAttribute('aria-checked')) !== 'true') {
 			await plansRadio.click();
+			await expect(plansRadio).toHaveAttribute('aria-checked', 'true');
 		}
-		// The "+" button is a link with title "New Plan"
 		await page.getByTitle('New Plan').click();
 		await expect(page).toHaveURL('/plans/new');
 		await expect(page.getByLabel('What do you want to build?')).toBeVisible();

@@ -54,6 +54,24 @@
           "mock-fast"
         ]
       },
+      "plan_review": {
+        "description": "Plan review (mock: returns approved verdict)",
+        "preferred": [
+          "mock-reviewer"
+        ],
+        "fallback": [
+          "mock-fast"
+        ]
+      },
+      "qa": {
+        "description": "QA release-readiness review (mock: returns approved verdict)",
+        "preferred": [
+          "mock-qa-reviewer"
+        ],
+        "fallback": [
+          "mock-reviewer"
+        ]
+      },
       "requirement_generation": {
         "description": "Requirement decomposition (mock: returns canned requirements)",
         "preferred": [
@@ -102,6 +120,14 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-reviewer",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
+      },
+      "mock-qa-reviewer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-qa-reviewer",
         "max_tokens": 32768,
         "supports_tools": true,
         "tool_format": "openai"

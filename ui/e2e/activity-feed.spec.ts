@@ -77,9 +77,13 @@ test.describe('@t0 activity-feed', () => {
 
 		await feedModeRadio(page).click();
 
-		// Either events are present (role="log") or empty state shows
+		// Either events are present (role="log") or an empty-state container
+		// renders. The empty-state text itself varies by (isConnected, scope)
+		// since 9833ea7 — checking the container class keeps this test
+		// implementation-agnostic to which of the three empty-state branches
+		// (No activity yet / Activity stream offline / Select a plan) fires.
 		const eventsList = page.getByRole('log');
-		const emptyFeed = page.getByText('Select a plan to see activity');
+		const emptyFeed = page.locator('.empty-feed');
 		const hasEvents = await eventsList.isVisible().catch(() => false);
 		const isEmpty = await emptyFeed.isVisible().catch(() => false);
 		expect(hasEvents || isEmpty).toBe(true);
