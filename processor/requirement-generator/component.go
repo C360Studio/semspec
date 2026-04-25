@@ -25,6 +25,7 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -139,12 +140,10 @@ type Component struct {
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
 
-	// pending maps taskID → original trigger for in-flight dispatches.
-	pendingMu sync.RWMutex
-	pending   map[string]*pendingDispatch
-
-	// retryCount maps plan slug → number of generation retries attempted so far.
-	retryCount sync.Map
+	// retry tracks per-plan attempts keyed by slug; payload is *pendingDispatch
+	// (carrying the trigger + reviewFindings needed to re-publish on success
+	// and re-dispatch with feedback on retry).
+	retry *dispatchretry.State
 
 	// Lifecycle
 	running   bool
@@ -181,6 +180,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.MaxGenerationRetries == 0 {
 		config.MaxGenerationRetries = defaults.MaxGenerationRetries
 	}
+	if config.RetryBackoffMs <= 0 {
+		config.RetryBackoffMs = defaults.RetryBackoffMs
+	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -209,7 +211,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: deps.ModelRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
-		pending:       make(map[string]*pendingDispatch),
+		retry: dispatchretry.New(dispatchretry.Config{
+			MaxRetries: config.MaxGenerationRetries,
+			BackoffMs:  config.RetryBackoffMs,
+		}),
 	}, nil
 }
 
@@ -331,22 +336,20 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		},
 	}
 
-	// Record the pending dispatch before publishing so the completion watcher
-	// can look up the original trigger when the loop finishes.
+	// Track the dispatch context for retry and completion lookup. Track is
+	// no-op when an entry already exists (retry re-entry preserves the
+	// running count and the original trigger).
 	var rf string
 	if len(reviewFindings) > 0 {
 		rf = reviewFindings[0]
 	}
-	c.pendingMu.Lock()
-	c.pending[taskID] = &pendingDispatch{trigger: trigger, reviewFindings: rf}
-	c.pendingMu.Unlock()
+	c.retry.Track(trigger.Slug, &pendingDispatch{trigger: trigger, reviewFindings: rf})
+	c.retry.SetActiveLoop(trigger.Slug, taskID)
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-requirement-generator")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.pendingMu.Lock()
-		delete(c.pending, taskID)
-		c.pendingMu.Unlock()
+		c.retry.Clear(trigger.Slug)
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to marshal task message, rejecting plan", "slug", trigger.Slug, "error", err)
 		c.sendGenerationFailed(ctx, trigger.Slug, fmt.Sprintf("requirement dispatch marshal failed: %v", err))
@@ -354,9 +357,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 	}
 
 	if err := c.natsClient.PublishToStream(ctx, subjectRequirementGenerationTask, data); err != nil {
-		c.pendingMu.Lock()
-		delete(c.pending, taskID)
-		c.pendingMu.Unlock()
+		c.retry.Clear(trigger.Slug)
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to dispatch requirement generator, rejecting plan", "slug", trigger.Slug, "error", err)
 		c.sendGenerationFailed(ctx, trigger.Slug, fmt.Sprintf("requirement dispatch failed: %v", err))
@@ -517,6 +518,13 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 			continue
 		}
 
+		// Stale loop guard: drop completions from older dispatches that race a retry.
+		if c.retry.IsStaleLoop(slug, loop.TaskID) {
+			c.logger.Debug("Dropping stale requirement-gen loop completion (task ID mismatch)",
+				"slug", slug, "loop_task_id", loop.TaskID, "loop_id", loop.ID)
+			continue
+		}
+
 		c.handleLoopCompletion(ctx, &loop, slug, dp)
 	}
 }
@@ -531,34 +539,38 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	c.updateLastActivity()
 	trigger := dp.trigger
 
-	// retryOrFail increments the retry counter for slug and re-dispatches with
-	// feedback if under the limit, otherwise signals a permanent failure.
-	// Review findings are preserved across retries so the agent continues to
-	// address completeness gaps flagged by the reviewer (ADR-029 H1).
+	// retryOrFail Tick's the retry counter and re-dispatches with feedback if
+	// under the cap, otherwise sends generation.failed. Review findings are
+	// preserved across retries via the dispatch payload (ADR-029 H1).
 	retryOrFail := func(errMsg string) {
-		val, _ := c.retryCount.LoadOrStore(slug, 0)
-		count := val.(int) + 1
-		c.retryCount.Store(slug, count)
-
-		if count <= c.config.MaxGenerationRetries {
-			c.logger.Warn("Retrying requirement generation",
-				"slug", slug,
-				"loop_id", loop.ID,
-				"attempt", count,
-				"max", c.config.MaxGenerationRetries,
-				"reason", errMsg)
-			go c.dispatchRequirementGenerator(ctx, trigger, errMsg, dp.reviewFindings)
+		entry, retryOK := c.retry.Tick(ctx, slug)
+		if entry == nil {
+			if ctx.Err() != nil {
+				c.logger.Debug("retryOrFail aborted during backoff", "slug", slug, "error", ctx.Err())
+				return
+			}
+			c.generationsFailed.Add(1)
+			c.logger.Warn("retryOrFail: lost retry context, failing immediately", "slug", slug)
+			c.sendGenerationFailed(ctx, slug, errMsg)
 			return
 		}
-
-		c.generationsFailed.Add(1)
-		c.retryCount.Delete(slug)
-		c.logger.Error("Requirement generation failed after max retries",
+		if !retryOK {
+			c.generationsFailed.Add(1)
+			c.logger.Error("Requirement generation failed after max retries",
+				"slug", slug,
+				"loop_id", loop.ID,
+				"max_retries", c.config.MaxGenerationRetries,
+				"error", errMsg)
+			c.sendGenerationFailed(ctx, slug, errMsg)
+			return
+		}
+		c.logger.Warn("Retrying requirement generation",
 			"slug", slug,
 			"loop_id", loop.ID,
-			"max_retries", c.config.MaxGenerationRetries,
-			"error", errMsg)
-		c.sendGenerationFailed(ctx, slug, errMsg)
+			"attempt", entry.Count,
+			"max", c.config.MaxGenerationRetries,
+			"reason", errMsg)
+		go c.dispatchRequirementGenerator(ctx, trigger, errMsg, dp.reviewFindings)
 	}
 
 	if loop.Outcome != agentic.OutcomeSuccess {
@@ -576,8 +588,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	// Successful parse — clear any retry state for this slug.
-	c.retryCount.Delete(slug)
+	// Successful parse — clear retry state for this slug.
+	c.retry.Clear(slug)
 
 	// Check if the plan has moved past generating_requirements while we were working.
 	// If so, our result is stale — discard it without rejecting the plan.
@@ -588,34 +600,12 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"current_status", status,
 				"loop_id", loop.ID)
-			c.retryCount.Delete(slug)
 			return
 		}
 	}
 	// If KV read fails, proceed with the mutation — plan-manager will validate.
 
-	// For partial regen, new requirement IDs must not collide with existing ones.
-	// Determine the starting sequence offset from the current requirements count.
-	seqOffset := 0
-	if len(trigger.ReplaceRequirementIDs) > 0 {
-		seqOffset = len(trigger.ExistingRequirements)
-	}
-
-	// Convert agent items to workflow.Requirement structs.
-	planID := workflow.PlanEntityID(slug)
-	now := time.Now()
-	requirements := make([]workflow.Requirement, 0, len(items))
-	for i, item := range items {
-		requirements = append(requirements, workflow.Requirement{
-			ID:          fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1),
-			PlanID:      planID,
-			Title:       item.Title,
-			Description: item.Description,
-			Status:      workflow.RequirementStatusActive,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		})
-	}
+	requirements := buildRequirementsFromItems(slug, trigger, items)
 
 	if err := c.publishResults(ctx, trigger, requirements); err != nil {
 		// If the plan advanced past generating_requirements, this is NOT a generation
@@ -625,7 +615,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"error", err,
 				"loop_id", loop.ID)
-			c.retryCount.Delete(slug)
+			c.retry.Clear(slug)
 			return
 		}
 		c.generationsFailed.Add(1)
@@ -644,32 +634,58 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"requirement_count", len(requirements))
 }
 
-// resolveDispatchContext looks up the dispatch context for a completed loop.
-// It first checks the in-memory pending map, then falls back to PLAN_STATES
-// for restart recovery. Returns nil if context cannot be resolved.
-func (c *Component) resolveDispatchContext(ctx context.Context, taskID, slug string) *pendingDispatch {
-	c.pendingMu.RLock()
-	dp, ok := c.pending[taskID]
-	c.pendingMu.RUnlock()
-
-	if !ok {
-		// Restart recovery: reconstruct dispatch context from PLAN_STATES.
-		recovered, err := c.recoverDispatchFromKV(ctx, slug)
-		if err != nil {
-			c.logger.Warn("No dispatch context found (in-memory or PLAN_STATES), skipping",
-				"task_id", taskID, "slug", slug, "error", err)
-			return nil
-		}
-		c.logger.Info("Recovered dispatch context from PLAN_STATES after restart",
-			"task_id", taskID, "slug", slug)
-		return recovered
+// buildRequirementsFromItems converts agent-emitted items into workflow.Requirement
+// structs, assigning sequential IDs and handling the partial-regen sequence
+// offset so new IDs don't collide with existing ones on the plan.
+func buildRequirementsFromItems(slug string, trigger *payloads.RequirementGeneratorRequest, items []requirementItem) []workflow.Requirement {
+	seqOffset := 0
+	if len(trigger.ReplaceRequirementIDs) > 0 {
+		seqOffset = len(trigger.ExistingRequirements)
 	}
+	planID := workflow.PlanEntityID(slug)
+	now := time.Now()
+	out := make([]workflow.Requirement, 0, len(items))
+	for i, item := range items {
+		out = append(out, workflow.Requirement{
+			ID:          fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1),
+			PlanID:      planID,
+			Title:       item.Title,
+			Description: item.Description,
+			Status:      workflow.RequirementStatusActive,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
+	return out
+}
 
-	c.pendingMu.Lock()
-	delete(c.pending, taskID)
-	c.pendingMu.Unlock()
-
-	return dp
+// resolveDispatchContext looks up the dispatch context for a completed loop.
+// It first checks the dispatchretry payload (active in-flight dispatch), then
+// falls back to PLAN_STATES for restart recovery. Returns nil if context
+// cannot be resolved.
+//
+// Unlike the pre-migration map, the dispatchretry payload is keyed by slug
+// and is NOT deleted here — it stays around for the retry path. terminal
+// success or fail-closed paths in handleLoopCompletion call retry.Clear(slug)
+// to release it.
+func (c *Component) resolveDispatchContext(ctx context.Context, taskID, slug string) *pendingDispatch {
+	if snap, ok := c.retry.Snapshot(slug); ok {
+		if dp, ok2 := snap.Payload.(*pendingDispatch); ok2 {
+			return dp
+		}
+	}
+	// Restart recovery: reconstruct dispatch context from PLAN_STATES and
+	// re-Track so subsequent retry/dispatch see the same payload.
+	recovered, err := c.recoverDispatchFromKV(ctx, slug)
+	if err != nil {
+		c.logger.Warn("No dispatch context found (in-memory or PLAN_STATES), skipping",
+			"task_id", taskID, "slug", slug, "error", err)
+		return nil
+	}
+	c.logger.Info("Recovered dispatch context from PLAN_STATES after restart",
+		"task_id", taskID, "slug", slug)
+	c.retry.Track(slug, recovered)
+	return recovered
 }
 
 // recoverDispatchFromKV reads a plan from PLAN_STATES to reconstruct dispatch

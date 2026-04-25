@@ -22,6 +22,11 @@ type Config struct {
 	// after a parse failure before sending plan.mutation.generation.failed.
 	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on parse failure,category:basic,default:2"`
 
+	// RetryBackoffMs is the floor of the jittered delay before re-dispatching
+	// after a generation failure. See workflow/dispatchretry for semantics.
+	// Default 200ms; non-positive values fall back to the default.
+	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between generation retries (ms),category:advanced,default:200"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -32,6 +37,7 @@ func DefaultConfig() Config {
 		DefaultCapability:    "planning",
 		PlanStateBucket:      "PLAN_STATES",
 		MaxGenerationRetries: 2,
+		RetryBackoffMs:       200,
 		Ports: &component.PortConfig{
 			Outputs: []component.PortDefinition{
 				{
