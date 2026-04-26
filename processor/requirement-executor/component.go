@@ -28,7 +28,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
@@ -38,6 +37,7 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -517,7 +517,7 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 	// Parse the DAG from decomposer result.
 	// The decompose_task tool returns {"goal": "...", "dag": {"nodes": [...]}}.
 	// Small models (qwen3, etc.) may wrap output in markdown code fences.
-	dagJSON := llm.ExtractJSON(event.Result)
+	dagJSON := jsonutil.ExtractJSON(event.Result)
 	if dagJSON == "" {
 		c.retryOrFailDecomposerLocked(ctx, exec, "failed to parse decomposer result: no JSON found in result")
 		return
@@ -667,7 +667,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 			FilesCreated  []string `json:"files_created"`
 			Summary       string   `json:"changes_summary"`
 		}
-		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &parsed); err == nil {
+		if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &parsed); err == nil {
 			nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
 			nodeResult.Summary = parsed.Summary
 		}
@@ -1149,7 +1149,7 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 	}
 	parseOK := true
 	if event.Result != "" {
-		if err := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result); err != nil {
+		if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &result); err != nil {
 			c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
 			parseOK = false
 		}

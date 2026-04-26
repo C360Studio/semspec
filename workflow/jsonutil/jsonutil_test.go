@@ -1,4 +1,4 @@
-package llm
+package jsonutil
 
 import (
 	"encoding/json"

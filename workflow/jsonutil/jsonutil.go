@@ -1,4 +1,16 @@
-package llm
+// Package jsonutil extracts and cleans JSON from LLM-generated text.
+//
+// LLMs frequently wrap JSON in markdown code fences, prefix it with prose
+// ("Here is the JSON:"), trail it with explanations, or include line
+// comments inside the body. ExtractJSON and ExtractJSONArray strip those
+// wrappers and return a parseable string. trimToBalancedJSON handles the
+// Go 1.25 json.Decoder breaking change where trailing content makes
+// Unmarshal fail.
+//
+// This package is the LLM-output equivalent of "do what the model
+// probably meant" — it is intentionally permissive. Strict callers
+// should validate after parsing.
+package jsonutil
 
 import (
 	"encoding/json"

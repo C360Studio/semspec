@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 )
 
 // maxAnalysisChars limits document content for LLM analysis.
@@ -72,7 +73,7 @@ func truncateForAnalysis(content string, maxChars int) string {
 // parseAnalysisResponse extracts AnalysisResult from LLM response.
 func parseAnalysisResponse(content string) (*AnalysisResult, error) {
 	// Extract JSON from response (may be wrapped in markdown code block)
-	jsonStr := llm.ExtractJSON(content)
+	jsonStr := jsonutil.ExtractJSON(content)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}

@@ -35,7 +35,6 @@ import (
 
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 
-	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
@@ -44,6 +43,7 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
@@ -619,7 +619,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	}
 
 	var result payloads.DeveloperResult
-	parseErr := json.Unmarshal([]byte(llm.ExtractJSON(event.Result)), &result)
+	parseErr := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &result)
 	if parseErr != nil {
 		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", parseErr)
 	} else {
@@ -739,7 +739,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 // wrap around JSON tool responses.
 func (c *Component) parseCodeReviewResult(raw string, slug string) (payloads.TaskCodeReviewResult, bool) {
 	var result payloads.TaskCodeReviewResult
-	cleaned := llm.ExtractJSON(raw)
+	cleaned := jsonutil.ExtractJSON(raw)
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
 		c.logger.Warn("Failed to parse code review result",
 			"slug", slug, "error", err)
