@@ -3,8 +3,6 @@ package httptool
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,10 +14,9 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
-	"github.com/c360studio/semstreams/message"
 
-	"github.com/c360studio/semspec/vocabulary/source"
-	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/source"
+	"github.com/c360studio/semspec/source/weburl"
 )
 
 const (
@@ -36,20 +33,12 @@ const (
 	// requestTimeout is the HTTP client deadline for each fetch.
 	requestTimeout = 30 * time.Second
 
-	// graphIngestSubject is the JetStream subject for new graph entities.
-	graphIngestSubject = "graph.ingest.entity"
-
-	// persistTimeout is the deadline for async graph publish.
-	persistTimeout = 5 * time.Second
+	// ingestPublishTimeout is the deadline for the async ingestion-request
+	// publish to web-ingester. Short by design — failure to enqueue should
+	// not delay the agent, and a dropped enqueue is recoverable on the
+	// next fetch of the same URL.
+	ingestPublishTimeout = 5 * time.Second
 )
-
-// webEntityType is the message.Type used for web content entities published
-// to graph.ingest.entity.
-var webEntityType = message.Type{
-	Domain:   "web",
-	Category: "entity",
-	Version:  "v1",
-}
 
 // NATSClient is the subset of natsclient.Client that Executor needs.
 // Depending on this interface keeps the executor testable without a live NATS
@@ -201,10 +190,14 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		}
 	}
 
-	// Persist web content to graph asynchronously — fire and forget.
-	// We don't block the agent on this write.
+	// Enqueue the URL for proper ingestion via web-ingester (SSRF-checked
+	// fetch, HTML→markdown conversion, chunking, optional classification).
+	// Fire-and-forget — the agent has already received its response. Web-
+	// ingester refetches; the small duplicate fetch cost is the price of
+	// keeping httptool's tool-call shape synchronous while still feeding the
+	// graph through one canonical pipeline.
 	if isHTML && len(content) >= minPersistLength && e.natsClient != nil {
-		go e.persistToGraph(rawURL, title, content, resp.Header.Get("ETag"))
+		go e.requestIngestion(rawURL)
 	}
 
 	if title != "" {
@@ -216,63 +209,29 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	return agentic.ToolResult{CallID: call.ID, Content: content}, nil
 }
 
-// persistToGraph publishes the fetched content as a source.web graph entity.
-// It uses the same EntityPayload / BaseMessage pattern as plan-api/graph.go.
-func (e *Executor) persistToGraph(rawURL, title, content, etag string) {
-	if title == "" {
-		parsed, err := url.Parse(rawURL)
-		if err == nil {
-			title = parsed.Host + parsed.Path
-		} else {
-			title = rawURL
-		}
-	}
-
-	// Derive a stable entity ID: slug of the title + first 6 hex chars of URL hash.
-	h := sha256.Sum256([]byte(rawURL))
-	urlHash := hex.EncodeToString(h[:3]) // 6 hex chars, collision-resistant enough
-	slug := slugify(title, 40)
-	entityID := fmt.Sprintf("local.semspec.web.agent.%s-%s", slug, urlHash)
-
-	// Parse the URL hostname for the web.domain predicate.
-	hostname := ""
-	if parsed, err := url.Parse(rawURL); err == nil {
-		hostname = parsed.Hostname()
-	}
-
-	now := time.Now().UTC()
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: source.WebType, Object: "web"},
-		{Subject: entityID, Predicate: source.WebURL, Object: rawURL},
-		{Subject: entityID, Predicate: source.WebTitle, Object: title},
-		{Subject: entityID, Predicate: source.WebContent, Object: content},
-		{Subject: entityID, Predicate: source.WebSummary, Object: truncate(content, 300)},
-		{Subject: entityID, Predicate: source.WebContentType, Object: "text/html"},
-		{Subject: entityID, Predicate: source.WebScope, Object: "all"},
-		{Subject: entityID, Predicate: source.WebLastFetched, Object: now.Format(time.RFC3339)},
-	}
-
-	if hostname != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: source.WebDomain, Object: hostname})
-	}
-	if etag != "" {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: source.WebETag, Object: etag})
-	}
-
-	payload := workflow.NewEntityPayload(webEntityType, entityID, triples)
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "http-request")
-
-	data, err := json.Marshal(baseMsg)
+// requestIngestion enqueues an AddWebSourceRequest on web-ingester's input
+// subject so the URL gets the full ingestion pipeline (SSRF check, ETag,
+// chunked HTML→markdown, optional classification). Mirrors the publish
+// shape used by source/http.go's POST /api/sources/web handler.
+//
+// Fire-and-forget: the agent already has its response. A failed enqueue
+// is logged but does not surface to the caller — the next fetch of the
+// same URL will re-enqueue.
+func (e *Executor) requestIngestion(rawURL string) {
+	req := source.AddWebSourceRequest{URL: rawURL}
+	data, err := json.Marshal(req)
 	if err != nil {
-		e.logger.Debug("Failed to marshal web entity", "url", rawURL, "error", err)
+		e.logger.Debug("Failed to marshal web ingestion request", "url", rawURL, "error", err)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), persistTimeout)
+	subject := fmt.Sprintf("source.web.ingest.%s", weburl.GenerateEntityID(rawURL))
+
+	ctx, cancel := context.WithTimeout(context.Background(), ingestPublishTimeout)
 	defer cancel()
 
-	if err := e.natsClient.PublishToStream(ctx, graphIngestSubject, data); err != nil {
-		e.logger.Debug("Failed to persist web content to graph", "url", rawURL, "error", err)
+	if err := e.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		e.logger.Debug("Failed to enqueue web ingestion request", "url", rawURL, "subject", subject, "error", err)
 	}
 }
 
