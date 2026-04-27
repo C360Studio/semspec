@@ -8,8 +8,6 @@ import (
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
-
-	"github.com/c360studio/semspec/source/webingest"
 )
 
 // Format identifies which view the agent wants of an HTTP response.
@@ -74,7 +72,7 @@ type heading struct {
 // original body. body is the raw HTTP body (used for link/heading
 // extraction); conv is the Converter's output (used for the markdown / main
 // content surface). maxChars is the per-format cap; 0 means "use default".
-func formatResponse(format Format, conv *webingest.ConvertResult, body []byte, pageURL string, maxChars int) string {
+func formatResponse(format Format, conv *convertResult, body []byte, pageURL string, maxChars int) string {
 	if maxChars <= 0 {
 		maxChars = defaultMaxChars
 	}
@@ -96,7 +94,7 @@ func formatResponse(format Format, conv *webingest.ConvertResult, body []byte, p
 }
 
 // renderMarkdown returns the title-prefixed full markdown, capped.
-func renderMarkdown(conv *webingest.ConvertResult, maxChars int) string {
+func renderMarkdown(conv *convertResult, maxChars int) string {
 	if conv == nil || conv.Markdown == "" {
 		return ""
 	}
@@ -109,7 +107,7 @@ func renderMarkdown(conv *webingest.ConvertResult, maxChars int) string {
 // renderSummary returns a compact view: title, excerpt, outline, top links,
 // main-content excerpt. Designed to answer "is this page worth reading?"
 // without spending a 20K-char budget on the answer.
-func renderSummary(conv *webingest.ConvertResult, body []byte, pageURL string, maxChars int) string {
+func renderSummary(conv *convertResult, body []byte, pageURL string, maxChars int) string {
 	var b strings.Builder
 
 	if conv != nil && conv.Title != "" {

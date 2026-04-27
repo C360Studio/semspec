@@ -1,4 +1,4 @@
-package webingest
+package httptool
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ var (
 )
 
 // ConvertResult is the output of HTML→markdown conversion.
-type ConvertResult struct {
+type convertResult struct {
 	// Title is the page title (from <title>, OpenGraph, or first H1).
 	Title string
 	// Markdown is the cleaned, main-content markdown.
@@ -36,15 +36,15 @@ type ConvertResult struct {
 // Converter turns HTML bodies into clean markdown via Readability with a
 // permissive tag-stripping fallback. Extracted from processor/web-ingester
 // during WS-25; the fallback path mirrors the previous main-content logic.
-type Converter struct {
+type converter struct {
 	md *md.Converter
 }
 
 // NewConverter constructs a converter with GitHub-flavored markdown rules.
-func NewConverter() *Converter {
+func newConverter() *converter {
 	c := md.NewConverter("", true, nil)
 	c.Use(plugin.GitHubFlavored())
-	return &Converter{md: c}
+	return &converter{md: c}
 }
 
 // Convert turns an HTML body into markdown. pageURL is used by Readability
@@ -53,7 +53,7 @@ func NewConverter() *Converter {
 //
 // On success the result always has Markdown and Title populated. Excerpt
 // and SiteName may be empty when Readability cannot extract them.
-func (c *Converter) Convert(body []byte, pageURL string) (*ConvertResult, error) {
+func (c *converter) Convert(body []byte, pageURL string) (*convertResult, error) {
 	var parsedURL *nurl.URL
 	if pageURL != "" {
 		parsedURL, _ = nurl.Parse(pageURL)
@@ -69,7 +69,7 @@ func (c *Converter) Convert(body []byte, pageURL string) (*ConvertResult, error)
 			if title == "" {
 				title = extractMarkdownTitle(markdown)
 			}
-			return &ConvertResult{
+			return &convertResult{
 				Title:    title,
 				Markdown: markdown,
 				Excerpt:  strings.TrimSpace(article.Excerpt),
@@ -87,7 +87,7 @@ func (c *Converter) Convert(body []byte, pageURL string) (*ConvertResult, error)
 
 // convertFallback strips chrome elements with simple selectors and converts
 // what's left to markdown. Used when Readability returns empty content.
-func (c *Converter) convertFallback(body []byte) (*ConvertResult, error) {
+func (c *converter) convertFallback(body []byte) (*convertResult, error) {
 	title := extractHTMLTitle(body)
 	cleaned := stripChrome(body)
 	markdown, err := c.md.ConvertString(cleaned)
@@ -98,7 +98,7 @@ func (c *Converter) convertFallback(body []byte) (*ConvertResult, error) {
 	if title == "" {
 		title = extractMarkdownTitle(markdown)
 	}
-	return &ConvertResult{Title: title, Markdown: markdown}, nil
+	return &convertResult{Title: title, Markdown: markdown}, nil
 }
 
 // extractHTMLTitle pulls the <title> out of an HTML byte stream.

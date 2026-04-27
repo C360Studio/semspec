@@ -3,8 +3,6 @@ package httptool
 import (
 	"strings"
 	"testing"
-
-	"github.com/c360studio/semspec/source/webingest"
 )
 
 const sampleHTML = `<!DOCTYPE html>
@@ -142,7 +140,7 @@ func TestFormatResponse_HeadingsFromBody(t *testing.T) {
 }
 
 func TestFormatResponse_SummaryHasOutlineAndExcerpt(t *testing.T) {
-	conv := &webingest.ConvertResult{
+	conv := &convertResult{
 		Title:    "Widgets and Gadgets",
 		Markdown: "# Widgets and Gadgets\n\nWidgets are small things.\n",
 		Excerpt:  "A page about widgets and gadgets.",

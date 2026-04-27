@@ -1,4 +1,4 @@
-package webingest
+package httptool
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 )
 
 func TestConverter_ExtractsArticleAndTitle(t *testing.T) {
-	conv := NewConverter()
+	conv := newConverter()
 	got, err := conv.Convert([]byte(sampleHTML), "https://example.com/sample")
 	if err != nil {
 		t.Fatalf("Convert err: %v", err)
@@ -29,7 +29,7 @@ func TestConverter_FallbackOnEmptyReadability(t *testing.T) {
 	bare := []byte(`<html><head><title>Tiny</title></head><body>
 		<p>This is a very small page with not much content at all.</p>
 	</body></html>`)
-	conv := NewConverter()
+	conv := newConverter()
 	got, err := conv.Convert(bare, "https://example.com")
 	if err != nil {
 		t.Fatalf("Convert err: %v", err)

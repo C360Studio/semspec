@@ -1,4 +1,4 @@
-package weburl
+package httptool
 
 import (
 	"net"
@@ -65,9 +65,9 @@ func TestValidateURL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateURL(tt.url)
+			err := validateURL(tt.url)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+				t.Errorf("validateURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
 			}
 		})
 	}
@@ -109,9 +109,9 @@ func TestIsPrivateIP(t *testing.T) {
 			if ip == nil {
 				t.Fatalf("failed to parse IP: %s", tt.ip)
 			}
-			got := IsPrivateIP(ip)
+			got := isPrivateIP(ip)
 			if got != tt.expected {
-				t.Errorf("IsPrivateIP(%q) = %v, want %v", tt.ip, got, tt.expected)
+				t.Errorf("isPrivateIP(%q) = %v, want %v", tt.ip, got, tt.expected)
 			}
 		})
 	}
@@ -147,9 +147,9 @@ func TestGenerateEntityID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := GenerateEntityID(tt.url)
+			got := generateEntityID(tt.url)
 			if got != tt.expected {
-				t.Errorf("GenerateEntityID(%q) = %q, want %q", tt.url, got, tt.expected)
+				t.Errorf("generateEntityID(%q) = %q, want %q", tt.url, got, tt.expected)
 			}
 		})
 	}
@@ -157,12 +157,12 @@ func TestGenerateEntityID(t *testing.T) {
 
 func TestGenerateEntityID_InvalidURL(t *testing.T) {
 	// Invalid URLs should return hash-based IDs
-	id := GenerateEntityID("not a valid url ://")
-	if !ValidateEntityID(id) {
-		t.Errorf("GenerateEntityID for invalid URL returned invalid ID: %s", id)
+	id := generateEntityID("not a valid url ://")
+	if !validateEntityID(id) {
+		t.Errorf("generateEntityID for invalid URL returned invalid ID: %s", id)
 	}
 	if len(id) < len("c360.semspec.source.web.page.") {
-		t.Errorf("GenerateEntityID for invalid URL returned too short ID: %s", id)
+		t.Errorf("generateEntityID for invalid URL returned too short ID: %s", id)
 	}
 }
 
@@ -187,9 +187,9 @@ func TestValidateEntityID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
-			got := ValidateEntityID(tt.id)
+			got := validateEntityID(tt.id)
 			if got != tt.expected {
-				t.Errorf("ValidateEntityID(%q) = %v, want %v", tt.id, got, tt.expected)
+				t.Errorf("validateEntityID(%q) = %v, want %v", tt.id, got, tt.expected)
 			}
 		})
 	}
@@ -208,9 +208,9 @@ func TestExtractDomain(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.url, func(t *testing.T) {
-			got := ExtractDomain(tt.url)
+			got := extractDomain(tt.url)
 			if got != tt.expected {
-				t.Errorf("ExtractDomain(%q) = %q, want %q", tt.url, got, tt.expected)
+				t.Errorf("extractDomain(%q) = %q, want %q", tt.url, got, tt.expected)
 			}
 		})
 	}

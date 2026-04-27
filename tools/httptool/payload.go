@@ -1,4 +1,4 @@
-package webingest
+package httptool
 
 import (
 	"encoding/json"
@@ -9,31 +9,31 @@ import (
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-// WebEntityType is the message type for web entity payloads published to
+// webEntityType is the message type for web entity payloads published to
 // graph.ingest.entity. Re-homed from processor/web-ingester after that
 // component was removed in WS-25 (httptool now writes to the graph directly).
-var WebEntityType = message.Type{Domain: "web", Category: "entity", Version: "v1"}
+var webEntityType = message.Type{Domain: "web", Category: "entity", Version: "v1"}
 
-// WebEntityPayload implements message.Payload and graph.Graphable for web
+// webEntityPayload implements message.Payload and graph.Graphable for web
 // source entity ingestion. Schema unchanged from the old web-ingester
 // package — graph-ingest still reads payloads of this domain/category/version.
-type WebEntityPayload struct {
+type webEntityPayload struct {
 	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // EntityID returns the entity identifier for Graphable interface.
-func (p *WebEntityPayload) EntityID() string { return p.ID }
+func (p *webEntityPayload) EntityID() string { return p.ID }
 
 // Triples returns the entity triples for Graphable interface.
-func (p *WebEntityPayload) Triples() []message.Triple { return p.TripleData }
+func (p *webEntityPayload) Triples() []message.Triple { return p.TripleData }
 
 // Schema returns the message type for Payload interface.
-func (p *WebEntityPayload) Schema() message.Type { return WebEntityType }
+func (p *webEntityPayload) Schema() message.Type { return webEntityType }
 
 // Validate validates the payload for Payload interface.
-func (p *WebEntityPayload) Validate() error {
+func (p *webEntityPayload) Validate() error {
 	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
@@ -41,14 +41,14 @@ func (p *WebEntityPayload) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler.
-func (p *WebEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias WebEntityPayload
+func (p *webEntityPayload) MarshalJSON() ([]byte, error) {
+	type Alias webEntityPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (p *WebEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias WebEntityPayload
+func (p *webEntityPayload) UnmarshalJSON(data []byte) error {
+	type Alias webEntityPayload
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
@@ -58,8 +58,8 @@ func init() {
 		Category:    "entity",
 		Version:     "v1",
 		Description: "Web source entity payload for graph ingestion",
-		Factory:     func() any { return &WebEntityPayload{} },
+		Factory:     func() any { return &webEntityPayload{} },
 	}); err != nil {
-		panic("failed to register WebEntityPayload: " + err.Error())
+		panic("failed to register webEntityPayload: " + err.Error())
 	}
 }

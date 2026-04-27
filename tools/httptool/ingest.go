@@ -1,11 +1,9 @@
-// Package webingest converts HTTP bodies into chunked graph entities and
-// publishes them to graph.ingest.entity.
-//
-// Re-homed from processor/web-ingester during WS-25. The old async pipeline
-// (httptool publishes to source.web.ingest.* → web-ingester refetches +
-// chunks + persists) was deleted in favour of synchronous in-tool ingestion.
-// One fetch, one publish, no separate component.
-package webingest
+package httptool
+
+// Ingest pipeline: convert an already-fetched HTTP body into chunked graph
+// entities and publish them to graph.ingest.entity. Folded into httptool in
+// WS-27 — what used to be source/webingest is now part of the same package
+// as the agent tool that consumes it.
 
 import (
 	"context"
@@ -15,8 +13,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c360studio/semspec/source/chunker"
-	"github.com/c360studio/semspec/source/weburl"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	"github.com/c360studio/semstreams/message"
 )
@@ -25,16 +21,9 @@ import (
 // old web-ingester component to preserve graph schema compatibility.
 const graphIngestSubject = "graph.ingest.entity"
 
-// NATSClient is the minimum NATS surface PublishGraphEntities needs. Both
-// natsclient.Client and any test fake satisfy it — the interface keeps this
-// package usable from unit tests without a live NATS connection.
-type NATSClient interface {
-	PublishToStream(ctx context.Context, subject string, data []byte) error
-}
-
-// IngestRequest carries the inputs required to build the parent + chunk
+// ingestRequest carries the inputs required to build the parent + chunk
 // entities. Fields beyond URL are optional.
-type IngestRequest struct {
+type ingestRequest struct {
 	URL             string
 	ContentType     string
 	ETag            string
@@ -43,16 +32,16 @@ type IngestRequest struct {
 	ProjectID       string
 }
 
-// IngestResult is the chunked + tripled output of a single ingestion. The
+// ingestResult is the chunked + tripled output of a single ingestion. The
 // Entities slice is parent-first, chunks-after; PublishGraphEntities flips
 // the publish order so chunks land before the parent.
-type IngestResult struct {
+type ingestResult struct {
 	EntityID    string
 	Title       string
 	Markdown    string
 	ContentHash string
 	ChunkCount  int
-	Entities    []*WebEntityPayload
+	Entities    []*webEntityPayload
 }
 
 // Ingest converts an already-fetched HTTP body into graph-ready entities.
@@ -61,13 +50,13 @@ type IngestResult struct {
 // The conversion uses Readability with a tag-stripping fallback (see
 // converter.go). Failures bubble up — the caller decides whether to publish
 // nothing, surface the error, or retry.
-func Ingest(req IngestRequest, body []byte, conv *Converter, chk *chunker.Chunker, fetchTime time.Time) (*IngestResult, error) {
+func ingest(req ingestRequest, body []byte, conv *converter, chk *chunkerImpl, fetchTime time.Time) (*ingestResult, error) {
 	if conv == nil {
-		conv = NewConverter()
+		conv = newConverter()
 	}
 	if chk == nil {
 		var err error
-		chk, err = chunker.New(chunker.DefaultConfig())
+		chk, err = newChunker(defaultChunkerConfig())
 		if err != nil {
 			return nil, fmt.Errorf("default chunker: %w", err)
 		}
@@ -78,19 +67,19 @@ func Ingest(req IngestRequest, body []byte, conv *Converter, chk *chunker.Chunke
 		return nil, fmt.Errorf("convert html: %w", err)
 	}
 
-	entityID := weburl.GenerateEntityID(req.URL)
+	entityID := generateEntityID(req.URL)
 	contentHash := computeIngestHash(body)
-	chunks := chk.Chunk(entityID, convResult.Markdown)
+	chunks := chk.chunk(entityID, convResult.Markdown)
 
 	parent := buildParentEntity(req, convResult, contentHash, len(chunks), fetchTime)
 
-	entities := make([]*WebEntityPayload, 0, len(chunks)+1)
+	entities := make([]*webEntityPayload, 0, len(chunks)+1)
 	entities = append(entities, parent)
 	for _, ch := range chunks {
 		entities = append(entities, buildChunkEntity(entityID, ch, fetchTime))
 	}
 
-	return &IngestResult{
+	return &ingestResult{
 		EntityID:    entityID,
 		Title:       convResult.Title,
 		Markdown:    convResult.Markdown,
@@ -108,7 +97,7 @@ func Ingest(req IngestRequest, body []byte, conv *Converter, chk *chunker.Chunke
 // PublishToStreamer is the minimum NATS surface required (NATSClient already
 // satisfies it). Errors are returned for the first failure; remaining
 // entities are not attempted.
-func PublishGraphEntities(ctx context.Context, nc NATSClient, result *IngestResult) error {
+func publishGraphEntities(ctx context.Context, nc NATSClient, result *ingestResult) error {
 	if nc == nil {
 		return fmt.Errorf("nats client required")
 	}
@@ -131,8 +120,8 @@ func PublishGraphEntities(ctx context.Context, nc NATSClient, result *IngestResu
 	return nil
 }
 
-func publishEntity(ctx context.Context, nc NATSClient, entity *WebEntityPayload) error {
-	msg := message.NewBaseMessage(WebEntityType, entity, "semspec")
+func publishEntity(ctx context.Context, nc NATSClient, entity *webEntityPayload) error {
+	msg := message.NewBaseMessage(webEntityType, entity, "semspec")
 	data, err := json.Marshal(msg)
 	if err != nil {
 		return fmt.Errorf("marshal entity: %w", err)
@@ -144,7 +133,7 @@ func publishEntity(ctx context.Context, nc NATSClient, entity *WebEntityPayload)
 // match what processor/web-ingester wrote so existing graph consumers keep
 // working unchanged. WS-25 dropped the LLM-analysis predicates (Category,
 // Severity, etc.) — those had no production consumer.
-func buildParentEntity(req IngestRequest, conv *ConvertResult, contentHash string, chunkCount int, ts time.Time) *WebEntityPayload {
+func buildParentEntity(req ingestRequest, conv *convertResult, contentHash string, chunkCount int, ts time.Time) *webEntityPayload {
 	triples := []message.Triple{
 		{Subject: "", Predicate: sourceVocab.SourceType, Object: "web"},
 		{Subject: "", Predicate: sourceVocab.WebType, Object: "web"},
@@ -156,7 +145,7 @@ func buildParentEntity(req IngestRequest, conv *ConvertResult, contentHash strin
 		{Subject: "", Predicate: sourceVocab.SourceAddedAt, Object: ts.Format(time.RFC3339)},
 	}
 
-	entityID := weburl.GenerateEntityID(req.URL)
+	entityID := generateEntityID(req.URL)
 	for i := range triples {
 		triples[i].Subject = entityID
 	}
@@ -170,7 +159,7 @@ func buildParentEntity(req IngestRequest, conv *ConvertResult, contentHash strin
 		message.Triple{Subject: entityID, Predicate: sourceVocab.WebTitle, Object: title},
 	)
 
-	if hostname := weburl.ExtractDomain(req.URL); hostname != "" {
+	if hostname := extractDomain(req.URL); hostname != "" {
 		triples = append(triples, message.Triple{
 			Subject: entityID, Predicate: sourceVocab.WebDomain, Object: hostname,
 		})
@@ -201,7 +190,7 @@ func buildParentEntity(req IngestRequest, conv *ConvertResult, contentHash strin
 		})
 	}
 
-	return &WebEntityPayload{
+	return &webEntityPayload{
 		ID:         entityID,
 		TripleData: triples,
 		UpdatedAt:  ts,
@@ -211,7 +200,7 @@ func buildParentEntity(req IngestRequest, conv *ConvertResult, contentHash strin
 // buildChunkEntity constructs a chunk entity with a 6-part chunk ID.
 // Format: c360.semspec.source.web.chunk.{hash}{index} — preserved verbatim
 // from web-ingester so existing chunk lookups keep working.
-func buildChunkEntity(parentID string, chunk chunker.Chunk, ts time.Time) *WebEntityPayload {
+func buildChunkEntity(parentID string, chunk chunk, ts time.Time) *webEntityPayload {
 	hash := sha256.Sum256(fmt.Appendf(nil, "%s-%d", parentID, chunk.Index+1))
 	chunkID := fmt.Sprintf("c360.semspec.source.web.chunk.%s%04d",
 		hex.EncodeToString(hash[:])[:12], chunk.Index+1)
@@ -228,7 +217,7 @@ func buildChunkEntity(parentID string, chunk chunker.Chunk, ts time.Time) *WebEn
 		})
 	}
 
-	return &WebEntityPayload{
+	return &webEntityPayload{
 		ID:         chunkID,
 		TripleData: triples,
 		UpdatedAt:  ts,
@@ -244,7 +233,7 @@ func computeIngestHash(body []byte) string {
 // fallbackTitleFromURL returns the URL hostname when the page provides no
 // title metadata. Better than dumping the full URL into the title triple.
 func fallbackTitleFromURL(rawURL string) string {
-	if domain := weburl.ExtractDomain(rawURL); domain != "" {
+	if domain := extractDomain(rawURL); domain != "" {
 		return domain
 	}
 	return rawURL

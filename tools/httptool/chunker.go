@@ -1,5 +1,7 @@
-// Package chunker provides document chunking for context assembly.
-package chunker
+package httptool
+
+// Document chunking for graph ingestion. Folded into httptool in WS-27;
+// previously its own package source/chunker.
 
 import (
 	"fmt"
@@ -10,7 +12,7 @@ import (
 // from the parent `source` package during WS-25 — the type only had readers
 // inside chunker and webingest, so colocating it here breaks the upward
 // import that previously forced source/* to be cycle-prone.
-type Chunk struct {
+type chunk struct {
 	// ParentID is the ID of the parent document.
 	ParentID string `json:"parent_id"`
 
@@ -31,7 +33,7 @@ type Chunk struct {
 const charsPerToken = 4
 
 // Config holds chunking configuration.
-type Config struct {
+type chunkerConfig struct {
 	// TargetTokens is the ideal chunk size in tokens.
 	TargetTokens int
 
@@ -43,8 +45,8 @@ type Config struct {
 }
 
 // DefaultConfig returns sensible chunking defaults.
-func DefaultConfig() Config {
-	return Config{
+func defaultChunkerConfig() chunkerConfig {
+	return chunkerConfig{
 		TargetTokens: 1000,
 		MaxTokens:    1500,
 		MinTokens:    200,
@@ -52,7 +54,7 @@ func DefaultConfig() Config {
 }
 
 // Validate checks if the configuration is valid.
-func (c Config) Validate() error {
+func (c chunkerConfig) Validate() error {
 	if c.MinTokens <= 0 {
 		return fmt.Errorf("MinTokens must be positive, got %d", c.MinTokens)
 	}
@@ -72,26 +74,26 @@ func (c Config) Validate() error {
 }
 
 // Chunker splits documents into chunks for context assembly.
-type Chunker struct {
-	config Config
+type chunkerImpl struct {
+	config chunkerConfig
 }
 
 // New creates a new Chunker with the given configuration.
 // Returns an error if the configuration is invalid.
-func New(cfg Config) (*Chunker, error) {
+func newChunker(cfg chunkerConfig) (*chunkerImpl, error) {
 	if cfg.TargetTokens == 0 {
-		cfg = DefaultConfig()
+		cfg = defaultChunkerConfig()
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	return &Chunker{config: cfg}, nil
+	return &chunkerImpl{config: cfg}, nil
 }
 
 // MustNew creates a new Chunker, panicking on invalid config.
 // Use for known-good configurations.
-func MustNew(cfg Config) *Chunker {
-	c, err := New(cfg)
+func mustNewChunker(cfg chunkerConfig) *chunkerImpl {
+	c, err := newChunker(cfg)
 	if err != nil {
 		panic(err)
 	}
@@ -99,19 +101,19 @@ func MustNew(cfg Config) *Chunker {
 }
 
 // NewDefault creates a Chunker with default configuration.
-func NewDefault() *Chunker {
-	return MustNew(DefaultConfig())
+func newDefaultChunker() *chunkerImpl {
+	return mustNewChunker(defaultChunkerConfig())
 }
 
 // Chunk splits a document body into chunks.
 // Returns a slice of Chunk structs with section names and content.
-func (c *Chunker) Chunk(parentID string, content string) []Chunk {
+func (c *chunkerImpl) chunk(parentID string, content string) []chunk {
 	// Parse sections from markdown
 	sections := c.parseSections(content)
 
 	// Build chunks from sections
-	var chunks []Chunk
-	var currentChunk Chunk
+	var chunks []chunk
+	var currentChunk chunk
 	currentChunk.ParentID = parentID
 
 	for _, section := range sections {
@@ -122,7 +124,7 @@ func (c *Chunker) Chunk(parentID string, content string) []Chunk {
 			// Flush current chunk if non-empty
 			if c.estimateTokens(currentChunk.Content) >= c.config.MinTokens {
 				chunks = append(chunks, c.finalizeChunk(currentChunk, len(chunks)))
-				currentChunk = Chunk{ParentID: parentID}
+				currentChunk = chunk{ParentID: parentID}
 			}
 
 			// Split large section into paragraphs
@@ -136,7 +138,7 @@ func (c *Chunker) Chunk(parentID string, content string) []Chunk {
 		// If adding this section would exceed target, finalize current chunk
 		if currentTokens > 0 && currentTokens+sectionTokens > c.config.TargetTokens {
 			chunks = append(chunks, c.finalizeChunk(currentChunk, len(chunks)))
-			currentChunk = Chunk{ParentID: parentID}
+			currentChunk = chunk{ParentID: parentID}
 		}
 
 		// Add section to current chunk
@@ -168,7 +170,7 @@ type section struct {
 }
 
 // parseSections extracts sections from markdown content.
-func (c *Chunker) parseSections(content string) []section {
+func (c *chunkerImpl) parseSections(content string) []section {
 	lines := strings.Split(content, "\n")
 	var sections []section
 	var current section
@@ -212,11 +214,11 @@ func (c *Chunker) parseSections(content string) []section {
 }
 
 // splitLargeSection splits a section that exceeds max tokens.
-func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int) []Chunk {
-	var chunks []Chunk
+func (c *chunkerImpl) splitLargeSection(parentID string, sec section, startIndex int) []chunk {
+	var chunks []chunk
 	paragraphs := c.splitIntoParagraphs(sec.Content)
 
-	var current Chunk
+	var current chunk
 	current.ParentID = parentID
 	current.Section = sec.Heading
 
@@ -228,7 +230,7 @@ func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int
 			// Flush current
 			if c.estimateTokens(current.Content) >= c.config.MinTokens {
 				chunks = append(chunks, c.finalizeChunk(current, startIndex+len(chunks)))
-				current = Chunk{ParentID: parentID, Section: sec.Heading}
+				current = chunk{ParentID: parentID, Section: sec.Heading}
 			}
 
 			// Split paragraph by sentences (or just take it as-is if still too big)
@@ -240,7 +242,7 @@ func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int
 		currentTokens := c.estimateTokens(current.Content)
 		if currentTokens > 0 && currentTokens+paraTokens > c.config.TargetTokens {
 			chunks = append(chunks, c.finalizeChunk(current, startIndex+len(chunks)))
-			current = Chunk{ParentID: parentID, Section: sec.Heading}
+			current = chunk{ParentID: parentID, Section: sec.Heading}
 		}
 
 		if current.Content != "" {
@@ -258,7 +260,7 @@ func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int
 }
 
 // splitIntoParagraphs splits content by double newlines, preserving code blocks.
-func (c *Chunker) splitIntoParagraphs(content string) []string {
+func (c *chunkerImpl) splitIntoParagraphs(content string) []string {
 	var paragraphs []string
 	var current strings.Builder
 	lines := strings.Split(content, "\n")
@@ -296,10 +298,10 @@ func (c *Chunker) splitIntoParagraphs(content string) []string {
 }
 
 // splitBySentences splits a paragraph by sentences as a last resort.
-func (c *Chunker) splitBySentences(parentID, sectionName, content string, startIndex int) []Chunk {
+func (c *chunkerImpl) splitBySentences(parentID, sectionName, content string, startIndex int) []chunk {
 	// Simple sentence splitting - split on . ? ! followed by space or newline
-	var chunks []Chunk
-	var current Chunk
+	var chunks []chunk
+	var current chunk
 	current.ParentID = parentID
 	current.Section = sectionName
 
@@ -313,7 +315,7 @@ func (c *Chunker) splitBySentences(parentID, sectionName, content string, startI
 		current.Content = content
 		current.TokenCount = c.estimateTokens(content)
 		current.Index = startIndex
-		return []Chunk{current}
+		return []chunk{current}
 	}
 
 	for _, sentence := range sentences {
@@ -322,7 +324,7 @@ func (c *Chunker) splitBySentences(parentID, sectionName, content string, startI
 
 		if currentTokens > 0 && currentTokens+sentenceTokens > c.config.TargetTokens {
 			chunks = append(chunks, c.finalizeChunk(current, startIndex+len(chunks)))
-			current = Chunk{ParentID: parentID, Section: sectionName}
+			current = chunk{ParentID: parentID, Section: sectionName}
 		}
 
 		if current.Content != "" {
@@ -340,8 +342,8 @@ func (c *Chunker) splitBySentences(parentID, sectionName, content string, startI
 
 // hardSplit splits content at character boundaries when no natural breaks exist.
 // This is a last resort to ensure MaxTokens is never exceeded.
-func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex int) []Chunk {
-	var chunks []Chunk
+func (c *chunkerImpl) hardSplit(parentID, sectionName, content string, startIndex int) []chunk {
+	var chunks []chunk
 	maxChars := c.config.MaxTokens * charsPerToken
 
 	runes := []rune(content)
@@ -352,7 +354,7 @@ func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex in
 		}
 
 		chunkContent := string(runes[i:end])
-		chunks = append(chunks, Chunk{
+		chunks = append(chunks, chunk{
 			ParentID:   parentID,
 			Section:    sectionName,
 			Index:      startIndex + len(chunks),
@@ -365,26 +367,26 @@ func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex in
 }
 
 // mergeSmallChunks combines chunks that are below minimum size.
-func (c *Chunker) mergeSmallChunks(chunks []Chunk) []Chunk {
+func (c *chunkerImpl) mergeSmallChunks(chunks []chunk) []chunk {
 	if len(chunks) <= 1 {
 		return chunks
 	}
 
-	var result []Chunk
+	var result []chunk
 	for i := 0; i < len(chunks); i++ {
-		chunk := chunks[i]
+		c0 := chunks[i]
 
 		// If chunk is too small and there's a next chunk, merge
-		if chunk.TokenCount < c.config.MinTokens && i < len(chunks)-1 {
+		if c0.TokenCount < c.config.MinTokens && i < len(chunks)-1 {
 			next := chunks[i+1]
-			combined := chunk.Content + "\n\n" + next.Content
+			combined := c0.Content + "\n\n" + next.Content
 			combinedTokens := c.estimateTokens(combined)
 
 			// Only merge if combined doesn't exceed max
 			if combinedTokens <= c.config.MaxTokens {
-				chunks[i+1] = Chunk{
-					ParentID:   chunk.ParentID,
-					Section:    chunk.Section,
+				chunks[i+1] = chunk{
+					ParentID:   c0.ParentID,
+					Section:    c0.Section,
 					Content:    combined,
 					TokenCount: combinedTokens,
 				}
@@ -392,7 +394,7 @@ func (c *Chunker) mergeSmallChunks(chunks []Chunk) []Chunk {
 			}
 		}
 
-		result = append(result, chunk)
+		result = append(result, c0)
 	}
 
 	// Re-index after merge
@@ -404,14 +406,14 @@ func (c *Chunker) mergeSmallChunks(chunks []Chunk) []Chunk {
 }
 
 // finalizeChunk sets the index and token count for a chunk.
-func (c *Chunker) finalizeChunk(chunk Chunk, index int) Chunk {
+func (c *chunkerImpl) finalizeChunk(chunk chunk, index int) chunk {
 	chunk.Index = index
 	chunk.TokenCount = c.estimateTokens(chunk.Content)
 	return chunk
 }
 
 // estimateTokens estimates token count using the chars/token heuristic.
-func (c *Chunker) estimateTokens(content string) int {
+func (c *chunkerImpl) estimateTokens(content string) int {
 	if content == "" {
 		return 0
 	}

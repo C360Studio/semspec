@@ -17,9 +17,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
-
-	"github.com/c360studio/semspec/source/chunker"
-	"github.com/c360studio/semspec/source/webingest"
 )
 
 const (
@@ -41,7 +38,7 @@ const (
 
 // NATSClient is the subset of natsclient.Client that Executor needs. The
 // interface keeps the executor testable without a live NATS connection.
-// Compatible with webingest.NATSClient (same single method).
+// Compatible with NATSClient (same single method).
 type NATSClient interface {
 	PublishToStream(ctx context.Context, subject string, data []byte) error
 }
@@ -49,8 +46,8 @@ type NATSClient interface {
 // Executor handles http_request tool calls.
 type Executor struct {
 	natsClient NATSClient // nil disables graph persistence; tool still fetches.
-	converter  *webingest.Converter
-	chunker    *chunker.Chunker
+	converter  *converter
+	chunker    *chunkerImpl
 	logger     *slog.Logger
 	timeout    time.Duration // 0 means use requestTimeout const
 }
@@ -68,14 +65,14 @@ func WithRequestTimeout(d time.Duration) Option {
 // natsClient is optional — if nil, graph persistence is disabled and the
 // tool still fetches and converts HTML.
 func NewExecutor(nc NATSClient, opts ...Option) *Executor {
-	chk, err := chunker.New(chunker.DefaultConfig())
+	chk, err := newChunker(defaultChunkerConfig())
 	if err != nil {
-		// chunker.DefaultConfig() is always valid; the error is unreachable.
+		// defaultChunkerConfig() is always valid; the error is unreachable.
 		panic(fmt.Sprintf("httptool: default chunker config invalid: %v", err))
 	}
 	e := &Executor{
 		natsClient: nc,
-		converter:  webingest.NewConverter(),
+		converter:  newConverter(),
 		chunker:    chk,
 		logger:     slog.Default().With("component", "http-request"),
 	}
@@ -263,7 +260,7 @@ func (e *Executor) persistAsync(rawURL, contentType, etag string, body []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := webingest.Ingest(webingest.IngestRequest{
+	result, err := ingest(ingestRequest{
 		URL:         rawURL,
 		ContentType: contentType,
 		ETag:        etag,
@@ -272,7 +269,7 @@ func (e *Executor) persistAsync(rawURL, contentType, etag string, body []byte) {
 		e.logger.Debug("ingest failed", "url", rawURL, "error", err)
 		return
 	}
-	if err := webingest.PublishGraphEntities(ctx, e.natsClient, result); err != nil {
+	if err := publishGraphEntities(ctx, e.natsClient, result); err != nil {
 		e.logger.Debug("publish graph entities failed",
 			"url", rawURL, "entity_id", result.EntityID, "chunks", result.ChunkCount, "error", err)
 		return

@@ -1,7 +1,8 @@
-// Package weburl provides URL validation and ID generation for web sources.
-// It implements SSRF prevention including private IP detection and DNS rebinding
-// protection.
-package weburl
+package httptool
+
+// URL validation + entity ID generation for web sources. SSRF prevention,
+// private IP detection, DNS rebinding protection. Folded into httptool in
+// WS-27; previously its own package source/weburl.
 
 import (
 	"crypto/sha256"
@@ -44,9 +45,9 @@ func init() {
 	}
 }
 
-// ValidateURL validates a URL for security (SSRF prevention).
+// validateURL validates a URL for security (SSRF prevention).
 // It requires HTTPS and blocks localhost, private IPs, and local domains.
-func ValidateURL(rawURL string) error {
+func validateURL(rawURL string) error {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return fmt.Errorf("invalid URL: %w", err)
@@ -73,7 +74,7 @@ func ValidateURL(rawURL string) error {
 
 	// Try to parse as IP and check for private ranges
 	if ip := net.ParseIP(host); ip != nil {
-		if IsPrivateIP(ip) {
+		if isPrivateIP(ip) {
 			return fmt.Errorf("private IP addresses are not allowed")
 		}
 	}
@@ -81,9 +82,9 @@ func ValidateURL(rawURL string) error {
 	return nil
 }
 
-// IsPrivateIP checks if an IP is in private/reserved ranges.
+// isPrivateIP checks if an IP is in private/reserved ranges.
 // It handles IPv4, IPv6, and IPv6-mapped IPv4 addresses.
-func IsPrivateIP(ip net.IP) bool {
+func isPrivateIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true
 	}
@@ -106,9 +107,9 @@ func IsPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// GenerateEntityID creates a 6-part web source entity ID from a URL.
+// generateEntityID creates a 6-part web source entity ID from a URL.
 // Format: c360.semspec.source.web.page.{slug}
-func GenerateEntityID(rawURL string) string {
+func generateEntityID(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		// Fall back to hash-based ID for invalid URLs
@@ -151,16 +152,16 @@ func GenerateEntityID(rawURL string) string {
 	return "c360.semspec.source.web.page." + slug
 }
 
-// ValidateEntityID checks if an entity ID has a valid 6-part format.
+// validateEntityID checks if an entity ID has a valid 6-part format.
 // Valid IDs match the pattern "c360.semspec.source.web.page.[a-z0-9-]+"
 // to prevent NATS subject injection attacks.
-func ValidateEntityID(id string) bool {
+func validateEntityID(id string) bool {
 	return entityIDPattern.MatchString(id)
 }
 
-// ExtractDomain extracts the domain name from a URL.
+// extractDomain extracts the domain name from a URL.
 // Returns an empty string if the URL is invalid.
-func ExtractDomain(rawURL string) string {
+func extractDomain(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return ""

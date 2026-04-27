@@ -1,4 +1,4 @@
-package chunker
+package httptool
 
 import (
 	"strings"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestChunker_Chunk_SimpleDocument(t *testing.T) {
-	c := NewDefault()
+	c := newDefaultChunker()
 
 	content := `# Introduction
 
@@ -24,7 +24,7 @@ Some content in section 1.
 Some content in section 2.
 `
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 	require.NotEmpty(t, chunks)
 
 	// All chunks should have parent ID
@@ -37,7 +37,7 @@ Some content in section 2.
 }
 
 func TestChunker_Chunk_PreservesCodeBlocks(t *testing.T) {
-	c := MustNew(Config{
+	c := mustNewChunker(chunkerConfig{
 		TargetTokens: 50, // Small target to force splitting
 		MaxTokens:    100,
 		MinTokens:    10,
@@ -45,7 +45,7 @@ func TestChunker_Chunk_PreservesCodeBlocks(t *testing.T) {
 
 	content := "# Code Example\n\n" + "```go\nfunc main() {\n\t// This is a code block\n\t// It should not be split\n\tfmt.Println(\"Hello\")\n}\n```\n\nMore text after code."
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 
 	// Find the chunk containing the code block
 	var foundCodeBlock bool
@@ -62,7 +62,7 @@ func TestChunker_Chunk_PreservesCodeBlocks(t *testing.T) {
 }
 
 func TestChunker_Chunk_SectionNames(t *testing.T) {
-	c := NewDefault()
+	c := newDefaultChunker()
 
 	content := `# Main Title
 
@@ -77,7 +77,7 @@ Content of first section.
 Content of second section.
 `
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 	require.NotEmpty(t, chunks)
 
 	// First chunk should have the main title as section
@@ -85,7 +85,7 @@ Content of second section.
 }
 
 func TestChunker_Chunk_LargeSection(t *testing.T) {
-	c := MustNew(Config{
+	c := mustNewChunker(chunkerConfig{
 		TargetTokens: 100, // ~400 chars
 		MaxTokens:    200, // ~800 chars
 		MinTokens:    20,
@@ -95,7 +95,7 @@ func TestChunker_Chunk_LargeSection(t *testing.T) {
 	longParagraph := strings.Repeat("This is a test sentence. ", 100) // ~2500 chars
 	content := "# Large Section\n\n" + longParagraph
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 
 	// Should be split into multiple chunks
 	assert.Greater(t, len(chunks), 1, "long content should be split")
@@ -107,7 +107,7 @@ func TestChunker_Chunk_LargeSection(t *testing.T) {
 }
 
 func TestChunker_Chunk_MergesSmallChunks(t *testing.T) {
-	c := MustNew(Config{
+	c := mustNewChunker(chunkerConfig{
 		TargetTokens: 100,
 		MaxTokens:    200,
 		MinTokens:    50, // ~200 chars minimum
@@ -127,7 +127,7 @@ Tiny.
 Also small.
 `
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 
 	// Small chunks should be merged
 	// The exact number depends on merging behavior, but should be less than 3
@@ -135,21 +135,21 @@ Also small.
 }
 
 func TestChunker_Chunk_EmptyContent(t *testing.T) {
-	c := NewDefault()
+	c := newDefaultChunker()
 
-	chunks := c.Chunk("doc.test.123", "")
+	chunks := c.chunk("doc.test.123", "")
 	assert.Empty(t, chunks)
 }
 
 func TestChunker_Chunk_WhitespaceOnly(t *testing.T) {
-	c := NewDefault()
+	c := newDefaultChunker()
 
-	chunks := c.Chunk("doc.test.123", "   \n\n  \t  \n")
+	chunks := c.chunk("doc.test.123", "   \n\n  \t  \n")
 	assert.Empty(t, chunks)
 }
 
 func TestChunker_Chunk_NoHeadings(t *testing.T) {
-	c := NewDefault()
+	c := newDefaultChunker()
 
 	content := `This is a document without any headings.
 
@@ -158,7 +158,7 @@ It has multiple paragraphs though.
 And some more content here.
 `
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 	require.NotEmpty(t, chunks)
 
 	// Should still create chunks
@@ -167,7 +167,7 @@ And some more content here.
 }
 
 func TestChunker_estimateTokens(t *testing.T) {
-	c := NewDefault()
+	c := newDefaultChunker()
 
 	tests := []struct {
 		name    string
@@ -274,14 +274,14 @@ func TestSplitSentences(t *testing.T) {
 }
 
 func TestDefaultConfig(t *testing.T) {
-	cfg := DefaultConfig()
+	cfg := defaultChunkerConfig()
 	assert.Equal(t, 1000, cfg.TargetTokens)
 	assert.Equal(t, 1500, cfg.MaxTokens)
 	assert.Equal(t, 200, cfg.MinTokens)
 }
 
 func TestNew_DefaultsWhenZero(t *testing.T) {
-	c, err := New(Config{}) // Zero config gets defaults
+	c, err := newChunker(chunkerConfig{}) // Zero config gets defaults
 	require.NoError(t, err)
 	assert.Equal(t, 1000, c.config.TargetTokens)
 }
@@ -289,24 +289,24 @@ func TestNew_DefaultsWhenZero(t *testing.T) {
 func TestNew_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name    string
-		cfg     Config
+		cfg     chunkerConfig
 		wantErr string
 	}{
 		{
 			name:    "MinTokens >= TargetTokens",
-			cfg:     Config{TargetTokens: 100, MaxTokens: 200, MinTokens: 100},
+			cfg:     chunkerConfig{TargetTokens: 100, MaxTokens: 200, MinTokens: 100},
 			wantErr: "MinTokens (100) must be less than TargetTokens (100)",
 		},
 		{
 			name:    "TargetTokens > MaxTokens",
-			cfg:     Config{TargetTokens: 300, MaxTokens: 200, MinTokens: 50},
+			cfg:     chunkerConfig{TargetTokens: 300, MaxTokens: 200, MinTokens: 50},
 			wantErr: "TargetTokens (300) must not exceed MaxTokens (200)",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := New(tt.cfg)
+			_, err := newChunker(tt.cfg)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), tt.wantErr)
 		})
@@ -337,7 +337,7 @@ func TestIsCodeFence(t *testing.T) {
 }
 
 func TestChunker_HardSplit(t *testing.T) {
-	c := MustNew(Config{
+	c := mustNewChunker(chunkerConfig{
 		TargetTokens: 25, // ~100 chars
 		MaxTokens:    50, // ~200 chars
 		MinTokens:    10,
@@ -346,7 +346,7 @@ func TestChunker_HardSplit(t *testing.T) {
 	// Content with no sentence breaks that exceeds max
 	longContent := strings.Repeat("abcdefghij", 100) // 1000 chars, ~250 tokens
 
-	chunks := c.Chunk("doc.test.123", "# Test\n\n"+longContent)
+	chunks := c.chunk("doc.test.123", "# Test\n\n"+longContent)
 
 	// Should be split into multiple chunks
 	assert.Greater(t, len(chunks), 1, "long content without breaks should be hard split")
@@ -359,7 +359,7 @@ func TestChunker_HardSplit(t *testing.T) {
 }
 
 func TestChunker_Chunk_IndexesAreSequential(t *testing.T) {
-	c := MustNew(Config{
+	c := mustNewChunker(chunkerConfig{
 		TargetTokens: 50,
 		MaxTokens:    100,
 		MinTokens:    10,
@@ -367,7 +367,7 @@ func TestChunker_Chunk_IndexesAreSequential(t *testing.T) {
 
 	content := "# Section 1\n\nContent 1.\n\n# Section 2\n\nContent 2.\n\n# Section 3\n\nContent 3."
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 
 	// Verify indexes are sequential starting at 0
 	for i, chunk := range chunks {
@@ -376,7 +376,7 @@ func TestChunker_Chunk_IndexesAreSequential(t *testing.T) {
 }
 
 func TestChunker_Chunk_NestedCodeBlock(t *testing.T) {
-	c := MustNew(Config{
+	c := mustNewChunker(chunkerConfig{
 		TargetTokens: 50,
 		MaxTokens:    500,
 		MinTokens:    10,
@@ -385,7 +385,7 @@ func TestChunker_Chunk_NestedCodeBlock(t *testing.T) {
 	// Code block with # inside (should not be treated as heading)
 	content := "# Real Heading\n\n```python\n# This is a comment\ndef func():\n    pass\n```\n\n## Another Heading\n\nMore content."
 
-	chunks := c.Chunk("doc.test.123", content)
+	chunks := c.chunk("doc.test.123", content)
 
 	// The # in the code block should not create a new section
 	foundCodeChunk := false
