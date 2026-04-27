@@ -1,4 +1,4 @@
-package webingester
+package webingest
 
 import (
 	"encoding/json"
@@ -9,23 +9,14 @@ import (
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-func init() {
-	err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "web",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Web source entity payload for graph ingestion",
-		Factory:     func() any { return &WebEntityPayload{} },
-	})
-	if err != nil {
-		panic("failed to register WebEntityPayload: " + err.Error())
-	}
-}
-
-// WebEntityType is the message type for web entity payloads.
+// WebEntityType is the message type for web entity payloads published to
+// graph.ingest.entity. Re-homed from processor/web-ingester after that
+// component was removed in WS-25 (httptool now writes to the graph directly).
 var WebEntityType = message.Type{Domain: "web", Category: "entity", Version: "v1"}
 
-// WebEntityPayload implements message.Payload and graph.Graphable for web source entity ingestion.
+// WebEntityPayload implements message.Payload and graph.Graphable for web
+// source entity ingestion. Schema unchanged from the old web-ingester
+// package — graph-ingest still reads payloads of this domain/category/version.
 type WebEntityPayload struct {
 	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
@@ -59,4 +50,16 @@ func (p *WebEntityPayload) MarshalJSON() ([]byte, error) {
 func (p *WebEntityPayload) UnmarshalJSON(data []byte) error {
 	type Alias WebEntityPayload
 	return json.Unmarshal(data, (*Alias)(p))
+}
+
+func init() {
+	if err := payloadregistry.Register(&payloadregistry.Registration{
+		Domain:      "web",
+		Category:    "entity",
+		Version:     "v1",
+		Description: "Web source entity payload for graph ingestion",
+		Factory:     func() any { return &WebEntityPayload{} },
+	}); err != nil {
+		panic("failed to register WebEntityPayload: " + err.Error())
+	}
 }

@@ -4,9 +4,28 @@ package chunker
 import (
 	"fmt"
 	"strings"
-
-	"github.com/c360studio/semspec/source"
 )
+
+// Chunk represents a section of a document for context assembly. Re-homed
+// from the parent `source` package during WS-25 — the type only had readers
+// inside chunker and webingest, so colocating it here breaks the upward
+// import that previously forced source/* to be cycle-prone.
+type Chunk struct {
+	// ParentID is the ID of the parent document.
+	ParentID string `json:"parent_id"`
+
+	// Index is the chunk sequence number (0-indexed internally, 1-indexed for display).
+	Index int `json:"index"`
+
+	// Section is the heading or section name.
+	Section string `json:"section,omitempty"`
+
+	// Content is the chunk text.
+	Content string `json:"content"`
+
+	// TokenCount is the estimated token count.
+	TokenCount int `json:"token_count"`
+}
 
 // charsPerToken is the approximate average characters per token for GPT tokenizers.
 const charsPerToken = 4
@@ -86,13 +105,13 @@ func NewDefault() *Chunker {
 
 // Chunk splits a document body into chunks.
 // Returns a slice of Chunk structs with section names and content.
-func (c *Chunker) Chunk(parentID string, content string) []source.Chunk {
+func (c *Chunker) Chunk(parentID string, content string) []Chunk {
 	// Parse sections from markdown
 	sections := c.parseSections(content)
 
 	// Build chunks from sections
-	var chunks []source.Chunk
-	var currentChunk source.Chunk
+	var chunks []Chunk
+	var currentChunk Chunk
 	currentChunk.ParentID = parentID
 
 	for _, section := range sections {
@@ -103,7 +122,7 @@ func (c *Chunker) Chunk(parentID string, content string) []source.Chunk {
 			// Flush current chunk if non-empty
 			if c.estimateTokens(currentChunk.Content) >= c.config.MinTokens {
 				chunks = append(chunks, c.finalizeChunk(currentChunk, len(chunks)))
-				currentChunk = source.Chunk{ParentID: parentID}
+				currentChunk = Chunk{ParentID: parentID}
 			}
 
 			// Split large section into paragraphs
@@ -117,7 +136,7 @@ func (c *Chunker) Chunk(parentID string, content string) []source.Chunk {
 		// If adding this section would exceed target, finalize current chunk
 		if currentTokens > 0 && currentTokens+sectionTokens > c.config.TargetTokens {
 			chunks = append(chunks, c.finalizeChunk(currentChunk, len(chunks)))
-			currentChunk = source.Chunk{ParentID: parentID}
+			currentChunk = Chunk{ParentID: parentID}
 		}
 
 		// Add section to current chunk
@@ -193,11 +212,11 @@ func (c *Chunker) parseSections(content string) []section {
 }
 
 // splitLargeSection splits a section that exceeds max tokens.
-func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int) []source.Chunk {
-	var chunks []source.Chunk
+func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int) []Chunk {
+	var chunks []Chunk
 	paragraphs := c.splitIntoParagraphs(sec.Content)
 
-	var current source.Chunk
+	var current Chunk
 	current.ParentID = parentID
 	current.Section = sec.Heading
 
@@ -209,7 +228,7 @@ func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int
 			// Flush current
 			if c.estimateTokens(current.Content) >= c.config.MinTokens {
 				chunks = append(chunks, c.finalizeChunk(current, startIndex+len(chunks)))
-				current = source.Chunk{ParentID: parentID, Section: sec.Heading}
+				current = Chunk{ParentID: parentID, Section: sec.Heading}
 			}
 
 			// Split paragraph by sentences (or just take it as-is if still too big)
@@ -221,7 +240,7 @@ func (c *Chunker) splitLargeSection(parentID string, sec section, startIndex int
 		currentTokens := c.estimateTokens(current.Content)
 		if currentTokens > 0 && currentTokens+paraTokens > c.config.TargetTokens {
 			chunks = append(chunks, c.finalizeChunk(current, startIndex+len(chunks)))
-			current = source.Chunk{ParentID: parentID, Section: sec.Heading}
+			current = Chunk{ParentID: parentID, Section: sec.Heading}
 		}
 
 		if current.Content != "" {
@@ -277,10 +296,10 @@ func (c *Chunker) splitIntoParagraphs(content string) []string {
 }
 
 // splitBySentences splits a paragraph by sentences as a last resort.
-func (c *Chunker) splitBySentences(parentID, sectionName, content string, startIndex int) []source.Chunk {
+func (c *Chunker) splitBySentences(parentID, sectionName, content string, startIndex int) []Chunk {
 	// Simple sentence splitting - split on . ? ! followed by space or newline
-	var chunks []source.Chunk
-	var current source.Chunk
+	var chunks []Chunk
+	var current Chunk
 	current.ParentID = parentID
 	current.Section = sectionName
 
@@ -294,7 +313,7 @@ func (c *Chunker) splitBySentences(parentID, sectionName, content string, startI
 		current.Content = content
 		current.TokenCount = c.estimateTokens(content)
 		current.Index = startIndex
-		return []source.Chunk{current}
+		return []Chunk{current}
 	}
 
 	for _, sentence := range sentences {
@@ -303,7 +322,7 @@ func (c *Chunker) splitBySentences(parentID, sectionName, content string, startI
 
 		if currentTokens > 0 && currentTokens+sentenceTokens > c.config.TargetTokens {
 			chunks = append(chunks, c.finalizeChunk(current, startIndex+len(chunks)))
-			current = source.Chunk{ParentID: parentID, Section: sectionName}
+			current = Chunk{ParentID: parentID, Section: sectionName}
 		}
 
 		if current.Content != "" {
@@ -321,8 +340,8 @@ func (c *Chunker) splitBySentences(parentID, sectionName, content string, startI
 
 // hardSplit splits content at character boundaries when no natural breaks exist.
 // This is a last resort to ensure MaxTokens is never exceeded.
-func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex int) []source.Chunk {
-	var chunks []source.Chunk
+func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex int) []Chunk {
+	var chunks []Chunk
 	maxChars := c.config.MaxTokens * charsPerToken
 
 	runes := []rune(content)
@@ -333,7 +352,7 @@ func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex in
 		}
 
 		chunkContent := string(runes[i:end])
-		chunks = append(chunks, source.Chunk{
+		chunks = append(chunks, Chunk{
 			ParentID:   parentID,
 			Section:    sectionName,
 			Index:      startIndex + len(chunks),
@@ -346,12 +365,12 @@ func (c *Chunker) hardSplit(parentID, sectionName, content string, startIndex in
 }
 
 // mergeSmallChunks combines chunks that are below minimum size.
-func (c *Chunker) mergeSmallChunks(chunks []source.Chunk) []source.Chunk {
+func (c *Chunker) mergeSmallChunks(chunks []Chunk) []Chunk {
 	if len(chunks) <= 1 {
 		return chunks
 	}
 
-	var result []source.Chunk
+	var result []Chunk
 	for i := 0; i < len(chunks); i++ {
 		chunk := chunks[i]
 
@@ -363,7 +382,7 @@ func (c *Chunker) mergeSmallChunks(chunks []source.Chunk) []source.Chunk {
 
 			// Only merge if combined doesn't exceed max
 			if combinedTokens <= c.config.MaxTokens {
-				chunks[i+1] = source.Chunk{
+				chunks[i+1] = Chunk{
 					ParentID:   chunk.ParentID,
 					Section:    chunk.Section,
 					Content:    combined,
@@ -385,7 +404,7 @@ func (c *Chunker) mergeSmallChunks(chunks []source.Chunk) []source.Chunk {
 }
 
 // finalizeChunk sets the index and token count for a chunk.
-func (c *Chunker) finalizeChunk(chunk source.Chunk, index int) source.Chunk {
+func (c *Chunker) finalizeChunk(chunk Chunk, index int) Chunk {
 	chunk.Index = index
 	chunk.TokenCount = c.estimateTokens(chunk.Content)
 	return chunk

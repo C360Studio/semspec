@@ -1,9 +1,12 @@
+// Package httptool implements the http_request agent tool. It fetches URLs
+// (SSRF-checked, DNS-pinned), runs Readability on HTML responses, renders
+// the result via a caller-selected format (summary, markdown, links,
+// headings, raw), and publishes a chunked entity graph to
+// graph.ingest.entity for future graph_search lookups.
 package httptool
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,41 +18,39 @@ import (
 
 	"github.com/c360studio/semstreams/agentic"
 
-	"github.com/c360studio/semspec/source"
-	"github.com/c360studio/semspec/source/weburl"
+	"github.com/c360studio/semspec/source/chunker"
+	"github.com/c360studio/semspec/source/webingest"
 )
 
 const (
-	// maxResponseSize caps the raw HTTP response read to prevent runaway allocations.
-	maxResponseSize = 100 * 1024 // 100 KB
+	// maxResponseSize caps the raw HTTP response read to prevent runaway
+	// allocations.
+	maxResponseSize = 1 * 1024 * 1024 // 1 MB
 
-	// maxTextSize caps the HTML-to-text output presented to the agent.
-	maxTextSize = 20000 // chars
+	// defaultMaxChars caps the agent-facing output for any format that
+	// honours max_chars. Agents can override per call.
+	defaultMaxChars = 20000
 
-	// minPersistLength skips graph persistence for responses that are too short
-	// to be useful (error pages, redirects, etc.).
+	// minPersistLength skips graph persistence for responses that are too
+	// short to be useful (error pages, redirects, empty stubs).
 	minPersistLength = 500
 
 	// requestTimeout is the HTTP client deadline for each fetch.
 	requestTimeout = 30 * time.Second
-
-	// ingestPublishTimeout is the deadline for the async ingestion-request
-	// publish to web-ingester. Short by design — failure to enqueue should
-	// not delay the agent, and a dropped enqueue is recoverable on the
-	// next fetch of the same URL.
-	ingestPublishTimeout = 5 * time.Second
 )
 
-// NATSClient is the subset of natsclient.Client that Executor needs.
-// Depending on this interface keeps the executor testable without a live NATS
-// connection — the same pattern used by spawn.NATSClient.
+// NATSClient is the subset of natsclient.Client that Executor needs. The
+// interface keeps the executor testable without a live NATS connection.
+// Compatible with webingest.NATSClient (same single method).
 type NATSClient interface {
 	PublishToStream(ctx context.Context, subject string, data []byte) error
 }
 
 // Executor handles http_request tool calls.
 type Executor struct {
-	natsClient NATSClient // nil means graph persistence is disabled.
+	natsClient NATSClient // nil disables graph persistence; tool still fetches.
+	converter  *webingest.Converter
+	chunker    *chunker.Chunker
 	logger     *slog.Logger
 	timeout    time.Duration // 0 means use requestTimeout const
 }
@@ -64,11 +65,18 @@ func WithRequestTimeout(d time.Duration) Option {
 }
 
 // NewExecutor creates an HTTP request executor.
-// natsClient is optional — if nil, graph persistence is disabled and the tool
-// still fetches and converts HTML.
+// natsClient is optional — if nil, graph persistence is disabled and the
+// tool still fetches and converts HTML.
 func NewExecutor(nc NATSClient, opts ...Option) *Executor {
+	chk, err := chunker.New(chunker.DefaultConfig())
+	if err != nil {
+		// chunker.DefaultConfig() is always valid; the error is unreachable.
+		panic(fmt.Sprintf("httptool: default chunker config invalid: %v", err))
+	}
 	e := &Executor{
 		natsClient: nc,
+		converter:  webingest.NewConverter(),
+		chunker:    chk,
 		logger:     slog.Default().With("component", "http-request"),
 	}
 	for _, opt := range opts {
@@ -89,8 +97,18 @@ func (e *Executor) effectiveTimeout() time.Duration {
 func (e *Executor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
-			Name:        "http_request",
-			Description: "Fetch a URL. HTML is converted to clean readable text. Results are saved to the knowledge graph so future agents can find this content without re-fetching.",
+			Name: "http_request",
+			Description: "Fetch a URL and return a curated view of its content. " +
+				"HTML pages run through Readability so the response is the main " +
+				"article, not boilerplate. Every fetch is also chunked and stored " +
+				"in the knowledge graph for future agents to find via graph_search " +
+				"without re-fetching. " +
+				"Default format is `summary` — title, outline, top links, and a " +
+				"short content excerpt — designed to answer 'is this page worth " +
+				"reading more of?' in under 2K chars. " +
+				"Use format=markdown for the full cleaned article (capped at " +
+				"max_chars), format=links to get just the URLs, format=headings " +
+				"for an outline, or format=raw for the original body.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -101,6 +119,15 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 					"method": map[string]any{
 						"type":        "string",
 						"description": "HTTP method: GET or POST (default: GET)",
+					},
+					"format": map[string]any{
+						"type":        "string",
+						"description": "Response shape: summary (default), markdown, links, headings, or raw",
+						"enum":        []string{"summary", "markdown", "links", "headings", "raw"},
+					},
+					"max_chars": map[string]any{
+						"type":        "integer",
+						"description": "Override the per-format character cap (default 20000)",
 					},
 				},
 				"required": []string{"url"},
@@ -115,14 +142,12 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	if !ok || rawURL == "" {
 		return agentic.ToolResult{CallID: call.ID, Error: "url is required"}, nil
 	}
-
 	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
 		return agentic.ToolResult{
 			CallID: call.ID,
 			Error:  "url must start with http:// or https://",
 		}, nil
 	}
-
 	if err := checkSSRF(rawURL); err != nil {
 		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
 	}
@@ -136,6 +161,18 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 			CallID: call.ID,
 			Error:  "method must be GET or POST",
 		}, nil
+	}
+
+	format := FormatSummary
+	if rawFmt, ok := call.Arguments["format"].(string); ok {
+		format = parseFormat(rawFmt)
+	}
+
+	maxChars := 0
+	if v, ok := call.Arguments["max_chars"].(float64); ok && v > 0 {
+		maxChars = int(v)
+	} else if v, ok := call.Arguments["max_chars"].(int); ok && v > 0 {
+		maxChars = v
 	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, e.effectiveTimeout())
@@ -172,73 +209,90 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncate(string(body), 500)),
+			Error:  fmt.Sprintf("HTTP %d: %s", resp.StatusCode, truncateChars(string(body), 500)),
 		}, nil
 	}
 
 	contentType := resp.Header.Get("Content-Type")
-	isHTML := strings.Contains(contentType, "text/html")
+	isHTML := strings.Contains(contentType, "text/html") ||
+		strings.Contains(contentType, "application/xhtml")
 
-	var content, title string
-	if isHTML {
-		content, _ = htmlToText(bytes.NewReader(body), maxTextSize)
-		title = extractTitle(bytes.NewReader(body))
-	} else {
-		content = string(body)
-		if len(content) > maxTextSize {
-			content = content[:maxTextSize]
-		}
-	}
-
-	// Enqueue the URL for proper ingestion via web-ingester (SSRF-checked
-	// fetch, HTML→markdown conversion, chunking, optional classification).
-	// Fire-and-forget — the agent has already received its response. Web-
-	// ingester refetches; the small duplicate fetch cost is the price of
-	// keeping httptool's tool-call shape synchronous while still feeding the
-	// graph through one canonical pipeline.
-	if isHTML && len(content) >= minPersistLength && e.natsClient != nil {
-		go e.requestIngestion(rawURL)
-	}
-
-	if title != "" {
+	// Non-HTML responses bypass conversion: agents asking for json or text
+	// want the body verbatim. raw format also skips the converter.
+	if !isHTML || format == FormatRaw {
 		return agentic.ToolResult{
 			CallID:  call.ID,
-			Content: fmt.Sprintf("# %s\n\n%s", title, content),
+			Content: truncateChars(string(body), pickMaxChars(maxChars)),
 		}, nil
 	}
-	return agentic.ToolResult{CallID: call.ID, Content: content}, nil
-}
 
-// requestIngestion enqueues an AddWebSourceRequest on web-ingester's input
-// subject so the URL gets the full ingestion pipeline (SSRF check, ETag,
-// chunked HTML→markdown, optional classification). Mirrors the publish
-// shape used by source/http.go's POST /api/sources/web handler.
-//
-// Fire-and-forget: the agent already has its response. A failed enqueue
-// is logged but does not surface to the caller — the next fetch of the
-// same URL will re-enqueue.
-func (e *Executor) requestIngestion(rawURL string) {
-	req := source.AddWebSourceRequest{URL: rawURL}
-	data, err := json.Marshal(req)
+	convResult, err := e.converter.Convert(body, rawURL)
 	if err != nil {
-		e.logger.Debug("Failed to marshal web ingestion request", "url", rawURL, "error", err)
-		return
+		// Conversion failure shouldn't kill the call — return the raw body
+		// so the agent can salvage something.
+		e.logger.Debug("HTML conversion failed, falling back to raw", "url", rawURL, "error", err)
+		return agentic.ToolResult{
+			CallID:  call.ID,
+			Content: truncateChars(string(body), pickMaxChars(maxChars)),
+		}, nil
 	}
 
-	subject := fmt.Sprintf("source.web.ingest.%s", weburl.GenerateEntityID(rawURL))
+	rendered := formatResponse(format, convResult, body, rawURL, maxChars)
 
-	ctx, cancel := context.WithTimeout(context.Background(), ingestPublishTimeout)
+	// Persist to graph for any format that received curated content.
+	// links/headings views ran on the raw body too, but persisting them
+	// would write the same parent + chunks repeatedly with no new value.
+	// raw was already returned above. summary and markdown both share the
+	// converted markdown — same chunks, persist once.
+	if (format == FormatSummary || format == FormatMarkdown) &&
+		len(convResult.Markdown) >= minPersistLength &&
+		e.natsClient != nil {
+		go e.persistAsync(rawURL, contentType, resp.Header.Get("ETag"), body)
+	}
+
+	return agentic.ToolResult{CallID: call.ID, Content: rendered}, nil
+}
+
+// persistAsync ingests + publishes graph entities in the background so the
+// agent's response isn't blocked on chunk publish latency.
+//
+// Failures are logged at debug level — graph persistence is best-effort,
+// the agent already received its answer. context.Background is intentional:
+// the tool-call context is cancelled by the time we run.
+func (e *Executor) persistAsync(rawURL, contentType, etag string, body []byte) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := e.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		e.logger.Debug("Failed to enqueue web ingestion request", "url", rawURL, "subject", subject, "error", err)
+	result, err := webingest.Ingest(webingest.IngestRequest{
+		URL:         rawURL,
+		ContentType: contentType,
+		ETag:        etag,
+	}, body, e.converter, e.chunker, time.Now())
+	if err != nil {
+		e.logger.Debug("ingest failed", "url", rawURL, "error", err)
+		return
 	}
+	if err := webingest.PublishGraphEntities(ctx, e.natsClient, result); err != nil {
+		e.logger.Debug("publish graph entities failed",
+			"url", rawURL, "entity_id", result.EntityID, "chunks", result.ChunkCount, "error", err)
+		return
+	}
+	e.logger.Debug("ingested",
+		"url", rawURL, "entity_id", result.EntityID, "chunks", result.ChunkCount)
 }
 
-// buildPinnedClient constructs an HTTP client that pins the resolved IP address
-// for the given URL, preventing DNS rebinding attacks (TOCTOU between checkSSRF
-// and the actual dial). If IP resolution fails the standard client is returned —
-// checkSSRF has already validated the host at call time.
+// pickMaxChars resolves an explicit max_chars or returns the default.
+func pickMaxChars(explicit int) int {
+	if explicit > 0 {
+		return explicit
+	}
+	return defaultMaxChars
+}
+
+// buildPinnedClient constructs an HTTP client that pins the resolved IP
+// address for the given URL, preventing DNS rebinding attacks (TOCTOU
+// between checkSSRF and the actual dial). If IP resolution fails the
+// standard client is returned — checkSSRF has already validated the host.
 func (e *Executor) buildPinnedClient(rawURL string) *xhttp.Client {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
@@ -253,7 +307,6 @@ func (e *Executor) buildPinnedClient(rawURL string) *xhttp.Client {
 	}
 
 	pinnedIP := ips[0]
-	// Normalize to IPv4 if possible so port joining works correctly.
 	if v4 := pinnedIP.To4(); v4 != nil {
 		pinnedIP = v4
 	}
@@ -304,8 +357,6 @@ func checkSSRF(rawURL string) error {
 	}
 
 	for _, ip := range ips {
-		// Normalize IPv6-mapped IPv4 addresses (e.g. ::ffff:192.168.1.1) so
-		// that the private/loopback checks apply correctly.
 		if v4 := ip.To4(); v4 != nil {
 			ip = v4
 		}
@@ -315,12 +366,4 @@ func checkSSRF(rawURL string) error {
 		}
 	}
 	return nil
-}
-
-// truncate returns at most maxLen bytes of s, appending "..." if trimmed.
-func truncate(s string, maxLen int) string {
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen] + "..."
 }

@@ -142,24 +142,6 @@ type WebSource struct {
 	ChunkCount int `json:"chunk_count,omitempty"`
 }
 
-// Chunk represents a section of a document for context assembly.
-type Chunk struct {
-	// ParentID is the ID of the parent document.
-	ParentID string `json:"parent_id"`
-
-	// Index is the chunk sequence number (0-indexed internally, 1-indexed for display).
-	Index int `json:"index"`
-
-	// Section is the heading or section name.
-	Section string `json:"section,omitempty"`
-
-	// Content is the chunk text.
-	Content string `json:"content"`
-
-	// TokenCount is the estimated token count.
-	TokenCount int `json:"token_count"`
-}
-
 // Document represents a parsed document with its content and metadata.
 type Document struct {
 	// ID is the document identifier (typically derived from file path).

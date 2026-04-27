@@ -1,7 +1,9 @@
 package source
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/source/webingest"
 	"github.com/c360studio/semspec/source/weburl"
 	"github.com/c360studio/semstreams/natsclient"
 )
@@ -798,33 +801,94 @@ func (h *HTTPHandler) handleAddWebSource(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
-	// Generate entity ID from URL
-	entityID := weburl.GenerateEntityID(req.URL)
+	// Synchronous ingestion (WS-25): fetch the URL, run Readability,
+	// chunk, and publish entities to graph.ingest.entity directly. The
+	// previous publish-to-source.web.ingest.* path required the deleted
+	// web-ingester component to refetch + chunk asynchronously.
+	if h.natsClient == nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "graph_unavailable",
+			"Graph publish is disabled (no NATS client configured)")
+		return
+	}
 
-	// Publish ingestion request to NATS
-	if h.natsClient != nil {
-		data, err := json.Marshal(req)
-		if err != nil {
-			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
-			return
-		}
+	body, fetchedContentType, etag, err := fetchWebSourceBody(r.Context(), req.URL)
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, "fetch_failed",
+			fmt.Sprintf("Failed to fetch URL: %v", err))
+		return
+	}
 
-		subject := fmt.Sprintf("source.web.ingest.%s", entityID)
-		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
-			writeJSON(w, http.StatusAccepted, WebSourceResponse{
-				ID:      entityID,
-				Status:  "pending",
-				Message: "Request accepted but ingestion queue failed",
-			})
-			return
-		}
+	result, err := webingest.Ingest(webingest.IngestRequest{
+		URL:             req.URL,
+		ContentType:     fetchedContentType,
+		ETag:            etag,
+		AutoRefresh:     req.AutoRefresh,
+		RefreshInterval: req.RefreshInterval,
+		ProjectID:       req.ProjectID,
+	}, body, nil, nil, time.Now())
+	if err != nil {
+		writeJSONError(w, http.StatusUnprocessableEntity, "convert_failed",
+			fmt.Sprintf("Failed to convert page: %v", err))
+		return
+	}
+
+	if err := webingest.PublishGraphEntities(r.Context(), h.natsClient, result); err != nil {
+		writeJSONError(w, http.StatusBadGateway, "publish_failed",
+			fmt.Sprintf("Failed to publish entities: %v", err))
+		return
 	}
 
 	writeJSON(w, http.StatusCreated, WebSourceResponse{
-		ID:      entityID,
-		Status:  "pending",
-		Message: "Web source queued for fetching and indexing",
+		ID:      result.EntityID,
+		Title:   result.Title,
+		Status:  "ready",
+		Message: fmt.Sprintf("Ingested with %d chunk(s)", result.ChunkCount),
 	})
+}
+
+// webSourceFetchTimeout caps the synchronous fetch from /api/sources/web.
+// Long enough for slow docs sites, short enough that a stuck origin doesn't
+// hold the request handler open. Match httptool's tool-call default.
+const webSourceFetchTimeout = 30 * time.Second
+
+// webSourceMaxBytes caps the response body read from POST /api/sources/web.
+// Pages larger than this are pre-Readability/pre-chunker truncated; that's
+// fine — agents reading docs rarely need >1MB and the cap prevents the API
+// becoming a memory-amplification surface.
+const webSourceMaxBytes = 1 * 1024 * 1024
+
+// fetchWebSourceBody fetches a URL with timeout + max-size guard and
+// returns the body, content-type header, and ETag header. SSRF was already
+// validated by weburl.ValidateURL on the request path; we don't repeat it.
+func fetchWebSourceBody(ctx context.Context, rawURL string) ([]byte, string, string, error) {
+	fetchCtx, cancel := context.WithTimeout(ctx, webSourceFetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(fetchCtx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		return nil, "", "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("User-Agent", "semspec-source-ingest/1.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 400 {
+		return nil, "", "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, webSourceMaxBytes+1))
+	if err != nil {
+		return nil, "", "", fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(body)) > webSourceMaxBytes {
+		return nil, "", "", errors.New("response body exceeds 1MB limit")
+	}
+	return body, resp.Header.Get("Content-Type"), resp.Header.Get("ETag"), nil
 }
 
 // handleWebWithID handles requests to /api/sources/web/{id}* endpoints.
