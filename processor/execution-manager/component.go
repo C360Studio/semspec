@@ -1671,11 +1671,33 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 		return fmt.Errorf("merge worktree after retries: %w", err)
 	}
 
+	// Claim/observation cross-check: the developer reported FilesModified
+	// but the sandbox observed no commit. This is the silent-work-drop
+	// pattern from the 2026-04-27 Gemini @t2 run (bug #9). Two failure
+	// modes:
+	//   - Sandbox set NothingToCommit=true (true no-op), but the developer
+	//     claimed work — meaning the tools agent reported files it didn't
+	//     actually write to the worktree. Phantom completion territory.
+	//   - Sandbox returned an empty Commit without NothingToCommit (a
+	//     malformed response that pre-FIX-A could happen on certain retry
+	//     paths). Defensive — fail rather than trust a malformed response.
+	if len(exec.FilesModified) > 0 && (result.NothingToCommit || result.Commit == "") {
+		c.logger.Error("Merge claim/observation mismatch — developer reported files_modified but sandbox observed no commit",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"claimed_files", exec.FilesModified,
+			"nothing_to_commit", result.NothingToCommit,
+			"commit", result.Commit,
+		)
+		return fmt.Errorf("merge claim/observation mismatch: developer reported %d files but sandbox produced no commit (nothing_to_commit=%v)", len(exec.FilesModified), result.NothingToCommit)
+	}
+
 	c.logger.Info("Worktree merged successfully",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
 		"commit", result.Commit,
 		"files_changed", len(result.FilesChanged),
+		"nothing_to_commit", result.NothingToCommit,
 	)
 	// Update FilesModified with definitive file list from merge.
 	if len(result.FilesChanged) > 0 {
