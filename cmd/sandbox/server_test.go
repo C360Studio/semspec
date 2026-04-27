@@ -2443,21 +2443,19 @@ func TestEnsureHEAD_EmptyRepoNoFiles(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 // TestMergeWorktree_NothingToCommit_ReturnsTypedSignal — when the worktree
-// has no staged changes, the merge response must give callers a programmatic
-// signal (typed Status value or boolean field), not just a free-form Note
-// string. Today the response is Status="merged" Commit="" Note="nothing_to_commit"
-// — callers have to string-match Note, which is fragile and is what allowed
-// bug #9 (10/17 silent no-op merges in Gemini @t2 run) to escape detection.
-//
-// Contract: Status MUST distinguish a true merge from a no-op. Either
-// Status != "merged" when nothing was committed, OR a typed boolean field
-// like NothingToCommit on the response.
+// has no staged changes AND its HEAD is already reachable from the merge
+// target, the response must include the NothingToCommit boolean so callers
+// can detect the no-op case without string-matching the Note field. The
+// legacy Note string remains for backward-compat but must not be the only
+// signal — string-matching is what allowed bug #9 (10/17 silent no-op
+// merges in 2026-04-27 Gemini @t2 run) to escape detection.
 func TestMergeWorktree_NothingToCommit_ReturnsTypedSignal(t *testing.T) {
 	_, ts := newTestServer(t)
 
 	createWorktree(t, ts, "test-empty-merge")
 
-	// No file writes — worktree has no staged changes.
+	// No file writes — worktree has no staged changes AND its HEAD is the
+	// initial commit (already on main).
 	resp := doRequest(t, ts, http.MethodPost, "/worktree/test-empty-merge/merge", nil)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -2467,12 +2465,15 @@ func TestMergeWorktree_NothingToCommit_ReturnsTypedSignal(t *testing.T) {
 	var result mergeResponse
 	decodeJSON(t, resp, &result)
 
-	// Today: Status="merged" — indistinguishable from a real merge.
-	// Contract: callers must be able to detect "nothing committed" without
-	// inspecting the Note string. EXPECTED RED.
-	if result.Status == "merged" && result.Commit == "" {
-		t.Errorf("nothing-to-commit returned Status=%q Commit=%q — callers cannot distinguish from a real merge without string-matching Note=%q. Contract violation: response needs a typed signal (distinct Status value or boolean field).",
+	// Contract: response must carry the typed NothingToCommit flag so
+	// callers can branch programmatically without parsing Note.
+	if !result.NothingToCommit {
+		t.Errorf("nothing-to-commit case returned response without NothingToCommit=true (Status=%q Commit=%q Note=%q). Callers cannot distinguish from a real merge without string-matching — contract violation.",
 			result.Status, result.Commit, result.Note)
+	}
+	// Sanity: the legacy Note remains for backward-compat readers.
+	if result.Note != "nothing_to_commit" {
+		t.Errorf("Note = %q, want %q (legacy backward-compat field still expected)", result.Note, "nothing_to_commit")
 	}
 }
 

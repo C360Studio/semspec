@@ -441,11 +441,17 @@ type mergeRequest struct {
 }
 
 // mergeResponse is the JSON response from POST /worktree/{taskID}/merge.
+//
+// NothingToCommit is the typed signal callers must check to detect the
+// no-op case — Status="merged" Commit="" without this flag is a bug
+// (silent work-drop). String-matching the Note field is the legacy path
+// and must not be relied on.
 type mergeResponse struct {
-	Status       string           `json:"status"`
-	Commit       string           `json:"commit,omitempty"`
-	Note         string           `json:"note,omitempty"`
-	FilesChanged []fileChangeInfo `json:"files_changed,omitempty"`
+	Status          string           `json:"status"`
+	Commit          string           `json:"commit,omitempty"`
+	Note            string           `json:"note,omitempty"`
+	NothingToCommit bool             `json:"nothing_to_commit,omitempty"`
+	FilesChanged    []fileChangeInfo `json:"files_changed,omitempty"`
 }
 
 // handleMergeWorktree commits any pending changes in the worktree and merges
@@ -484,24 +490,59 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if nothingToCommit {
-		// Nothing to merge — clean up and return success.
-		if err := s.removeWorktree(ctx, worktreePath); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to remove worktree: "+err.Error())
-			return
-		}
-		_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
-		writeJSON(w, http.StatusOK, mergeResponse{Status: "merged", Note: "nothing_to_commit"})
-		return
-	}
-
-	// Get the commit hash from the worktree.
+	// Get the commit hash from the worktree. We need this regardless of
+	// whether stage+commit produced new work — the worktree may have
+	// commits from a previous (failed mid-flight) merge attempt that need
+	// to be propagated to main on this retry.
 	hash, err := gitOutput(ctx, worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get commit hash: "+err.Error())
 		return
 	}
 	hash = strings.TrimSpace(hash)
+
+	if nothingToCommit {
+		// Stage produced nothing new. Two distinct sub-cases:
+		//   (a) Worktree HEAD is already reachable from the merge target
+		//       (true no-op — first merge had no work or work landed on
+		//       a previous successful call).
+		//   (b) Worktree HEAD is NOT reachable from the merge target —
+		//       a previous merge attempt failed mid-flight after the
+		//       stage+commit on the worktree branch. The work was never
+		//       propagated to main. Falling through to mergeIntoMainRepo
+		//       fixes the silent-work-drop bug (#9 from 2026-04-27 Gemini
+		//       @t2 run, 10/17 silent no-op merges).
+		mergeTarget := req.TargetBranch
+		if mergeTarget == "" {
+			cur, curErr := gitOutput(ctx, s.repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+			if curErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to determine merge target: "+curErr.Error())
+				return
+			}
+			mergeTarget = strings.TrimSpace(cur)
+		}
+		// `git merge-base --is-ancestor <hash> <target>` returns exit code 0
+		// when hash is an ancestor of (or equal to) target — i.e. fully merged.
+		ancestorErr := runGit(ctx, s.repoPath, "merge-base", "--is-ancestor", hash, mergeTarget)
+		if ancestorErr == nil {
+			// Sub-case (a): true no-op. Clean up and return the typed signal.
+			if err := s.removeWorktree(ctx, worktreePath); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to remove worktree: "+err.Error())
+				return
+			}
+			_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
+			writeJSON(w, http.StatusOK, mergeResponse{
+				Status:          "merged",
+				Note:            "nothing_to_commit",
+				NothingToCommit: true,
+			})
+			return
+		}
+		// Sub-case (b): worktree HEAD has unmerged commits. Fall through to
+		// mergeIntoMainRepo using the existing hash so the work actually lands.
+		s.logger.Info("Worktree had no new changes but HEAD is unmerged — proceeding with merge",
+			"task_id", taskID, "worktree_hash", hash, "target", mergeTarget)
+	}
 
 	// Serialize main-repo mutations (checkout + merge) to prevent concurrent
 	// merges from racing on the working directory.

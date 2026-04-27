@@ -177,11 +177,18 @@ func (c *Client) DeleteWorktree(ctx context.Context, taskID string) error {
 }
 
 // MergeResult holds the outcome of a worktree merge.
+//
+// NothingToCommit is the typed signal that the worktree was empty AND its
+// HEAD was already reachable from the merge target — i.e. there was nothing
+// to do. Callers MUST check this flag rather than inferring no-op from
+// `Commit == ""`. An empty Commit without NothingToCommit==true means the
+// sandbox response was malformed or the contract was violated.
 type MergeResult struct {
-	Status       string           `json:"status"`
-	Commit       string           `json:"commit,omitempty"`
-	Note         string           `json:"note,omitempty"`
-	FilesChanged []FileChangeInfo `json:"files_changed,omitempty"`
+	Status          string           `json:"status"`
+	Commit          string           `json:"commit,omitempty"`
+	Note            string           `json:"note,omitempty"`
+	NothingToCommit bool             `json:"nothing_to_commit,omitempty"`
+	FilesChanged    []FileChangeInfo `json:"files_changed,omitempty"`
 }
 
 // MergeOption configures optional parameters for MergeWorktree.
