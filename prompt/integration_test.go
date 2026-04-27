@@ -11,7 +11,8 @@ import (
 //
 // Run only integration tests: go test ./prompt/ -run TestIntegration
 
-// allSemspecTools simulates the full tool list from agentictools.ListRegisteredTools().
+// allSemspecTools simulates the full tool list from the shared
+// agentic-tools registry (deps.ToolRegistry.ListTools()).
 var allSemspecTools = []string{
 	"bash", "submit_work", "ask_question",
 	"graph_search", "graph_query", "graph_summary",

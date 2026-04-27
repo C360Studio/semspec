@@ -1,16 +1,22 @@
 package terminal
 
 import (
-	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
-
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/component"
 )
 
-// ToolsForDeliverable returns registered tools filtered to the allowed set,
-// with submit_work's schema replaced by a role-specific version.
+// ToolsForDeliverable returns the supplied registry's tools filtered to the
+// allowed set, with submit_work's schema replaced by a role-specific version.
 // If allowedNames is empty, all registered tools are included (backward compat).
-func ToolsForDeliverable(deliverableType string, allowedNames ...string) []agentic.ToolDefinition {
-	allTools := agentictools.ListRegisteredTools()
+//
+// Pass deps.ToolRegistry from the calling component. A nil registry is treated
+// as "no tools registered" — the function returns an empty slice rather than
+// panicking, matching the behaviour of an unpopulated registry.
+func ToolsForDeliverable(reg component.ToolRegistryReader, deliverableType string, allowedNames ...string) []agentic.ToolDefinition {
+	var allTools []agentic.ToolDefinition
+	if reg != nil {
+		allTools = reg.ListTools()
+	}
 	schema := schemaForDeliverable(deliverableType)
 
 	var allowed map[string]bool

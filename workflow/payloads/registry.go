@@ -2,8 +2,8 @@ package payloads
 
 import (
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 // RegisterPayloads registers all payload types from this package with the
@@ -22,7 +22,7 @@ func registerTriggerPayload() {
 	// The reactive engine receives triggers on workflow.trigger.* subjects.
 	// These messages use workflow.trigger.v1 type and need to be registered
 	// for BaseMessage.UnmarshalJSON to deserialize them correctly.
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      workflow.WorkflowTriggerType.Domain,
 		Category:    workflow.WorkflowTriggerType.Category,
 		Version:     workflow.WorkflowTriggerType.Version,
@@ -75,7 +75,7 @@ func registerRequestPayloads() {
 	}
 
 	for _, p := range payloads {
-		if err := component.RegisterPayload(&component.PayloadRegistration{
+		if err := payloadregistry.Register(&payloadregistry.Registration{
 			Domain:      p.msgType.Domain,
 			Category:    p.msgType.Category,
 			Version:     p.msgType.Version,

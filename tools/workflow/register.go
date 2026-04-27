@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 
 	"github.com/c360studio/semstreams/agentic"
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
@@ -9,15 +10,17 @@ import (
 
 // Register registers graph tools (graph_summary, graph_search, graph_query)
 // as separate executors to avoid duplicate tool definitions with Gemini.
-func Register() {
+func Register(reg *agentictools.ExecutorRegistry) error {
 	graphExec := NewGraphExecutor()
 
 	// Register each tool individually. The shared GraphExecutor handles all
-	// three, but RegisterTool calls ListTools() which returns all definitions.
-	// Wrapping each registration ensures only one definition per name.
-	_ = agentictools.RegisterTool("graph_summary", singleGraphTool(graphExec, "graph_summary"))
-	_ = agentictools.RegisterTool("graph_search", singleGraphTool(graphExec, "graph_search"))
-	_ = agentictools.RegisterTool("graph_query", singleGraphTool(graphExec, "graph_query"))
+	// three, but ListTools() returns all definitions. Wrapping each
+	// registration ensures only one definition per name.
+	return errors.Join(
+		reg.RegisterTool("graph_summary", singleGraphTool(graphExec, "graph_summary")),
+		reg.RegisterTool("graph_search", singleGraphTool(graphExec, "graph_search")),
+		reg.RegisterTool("graph_query", singleGraphTool(graphExec, "graph_query")),
+	)
 }
 
 // singleGraphTool wraps a GraphExecutor so ListTools() returns only the

@@ -7,16 +7,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semstreams/payloadregistry"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 func init() {
 	// Register AnswerPayload type for message deserialization
-	_ = component.RegisterPayload(&component.PayloadRegistration{
+	_ = payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "question",
 		Category:    "answer",
 		Version:     "v1",

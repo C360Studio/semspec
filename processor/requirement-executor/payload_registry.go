@@ -6,12 +6,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 func init() {
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "requirement-execution",
 		Version:     "v1",

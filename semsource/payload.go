@@ -13,9 +13,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 // Compile-time interface compliance checks.
@@ -25,7 +25,7 @@ var (
 )
 
 func init() {
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "semsource",
 		Category:    "entity",
 		Version:     "v1",
@@ -43,7 +43,7 @@ func init() {
 	}
 
 	// Register semsource status heartbeat so message-logger can parse it.
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "semsource",
 		Category:    "status",
 		Version:     "v1",
@@ -56,7 +56,7 @@ func init() {
 	}
 
 	// Register semsource manifest — published at startup listing configured sources.
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "semsource",
 		Category:    "manifest",
 		Version:     "v1",
@@ -67,7 +67,7 @@ func init() {
 	}
 
 	// Register semsource predicates — predicate schema per source type.
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "semsource",
 		Category:    "predicates",
 		Version:     "v1",

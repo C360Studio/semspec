@@ -3,8 +3,8 @@ package payloads
 import (
 	"encoding/json"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 // Result types for reactive workflow callback deserialization.
@@ -214,7 +214,7 @@ func (r *ValidationResult) UnmarshalJSON(data []byte) error {
 }
 
 func init() {
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "structural-validation-result",
 		Version:     "v1",

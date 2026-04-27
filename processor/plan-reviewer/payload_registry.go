@@ -1,10 +1,10 @@
 package planreviewer
 
-import "github.com/c360studio/semstreams/component"
+import "github.com/c360studio/semstreams/payloadregistry"
 
 func init() {
 	// Register PlanReviewResult type for message deserialization
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "review-result",
 		Version:     "v1",

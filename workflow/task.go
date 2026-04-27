@@ -3,8 +3,8 @@ package workflow
 import (
 	"encoding/json"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 // TaskPayload represents a task request for the agentic-loop workflow.
@@ -126,7 +126,7 @@ func (e *ValidationError) Error() string {
 
 func init() {
 	// Register the workflow task payload type
-	_ = component.RegisterPayload(&component.PayloadRegistration{
+	_ = payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "task",
 		Version:     "v1",

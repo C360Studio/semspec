@@ -9,14 +9,14 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 func init() {
 	// Register Notification type for message deserialization
-	_ = component.RegisterPayload(&component.PayloadRegistration{
+	_ = payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "notification",
 		Category:    "question",
 		Version:     "v1",

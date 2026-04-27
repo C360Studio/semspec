@@ -64,6 +64,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	modelRegistry ssmodel.RegistryReader
+	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
 
@@ -131,6 +132,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: deps.ModelRegistry,
+		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
 		retry: dispatchretry.New(dispatchretry.Config{
@@ -535,7 +537,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
-		Tools:        terminal.ToolsForDeliverable("plan", c.availableToolNames()...),
+		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "plan", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepDrafting,

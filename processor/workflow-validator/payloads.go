@@ -6,8 +6,8 @@ import (
 	"log"
 
 	"github.com/c360studio/semspec/workflow/validation"
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 // ValidateRequest is the request payload for document validation.
@@ -129,7 +129,7 @@ var ValidateResponseType = message.Type{
 
 func init() {
 	// Register the validation request payload type
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "validate.request",
 		Version:     "v1",
@@ -140,7 +140,7 @@ func init() {
 	}
 
 	// Register the validation response payload type
-	if err := component.RegisterPayload(&component.PayloadRegistration{
+	if err := payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "validate.response",
 		Version:     "v1",

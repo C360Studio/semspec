@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/payloadregistry"
 )
 
 // ProjectEntityID returns the entity ID for a project.
@@ -235,7 +235,7 @@ var workflowEntityTypes = []struct {
 func init() {
 	for _, et := range workflowEntityTypes {
 		msgType := et.msgType
-		_ = component.RegisterPayload(&component.PayloadRegistration{
+		_ = payloadregistry.Register(&payloadregistry.Registration{
 			Domain:      et.domain,
 			Category:    "entity",
 			Version:     "v1",

@@ -11,7 +11,8 @@ import (
 // These catch regressions in actual fragment content, conditions, and role gating that the
 // test-double-based integration tests in prompt/integration_test.go cannot.
 
-// allTools simulates the full tool list from agentictools.ListRegisteredTools().
+// allTools simulates the full tool list from the shared agentic-tools
+// registry (deps.ToolRegistry.ListTools()).
 var allTools = []string{
 	"bash", "submit_work", "ask_question",
 	"graph_search", "graph_query", "graph_summary",

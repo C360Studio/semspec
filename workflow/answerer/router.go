@@ -8,15 +8,15 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semstreams/payloadregistry"
 	"github.com/google/uuid"
 )
 
 func init() {
 	// Register QuestionAnswerTask for BaseMessage deserialization.
-	_ = component.RegisterPayload(&component.PayloadRegistration{
+	_ = payloadregistry.Register(&payloadregistry.Registration{
 		Domain:      "question",
 		Category:    "answer-task",
 		Version:     "v1",

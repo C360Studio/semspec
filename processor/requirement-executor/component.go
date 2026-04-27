@@ -99,6 +99,7 @@ type Component struct {
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
 	platform     component.PlatformMeta
+	toolRegistry component.ToolRegistryReader
 	tripleWriter *graphutil.TripleWriter
 	sandbox      sandboxClient     // nil when sandbox is disabled
 	assembler    *prompt.Assembler // composes system prompts for requirement-level review
@@ -158,12 +159,13 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry.Register(prompt.GraphManifestFragment(workflowtools.RegistrySummaryFetchFn()))
 
 	c := &Component{
-		config:     cfg,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		platform:   deps.Platform,
-		sandbox:    newSandboxClient(cfg.SandboxURL),
-		assembler:  prompt.NewAssembler(registry),
+		config:       cfg,
+		natsClient:   deps.NATSClient,
+		logger:       logger,
+		platform:     deps.Platform,
+		toolRegistry: deps.ToolRegistry,
+		sandbox:      newSandboxClient(cfg.SandboxURL),
+		assembler:    prompt.NewAssembler(registry),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -1097,7 +1099,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        exec.Model,
-		Tools:        terminal.ToolsForDeliverable("review", availableToolNames()...),
+		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "review", availableToolNames()...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
 		Prompt:       c.buildReviewPrompt(exec),

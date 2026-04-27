@@ -107,6 +107,7 @@ type Component struct {
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
 	platform     component.PlatformMeta
+	toolRegistry component.ToolRegistryReader
 	tripleWriter *graphutil.TripleWriter
 	sandbox      worktreeManager        // required — Start() fails if not configured
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
@@ -195,6 +196,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		platform:      deps.Platform,
+		toolRegistry:  deps.ToolRegistry,
 		modelRegistry: deps.ModelRegistry,
 		sandbox:       newWorktreeManager(cfg.SandboxURL),
 		indexingGate:  workflow.NewIndexingGate(cfg.GraphGatewayURL, logger),
@@ -1235,7 +1237,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        exec.Model,
-		Tools:        terminal.ToolsForDeliverable("developer", c.availableToolNames()...),
+		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "developer", c.availableToolNames()...),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 		Prompt:       userPrompt,
@@ -1486,7 +1488,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        exec.Model,
-		Tools:        terminal.ToolsForDeliverable("review", c.availableToolNames()...),
+		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "review", c.availableToolNames()...),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
 		Prompt:       reviewSubject.String(),

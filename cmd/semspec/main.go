@@ -57,6 +57,7 @@ import (
 	"github.com/c360studio/semstreams/config"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/c360studio/semstreams/natsclient"
+	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
 	"github.com/spf13/cobra"
@@ -293,6 +294,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 func setupServiceManager(
 	cfg *config.Config,
 	natsClient *natsclient.Client,
+	toolRegistry *agentictools.ExecutorRegistry,
 	metricsRegistry *metric.MetricsRegistry,
 	logger *slog.Logger,
 	platform types.PlatformMeta,
@@ -313,6 +315,7 @@ func setupServiceManager(
 		Platform:          platform,
 		Manager:           configManager,
 		ComponentRegistry: componentRegistry,
+		ToolRegistry:      toolRegistry,
 	}
 	if err := configureAndCreateServices(cfg, manager, svcDeps); err != nil {
 		return nil, err
@@ -338,8 +341,14 @@ func setupInfrastructure(
 		return nil, nil, nil, err
 	}
 
-	// Register agentic tools with NATS-backed infrastructure.
-	registerAgenticTools(ctx, natsClient)
+	// Build the shared agentic-tools registry up front so it can be plumbed
+	// through service.Dependencies.ToolRegistry into every component. beta.16
+	// removed the package-level singleton (ADR-029 Pattern A).
+	toolRegistry := agentictools.NewExecutorRegistry()
+	if err := registerAgenticTools(ctx, toolRegistry, natsClient); err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("register agentic tools: %w", err)
+	}
 
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
@@ -372,7 +381,7 @@ func setupInfrastructure(
 	factories := componentRegistry.ListFactories()
 	slog.Info("Component factories registered", "count", len(factories))
 
-	manager, err := setupServiceManager(cfg, natsClient, metricsRegistry, logger, platform, configManager, componentRegistry)
+	manager, err := setupServiceManager(cfg, natsClient, toolRegistry, metricsRegistry, logger, platform, configManager, componentRegistry)
 	if err != nil {
 		configManager.Stop(5 * time.Second)
 		natsClient.Close(ctx)
@@ -816,9 +825,11 @@ func createServiceIfEnabled(
 	return nil
 }
 
-// registerAgenticTools registers all agentic tools.
-func registerAgenticTools(ctx context.Context, natsClient *natsclient.Client) {
-	tools.RegisterAgenticToolsWithContext(ctx, tools.AgenticToolDeps{
+// registerAgenticTools registers all agentic tools onto the shared executor
+// registry. The registry is owned by main and plumbed through
+// service.Dependencies.ToolRegistry to every component.
+func registerAgenticTools(ctx context.Context, reg *agentictools.ExecutorRegistry, natsClient *natsclient.Client) error {
+	return tools.RegisterAgenticToolsWithContext(ctx, reg, tools.AgenticToolDeps{
 		NATSClient: natsClient,
 		Timeouts:   parseToolTimeouts(),
 	})

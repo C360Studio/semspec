@@ -6,13 +6,15 @@ import (
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 )
 
-// Register registers the web_search tool if BRAVE_SEARCH_API_KEY is set.
-func Register() {
+// Register registers the web_search tool on the supplied registry if
+// BRAVE_SEARCH_API_KEY is set. Returns nil when the env var is missing
+// (the tool is intentionally disabled, not an error).
+func Register(reg *agentictools.ExecutorRegistry) error {
 	apiKey := os.Getenv("BRAVE_SEARCH_API_KEY")
 	if apiKey == "" {
-		return
+		return nil
 	}
 	provider := NewBraveProvider(apiKey)
 	exec := NewExecutor(provider)
-	_ = agentictools.RegisterTool("web_search", exec)
+	return reg.RegisterTool("web_search", exec)
 }

@@ -68,6 +68,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	modelRegistry ssmodel.RegistryReader
+	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
 
@@ -141,6 +142,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: deps.ModelRegistry,
+		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
 		retry: dispatchretry.New(dispatchretry.Config{
@@ -508,7 +510,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
 		Role:         agentic.RoleReviewer,
 		Model:        modelName,
 		Prompt:       userPrompt,
-		Tools:        terminal.ToolsForDeliverable("qa-review", c.availableToolNames()...),
+		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "qa-review", c.availableToolNames()...),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepQAReviewing,
 		Context: &agentic.ConstructedContext{

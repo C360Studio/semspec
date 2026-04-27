@@ -8,6 +8,8 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -45,16 +47,27 @@ type AgenticToolDeps struct {
 	Timeouts ToolTimeouts
 }
 
-// RegisterAgenticTools registers all agent tools. Call once during component startup.
-// Uses context.Background — prefer RegisterAgenticToolsWithContext for lifecycle-aware callers.
-func RegisterAgenticTools(deps AgenticToolDeps) {
-	RegisterAgenticToolsWithContext(context.Background(), deps)
+// RegisterAgenticTools registers all agent tools onto the supplied registry.
+// Call once during component startup. Uses context.Background — prefer
+// RegisterAgenticToolsWithContext for lifecycle-aware callers.
+func RegisterAgenticTools(reg *agentictools.ExecutorRegistry, deps AgenticToolDeps) error {
+	return RegisterAgenticToolsWithContext(context.Background(), reg, deps)
 }
 
-// registerAgenticToolsImpl is the real implementation. Accepts a context so
-// future tools that need lifecycle-aware KV bucket discovery (or similar)
-// can use it without a signature churn — currently unused post-spawn removal.
-func registerAgenticToolsImpl(_ context.Context, deps AgenticToolDeps) {
+// RegisterAgenticToolsWithContext registers all agent tools onto the supplied
+// registry. The context is reserved for lifecycle-aware operations like KV
+// bucket discovery; currently unused.
+//
+// Returns an aggregated error covering every per-tool registration failure
+// (joined via errors.Join). Duplicate registration is a hard error in beta.16,
+// so this surfaces misconfiguration loudly instead of swallowing it.
+func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.ExecutorRegistry, deps AgenticToolDeps) error {
+	if reg == nil {
+		return fmt.Errorf("RegisterAgenticToolsWithContext: registry is nil")
+	}
+
+	var errs []error
+
 	// --- Stateless tools ---
 
 	// bash — universal shell access (sandbox or local).
@@ -64,31 +77,28 @@ func registerAgenticToolsImpl(_ context.Context, deps AgenticToolDeps) {
 		bashOpts = append(bashOpts, bash.WithDefaultTimeout(deps.Timeouts.Bash))
 	}
 	bashExec := bash.NewExecutor(repoRoot, os.Getenv("SANDBOX_URL"), bashOpts...)
-	_ = agentictools.RegisterTool("bash", bashExec)
+	errs = append(errs, reg.RegisterTool("bash", bashExec))
 
-	// Terminal tools (StopLoop=true).
-	// Each registration wraps the shared executor with singleToolAdapter so
-	// ListTools() returns only the registered tool — prevents Gemini's
-	// "Duplicate function declaration" error.
+	// submit_work — terminal tool (StopLoop=true) shared across deliverable types.
 	termExec := terminal.NewExecutor()
-	_ = agentictools.RegisterTool("submit_work", termExec)
+	errs = append(errs, reg.RegisterTool("submit_work", termExec))
 
 	// decompose_task — validates LLM-provided TaskDAG.
 	decomposeExec := decompose.NewExecutor()
-	_ = agentictools.RegisterTool("decompose_task", decomposeExec)
+	errs = append(errs, reg.RegisterTool("decompose_task", decomposeExec))
 
 	// http_request — with NATS for graph persistence when available.
 	var httpOpts []httptool.Option
 	if deps.Timeouts.HTTP > 0 {
 		httpOpts = append(httpOpts, httptool.WithRequestTimeout(deps.Timeouts.HTTP))
 	}
-	httptool.Register(deps.NATSClient, httpOpts...)
+	errs = append(errs, httptool.Register(reg, deps.NATSClient, httpOpts...))
 
 	// graph tools (graph_search, graph_query, graph_summary).
-	workflow.Register()
+	errs = append(errs, workflow.Register(reg))
 
 	// web_search — only active when BRAVE_SEARCH_API_KEY is set.
-	websearch.Register()
+	errs = append(errs, websearch.Register(reg))
 
 	// --- Infrastructure-dependent tools ---
 
@@ -108,17 +118,16 @@ func registerAgenticToolsImpl(_ context.Context, deps AgenticToolDeps) {
 		if deps.DefaultModel != "" {
 			questionExec = questionExec.WithDefaultModel(deps.DefaultModel)
 		}
-		_ = agentictools.RegisterTool("ask_question", questionExec)
+		errs = append(errs, reg.RegisterTool("ask_question", questionExec))
 
 		answerExec := question.NewAnswerExecutor(questionStore, nil)
-		_ = agentictools.RegisterTool("answer_question", answerExec)
+		errs = append(errs, reg.RegisterTool("answer_question", answerExec))
 	}
-}
 
-// RegisterAgenticToolsWithContext registers all agent tools with a parent context
-// for lifecycle-aware operations like KV bucket discovery.
-func RegisterAgenticToolsWithContext(ctx context.Context, deps AgenticToolDeps) {
-	registerAgenticToolsImpl(ctx, deps)
+	if joined := errors.Join(errs...); joined != nil {
+		return fmt.Errorf("register agentic tools: %w", joined)
+	}
+	return nil
 }
 
 // resolveRepoRoot determines the workspace root from env or cwd.
