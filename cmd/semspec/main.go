@@ -415,9 +415,13 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 
 	expanded := config.ExpandEnvWithDefaults(string(data))
 
-	// Initialize model registry from config if present
-	// This must happen before component initialization since components use model.Global()
-	if err := initModelRegistryFromConfig([]byte(expanded)); err != nil {
+	// Validate model_registry from config if present.
+	// semspec/model.Validate enforces local invariants (e.g., dots in
+	// endpoint names → entity-ID separator collisions) that semstreams'
+	// config.Manager doesn't replicate. The parsed registry is discarded
+	// after validation — runtime components consume the semstreams
+	// model.RegistryReader via deps.ModelRegistry instead.
+	if err := validateModelRegistryFromConfig([]byte(expanded)); err != nil {
 		return nil, fmt.Errorf("load model_registry from %s: %w", configPath, err)
 	}
 
@@ -547,14 +551,18 @@ func parseGraphSourcesFromEnv() []graph.Source {
 	return sources
 }
 
-// initModelRegistryFromConfig loads model_registry section from config JSON and
-// initializes the global model registry. If no model_registry is present, no action is taken.
-// Validation errors (e.g. endpoint names containing dots) are returned so startup fails
-// loudly rather than panicking later inside agentic-loop's graph writer.
-func initModelRegistryFromConfig(data []byte) error {
+// validateModelRegistryFromConfig parses the model_registry section from
+// config JSON purely to enforce semspec's local invariants (e.g. endpoint
+// names without dots, since dots are entity-ID separators inside agentic-
+// loop's graph writer). The parsed registry is discarded after validation;
+// runtime components read the live registry via deps.ModelRegistry, which
+// the semstreams config.Manager keeps in sync from the same KV key.
+//
+// If no model_registry section is present, validation is a no-op.
+func validateModelRegistryFromConfig(data []byte) error {
 	registry, err := model.LoadFromJSON(data)
 	if err != nil {
-		// No model_registry in config - this is fine, use defaults
+		// No model_registry in config — fine, use semstreams defaults.
 		return nil
 	}
 
@@ -562,9 +570,7 @@ func initModelRegistryFromConfig(data []byte) error {
 		return fmt.Errorf("model_registry validation failed: %w", err)
 	}
 
-	// Initialize global registry with loaded config
-	model.InitGlobal(registry)
-	slog.Info("Model registry initialized from config",
+	slog.Info("Model registry validated from config",
 		"endpoints", len(registry.ListEndpoints()))
 	return nil
 }

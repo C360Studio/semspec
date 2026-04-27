@@ -421,7 +421,12 @@ func (c *Component) DataFlow() component.FlowMetrics {
 }
 
 // createModelRegistry creates a model registry for LLM analysis.
-// Uses the global registry which respects LLM_API_URL environment variable.
+// Returns a default registry that respects the LLM_API_URL env var.
+//
+// Web-ingester is not currently wired into the semspec component registry —
+// the AnalysisEnabled path remains as a hook for future opt-in use. When
+// the component is registered, plumb a *model.Registry through the factory
+// instead of constructing a default here.
 func (c *Component) createModelRegistry() *model.Registry {
-	return model.Global()
+	return model.NewDefaultRegistry()
 }
