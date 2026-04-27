@@ -17,7 +17,6 @@ type Registry struct {
 	capabilities map[Capability]*CapabilityConfig
 	endpoints    map[string]*EndpointConfig
 	defaults     *DefaultsConfig
-	health       *healthState
 }
 
 // CapabilityConfig defines model preferences for a capability.

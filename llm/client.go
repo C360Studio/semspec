@@ -1,5 +1,6 @@
 // Package llm provides a provider-agnostic LLM client with retry and fallback support.
-// It integrates with the model.Registry for capability-based model selection.
+// It integrates with model.Registry for capability-based model selection and a
+// pluggable model.HealthPolicy (default RollingWindowBreaker) for circuit breaking.
 package llm
 
 import (
@@ -13,20 +14,31 @@ import (
 	"os"
 	"time"
 
-	"github.com/c360studio/semspec/model"
 	"github.com/google/uuid"
+
+	"github.com/c360studio/semspec/model"
+	ssmodel "github.com/c360studio/semstreams/model"
 )
 
 // maxResponseSize limits the LLM response body to prevent memory exhaustion.
 const maxResponseSize = 10 * 1024 * 1024 // 10MB
 
 // Client is a provider-agnostic LLM client with retry and fallback support.
+//
+// The healthPolicy field tracks per-endpoint circuit-breaker state. The
+// default (RollingWindowBreaker) gives strict-superset behaviour relative
+// to the prior consecutive-failure tracking that lived on
+// semspec/model.Registry — sliding window over recent observations, lazy
+// Open→HalfOpen→Closed transitions, half-open thundering-herd protection.
+// Callers can swap in their own via WithHealthPolicy (e.g. shared-state
+// across processes, or NewAlwaysHealthyPolicy() to disable in tests).
 type Client struct {
-	registry    *model.Registry
-	httpClient  *http.Client
-	retryConfig RetryConfig
-	logger      *slog.Logger
-	governor    *ConcurrencyGovernor
+	registry     *model.Registry
+	httpClient   *http.Client
+	retryConfig  RetryConfig
+	logger       *slog.Logger
+	governor     *ConcurrencyGovernor
+	healthPolicy ssmodel.HealthPolicy
 }
 
 // Message represents a chat message.
@@ -150,16 +162,29 @@ func WithTimeout(d time.Duration) ClientOption {
 	}
 }
 
+// WithHealthPolicy replaces the default in-process RollingWindowBreaker
+// with a caller-provided HealthPolicy. Use ssmodel.NewAlwaysHealthyPolicy()
+// to disable circuit breaking in tests, or wire a custom policy (e.g. one
+// backed by NATS KV for cross-process shared state).
+func WithHealthPolicy(p ssmodel.HealthPolicy) ClientOption {
+	return func(c *Client) {
+		if p != nil {
+			c.healthPolicy = p
+		}
+	}
+}
+
 // NewClient creates a new LLM client with the given model registry.
 // The HTTP client has no default timeout — callers (e.g., agentic-model)
 // control duration via context deadlines. Per-endpoint RequestTimeout
 // provides an optional safety cap for cloud endpoints.
 func NewClient(registry *model.Registry, opts ...ClientOption) *Client {
 	c := &Client{
-		registry:    registry,
-		retryConfig: DefaultRetryConfig(),
-		httpClient:  &http.Client{},
-		logger:      slog.Default(),
+		registry:     registry,
+		retryConfig:  DefaultRetryConfig(),
+		httpClient:   &http.Client{},
+		logger:       slog.Default(),
+		healthPolicy: ssmodel.NewRollingWindowBreaker(ssmodel.BreakerConfig{}),
 	}
 
 	for _, opt := range opts {
@@ -181,12 +206,14 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 	// Generate request ID for caller correlation
 	requestID := uuid.New().String()
 
-	// Parse capability and get fallback chain filtered by health
+	// Parse capability and get the raw fallback chain. The per-endpoint
+	// IsHealthy filter is applied below in the iteration so a stale chain
+	// snapshot can't leak Open endpoints between Resolve and dispatch.
 	capVal := model.ParseCapability(req.Capability)
 	if capVal == "" {
 		capVal = model.CapabilityFast // Default to fast for unknown capabilities
 	}
-	chain := c.registry.GetAvailableFallbackChain(capVal)
+	chain := c.registry.GetFallbackChain(capVal)
 
 	if len(chain) == 0 {
 		return nil, fmt.Errorf("no models configured for capability %s", req.Capability)
@@ -201,8 +228,10 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 			continue
 		}
 
-		// Check circuit breaker status
-		if !c.registry.IsEndpointAvailable(modelName) {
+		// Check circuit breaker status. RollingWindowBreaker treats endpoints
+		// with no recorded observations as Closed, so the first dispatch to
+		// a fresh endpoint always proceeds.
+		if !c.healthPolicy.IsHealthy(modelName) {
 			c.logger.Debug("Endpoint circuit open, skipping", "model", modelName)
 			continue
 		}
@@ -249,8 +278,10 @@ func (c *Client) tryEndpointWithRetryTracked(ctx context.Context, ep *model.Endp
 	for attempt := 1; attempt <= c.retryConfig.MaxAttempts; attempt++ {
 		resp, err := c.doRequest(ctx, ep, req)
 		if err == nil {
-			// Mark endpoint as healthy on success
-			c.registry.MarkEndpointSuccess(modelName)
+			// Record the success against the breaker. Successful results
+			// (including those that needed transient retries above) keep
+			// the endpoint Closed.
+			c.healthPolicy.RecordResult(modelName, ssmodel.Result{Success: true})
 			return resp, attempt, nil
 		}
 
@@ -281,8 +312,15 @@ func (c *Client) tryEndpointWithRetryTracked(ctx context.Context, ep *model.Endp
 		}
 	}
 
-	// All retries exhausted - mark endpoint as unhealthy
-	c.registry.MarkEndpointFailure(modelName)
+	// All retries exhausted — record the failure against the breaker.
+	// Kind classification stays coarse (Unknown) for now; a future pass
+	// could parse lastErr into Timeout/RateLimit/ServerError/Network so
+	// EndpointStats's per-kind counters surface useful detail. Doesn't
+	// affect breaker math today (Unknown is treated like ServerError).
+	c.healthPolicy.RecordResult(modelName, ssmodel.Result{
+		Success: false,
+		Kind:    ssmodel.ErrorKindUnknown,
+	})
 
 	return nil, c.retryConfig.MaxAttempts, lastErr
 }
