@@ -2434,3 +2434,188 @@ func TestEnsureHEAD_EmptyRepoNoFiles(t *testing.T) {
 		t.Fatal("HEAD still invalid after ensureHEAD with empty dir")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Sandbox truth invariants (added 2026-04-27 after Gemini @t2 run surfaced
+// silent merge no-ops). These tests pin the contracts the sandbox needs to
+// uphold so callers can detect work loss without string-matching `Note`.
+// All four are EXPECTED RED until production fixes land.
+// ---------------------------------------------------------------------------
+
+// TestMergeWorktree_NothingToCommit_ReturnsTypedSignal — when the worktree
+// has no staged changes, the merge response must give callers a programmatic
+// signal (typed Status value or boolean field), not just a free-form Note
+// string. Today the response is Status="merged" Commit="" Note="nothing_to_commit"
+// — callers have to string-match Note, which is fragile and is what allowed
+// bug #9 (10/17 silent no-op merges in Gemini @t2 run) to escape detection.
+//
+// Contract: Status MUST distinguish a true merge from a no-op. Either
+// Status != "merged" when nothing was committed, OR a typed boolean field
+// like NothingToCommit on the response.
+func TestMergeWorktree_NothingToCommit_ReturnsTypedSignal(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	createWorktree(t, ts, "test-empty-merge")
+
+	// No file writes — worktree has no staged changes.
+	resp := doRequest(t, ts, http.MethodPost, "/worktree/test-empty-merge/merge", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("merge empty worktree: expected 200, got %d", resp.StatusCode)
+	}
+
+	var result mergeResponse
+	decodeJSON(t, resp, &result)
+
+	// Today: Status="merged" — indistinguishable from a real merge.
+	// Contract: callers must be able to detect "nothing committed" without
+	// inspecting the Note string. EXPECTED RED.
+	if result.Status == "merged" && result.Commit == "" {
+		t.Errorf("nothing-to-commit returned Status=%q Commit=%q — callers cannot distinguish from a real merge without string-matching Note=%q. Contract violation: response needs a typed signal (distinct Status value or boolean field).",
+			result.Status, result.Commit, result.Note)
+	}
+}
+
+// TestMergeWorktree_RetryAfterUnmergedCommits_DoesNotSilentlyNoOp — when the
+// worktree has commits that haven't been merged to main (e.g. a previous merge
+// attempt failed mid-flight), calling merge again must NOT return a silent
+// `Status:"merged" Commit:"" Note:"nothing_to_commit"` success — that's how
+// bug #9's 10 no-op merges happened in the Gemini run.
+//
+// Reproduction: stage+commit-on-worktree succeeds (creates a commit on
+// agent/<taskID>), but the merge-into-main step fails. Retry sees no NEW
+// staged changes (`git commit` says "nothing to commit") and returns the
+// no-op signal — but the worktree branch HAS unmerged commits.
+//
+// Contract: when the worktree branch is ahead of main with unmerged commits,
+// the merge endpoint must either complete the merge or return an explicit
+// error — never `Status:"merged" Commit:""`.
+func TestMergeWorktree_RetryAfterUnmergedCommits_DoesNotSilentlyNoOp(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	createWorktree(t, ts, "test-unmerged-retry")
+
+	// Write a file to the worktree.
+	writeResp := doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-unmerged-retry",
+		Path:    "first.txt",
+		Content: "first attempt\n",
+	})
+	writeResp.Body.Close()
+
+	// Manually commit the worktree's changes so we have a commit on
+	// agent/test-unmerged-retry that isn't in main yet — simulating the
+	// state after a stage+commit succeeded but the main-repo merge failed
+	// halfway through (the failure mode that produced bug #9).
+	worktreePath := filepath.Join(srv.worktreeRoot, "test-unmerged-retry")
+	run(t, worktreePath, "git", "add", "-A")
+	run(t, worktreePath, "git", "commit", "-m", "first attempt")
+
+	// At this point: worktree branch has 1 commit ahead of main, and main
+	// has nothing new from this task. Now call merge — this is what
+	// execution-manager's retry would do.
+	mergeResp := doRequest(t, ts, http.MethodPost, "/worktree/test-unmerged-retry/merge", nil)
+	if mergeResp.StatusCode != http.StatusOK {
+		t.Fatalf("merge retry: expected 200, got %d", mergeResp.StatusCode)
+	}
+
+	var result mergeResponse
+	decodeJSON(t, mergeResp, &result)
+
+	// Today: result is Status:"merged" Commit:"" Note:"nothing_to_commit"
+	// because stageAndCommitWorktree returns nothingToCommit=true (nothing
+	// new staged) — but the worktree commit was never propagated to main.
+	// EXPECTED RED.
+	if result.Status == "merged" && result.Commit == "" {
+		// Verify the bug: main repo has zero commits from this task.
+		mainLog := runOutput(t, srv.repoPath, "git", "log", "--oneline", "--all")
+		if !strings.Contains(mainLog, "first attempt") {
+			t.Errorf("merge returned Status=%q Commit=%q (silent no-op), but the worktree commit 'first attempt' is NOT in main. Work was silently dropped. Main log:\n%s",
+				result.Status, result.Commit, mainLog)
+		}
+	}
+}
+
+// TestMergeWorktree_DuplicateTaskID_RejectedOrIdempotent — calling merge
+// twice for the same task_id (after a successful first merge) must NOT
+// produce a duplicate commit on main. Today we observed pairs of identical
+// task_id commits in workspace fixtures (c19bcef/af6617f, 4d7baa0/4e8b060)
+// suggesting either the worktree wasn't cleaned up or the merge endpoint
+// allows re-entry without idempotency checks.
+//
+// Contract: second merge call for the same task_id returns a non-200
+// status (e.g. 404 worktree-not-found, 409 already-merged) OR returns 200
+// with a typed signal that no new commit was created. Never a duplicate.
+func TestMergeWorktree_DuplicateTaskID_RejectedOrIdempotent(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	createWorktree(t, ts, "test-dup-task")
+
+	writeResp := doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-dup-task",
+		Path:    "dup.txt",
+		Content: "first merge\n",
+	})
+	writeResp.Body.Close()
+
+	// First merge — should succeed.
+	resp1 := doRequest(t, ts, http.MethodPost, "/worktree/test-dup-task/merge", nil)
+	if resp1.StatusCode != http.StatusOK {
+		t.Fatalf("first merge: expected 200, got %d", resp1.StatusCode)
+	}
+	var result1 mergeResponse
+	decodeJSON(t, resp1, &result1)
+	if result1.Commit == "" {
+		t.Fatalf("first merge: expected non-empty commit, got %+v", result1)
+	}
+
+	// Count commits on main BEFORE the duplicate call.
+	logBefore := runOutput(t, srv.repoPath, "git", "log", "--oneline")
+	commitsBefore := strings.Count(logBefore, "\n")
+
+	// Second merge — same task_id. Today behavior is undefined / depends on
+	// whether worktree was cleaned up. Contract: must NOT add a duplicate
+	// commit to main.
+	resp2 := doRequest(t, ts, http.MethodPost, "/worktree/test-dup-task/merge", nil)
+	resp2.Body.Close()
+
+	logAfter := runOutput(t, srv.repoPath, "git", "log", "--oneline")
+	commitsAfter := strings.Count(logAfter, "\n")
+
+	if commitsAfter > commitsBefore {
+		t.Errorf("second merge for the same task_id added %d new commit(s) to main — duplicate commit bug. Before:\n%s\nAfter:\n%s",
+			commitsAfter-commitsBefore, logBefore, logAfter)
+	}
+}
+
+// TestMergeWorktree_BranchCleanedUpAfterMerge — successful merge with the
+// default keep_worktree=false must delete the agent/<task_id> branch in
+// the main repo. Branch leaks compound under stress — every parallel-run
+// task can leave a stale branch that conflicts with future runs.
+//
+// Contract: after a successful merge, `git branch --list agent/<task_id>`
+// in the main repo returns no matches.
+func TestMergeWorktree_BranchCleanedUpAfterMerge(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	createWorktree(t, ts, "test-branch-cleanup")
+
+	writeResp := doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-branch-cleanup",
+		Path:    "cleanup.txt",
+		Content: "branch should be deleted after merge\n",
+	})
+	writeResp.Body.Close()
+
+	mergeResp := doRequest(t, ts, http.MethodPost, "/worktree/test-branch-cleanup/merge", nil)
+	if mergeResp.StatusCode != http.StatusOK {
+		t.Fatalf("merge: expected 200, got %d", mergeResp.StatusCode)
+	}
+	mergeResp.Body.Close()
+
+	// Verify the agent/<task_id> branch is gone from the main repo.
+	branches := runOutput(t, srv.repoPath, "git", "branch", "--list", "agent/test-branch-cleanup")
+	if strings.TrimSpace(branches) != "" {
+		t.Errorf("agent/test-branch-cleanup branch still exists after successful merge:\n%s", branches)
+	}
+}
