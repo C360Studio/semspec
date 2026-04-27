@@ -1,0 +1,14 @@
+{
+  "content": "QA review complete. Verdict: approved.",
+  "tool_calls": [
+    {
+      "id": "call_qa_review",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"approved\", \"summary\": \"All requirements are implemented and the plan goal is satisfied. Implementation quality is adequate for the qa.level.\", \"dimensions\": {\"requirement_fulfillment\": \"All declared requirements have corresponding implementation. No gaps detected.\"}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

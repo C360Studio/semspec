@@ -1,0 +1,14 @@
+{
+  "content": "I'll implement the /goodbye endpoint with tests.",
+  "tool_calls": [
+    {
+      "id": "call_phantom_submit",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests\", \"files_modified\": [\"app.py\", \"tests/test_goodbye.py\"]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
