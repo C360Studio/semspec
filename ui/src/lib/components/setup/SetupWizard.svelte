@@ -1,11 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { setupStore } from '$lib/stores/setup.svelte';
-	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import type { Check, Standard } from '$lib/api/project';
-	import type { DocCategory } from '$lib/types/source';
 	import { tick } from 'svelte';
 
 	// Step labels and indices for progress indicator - dynamic based on greenfield
@@ -173,90 +170,6 @@
 		newStandardCategory = '';
 		newStandardOrigin = 'user';
 		showAddStandard = false;
-	}
-
-	// ─── Completion step state ────────────────────────────────────────────────
-
-	let showUploadModal = $state(false);
-	let uploadCategory = $state<DocCategory>('reference');
-	let uploadPromptLabel = $state('');
-	let uploadedSuggestions = $state<Set<string>>(new Set());
-
-	// Map languages/frameworks to suggested source types
-	const SOURCE_SUGGESTIONS: Record<
-		string,
-		{ label: string; category: DocCategory; hint: string }[]
-	> = {
-		Python: [
-			{ label: 'Python style guide', category: 'sop', hint: 'PEP8 customizations, naming conventions' },
-			{ label: 'API documentation', category: 'api', hint: 'OpenAPI specs, endpoint docs' }
-		],
-		Flask: [{ label: 'Flask conventions', category: 'sop', hint: 'Route patterns, error handling' }],
-		Go: [
-			{ label: 'Go standards', category: 'sop', hint: 'Error handling, context patterns' },
-			{ label: 'API specs', category: 'api', hint: 'OpenAPI, protobuf definitions' }
-		],
-		TypeScript: [
-			{ label: 'TypeScript config', category: 'spec', hint: 'TSConfig standards, type patterns' }
-		],
-		Svelte: [
-			{ label: 'Component conventions', category: 'sop', hint: 'Runes patterns, state management' }
-		],
-		SvelteKit: [
-			{ label: 'SvelteKit patterns', category: 'sop', hint: 'Load functions, routing conventions' }
-		],
-		_default: [
-			{ label: 'Project SOP', category: 'sop', hint: 'Development workflows, review process' },
-			{ label: 'Architecture docs', category: 'reference', hint: 'System design, decision records' }
-		]
-	};
-
-	// Get relevant suggestions based on detected/scaffolded stack
-	const sourceSuggestions = $derived(() => {
-		const detected = setupStore.detection;
-		const suggestions = new Map<string, { label: string; category: DocCategory; hint: string }>();
-
-		// Add suggestions for detected languages
-		for (const lang of detected?.languages ?? []) {
-			for (const sug of SOURCE_SUGGESTIONS[lang.name] ?? []) {
-				suggestions.set(sug.label, sug);
-			}
-		}
-
-		// Add suggestions for detected frameworks
-		for (const fw of detected?.frameworks ?? []) {
-			for (const sug of SOURCE_SUGGESTIONS[fw.name] ?? []) {
-				suggestions.set(sug.label, sug);
-			}
-		}
-
-		// Always include defaults
-		for (const sug of SOURCE_SUGGESTIONS['_default']) {
-			if (!suggestions.has(sug.label)) {
-				suggestions.set(sug.label, sug);
-			}
-		}
-
-		return Array.from(suggestions.values());
-	});
-
-	function openUploadFor(suggestion: { label: string; category: DocCategory }) {
-		uploadCategory = suggestion.category;
-		uploadPromptLabel = suggestion.label;
-		showUploadModal = true;
-	}
-
-	async function handleSourceUpload(
-		file: File,
-		options: { category: DocCategory; project?: string }
-	) {
-		await sourcesStore.upload(file, {
-			category: uploadCategory,
-			projectId: options.project ?? ''
-		});
-		uploadedSuggestions = new Set([...uploadedSuggestions, uploadPromptLabel]);
-		showUploadModal = false;
-		await setupStore.refreshStatus();
 	}
 
 	function goToCreatePlan() {
@@ -686,11 +599,9 @@
 							<div class="generate-message" role="status">
 								<Icon name="info" size={14} />
 								<span>
-									No documentation found. You can
-									<button class="link-btn" onclick={() => { uploadCategory = 'sop'; uploadPromptLabel = 'Standards document'; showUploadModal = true; }}>
-										upload docs
-									</button>
-									to generate standards, or load defaults for your detected languages.
+									No documentation found. Drop docs into the workspace and
+									semsource will index them automatically, or load defaults
+									for your detected languages.
 								</span>
 							</div>
 						{:else if generateMessage}
@@ -823,45 +734,6 @@
 						</ul>
 					</section>
 
-					<!-- Context-Aware Source Suggestions -->
-					<section class="sources-section">
-						<h3>Add Project Knowledge</h3>
-						<p class="section-hint">
-							Add documentation to help the agent understand your project better.
-							These will be indexed into the knowledge graph.
-						</p>
-
-						<div class="source-suggestions">
-							{#each sourceSuggestions() as suggestion}
-								<button
-									class="suggestion-card"
-									class:uploaded={uploadedSuggestions.has(suggestion.label)}
-									onclick={() => openUploadFor(suggestion)}
-									disabled={uploadedSuggestions.has(suggestion.label)}
-								>
-									<div class="suggestion-content">
-										<span class="suggestion-label">
-											{#if uploadedSuggestions.has(suggestion.label)}
-												<Icon name="check" size={14} />
-											{:else}
-												<Icon name="file-plus" size={14} />
-											{/if}
-											{suggestion.label}
-										</span>
-										<span class="suggestion-hint">{suggestion.hint}</span>
-									</div>
-									<span class="category-badge category-{suggestion.category}">
-										{suggestion.category}
-									</span>
-								</button>
-							{/each}
-						</div>
-
-						<button class="btn btn-ghost btn-sm skip-btn" onclick={goToCreatePlan}>
-							Skip for now
-						</button>
-					</section>
-
 					<!-- Primary CTA -->
 					<div class="cta-section">
 						<button class="btn btn-primary btn-lg" onclick={goToCreatePlan}>
@@ -873,13 +745,6 @@
 				</div>
 			{/if}
 
-		<UploadModal
-			open={showUploadModal}
-			uploading={sourcesStore.uploading}
-			progress={sourcesStore.uploadProgress}
-			onclose={() => (showUploadModal = false)}
-			onupload={handleSourceUpload}
-		/>
 		</div>
 
 		<!-- ── Footer / Navigation ────────────────────────────────────────────── -->
@@ -1605,8 +1470,7 @@
 		width: 100%;
 	}
 
-	.readiness-section h3,
-	.sources-section h3 {
+	.readiness-section h3 {
 		margin: 0 0 var(--space-3) 0;
 		font-size: var(--font-size-sm);
 		font-weight: var(--font-weight-semibold);
@@ -1642,79 +1506,6 @@
 		border-radius: var(--radius-full);
 		margin-left: auto;
 	}
-
-	/* Sources section */
-	.sources-section {
-		width: 100%;
-		text-align: left;
-	}
-
-	.source-suggestions {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
-		margin-top: var(--space-3);
-	}
-
-	.suggestion-card {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-3);
-		background: var(--color-bg-tertiary);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-md);
-		cursor: pointer;
-		transition: all var(--transition-fast);
-		text-align: left;
-	}
-
-	.suggestion-card:hover:not(:disabled) {
-		border-color: var(--color-accent);
-		background: var(--color-bg-elevated);
-	}
-
-	.suggestion-card.uploaded {
-		border-color: var(--color-success);
-		background: var(--color-success-muted);
-		cursor: default;
-	}
-
-	.suggestion-card:disabled {
-		opacity: 0.7;
-	}
-
-	.suggestion-content {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.suggestion-label {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		color: var(--color-text-primary);
-	}
-
-	.suggestion-hint {
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		padding-left: calc(14px + var(--space-2));
-	}
-
-	.skip-btn {
-		margin-top: var(--space-3);
-	}
-
-	/* Category badges for sources */
-	.category-sop { background: var(--color-warning-muted); color: var(--color-warning); }
-	.category-spec { background: var(--color-success-muted); color: var(--color-success); }
-	.category-api { background: var(--color-accent-muted); color: var(--color-accent); }
-	.category-reference { background: var(--color-info-muted); color: var(--color-info); }
-	.category-datasheet { background: var(--color-bg-elevated); color: var(--color-text-secondary); }
 
 	/* CTA section */
 	.cta-section {

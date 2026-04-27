@@ -1,20 +1,21 @@
 <script lang="ts">
 	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
-	import ChatDropZone from '$lib/components/chat/ChatDropZone.svelte';
 
 	interface Props {
 		planSlug: string;
 		projectId?: string;
 	}
 
-	let { planSlug, projectId = 'default' }: Props = $props();
+	// projectId remains in the prop set for parent compatibility but is no longer
+	// consumed here — the file-drop affordance went away when /api/sources was
+	// deleted (WS-26). semsource auto-indexes the workspace, so doc ingest no
+	// longer needs a UI route.
+	let { planSlug }: Props = $props();
 </script>
 
 <div class="plan-chat">
 	<div class="chat-section">
-		<ChatDropZone {projectId}>
-			<ChatPanel title="Plan Chat" {planSlug} />
-		</ChatDropZone>
+		<ChatPanel title="Plan Chat" {planSlug} />
 	</div>
 </div>
 

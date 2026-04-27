@@ -1,14 +1,10 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import { extractUrl, cleanUrl } from '$lib/constants/urls';
-	import { VALID_DOCUMENT_EXTENSIONS } from '$lib/constants/fileTypes';
 
 	interface Props {
 		onSend: (content: string) => Promise<void>;
 		disabled?: boolean;
-		onUrlDetected?: (url: string | null) => void;
-		onFilePathDetected?: (path: string | null) => void;
-		/** Content to clear from input (set by parent after source added) */
+		/** Content to clear from input (set by parent after action consumed) */
 		clearContent?: string | null;
 		/** Called after content is cleared */
 		onCleared?: () => void;
@@ -19,8 +15,6 @@
 	let {
 		onSend,
 		disabled = false,
-		onUrlDetected,
-		onFilePathDetected,
 		clearContent = null,
 		onCleared,
 		placeholder = 'Type a message...'
@@ -29,24 +23,11 @@
 	let input = $state('');
 	let sending = $state(false);
 	let textarea = $state<HTMLTextAreaElement | null>(null);
-	let detectedUrl = $state<string | null>(null);
-	let detectedFilePath = $state<string | null>(null);
-
-	// Build file path pattern from centralized extensions
-	const fileExtPattern = VALID_DOCUMENT_EXTENSIONS.map((e) => e.replace('.', '\\.')).join('|');
-	const FILE_PATH_PATTERN = new RegExp(
-		`(?:^|\\s)([~./][\\w/.~-]*(?:${fileExtPattern}))(?:\\s|$)`,
-		'i'
-	);
 
 	// React to clearContent prop changes
 	$effect(() => {
 		if (clearContent) {
 			input = input.replace(clearContent, '').trim();
-			detectedUrl = null;
-			detectedFilePath = null;
-			onUrlDetected?.(null);
-			onFilePathDetected?.(null);
 			resizeTextarea();
 			onCleared?.();
 		}
@@ -58,21 +39,12 @@
 		sending = true;
 		const content = input;
 		input = '';
-
-		// Reset detection state
-		detectedUrl = null;
-		detectedFilePath = null;
-		onUrlDetected?.(null);
-		onFilePathDetected?.(null);
-
-		// Reset textarea height
 		resizeTextarea();
 
 		try {
 			await onSend(content);
 		} finally {
 			sending = false;
-			// Re-focus for better UX
 			textarea?.focus();
 		}
 	}
@@ -90,33 +62,6 @@
 			send();
 		}
 	}
-
-	function handleInput(): void {
-		resizeTextarea();
-		detectContent();
-	}
-
-	function detectContent(): void {
-		// URL detection using utility function
-		const foundUrl = extractUrl(input);
-		if (foundUrl !== detectedUrl) {
-			detectedUrl = foundUrl;
-			onUrlDetected?.(detectedUrl);
-		}
-
-		// File path detection (only if no URL found)
-		if (!detectedUrl) {
-			const pathMatch = input.match(FILE_PATH_PATTERN);
-			const newPath = pathMatch?.[1] ?? null;
-			if (newPath !== detectedFilePath) {
-				detectedFilePath = newPath;
-				onFilePathDetected?.(detectedFilePath);
-			}
-		} else if (detectedFilePath !== null) {
-			detectedFilePath = null;
-			onFilePathDetected?.(null);
-		}
-	}
 </script>
 
 <div class="message-input-container">
@@ -124,7 +69,7 @@
 		<textarea
 			bind:this={textarea}
 			bind:value={input}
-			oninput={handleInput}
+			oninput={resizeTextarea}
 			onkeydown={handleKeydown}
 			{placeholder}
 			rows="1"

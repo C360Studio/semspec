@@ -4,18 +4,12 @@
 	import MessageList from '$lib/components/chat/MessageList.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import ModeIndicator from '$lib/components/chat/ModeIndicator.svelte';
-	import SourceSuggestionChip from '$lib/components/chat/SourceSuggestionChip.svelte';
-	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
-	import { sourcesStore } from '$lib/stores/sources.svelte';
-	import { projectStore } from '$lib/stores/project.svelte';
 	import { invalidate } from '$app/navigation';
 	import type { PlanWithStatus } from '$lib/types/plan';
-	import { getChatModeConfig, type ChatModeConfig } from '$lib/stores/chatMode.svelte';
+	import { getChatModeConfig } from '$lib/stores/chatMode.svelte';
 	import { api } from '$lib/api/client';
-	import { isValidHttpUrl } from '$lib/constants/urls';
 	import type { Message, MessageContext } from '$lib/types';
-	import type { DocCategory } from '$lib/types/source';
 	import type { PlanSelection } from '$lib/stores/planSelection.svelte';
 
 	interface Props {
@@ -50,17 +44,6 @@
 
 	// Get current chat mode based on route context
 	const modeConfig = $derived(getChatModeConfig(page.url.pathname, planSlug, plan));
-
-	let detectedUrl = $state<string | null>(null);
-	let detectedFilePath = $state<string | null>(null);
-	let showUploadModal = $state(false);
-	let suggestedFilename = $state<string | undefined>(undefined);
-
-	// State for clearing content from input (prop-based communication)
-	let clearContent = $state<string | null>(null);
-
-	// Resolve project ID from context with safe fallback
-	const projectId = $derived(plan?.project_id ?? projectStore.currentProjectId ?? 'default');
 
 	// Get plan's loop IDs for filtering
 	const planLoopIds = $derived(
@@ -142,85 +125,6 @@
 			messagesStore.messages = [...messagesStore.messages, errorMessage];
 		}
 	}
-
-	/**
-	 * Handle adding URL as web source from suggestion chip.
-	 */
-	async function handleAddUrl(): Promise<void> {
-		if (!detectedUrl) return;
-
-		// Validate URL before sending
-		if (!isValidHttpUrl(detectedUrl)) {
-			messagesStore.addStatus('Invalid URL format');
-			detectedUrl = null;
-			return;
-		}
-
-		const url = detectedUrl;
-		try {
-			const result = await sourcesStore.addWebSource({ url, projectId });
-			if (result) {
-				// Clear the URL from input using prop-based communication
-				clearContent = url;
-				detectedUrl = null;
-				messagesStore.addStatus(`Added source: ${result.name}`);
-			} else {
-				const errorMsg = sourcesStore.error || 'Unknown error';
-				messagesStore.addStatus(`Failed to add source: ${errorMsg}`);
-				console.error('Failed to add web source:', errorMsg);
-			}
-		} catch (err) {
-			const errorMsg = err instanceof Error ? err.message : 'Unexpected error';
-			messagesStore.addStatus(`Failed to add source: ${errorMsg}`);
-			console.error('Error adding web source:', err);
-		}
-	}
-
-	/**
-	 * Handle file path suggestion - open upload modal.
-	 */
-	async function handleAddFilePath(): Promise<void> {
-		if (!detectedFilePath) return;
-
-		suggestedFilename = detectedFilePath.split('/').pop();
-		clearContent = detectedFilePath;
-		detectedFilePath = null;
-		showUploadModal = true;
-	}
-
-	/**
-	 * Handle file upload from modal.
-	 */
-	function handleUpload(file: File, options: { category: DocCategory; project?: string }): void {
-		sourcesStore
-			.upload(file, {
-				projectId: options.project || projectId,
-				category: options.category
-			})
-			.then((result) => {
-				if (result) {
-					messagesStore.addStatus(`Uploaded: ${result.name}`);
-				} else {
-					const errorMsg = sourcesStore.error || 'Unknown error';
-					messagesStore.addStatus(`Upload failed: ${errorMsg}`);
-					console.error('Failed to upload file:', errorMsg);
-				}
-			})
-			.catch((err) => {
-				const errorMsg = err instanceof Error ? err.message : 'Unexpected error';
-				messagesStore.addStatus(`Upload failed: ${errorMsg}`);
-				console.error('Error uploading file:', err);
-			});
-		showUploadModal = false;
-		suggestedFilename = undefined;
-	}
-
-	/**
-	 * Called when content is cleared from input.
-	 */
-	function handleCleared(): void {
-		clearContent = null;
-	}
 </script>
 
 <div class="chat-panel">
@@ -236,45 +140,13 @@
 		<div class="mode-row">
 			<ModeIndicator mode={modeConfig.mode} label={modeConfig.label} />
 		</div>
-		{#if detectedUrl}
-			<SourceSuggestionChip
-				type="url"
-				value={detectedUrl}
-				{projectId}
-				onAdd={handleAddUrl}
-				onDismiss={() => (detectedUrl = null)}
-			/>
-		{:else if detectedFilePath}
-			<SourceSuggestionChip
-				type="file"
-				value={detectedFilePath}
-				{projectId}
-				onAdd={handleAddFilePath}
-				onDismiss={() => (detectedFilePath = null)}
-			/>
-		{/if}
 		<MessageInput
 			onSend={handleSend}
 			disabled={messagesStore.sending}
-			onUrlDetected={(url) => (detectedUrl = url)}
-			onFilePathDetected={(path) => (detectedFilePath = path)}
-			{clearContent}
-			onCleared={handleCleared}
 			placeholder={modeConfig.hint}
 		/>
 	</div>
 </div>
-
-<UploadModal
-	open={showUploadModal}
-	uploading={sourcesStore.uploading}
-	progress={sourcesStore.uploadProgress}
-	onclose={() => {
-		showUploadModal = false;
-		suggestedFilename = undefined;
-	}}
-	onupload={handleUpload}
-/>
 
 <style>
 	.chat-panel {
