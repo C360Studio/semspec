@@ -68,6 +68,11 @@ type stubSandbox struct {
 	// lastMergeOpts records the MergeOption list of the most recent call so
 	// tests can assert on commit trailers etc. Guarded by mergeCallsMu.
 	lastMergeOpts []sandbox.MergeOption
+	// mergeResult lets tests inject a specific MergeResult shape (e.g. a
+	// commit hash + non-empty FilesChanged for happy-path assertions, or an
+	// empty result to simulate the silent-no-op bug). Default zero-value
+	// returns &sandbox.MergeResult{} — empty Status/Commit/FilesChanged.
+	mergeResult *sandbox.MergeResult
 }
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, _ string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
@@ -81,6 +86,9 @@ func (s *stubSandbox) MergeWorktree(_ context.Context, _ string, opts ...sandbox
 	s.mergeCallsMu.Unlock()
 	if s.mergeErr != nil {
 		return nil, s.mergeErr
+	}
+	if s.mergeResult != nil {
+		return s.mergeResult, nil
 	}
 	return &sandbox.MergeResult{}, nil
 }

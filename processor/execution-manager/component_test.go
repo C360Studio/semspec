@@ -1249,3 +1249,68 @@ func TestHandleReviewerComplete_FailedOutcome_Retries(t *testing.T) {
 		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
 	}
 }
+
+// TestMarkApprovedLocked_EmptyMergeResult_ClaimedFiles_FailsTask — when the
+// developer claimed FilesModified but the sandbox returns an empty
+// MergeResult (Commit:"" FilesChanged:nil), mergeWorktree must NOT silently
+// approve the task. This is the smoking-gun test for bug #9 (10/17 silent
+// no-op merges in Gemini @t2 run): execution-manager logs "Worktree merged
+// successfully" with commit="" files_changed=0 even though the developer
+// reported writing files.
+//
+// Contract: when exec.FilesModified is non-empty AND result.Commit is empty,
+// the task must be marked as failed (claim/observation mismatch), not
+// approved. EXPECTED RED until production fix lands at component.go:1674.
+func TestMarkApprovedLocked_EmptyMergeResult_ClaimedFiles_FailsTask(t *testing.T) {
+	c := newTestComponent(t)
+	c.sandbox = &stubSandbox{} // mergeResult=nil → returns empty &MergeResult{}
+
+	exec := newTestExec("plan", "task-empty-merge")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-empty-merge"
+	// Developer claimed they wrote files. This is the bug-trigger pattern:
+	// FilesModified non-empty + sandbox returns Commit:"" FilesChanged:nil.
+	exec.FilesModified = []string{"main.go", "main_test.go"}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if exec.Stage == phaseApproved {
+		t.Errorf("Stage = %q after merge that produced commit=\"\" files_changed=0 with developer-claimed FilesModified=%v. This is the silent-no-op pattern (bug #9). Expected: Stage=%q (claim/observation mismatch).",
+			exec.Stage, []string{"main.go", "main_test.go"}, phaseError)
+	}
+	if c.errors.Load() == 0 {
+		t.Error("errors counter should increment when sandbox returns empty merge result while developer claimed files modified")
+	}
+}
+
+// TestMarkApprovedLocked_EmptyMergeResult_NoClaimedFiles_OK — the legitimate
+// no-op case. Developer didn't claim any files (empty FilesModified) and
+// sandbox returns empty MergeResult — that's a valid "nothing to merge"
+// scenario. Task should still be approved without raising a mismatch error.
+//
+// This test PINS the contract that empty-merge is only a problem when the
+// developer claimed work. Today: GREEN (no mismatch detection at all).
+// After the production fix lands: should still be GREEN (the fix must only
+// fail when claim ≠ observation).
+func TestMarkApprovedLocked_EmptyMergeResult_NoClaimedFiles_OK(t *testing.T) {
+	c := newTestComponent(t)
+	c.sandbox = &stubSandbox{}
+
+	exec := newTestExec("plan", "task-noop-ok")
+	exec.Stage = phaseReviewing
+	exec.WorktreePath = "/workspace/.semspec/worktrees/task-noop-ok"
+	// FilesModified is empty — developer correctly indicated no work.
+	exec.FilesModified = nil
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markApprovedLocked(testCtx(t), exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseApproved {
+		t.Errorf("Stage = %q for legit no-op case (empty claims + empty merge). Want %q.", exec.Stage, phaseApproved)
+	}
+}

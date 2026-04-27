@@ -2253,3 +2253,69 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 		})
 	}
 }
+
+// TestRequirementCompletion_RejectsApprovalWithoutCommitObservation pins the
+// claim/observation contract for requirement-level completion. Today the
+// gate at component.go:1204-1205 is purely `verdict == "approved"` — no
+// cross-check that the underlying NodeResults actually produced commits to
+// main. This is the architectural sibling of bug #9 (worktree merge no-op):
+// even when individual node merges silently no-op, the reviewer can still
+// approve based on the worktree state (which has the work, just unmerged),
+// and the requirement gets marked completed despite zero impact on main.
+//
+// Contract: when ANY NodeResult claims FilesModified but no commit was
+// observed for it (e.g. a CommitSHA field on NodeResult that's empty),
+// markCompletedLocked must NOT be called. EXPECTED RED until production
+// adds either:
+//   - A CommitSHA field on NodeResult (populated by execution-manager from
+//     successful merges) + a check in handleRequirementReviewerCompleteLocked
+//     that fails when claim ≠ observation.
+//   - A separate "all merges observed" gate signal from execution-manager.
+//
+// This test pins the contract minimally: developer-claimed files exist in
+// NodeResults, reviewer says approved, but the test asserts the req is NOT
+// silently completed. Today: req IS silently completed → test fails.
+func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:      "semspec.local.exec.req.run.test-claim-only",
+		Slug:          "test-plan",
+		RequirementID: "requirement.test-plan.1",
+		VisitedNodes:  map[string]bool{"impl-health": true},
+		// Developer claimed work — these are the FilesModified the reviewer
+		// based its approval on. In the smoking-gun bug pattern these files
+		// exist in the worktree but never reached main due to merge no-op.
+		NodeResults: []NodeResult{
+			{
+				NodeID:        "impl-health",
+				FilesModified: []string{"main.go", "main_test.go"},
+				Summary:       "Implemented /health endpoint with tests",
+			},
+		},
+	}
+
+	// Reviewer approves based on worktree contents. There is no commit
+	// observation in the event payload — the reviewer doesn't know whether
+	// the per-node merges actually landed in main.
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-1",
+		TaskID:       "requirement-rev-test-claim-only",
+		Outcome:      agentic.OutcomeSuccess,
+		WorkflowSlug: "requirement-execution",
+		WorkflowStep: "requirement-review",
+		Result:       `{"verdict":"approved","feedback":"All scenarios pass.","scenario_verdicts":[{"scenario_id":"s1","verdict":"approved"}]}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	// Today: exec.terminated is true and requirementsCompleted incremented
+	// because verdict=approved. Contract: completion must be gated on commit
+	// observation, not just reviewer verdict.
+	if exec.terminated && c.requirementsCompleted.Load() == 1 {
+		t.Errorf("Requirement marked completed on reviewer-verdict alone, with no commit observation. NodeResults claimed FilesModified=%v but no CommitSHA / merge-observed signal exists. This is the architectural sibling of bug #9: phantom completion despite empty merges.",
+			exec.NodeResults[0].FilesModified)
+	}
+}
