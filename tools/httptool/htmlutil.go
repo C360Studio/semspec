@@ -1,6 +1,7 @@
 // Package httptool implements the http_request agent tool.
-// It fetches URLs, converts HTML to clean text suitable for LLM consumption,
-// and persists the content to the knowledge graph as source.web entities.
+// It fetches URLs (SSRF-checked, DNS-pinned), converts HTML to clean text
+// suitable for LLM consumption, and enqueues the URL with web-ingester so
+// the content lands in the graph through the canonical ingestion pipeline.
 package httptool
 
 import (
@@ -213,26 +214,4 @@ func collapseNewlines(s string) string {
 		}
 	}
 	return sb.String()
-}
-
-// slugify creates a URL-friendly slug from a string, truncated to maxLen chars.
-func slugify(s string, maxLen int) string {
-	var sb strings.Builder
-	prevDash := false
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
-			sb.WriteRune(r)
-			prevDash = false
-		default:
-			if !prevDash && sb.Len() > 0 {
-				sb.WriteByte('-')
-				prevDash = true
-			}
-		}
-		if sb.Len() >= maxLen {
-			break
-		}
-	}
-	return strings.TrimRight(sb.String(), "-")
 }

@@ -114,30 +114,6 @@ func TestExtractTitle_Missing(t *testing.T) {
 	}
 }
 
-func TestSlugify(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		max   int
-		want  string
-	}{
-		{"simple words", "Hello World", 40, "hello-world"},
-		{"special chars", "API Docs — v2.1", 40, "api-docs-v2-1"},
-		{"trailing special", "Go Programming!", 40, "go-programming"},
-		{"truncation", "A Very Long Title That Should Be Truncated", 15, "a-very-long-tit"},
-		{"numbers", "RFC 7230 HTTP", 40, "rfc-7230-http"},
-		{"leading special", "...dots", 40, "dots"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := slugify(tt.input, tt.max)
-			if got != tt.want {
-				t.Errorf("slugify(%q, %d) = %q, want %q", tt.input, tt.max, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCollapseNewlines(t *testing.T) {
 	tests := []struct {
 		input string
