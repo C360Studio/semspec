@@ -63,8 +63,8 @@ type EndpointConfig struct {
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 
 	// RequestsPerMinute limits the rate of requests to this endpoint.
-	// 0 means no rate limiting. Honored by semstreams agentic-model
-	// (via its own EndpointThrottle) and the local llm.ConcurrencyGovernor.
+	// 0 means no rate limiting. Honored by semstreams agentic-model via
+	// its own EndpointThrottle.
 	RequestsPerMinute int `json:"requests_per_minute,omitempty"`
 
 	// MaxConcurrent limits concurrent in-flight requests to this endpoint.
@@ -104,7 +104,7 @@ type DefaultsConfig struct {
 	Model string `json:"model"`
 
 	// MaxConcurrentGlobal caps total concurrent LLM requests across all endpoints.
-	// 0 means no global limit. Applied by llm.ConcurrencyGovernor.
+	// 0 means no global limit.
 	MaxConcurrentGlobal int `json:"max_concurrent_global,omitempty"`
 }
 
