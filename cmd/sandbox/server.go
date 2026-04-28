@@ -502,46 +502,9 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	hash = strings.TrimSpace(hash)
 
 	if nothingToCommit {
-		// Stage produced nothing new. Two distinct sub-cases:
-		//   (a) Worktree HEAD is already reachable from the merge target
-		//       (true no-op — first merge had no work or work landed on
-		//       a previous successful call).
-		//   (b) Worktree HEAD is NOT reachable from the merge target —
-		//       a previous merge attempt failed mid-flight after the
-		//       stage+commit on the worktree branch. The work was never
-		//       propagated to main. Falling through to mergeIntoMainRepo
-		//       fixes the silent-work-drop bug (#9 from 2026-04-27 Gemini
-		//       @t2 run, 10/17 silent no-op merges).
-		mergeTarget := req.TargetBranch
-		if mergeTarget == "" {
-			cur, curErr := gitOutput(ctx, s.repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-			if curErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed to determine merge target: "+curErr.Error())
-				return
-			}
-			mergeTarget = strings.TrimSpace(cur)
-		}
-		// `git merge-base --is-ancestor <hash> <target>` returns exit code 0
-		// when hash is an ancestor of (or equal to) target — i.e. fully merged.
-		ancestorErr := runGit(ctx, s.repoPath, "merge-base", "--is-ancestor", hash, mergeTarget)
-		if ancestorErr == nil {
-			// Sub-case (a): true no-op. Clean up and return the typed signal.
-			if err := s.removeWorktree(ctx, worktreePath); err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to remove worktree: "+err.Error())
-				return
-			}
-			_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
-			writeJSON(w, http.StatusOK, mergeResponse{
-				Status:          "merged",
-				Note:            "nothing_to_commit",
-				NothingToCommit: true,
-			})
+		if handled := s.handleNothingToCommit(ctx, w, worktreePath, taskID, hash, req.TargetBranch); handled {
 			return
 		}
-		// Sub-case (b): worktree HEAD has unmerged commits. Fall through to
-		// mergeIntoMainRepo using the existing hash so the work actually lands.
-		s.logger.Info("Worktree had no new changes but HEAD is unmerged — proceeding with merge",
-			"task_id", taskID, "worktree_hash", hash, "target", mergeTarget)
 	}
 
 	// Serialize main-repo mutations (checkout + merge) to prevent concurrent
@@ -564,6 +527,52 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, mergeResp)
+}
+
+// handleNothingToCommit handles the post-stage path when the worktree had
+// no new changes to commit. Two distinct sub-cases:
+//
+//	(a) Worktree HEAD is already reachable from the merge target — true no-op.
+//	    Clean up and respond with the typed NothingToCommit signal. Returns
+//	    handled=true.
+//	(b) Worktree HEAD is NOT reachable from the merge target — a previous
+//	    merge attempt failed mid-flight after stage+commit on the worktree
+//	    branch. Returning a no-op signal here would silently drop the work
+//	    (bug #9 from 2026-04-27 Gemini @t2 run, 10/17 silent no-op merges).
+//	    Returns handled=false so the caller falls through to mergeIntoMainRepo
+//	    using the existing worktree hash.
+//
+// Errors are written to w directly; handled=true also covers the error case.
+func (s *Server) handleNothingToCommit(ctx context.Context, w http.ResponseWriter, worktreePath, taskID, hash, targetBranch string) (handled bool) {
+	mergeTarget := targetBranch
+	if mergeTarget == "" {
+		cur, curErr := gitOutput(ctx, s.repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+		if curErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to determine merge target: "+curErr.Error())
+			return true
+		}
+		mergeTarget = strings.TrimSpace(cur)
+	}
+	// `git merge-base --is-ancestor <hash> <target>` returns exit code 0
+	// when hash is an ancestor of (or equal to) target — fully merged.
+	if runGit(ctx, s.repoPath, "merge-base", "--is-ancestor", hash, mergeTarget) != nil {
+		// Sub-case (b): worktree HEAD has unmerged commits.
+		s.logger.Info("Worktree had no new changes but HEAD is unmerged — proceeding with merge",
+			"task_id", taskID, "worktree_hash", hash, "target", mergeTarget)
+		return false
+	}
+	// Sub-case (a): true no-op.
+	if err := s.removeWorktree(ctx, worktreePath); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove worktree: "+err.Error())
+		return true
+	}
+	_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
+	writeJSON(w, http.StatusOK, mergeResponse{
+		Status:          "merged",
+		Note:            "nothing_to_commit",
+		NothingToCommit: true,
+	})
+	return true
 }
 
 // httpErrorInfo carries a status code + message for helpers that need to
