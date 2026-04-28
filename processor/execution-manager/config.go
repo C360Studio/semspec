@@ -56,6 +56,11 @@ type Config struct {
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
 
+	// ReviewerModel is the model endpoint for the code reviewer agent. When empty,
+	// falls back to Model. Separate model lets mock fixtures dispatch to a review-shaped
+	// fixture set instead of forcing the developer mock to alternate dev/review shapes.
+	ReviewerModel string `json:"reviewer_model" schema:"type:string,description:Model endpoint for code reviewer agent,category:advanced"`
+
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 

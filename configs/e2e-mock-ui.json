@@ -516,6 +516,7 @@
         "timeout_seconds": 600,
         "model": "mock-coder",
         "decomposer_model": "mock-decomposer",
+        "reviewer_model": "mock-reviewer",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 1,
         "max_decomposer_retries": 1,
@@ -543,6 +544,7 @@
         "max_tdd_cycles": 3,
         "timeout_seconds": 300,
         "model": "mock-coder",
+        "reviewer_model": "mock-reviewer",
         "sandbox_url": "http://sandbox:8090"
       }
     },

@@ -1097,10 +1097,15 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	asmCtx := c.buildRequirementReviewContext(exec)
 	assembled := c.assembler.Assemble(asmCtx)
 
+	reviewerModel := c.config.ReviewerModel
+	if reviewerModel == "" {
+		reviewerModel = exec.Model
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
-		Model:        exec.Model,
+		Model:        reviewerModel,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "review", availableToolNames()...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,

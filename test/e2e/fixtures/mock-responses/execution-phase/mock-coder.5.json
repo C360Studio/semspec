@@ -1,12 +1,12 @@
 {
-  "content": "Code review complete. Implementation meets all requirements.",
+  "content": "Submitting work.",
   "tool_calls": [
     {
       "id": "call_review_approve",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Implementation correctly adds /goodbye endpoint with proper JSON response.\"}"
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
       }
     }
   ],

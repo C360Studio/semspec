@@ -57,6 +57,17 @@
       "description": "Port configuration",
       "category": "basic"
     },
+    "require_merge_observation": {
+      "type": "boolean",
+      "description": "Fail task on developer-claimed-but-sandbox-observed-no-commit mismatch",
+      "default": true,
+      "category": "advanced"
+    },
+    "reviewer_model": {
+      "type": "string",
+      "description": "Model endpoint for code reviewer agent",
+      "category": "advanced"
+    },
     "sandbox_url": {
       "type": "string",
       "description": "Sandbox server URL for worktree isolation (empty=disabled)",
