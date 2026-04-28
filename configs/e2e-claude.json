@@ -276,7 +276,7 @@
             }
           ]
         },
-        "workers": 2,
+        "workers": 4,
         "batch_size": 50,
         "coalesce_ms": 100
       }
@@ -485,7 +485,7 @@
         "model": "claude-sonnet",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
-        "indexing_budget": "30s"
+        "indexing_budget": "60s"
       }
     },
     "workflow-documents": {

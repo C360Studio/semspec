@@ -6,14 +6,14 @@
       "type": "git",
       "url": "/workspace",
       "branch": "main",
-      "poll_interval": "20s",
+      "poll_interval": "10s",
       "watch": true
     },
     {
       "type": "ast",
       "path": "/workspace",
       "language": "go",
-      "index_interval": "20s",
+      "index_interval": "10s",
       "watch": true
     },
     {
