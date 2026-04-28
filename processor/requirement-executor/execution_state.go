@@ -9,10 +9,17 @@ import (
 )
 
 // NodeResult tracks output from a completed DAG node for aggregate reporting.
+//
+// CommitSHA is the merge commit produced when this node's worktree was
+// merged into main. Empty when the node is still in flight, or when the
+// merge silently dropped the work (the bug-#9 pattern).
+// Today only populated when execution-manager wires it through; absence
+// is interpreted by the require_commit_observation gate.
 type NodeResult struct {
 	NodeID        string   `json:"node_id"`
 	FilesModified []string `json:"files_modified,omitempty"`
 	Summary       string   `json:"summary,omitempty"`
+	CommitSHA     string   `json:"commit_sha,omitempty"`
 }
 
 // requirementExecution holds in-memory state for a single requirement execution.

@@ -54,6 +54,16 @@ type Config struct {
 	// are updated to cite runtime-generated scenario IDs.
 	EnforceScenarioCoverage *bool `json:"enforce_scenario_coverage,omitempty" schema:"type:bool,description:Reject decomposer output that leaves input scenarios uncovered,category:advanced,default:true"`
 
+	// RequireCommitObservation gates markCompletedLocked on every NodeResult
+	// that claimed FilesModified having a non-empty CommitSHA. Sibling guard
+	// to execution-manager's claim/observation cross-check (bug #9): even if a
+	// reviewer somehow approves work that never reached main, the requirement
+	// will fail rather than be silently completed. Defaults to false until
+	// execution-manager wires CommitSHA through to NodeResult; turning it on
+	// without that wiring will fail every requirement that has any claimed
+	// files.
+	RequireCommitObservation bool `json:"require_commit_observation,omitempty" schema:"type:bool,description:Fail requirement-completion when any node claimed files but produced no commit observation,category:advanced,default:false"`
+
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }

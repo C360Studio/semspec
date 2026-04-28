@@ -2255,28 +2255,21 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 }
 
 // TestRequirementCompletion_RejectsApprovalWithoutCommitObservation pins the
-// claim/observation contract for requirement-level completion. Today the
-// gate at component.go:1204-1205 is purely `verdict == "approved"` — no
-// cross-check that the underlying NodeResults actually produced commits to
-// main. This is the architectural sibling of bug #9 (worktree merge no-op):
-// even when individual node merges silently no-op, the reviewer can still
+// claim/observation contract for requirement-level completion. Sibling of
+// bug #9: even when individual node merges silently no-op, the reviewer can
 // approve based on the worktree state (which has the work, just unmerged),
 // and the requirement gets marked completed despite zero impact on main.
 //
-// Contract: when ANY NodeResult claims FilesModified but no commit was
-// observed for it (e.g. a CommitSHA field on NodeResult that's empty),
-// markCompletedLocked must NOT be called. EXPECTED RED until production
-// adds either:
-//   - A CommitSHA field on NodeResult (populated by execution-manager from
-//     successful merges) + a check in handleRequirementReviewerCompleteLocked
-//     that fails when claim ≠ observation.
-//   - A separate "all merges observed" gate signal from execution-manager.
-//
-// This test pins the contract minimally: developer-claimed files exist in
-// NodeResults, reviewer says approved, but the test asserts the req is NOT
-// silently completed. Today: req IS silently completed → test fails.
+// Contract (gated by config.RequireCommitObservation): when any NodeResult
+// claims FilesModified but its CommitSHA is empty, markCompletedLocked must
+// NOT be called — the requirement fails with a claim/observation mismatch
+// reason. The gate is opt-in until upstream wiring (execution-manager →
+// req-executor → NodeResult.CommitSHA) lands; turning it on without that
+// wiring would fail every requirement that has any claimed files. The test
+// enables the gate explicitly.
 func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testing.T) {
 	c := newTestComponent(t)
+	c.config.RequireCommitObservation = true
 
 	exec := &requirementExecution{
 		EntityID:      "semspec.local.exec.req.run.test-claim-only",
@@ -2286,11 +2279,13 @@ func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testin
 		// Developer claimed work — these are the FilesModified the reviewer
 		// based its approval on. In the smoking-gun bug pattern these files
 		// exist in the worktree but never reached main due to merge no-op.
+		// CommitSHA is empty because the merge was a silent no-op.
 		NodeResults: []NodeResult{
 			{
 				NodeID:        "impl-health",
 				FilesModified: []string{"main.go", "main_test.go"},
 				Summary:       "Implemented /health endpoint with tests",
+				CommitSHA:     "", // ← the smoking gun
 			},
 		},
 	}
@@ -2311,11 +2306,15 @@ func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testin
 	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
 	exec.mu.Unlock()
 
-	// Today: exec.terminated is true and requirementsCompleted incremented
-	// because verdict=approved. Contract: completion must be gated on commit
-	// observation, not just reviewer verdict.
-	if exec.terminated && c.requirementsCompleted.Load() == 1 {
-		t.Errorf("Requirement marked completed on reviewer-verdict alone, with no commit observation. NodeResults claimed FilesModified=%v but no CommitSHA / merge-observed signal exists. This is the architectural sibling of bug #9: phantom completion despite empty merges.",
+	// Contract: with RequireCommitObservation enabled, the requirement must
+	// NOT be marked completed when a node claimed work but produced no
+	// commit observation. Instead it must transition to phaseFailed with
+	// a claim/observation mismatch reason.
+	if c.requirementsCompleted.Load() != 0 {
+		t.Errorf("Requirement was marked completed despite NodeResult.CommitSHA empty for FilesModified=%v. The RequireCommitObservation gate did not fire — contract violation.",
 			exec.NodeResults[0].FilesModified)
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1 (claim/observation mismatch should fail the requirement)", c.requirementsFailed.Load())
 	}
 }

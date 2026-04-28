@@ -1126,6 +1126,41 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	)
 }
 
+// handleApprovedClaimMismatchLocked enforces the requirement-scope claim/
+// observation cross-check. Defense-in-depth against the bug #9 pattern:
+// even when execution-manager's FIX-B guard is in place, the requirement
+// reviewer should not be the last word on completion if any node claimed
+// files but produced no commit observation. Gated by
+// config.RequireCommitObservation because the upstream wiring
+// (execution-manager → req-executor → NodeResult.CommitSHA) is not yet in
+// place; turning the gate on without that wiring would fail every
+// requirement that has any claimed work.
+//
+// Returns true when the gate fired and the requirement was marked failed —
+// caller must NOT proceed to markCompletedLocked.
+//
+// Caller must hold exec.mu.
+func (c *Component) handleApprovedClaimMismatchLocked(ctx context.Context, exec *requirementExecution) bool {
+	if !c.config.RequireCommitObservation {
+		return false
+	}
+	var unobserved []string
+	for _, nr := range exec.NodeResults {
+		if len(nr.FilesModified) > 0 && nr.CommitSHA == "" {
+			unobserved = append(unobserved, nr.NodeID)
+		}
+	}
+	if len(unobserved) == 0 {
+		return false
+	}
+	c.logger.Error("Requirement claim/observation mismatch — nodes claimed files but no commit observed",
+		"entity_id", exec.EntityID,
+		"unobserved_nodes", unobserved,
+	)
+	c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement claim/observation mismatch: nodes %v claimed files_modified but produced no commit observation", unobserved))
+	return true
+}
+
 // handleRequirementReviewerCompleteLocked processes the requirement reviewer verdict.
 // The reviewer receives all scenarios as a checklist and returns per-scenario verdicts.
 //
@@ -1202,6 +1237,9 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 	exec.ScenarioVerdicts = result.ScenarioVerdicts
 
 	if result.Verdict == "approved" {
+		if c.handleApprovedClaimMismatchLocked(ctx, exec) {
+			return
+		}
 		c.markCompletedLocked(ctx, exec)
 		return
 	}
