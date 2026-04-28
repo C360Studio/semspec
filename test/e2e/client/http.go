@@ -2484,3 +2484,40 @@ func (c *HTTPClient) WaitForPlanStatus(ctx context.Context, slug, status string)
 		}
 	}
 }
+
+// WaitForPlanTerminalStatus polls GetPlan until plan.Status reaches any of the
+// successful terminal states (complete, reviewing_rollup, reviewing_qa) or
+// returns an error on a failure terminal (rejected, error) or context timeout.
+//
+// Use this for the standard execution-completion gate. If you need richer
+// diagnostics on timeout (e.g. inspecting EXECUTION_STATES for failed
+// requirements), inline the loop instead — see hello_world.go's
+// stageWaitForExecutionComplete for that pattern.
+func (c *HTTPClient) WaitForPlanTerminalStatus(ctx context.Context, slug string) (*Plan, error) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastPlan *Plan
+	for {
+		select {
+		case <-ctx.Done():
+			lastStatus := "unknown"
+			if lastPlan != nil {
+				lastStatus = lastPlan.Status
+			}
+			return lastPlan, fmt.Errorf("plan did not reach a terminal status, last: %s: %w", lastStatus, ctx.Err())
+		case <-ticker.C:
+			plan, err := c.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+			lastPlan = plan
+			switch plan.Status {
+			case "complete", "reviewing_rollup", "reviewing_qa":
+				return plan, nil
+			case "rejected", "error":
+				return plan, fmt.Errorf("plan reached terminal failure: %s", plan.Status)
+			}
+		}
+	}
+}

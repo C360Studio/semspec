@@ -332,32 +332,12 @@ func (s *ReactiveExecutionScenario) stageVerifyPlanExecutionComplete(ctx context
 		return fmt.Errorf("plan_slug not set in result")
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			plan, _ := s.http.GetPlan(ctx, slug)
-			lastStatus := "unknown"
-			if plan != nil {
-				lastStatus = plan.Status
-			}
-			return fmt.Errorf("plan did not reach complete status, last: %s", lastStatus)
-		case <-ticker.C:
-			plan, err := s.http.GetPlan(ctx, slug)
-			if err != nil {
-				continue
-			}
-			switch plan.Status {
-			case "complete", "reviewing_rollup", "reviewing_qa":
-				result.SetDetail("plan_final_status", plan.Status)
-				return nil
-			case "rejected", "error":
-				return fmt.Errorf("plan reached terminal failure: %s", plan.Status)
-			}
-		}
+	plan, err := s.http.WaitForPlanTerminalStatus(ctx, slug)
+	if err != nil {
+		return err
 	}
+	result.SetDetail("plan_final_status", plan.Status)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

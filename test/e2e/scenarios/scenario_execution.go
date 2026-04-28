@@ -28,7 +28,6 @@ type ScenarioExecutionScenario struct {
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	nats        *client.NATSClient
 }
 
 // NewScenarioExecutionScenario creates a new scenario execution scenario.
@@ -56,13 +55,6 @@ func (s *ScenarioExecutionScenario) Setup(ctx context.Context) error {
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
-
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
-	}
-	s.nats = natsClient
-
 	return nil
 }
 
@@ -131,10 +123,7 @@ func (s *ScenarioExecutionScenario) Execute(ctx context.Context) (*Result, error
 }
 
 // Teardown cleans up after the scenario.
-func (s *ScenarioExecutionScenario) Teardown(ctx context.Context) error {
-	if s.nats != nil {
-		return s.nats.Close(ctx)
-	}
+func (s *ScenarioExecutionScenario) Teardown(_ context.Context) error {
 	return nil
 }
 

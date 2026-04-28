@@ -189,20 +189,15 @@ func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 // Stage: setup-workspace
 // ---------------------------------------------------------------------------
 
-// stageSetupWorkspace writes the Go project fixture files to the workspace,
-// initialises a git repository, and resets any stale reactive KV state.
+// stageSetupWorkspace writes the Go project fixture files to the workspace
+// and initialises a git repository.
 //
 // The workspace must contain a passing Go test suite so the sandbox can run
 // `go test ./...` at qa_level=unit and get a green result.
-func (s *QACycleScenario) stageSetupWorkspace(ctx context.Context, result *Result) error {
-	// Purge stale reactive state that could interfere with a fresh run.
-	for _, prefix := range []string{"plan-review.", "phase-review.", "task-review.", "task-execution."} {
-		if deleted, err := s.nats.PurgeKVByPrefix(ctx, "REACTIVE_STATE", prefix); err != nil {
-			return fmt.Errorf("purge reactive state %s: %w", prefix, err)
-		} else if deleted > 0 {
-			result.SetDetail("purged_"+prefix+"entries", deleted)
-		}
-	}
+func (s *QACycleScenario) stageSetupWorkspace(_ context.Context, result *Result) error {
+	// (REACTIVE_STATE purge removed — the bucket was deleted with the rules
+	// engine; PLAN_STATES/EXECUTION_STATES are reset by docker compose down -v
+	// in task e2e:mock's clean dep.)
 
 	// Go module and source files — `go test ./...` passes on this workspace.
 	files := map[string]string{

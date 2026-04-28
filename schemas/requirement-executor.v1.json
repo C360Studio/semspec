@@ -59,7 +59,7 @@
     },
     "reviewer_model": {
       "type": "string",
-      "description": "Model endpoint for requirement reviewer agent",
+      "description": "Model endpoint for post-merge requirement reviewer agent",
       "category": "advanced"
     },
     "sandbox_url": {

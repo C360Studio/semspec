@@ -24,10 +24,14 @@ type Config struct {
 	// falls back to Model. Separate model allows independent mock fixtures.
 	DecomposerModel string `json:"decomposer_model" schema:"type:string,description:Model endpoint for decomposer agent,category:advanced"`
 
-	// ReviewerModel is the model endpoint for the requirement reviewer agent. When
-	// empty, falls back to Model. Separate model lets mock fixtures dispatch to a
-	// review-shaped fixture set instead of forcing the developer mock to alternate.
-	ReviewerModel string `json:"reviewer_model" schema:"type:string,description:Model endpoint for requirement reviewer agent,category:advanced"`
+	// ReviewerModel is the model endpoint for the post-merge requirement
+	// reviewer agent (semantic completeness + scenario coverage check). When
+	// empty, falls back to Model. Distinct from execution-manager's
+	// CodeReviewerModel (in-TDD-cycle code review) so production configs can
+	// match each role to its best-suited model — e.g. a reasoning-heavy model
+	// for the broader semantic requirement review and a fast, code-aware model
+	// for the tight TDD code-review loop.
+	ReviewerModel string `json:"reviewer_model" schema:"type:string,description:Model endpoint for post-merge requirement reviewer agent,category:advanced"`
 
 	// SandboxURL is the base URL of the sandbox server. When set, the
 	// requirement-executor creates per-requirement branches for worktree isolation.

@@ -216,30 +216,10 @@ func (s *HelloWorldScenario) Teardown(ctx context.Context) error {
 }
 
 // stageSetupProject creates a minimal Python+JS hello-world project in the workspace.
-func (s *HelloWorldScenario) stageSetupProject(ctx context.Context, result *Result) error {
-	// Clean up reactive workflow state from previous runs.
-	// This is critical because the reactive workflow's notCompleted() condition
-	// will fail if state from a previous run shows status=completed.
-	if deleted, err := s.nats.PurgeKVByPrefix(ctx, "REACTIVE_STATE", "plan-review."); err != nil {
-		return fmt.Errorf("purge plan-review state: %w", err)
-	} else if deleted > 0 {
-		result.SetDetail("purged_plan_review_entries", deleted)
-	}
-	if deleted, err := s.nats.PurgeKVByPrefix(ctx, "REACTIVE_STATE", "phase-review."); err != nil {
-		return fmt.Errorf("purge phase-review state: %w", err)
-	} else if deleted > 0 {
-		result.SetDetail("purged_phase_review_entries", deleted)
-	}
-	if deleted, err := s.nats.PurgeKVByPrefix(ctx, "REACTIVE_STATE", "task-review."); err != nil {
-		return fmt.Errorf("purge task-review state: %w", err)
-	} else if deleted > 0 {
-		result.SetDetail("purged_task_review_entries", deleted)
-	}
-	if deleted, err := s.nats.PurgeKVByPrefix(ctx, "REACTIVE_STATE", "task-execution."); err != nil {
-		return fmt.Errorf("purge task-execution state: %w", err)
-	} else if deleted > 0 {
-		result.SetDetail("purged_task_execution_entries", deleted)
-	}
+func (s *HelloWorldScenario) stageSetupProject(_ context.Context, result *Result) error {
+	// (REACTIVE_STATE purge removed — the bucket was deleted with the rules
+	// engine; PLAN_STATES/EXECUTION_STATES are reset by docker compose down -v
+	// in task e2e:mock's clean dep.)
 
 	// Python API
 	appPy := `from flask import Flask, jsonify
