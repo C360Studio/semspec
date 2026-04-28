@@ -1,12 +1,12 @@
 {
-  "content": "Work complete.",
+  "content": "Submitting work.",
   "tool_calls": [
     {
       "id": "call_submit_fallback",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Task completed successfully\"}"
+        "arguments": "{\"summary\": \"Added Sub function with passing unit test\", \"files_modified\": [\"pkg/math/sub.go\", \"pkg/math/sub_test.go\"]}"
       }
     }
   ],

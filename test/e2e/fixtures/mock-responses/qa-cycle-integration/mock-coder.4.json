@@ -1,12 +1,12 @@
 {
-  "content": "Code review complete. Implementation meets all requirements.",
+  "content": "Submitting work.",
   "tool_calls": [
     {
       "id": "call_review_task",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Implementation correctly adds /goodbye endpoint with proper JSON response and tests.\"}"
+        "arguments": "{\"summary\": \"Added Sub function with passing unit test\", \"files_modified\": [\"pkg/math/sub.go\", \"pkg/math/sub_test.go\"]}"
       }
     }
   ],

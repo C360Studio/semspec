@@ -1,12 +1,12 @@
 {
-  "content": "I'll implement the /goodbye endpoint to pass the tests.",
+  "content": "Writing the test for Sub.",
   "tool_calls": [
     {
-      "id": "call_write_impl",
+      "id": "call_write_sub_test",
       "type": "function",
       "function": {
         "name": "bash",
-        "arguments": "{\"command\":\"cat >> api/app.py << 'PYEOF'\\n\\n@app.route('/goodbye')\\ndef goodbye():\\n    return jsonify({'message': 'Goodbye, World!'})\\nPYEOF\"}"
+        "arguments": "{\"command\":\"cat > pkg/math/sub_test.go << 'GOEOF'\\npackage math\\n\\nimport \\\"testing\\\"\\n\\nfunc TestSub(t *testing.T) {\\n\\tif got := Sub(5, 3); got != 2 {\\n\\t\\tt.Errorf(\\\"Sub(5, 3) = %d; want 2\\\", got)\\n\\t}\\n}\\nGOEOF\"}"
       }
     }
   ],

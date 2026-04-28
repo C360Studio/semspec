@@ -1,12 +1,12 @@
 {
-  "content": "Requirement review complete. All scenarios pass.",
+  "content": "Submitting work.",
   "tool_calls": [
     {
       "id": "call_review_req",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios verified: /goodbye endpoint returns correct JSON with 200 status.\"}"
+        "arguments": "{\"summary\": \"Added Sub function with passing unit test\", \"files_modified\": [\"pkg/math/sub.go\", \"pkg/math/sub_test.go\"]}"
       }
     }
   ],

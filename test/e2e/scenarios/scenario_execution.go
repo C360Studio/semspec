@@ -1,26 +1,20 @@
 package scenarios
 
-// ScenarioExecutionScenario tests the Requirement/Scenario CRUD APIs and the
-// requirement-execution-loop + dag-execution-loop reactive workflows.
+// ScenarioExecutionScenario tests the Requirement/Scenario CRUD APIs.
 //
 // Scope:
 //
 //  1. Requirement CRUD — create, get, list, update, deprecate, delete
 //  2. Scenario CRUD   — create, get, list (with filter), update, delete
 //  3. 404 responses for non-existent resources
-//  4. Requirement-execution-loop trigger — publishes to
-//     workflow.trigger.requirement-execution-loop and verifies the reactive
-//     workflow initialises its KV state (phase = "decomposing" or later).
 //
-// Full DAG execution (decomposition → node dispatch → completion signals)
-// requires a mock LLM that returns a decompose_task tool call. That is left
-// for a future fixture-driven scenario; see the comment in
-// stageVerifyTriggerDAGWorkflow for what additional mock fixtures would be
-// needed.
+// The reactive-workflow trigger stages were deleted when the rules engine
+// was removed (KV watchers replaced workflow.trigger.* subjects). Real
+// execution coverage now lives in hello-world-code-execution and
+// execution-phase, which exercise the KV self-trigger path end-to-end.
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -28,26 +22,7 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// TODO(migration): Phase N will replace this — ScenarioExecution constants removed with reactive package.
-// These are local copies until workflow/payloads defines them.
-const (
-	scenarioExecutionWorkflowID = "requirement-execution-loop"
-	scenarioPhaseDecomposing    = "decomposing"
-	scenarioPhaseDecomposed     = "decomposed"
-	scenarioPhaseExecuting      = "executing"
-	scenarioPhaseComplete       = "complete"
-	scenarioPhaseFailed         = "failed"
-)
-
-// scenarioExecutionTriggerPayload is a local substitute for the deleted reactive.ScenarioExecutionTriggerPayload.
-type scenarioExecutionTriggerPayload struct {
-	ScenarioID string `json:"scenario_id"`
-	Prompt     string `json:"prompt,omitempty"`
-	Role       string `json:"role,omitempty"`
-}
-
-// ScenarioExecutionScenario tests requirement/scenario CRUD and the
-// requirement-execution-loop + dag-execution-loop reactive workflows.
+// ScenarioExecutionScenario tests requirement/scenario CRUD.
 type ScenarioExecutionScenario struct {
 	name        string
 	description string
@@ -122,10 +97,6 @@ func (s *ScenarioExecutionScenario) Execute(ctx context.Context) (*Result, error
 		{"scenario-update", s.stageScenarioUpdate},
 		{"scenario-404", s.stageScenario404},
 
-		// Reactive workflow trigger
-		{"trigger-scenario-execution", s.stageTriggerScenarioExecution},
-		{"verify-scenario-execution-state", s.stageVerifyScenarioExecutionState},
-
 		// Cleanup: delete scenario and deprecate requirement
 		{"scenario-delete", s.stageScenarioDelete},
 		{"requirement-deprecate", s.stageRequirementDeprecate},
@@ -162,17 +133,6 @@ func (s *ScenarioExecutionScenario) Execute(ctx context.Context) (*Result, error
 // Teardown cleans up after the scenario.
 func (s *ScenarioExecutionScenario) Teardown(ctx context.Context) error {
 	if s.nats != nil {
-		// Clean up any scenario-execution KV state created during the test.
-		slug, _ := s.planSlug(nil)
-		if slug != "" {
-			if scenarioID, ok := s.storedScenarioID(nil); ok {
-				key := "scenario-execution." + scenarioID
-				if _, err := s.nats.PurgeKVByPrefix(ctx, client.ReactiveStateBucket, key); err != nil {
-					// Non-fatal; state will be overwritten on next run.
-					_ = err
-				}
-			}
-		}
 		return s.nats.Close(ctx)
 	}
 	return nil
@@ -581,103 +541,6 @@ func (s *ScenarioExecutionScenario) stageScenario404(ctx context.Context, result
 	}
 
 	result.SetDetail("scenario_404_verified", true)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Reactive workflow stages
-// ---------------------------------------------------------------------------
-
-// stageTriggerScenarioExecution publishes a ScenarioExecutionTriggerPayload to
-// workflow.trigger.requirement-execution-loop and verifies the message was accepted
-// (via message-logger). The KV state check happens in the next stage.
-func (s *ScenarioExecutionScenario) stageTriggerScenarioExecution(ctx context.Context, result *Result) error {
-	scenarioID, _ := s.storedScenarioID(result)
-
-	// TODO(migration): Phase N will replace this with a payloads.ScenarioExecutionTriggerPayload
-	trigger := &scenarioExecutionTriggerPayload{
-		ScenarioID: scenarioID,
-		Prompt:     "Decompose the authentication scenario into implementation tasks.",
-		Role:       "developer",
-	}
-
-	triggerData, err := json.Marshal(trigger)
-	if err != nil {
-		return fmt.Errorf("marshal trigger: %w", err)
-	}
-
-	if err := s.nats.PublishToStream(ctx, "workflow.trigger.requirement-execution-loop", triggerData); err != nil {
-		return fmt.Errorf("publish trigger: %w", err)
-	}
-
-	result.SetDetail("execution_trigger_scenario_id", scenarioID)
-	result.SetDetail("execution_trigger_published", true)
-	return nil
-}
-
-// stageVerifyScenarioExecutionState waits for the reactive workflow to create
-// a KV state entry for the triggered scenario execution. The workflow engine
-// writes to REACTIVE_STATE/scenario-execution.<scenarioID> on the accept-trigger
-// rule. We wait up to the stage timeout for this key to appear.
-//
-// Full end-to-end DAG execution would require additional mock LLM fixtures:
-//   - The agentic loop would need a fixture that calls decompose_task with a
-//     valid TaskDAG (at least 1 node with prompt + role fields populated).
-//   - After decomposition, dag-execution-loop would dispatch nodes to
-//     workflow.async.dag-node.<nodeID> subjects.
-//   - Nodes would need to signal completion via dag.node.complete.<nodeID>
-//     with valid QualityEvidence (validation_passed=true, review_verdict="approved").
-//   - The scenario would then reach "complete" phase.
-//
-// For now we verify that the workflow initialises its state (phase = "decomposing"
-// or any subsequent phase), which confirms the trigger wiring is correct.
-func (s *ScenarioExecutionScenario) stageVerifyScenarioExecutionState(ctx context.Context, result *Result) error {
-	scenarioID, _ := s.storedScenarioID(result)
-	kvKey := "scenario-execution." + scenarioID
-
-	// Wait up to the stage timeout for the KV entry to appear.
-	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	state, err := s.http.WaitForWorkflowPhaseIn(
-		waitCtx,
-		client.ReactiveStateBucket,
-		kvKey,
-		// Accept any active or terminal phase — the workflow may have already
-		// progressed beyond "decomposing" when the NATS infrastructure is fast.
-		[]string{
-			scenarioPhaseDecomposing,
-			scenarioPhaseDecomposed,
-			scenarioPhaseExecuting,
-			scenarioPhaseComplete,
-			scenarioPhaseFailed,
-		},
-	)
-	if err != nil {
-		// KV state not appearing is acceptable in CI environments where the
-		// reactive engine may not be configured. Record it as a non-fatal
-		// observation rather than a failure.
-		result.SetDetail("scenario_execution_state_found", false)
-		result.SetDetail("scenario_execution_state_note",
-			fmt.Sprintf("KV state not found within timeout (key=%s): %v — reactive engine may not be configured", kvKey, err))
-		result.AddWarning(fmt.Sprintf("scenario-execution KV state not found: %v", err))
-		return nil
-	}
-
-	// Verify the state has the expected structure.
-	// TODO(migration): Phase N will replace this with payloads.ScenarioExecutionWorkflowID
-	if state.WorkflowID != scenarioExecutionWorkflowID {
-		return fmt.Errorf("unexpected workflow_id: got %q, want %q",
-			state.WorkflowID, scenarioExecutionWorkflowID)
-	}
-	if state.Phase == "" {
-		return fmt.Errorf("workflow state has empty phase")
-	}
-
-	result.SetDetail("scenario_execution_state_found", true)
-	result.SetDetail("scenario_execution_workflow_id", state.WorkflowID)
-	result.SetDetail("scenario_execution_phase", state.Phase)
-	result.SetDetail("scenario_execution_status", state.Status)
 	return nil
 }
 

@@ -20,18 +20,18 @@ import (
 // after plan approval and verifying that the execution pipeline activates.
 //
 // Stages:
-//  1. setup-project         — Write fixture Python files to workspace.
-//  2. detect-stack          — Verify language detection.
-//  3. init-project          — Initialize project with detected languages.
-//  4. verify-graph-ready    — Gate on graph-gateway readiness.
-//  5. create-plan           — Create a plan via HTTP.
-//  6. wait-for-plan-goal    — Poll until planner writes a Goal.
-//  7. wait-for-approval     — Poll until plan.Approved == true.
-//  8. trigger-execution     — Call ExecutePlan to start reactive execution.
-//  9. wait-for-exec-start   — Confirm requirement-execution-loop received the trigger.
+//  1. setup-project              — Write fixture Python files to workspace.
+//  2. detect-stack               — Verify language detection.
+//  3. init-project               — Initialize project with detected languages.
+//  4. verify-graph-ready         — Gate on graph-gateway readiness.
+//  5. create-plan                — Create a plan via HTTP.
+//  6. wait-for-plan-goal         — Poll until planner writes a Goal.
+//  7. wait-for-approval          — Poll until plan.Approved == true.
+//  8. trigger-execution          — Call ExecutePlan to start reactive execution.
+//  9. wait-for-execution-complete — Poll PLAN_STATES KV until plan reaches a
+//     terminal complete status (complete, reviewing_rollup, reviewing_qa).
 //
-// 10. wait-for-exec-complete — Confirm task-execution-loop dispatched nodes.
-// 11. verify-mock-stats      — Assert mock-coder was called at least twice.
+// 10. verify-mock-stats           — Assert mock-coder was called at least twice.
 type ExecutionPhaseScenario struct {
 	config *config.Config
 	http   *client.HTTPClient
@@ -82,9 +82,7 @@ func (s *ExecutionPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"wait-for-plan-goal", s.stageWaitForPlanGoal, 120 * time.Second},
 		{"wait-for-approval", s.stageWaitForApproval, 360 * time.Second},
 		{"trigger-execution", s.stageTriggerExecution, 15 * time.Second},
-		{"wait-for-exec-start", s.stageWaitForExecStart, 120 * time.Second},
-		{"wait-for-exec-complete", s.stageWaitForExecComplete, 600 * time.Second},
-		{"verify-plan-complete", s.stageVerifyPlanComplete, 60 * time.Second},
+		{"wait-for-execution-complete", s.stageWaitForExecutionComplete, 600 * time.Second},
 		{"verify-mock-stats", s.stageVerifyMockStats, 10 * time.Second},
 	}
 
@@ -273,12 +271,6 @@ func (s *ExecutionPhaseScenario) stageWaitForApproval(ctx context.Context, resul
 func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	// Snapshot agent.complete.* count BEFORE triggering execution.
-	// The mock pipeline completes in <1s so we must capture the baseline
-	// before any execution messages arrive.
-	baselineEntries, _ := s.http.GetMessageLogEntries(ctx, 500, "agent.complete.*")
-	result.SetDetail("exec_complete_baseline_count", len(baselineEntries))
-
 	resp, err := s.http.ExecutePlan(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("execute plan: %w", err)
@@ -292,82 +284,14 @@ func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, resu
 	return nil
 }
 
-// stageWaitForExecStart polls the message-logger for evidence that the
-// execution pipeline has started. We look for agent.task.* messages which
-// are published when the TDD pipeline dispatches its first stage (tester).
-// Earlier signals like workflow.trigger.requirement-execution-loop may be evicted
-// from the message-logger buffer by the time we poll.
-func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, result *Result) error {
-	const subject = "agent.task.*"
-
-	if err := s.pollMessageLogger(ctx, subject, 1); err != nil {
-		return fmt.Errorf("execution pipeline agent tasks not observed: %w", err)
-	}
-
-	result.SetDetail("exec_loop_triggered", true)
-	return nil
-}
-
-// stageWaitForExecComplete polls two message-logger subjects to confirm the
-// execution pipeline completed end-to-end:
-//
-//  1. workflow.trigger.task-execution-loop — published by requirement-execution-loop
-//     after decompose_task succeeds; confirms DAG nodes were dispatched.
-//  2. agent.complete.* — published when any agentic loop finishes.
-//     We wait for count growth beyond the pre-execution baseline to confirm
-//     execution-phase loops completed (not just planning loops).
-//
-// Both checks are HARD assertions. The mock fixtures produce working code
-// that passes structural validation, so all executions should reach approved.
-func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, result *Result) error {
-	// Use baseline captured in stageTriggerExecution (before execution started).
-	baseline := 0
-	if v, ok := result.GetDetail("exec_complete_baseline_count"); ok {
-		if n, ok := v.(int); ok {
-			baseline = n
-		}
-	}
-
-	// First gate: wait for task-execution-loop trigger messages.
-	// With 3 requirements each decomposed into 1 node, expect at least 3.
-	taskExecSubject := "workflow.trigger.task-execution-loop"
-	if err := s.pollMessageLogger(ctx, taskExecSubject, 1); err != nil {
-		return fmt.Errorf("task-execution-loop trigger not observed: %w", err)
-	}
-	result.SetDetail("task_exec_loop_dispatched", true)
-
-	// Second gate: wait for agentic loop completions beyond baseline.
-	// 1 decomposer loop + (tester + builder + reviewer) = 4 loops minimum.
-	// We require at least 1 new completion (the decomposer loop).
-	const minNewCompletions = 1
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("agent.complete.* count did not grow by %d beyond baseline %d: %w",
-				minNewCompletions, baseline, ctx.Err())
-		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(ctx, 500, "agent.complete.*")
-			if err != nil {
-				continue
-			}
-			newCount := len(entries) - baseline
-			if newCount >= minNewCompletions {
-				result.SetDetail("exec_complete_observed", true)
-				result.SetDetail("exec_complete_count", len(entries))
-				result.SetDetail("exec_complete_new", newCount)
-				return nil
-			}
-		}
-	}
-}
-
-// stageVerifyPlanComplete polls until the plan reaches a terminal complete status.
-// This catches the convergence watcher regression where plans get stuck in implementing.
-func (s *ExecutionPhaseScenario) stageVerifyPlanComplete(ctx context.Context, result *Result) error {
+// stageWaitForExecutionComplete polls PLAN_STATES via the HTTP API until the
+// plan reaches a terminal status. The KV write IS the event — components
+// self-trigger off PLAN_STATES, so the authoritative completion signal is the
+// plan's status field, not message-bus events. (Predecessor stages
+// stageWaitForExecStart + stageWaitForExecComplete polled
+// workflow.trigger.task-execution-loop, which died with the rules-engine
+// removal; both stages were redundant with this check anyway.)
+func (s *ExecutionPhaseScenario) stageWaitForExecutionComplete(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -465,31 +389,4 @@ func (s *ExecutionPhaseScenario) stageVerifyMockStats(ctx context.Context, resul
 	result.SetDetail("mock_call_summary", strings.Join(summary, ", "))
 
 	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-// pollMessageLogger polls the message-logger until at least minCount entries
-// appear for the given subjectFilter, or the context is cancelled.
-func (s *ExecutionPhaseScenario) pollMessageLogger(ctx context.Context, subjectFilter string, minCount int) error {
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(ctx, 100, subjectFilter)
-			if err != nil {
-				// Transient error — keep polling.
-				continue
-			}
-			if len(entries) >= minCount {
-				return nil
-			}
-		}
-	}
 }
