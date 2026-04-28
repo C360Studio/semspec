@@ -570,6 +570,7 @@ tasks:
       - echo "[UI:LLM:UP] Building and starting real LLM stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 10 2>/dev/null
         ignore_error: true
+      - task: reset-fixtures
       - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
       - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
       - |
@@ -588,6 +589,7 @@ tasks:
       - echo "[UI:MOCK:UP] Cleaning stale state..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 10 2>/dev/null
         ignore_error: true
+      - task: reset-fixtures
       - echo "[UI:MOCK:UP] Building and starting..."
       - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml build
       - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml up -d --wait
@@ -647,6 +649,46 @@ tasks:
     cmds:
       - docker compose -f ui/docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
 
+  reset-fixtures:
+    internal: true
+    desc: Reset e2e fixture repos to their initial commits and prune accumulated agent/semspec branches.
+    cmds:
+      - |
+        for fixture in test/e2e/fixtures/go-project test/e2e/fixtures/osh-driver-meshtastic; do
+          if [ ! -d "$fixture/.git" ]; then
+            continue
+          fi
+          ROOT=$(git -C "$fixture" rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+          if [ -z "$ROOT" ]; then
+            echo "[RESET-FIXTURES] $fixture has no commits — skipping"
+            continue
+          fi
+          echo "[RESET-FIXTURES] $fixture -> $ROOT"
+          # Force main to the root commit and switch to it, drop unstaged +
+          # untracked (but keep ignored), then prune every accumulated
+          # agent/* + semspec/* branch the agents created. The previous
+          # inline pattern only reset whichever branch HEAD happened to be
+          # on, leaving cross-run drift on main and other branches.
+          # `checkout -f` is required because prior runs leave the working
+          # tree dirty (modified main.go, untracked main_test.go, etc.) —
+          # without -f the switch aborts.
+          git -C "$fixture" checkout -q -f -B main "$ROOT"
+          git -C "$fixture" reset --hard -q "$ROOT"
+          git -C "$fixture" clean -fd -q
+          # Remove the .semspec/worktrees/ directory so `git worktree prune`
+          # forgets the worktrees the agents created during prior runs. Then
+          # branch -D works because no worktree pins the ref anymore.
+          # `--expire=now` is required because the default expiry is 3 hours;
+          # without it, prune leaves recent stale entries in place and the
+          # subsequent branch-delete fails with "branch in use by worktree".
+          rm -rf "$fixture/.semspec/worktrees" "$fixture/.semspec/plans" 2>/dev/null || true
+          git -C "$fixture" worktree prune --expire=now -q 2>/dev/null || true
+          git -C "$fixture" for-each-ref --format='%(refname:short)' refs/heads | grep -vE '^main$' | while read -r b; do
+            git -C "$fixture" branch -D -q "$b" 2>/dev/null || true
+          done
+        done
+        echo "[OK] Fixtures reset"
+
   ui:cleanup:mock:
     internal: true
     cmds:
@@ -663,6 +705,7 @@ tasks:
         else
           docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null || true
         fi
+      - task: reset-fixtures
 
   ui:cleanup:llm:
     internal: true
@@ -680,10 +723,8 @@ tasks:
         else
           # Tear down with the epic overlay too — harmless when it wasn't used.
           docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml -f ui/docker-compose.e2e-epic.yml down -v --timeout 15 2>/dev/null || true
-          # Reset fixture dirs to avoid dirty working tree between runs.
-          (cd test/e2e/fixtures/go-project && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null) || true
-          (cd test/e2e/fixtures/osh-driver-meshtastic && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null) || true
         fi
+      - task: reset-fixtures
 
   stacks:
     desc: Show which E2E stacks are running (useful when sharing a machine)

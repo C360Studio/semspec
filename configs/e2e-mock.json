@@ -519,8 +519,7 @@
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 1,
         "max_decomposer_retries": 1,
-        "enforce_scenario_coverage": false,
-        "require_commit_observation": false
+        "enforce_scenario_coverage": false
       }
     },
     "structural-validator": {
@@ -544,8 +543,7 @@
         "max_tdd_cycles": 3,
         "timeout_seconds": 300,
         "model": "mock-coder",
-        "sandbox_url": "http://sandbox:8090",
-        "require_merge_observation": false
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "workflow-documents": {

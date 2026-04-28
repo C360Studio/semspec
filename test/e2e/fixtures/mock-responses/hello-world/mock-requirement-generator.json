@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"requirements\": [{\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing 'Goodbye, World!'. The response must have Content-Type application/json and return HTTP 200. Include unit tests.\"}]}"
+        "arguments": "{\"requirements\": [{\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint MUST return HTTP 200 with Content-Type application/json and a JSON body containing a 'message' field whose value is 'Goodbye, World!'. The route MUST be registered on the same ServeMux as the existing / route. Include unit tests using net/http/httptest that exercise the handler against the mux.\"}]}"
       }
     }
   ],

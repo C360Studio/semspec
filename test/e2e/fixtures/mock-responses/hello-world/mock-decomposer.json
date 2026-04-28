@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "decompose_task",
-        "arguments": "{\"goal\":\"Implement /goodbye endpoint for hello world project\",\"nodes\":[{\"id\":\"implement-goodbye\",\"prompt\":\"Add a /goodbye endpoint to api/app.py that returns JSON {\\\"message\\\": \\\"Goodbye, World!\\\"}. Include tests in api/test_goodbye.py.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\",\"api/test_goodbye.py\"]}]}"
+        "arguments": "{\"goal\":\"Implement /goodbye endpoint in main.go and add unit tests in main_test.go\",\"nodes\":[{\"id\":\"implement-goodbye\",\"prompt\":\"Refactor main.go to expose buildMux() *http.ServeMux containing both / and /goodbye routes; the /goodbye handler must write Content-Type application/json and a JSON body {\\\"message\\\": \\\"Goodbye, World!\\\"}. Add main_test.go that exercises buildMux() via net/http/httptest and asserts status, content-type, and body.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"main.go\",\"main_test.go\"],\"scenario_ids\":[\"scenario.1\",\"scenario.2\"]}]}"
       }
     }
   ],
