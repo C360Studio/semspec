@@ -29,7 +29,6 @@ import (
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -438,32 +437,18 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // a Goal/Context/Scope plan. Running through the agentic loop gives it real
 // tool execution, trajectory tracking, and codebase visibility.
 // buildPlannerUserPrompt assembles the per-turn user prompt for the planning
-// agent. Composes the revision-context preamble (when retrying after a
-// reviewer rejection) with the optional previous-error retry note.
-func buildPlannerUserPrompt(title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) string {
-	if isRevision && revisionPrompt != "" {
-		var sb []byte
-		if previousPlanJSON != "" {
-			sb = append(sb, "## Your Previous Plan Output\n\nThis is the plan you produced that was rejected. Update it to address ALL findings below.\n\n```json\n"...)
-			sb = append(sb, previousPlanJSON...)
-			sb = append(sb, "\n```\n\n"...)
-		}
-		sb = append(sb, revisionPrompt...)
-		if previousError != "" {
-			sb = append(sb, "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n"...)
-			sb = append(sb, previousError...)
-			sb = append(sb, "\n\nPlease try again, addressing the issue above."...)
-		}
-		return string(sb)
+// buildPlannerPromptContext maps the dispatcher's args into the typed
+// prompt-package context the user-prompt fragment renders against. Replaces
+// the legacy buildPlannerUserPrompt; the actual prompt body now lives in
+// prompt/domain/software_render.go::renderPlannerPrompt.
+func buildPlannerPromptContext(title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) *prompt.PlannerPromptContext {
+	return &prompt.PlannerPromptContext{
+		Title:            title,
+		IsRevision:       isRevision,
+		PreviousPlanJSON: previousPlanJSON,
+		RevisionPrompt:   revisionPrompt,
+		PreviousError:    previousError,
 	}
-	if title == "" {
-		return ""
-	}
-	prompt := prompts.PlannerPromptWithTitle(title)
-	if previousError != "" {
-		prompt += "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n" + previousError + "\n\nPlease try again, addressing the issue above."
-	}
-	return prompt
 }
 
 func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {
@@ -485,8 +470,6 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 
 	taskID := fmt.Sprintf("plan-%s-%s", slug, uuid.New().String())
 	c.retry.SetActiveLoop(slug, taskID)
-
-	userPrompt := buildPlannerUserPrompt(title, isRevision, previousPlanJSON, revisionPrompt, previousError)
 
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
@@ -512,6 +495,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		MaxTokens:      maxTokens,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
+		PlannerPrompt:  buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError),
 	}
 
 	// Wire role-scoped lessons learned.
@@ -531,12 +515,16 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		c.logger.Error("Planner user-prompt render failed", "slug", slug, "error", assembled.RenderError)
+		return
+	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "plan", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,

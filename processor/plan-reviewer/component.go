@@ -27,7 +27,6 @@ import (
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -361,9 +360,6 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	}
 	hasStandards := stdCtx != nil && len(stdCtx.Items) > 0
 
-	// Build user prompt.
-	userPrompt := prompts.PlanReviewerUserPrompt(slug, planContent, hasStandards, int(round))
-
 	// Resolve model.
 	capability := c.config.DefaultCapability
 	if model.ParseCapability(capability) == "" {
@@ -389,13 +385,23 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		Standards:      stdCtx,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
+		PlanReviewerPrompt: &prompt.PlanReviewerPromptContext{
+			Slug:         slug,
+			PlanContent:  planContent,
+			HasStandards: hasStandards,
+			Round:        int(round),
+		},
 	})
+	if assembled.RenderError != nil {
+		c.logger.Error("Plan-reviewer user-prompt render failed", "slug", slug, "round", round, "error", assembled.RenderError)
+		return
+	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "review", c.availableToolNames()...),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepReviewing,
@@ -520,12 +526,12 @@ func (c *Component) loadPlanContentFromKV(ctx context.Context, slug string) (str
 }
 
 // parseReviewFromResult extracts a PlanReviewResult from the agent's submit_work deliverable.
-func parseReviewFromResult(result string) (*prompts.PlanReviewResult, error) {
+func parseReviewFromResult(result string) (*workflow.PlanReviewResult, error) {
 	if result == "" {
 		return nil, fmt.Errorf("empty result")
 	}
 
-	var review prompts.PlanReviewResult
+	var review workflow.PlanReviewResult
 
 	// Try direct JSON parse first.
 	if err := json.Unmarshal([]byte(result), &review); err == nil {
@@ -580,11 +586,11 @@ func parseReviewFromResult(result string) (*prompts.PlanReviewResult, error) {
 
 // PlanReviewResult is the result payload for plan review.
 type PlanReviewResult struct {
-	RequestID string                      `json:"request_id"`
-	Slug      string                      `json:"slug"`
-	Verdict   string                      `json:"verdict"`
-	Summary   string                      `json:"summary"`
-	Findings  []prompts.PlanReviewFinding `json:"findings"`
+	RequestID string                       `json:"request_id"`
+	Slug      string                       `json:"slug"`
+	Verdict   string                       `json:"verdict"`
+	Summary   string                       `json:"summary"`
+	Findings  []workflow.PlanReviewFinding `json:"findings"`
 	// FormattedFindings is a human-readable markdown rendering of the findings.
 	FormattedFindings string   `json:"formatted_findings"`
 	Status            string   `json:"status"`
@@ -615,7 +621,7 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 
 // extractPlanLessons creates lessons from error-severity findings in a plan review rejection.
 // Each finding is tagged with the role responsible for the phase that produced it.
-func (c *Component) extractPlanLessons(ctx context.Context, slug string, result *prompts.PlanReviewResult) {
+func (c *Component) extractPlanLessons(ctx context.Context, slug string, result *workflow.PlanReviewResult) {
 	if c.lessonWriter == nil {
 		return
 	}

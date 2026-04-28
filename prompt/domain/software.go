@@ -264,7 +264,7 @@ The reviewer rejected your implementation with this feedback:
 
 Address ALL issues mentioned in the feedback. Do not ignore any points.
 
-Re-check applicable SOPs using graph_search if the feedback mentions standards or conventions you may have missed.
+If the feedback mentions standards, conventions, or "should follow X" — your FIRST tool call before re-implementing must be graph_search to find the canonical reference. Re-implementing on a guess produces the same rejection again.
 
 - Fix EVERY issue mentioned in feedback
 - Use bash cat to check current state, then write fixes via bash
@@ -309,6 +309,21 @@ Your workspace contains files from a previous attempt at this task.
 Your ONLY job is to understand the problem, explore the codebase for relevant context, and produce a plan with clear Goal, Context, and Scope. You do NOT write code, generate tasks, or make implementation decisions.
 
 You optimize for CLARITY and COMPLETENESS of the plan specification.`,
+		},
+		{
+			// User-message renderer for the planner. Replaces
+			// processor/planner/buildPlannerUserPrompt + the legacy
+			// workflow/prompts.PlannerPromptWithTitle helper.
+			ID:       "software.planner.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RolePlanner},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.PlannerPrompt
+				if p == nil {
+					return "", fmt.Errorf("planner user-prompt: AssemblyContext.PlannerPrompt is nil")
+				}
+				return renderPlannerPrompt(p), nil
+			},
 		},
 		{
 			ID:       "software.planner.output-format",
@@ -421,6 +436,21 @@ Guidelines:
 - If scope references files that don't exist AND the plan does not intend to create them, flag as an error-severity violation (hallucinated paths)
 - Files the plan explicitly intends to create (e.g. new test files, new modules) are VALID scope entries even if they don't exist yet — do NOT flag these as violations
 - For genuinely hallucinated paths (typos, wrong directories, files with no creation intent), suggest replacing with actual project files from the file tree`,
+		},
+		{
+			// User-message renderer for plan-reviewer (rounds 1 + 2). Replaces
+			// workflow/prompts.PlanReviewerUserPrompt — including the
+			// dial-#1 round-2 file-ownership criterion 3a.
+			ID:       "software.plan-reviewer.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RolePlanReviewer},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.PlanReviewerPrompt
+				if p == nil {
+					return "", fmt.Errorf("plan-reviewer user-prompt: AssemblyContext.PlanReviewerPrompt is nil")
+				}
+				return renderPlanReviewerPrompt(p), nil
+			},
 		},
 		{
 			ID:       "software.plan-reviewer.output-format",
@@ -631,7 +661,40 @@ Each requirement must:
 - Describe a distinct piece of intent — what the system should do or be
 - Be independently testable
 - Use active voice: "The system must...", "Users must be able to..."
-- Describe outcomes, not implementation (no function names, class names, or data structures)`,
+- Describe outcomes, not implementation (no function names, class names, or data structures)
+
+CRITICAL — Partition files across requirements (parallel execution rule):
+
+Requirements run in parallel git worktrees. If two requirements both write to the same file with no dependency between them, the integration merge fails and the entire plan stalls.
+
+For EVERY requirement, set files_owned to the workspace-relative paths that requirement is allowed to modify (drawn from the plan's scope.include). The set across all requirements must satisfy:
+- Disjoint by default — if two requirements need the same path, one must list the other in depends_on (by title) so the executor sequences them.
+- Cover the work — every path that needs editing must appear in some requirement's files_owned.
+- Stay in scope — only list paths that appear in the plan's scope.include and not in scope.protected.
+
+When the goal touches both implementation and tests for the same surface, prefer ONE requirement that owns BOTH files (impl + its test) rather than splitting. Splitting tests away from the impl that defines them is the most common cause of merge deadlock.
+
+Use depends_on (referenced by requirement title) when one requirement must finish before another begins.
+
+Skipping files_owned or producing overlapping requirements without depends_on edges will be rejected by the validator and you will be asked to regenerate.`,
+		},
+		{
+			// User-message renderer — replaces the legacy
+			// processor/requirement-generator/c.buildUserPrompt method. Lives
+			// in the registry so future edits land in one place; the
+			// CategoryUserPrompt slot is enforced unique per role at
+			// registration time so dual-pattern orphans (the dial-#1 footgun)
+			// are structurally impossible.
+			ID:       "software.requirement-generator.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				rg := ctx.RequirementGenerator
+				if rg == nil {
+					return "", fmt.Errorf("requirement-generator user-prompt: AssemblyContext.RequirementGenerator is nil")
+				}
+				return renderRequirementGeneratorPrompt(rg), nil
+			},
 		},
 		{
 			ID:       "software.requirement-generator.output-format",
@@ -643,12 +706,24 @@ Each requirement must:
   "requirements": [
     {
       "title": "Goodbye endpoint returns JSON",
-      "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field"
+      "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field",
+      "files_owned": ["api/handlers/goodbye.go", "api/handlers/goodbye_test.go"]
+    },
+    {
+      "title": "Goodbye endpoint surfaced through router",
+      "description": "GET /goodbye must be reachable via the main HTTP router, not only the handler in isolation",
+      "depends_on": ["Goodbye endpoint returns JSON"],
+      "files_owned": ["main.go"]
     }
   ]
 }
 
-Required: requirements (array of objects, each with title and description strings).
+Required fields per requirement:
+- title (string)
+- description (string)
+- files_owned (array of workspace-relative paths) — MANDATORY. Empty arrays are not acceptable. If a requirement modifies no files, it isn't a code requirement.
+- depends_on (array of titles) — optional, use when one requirement must follow another or when sharing a file with another requirement.
+
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
@@ -675,6 +750,20 @@ Scenario Design:
 - Then: Expected outcomes as an ARRAY of assertions. Use specific values where possible
 
 Do NOT include implementation details — describe WHAT happens, not HOW it is implemented.`,
+		},
+		{
+			// User-message renderer for scenario-generator. Replaces
+			// workflow/prompts.ScenarioGeneratorPrompt(params).
+			ID:       "software.scenario-generator.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.ScenarioGeneratorPrompt
+				if p == nil {
+					return "", fmt.Errorf("scenario-generator user-prompt: AssemblyContext.ScenarioGeneratorPrompt is nil")
+				}
+				return renderScenarioGeneratorPrompt(p), nil
+			},
 		},
 		{
 			ID:       "software.scenario-generator.output-format",
@@ -723,6 +812,20 @@ Guidelines:
 - Justify every decision with a clear rationale
 - Flag architectural risks and trade-offs
 - Keep component boundaries aligned with the existing project structure`,
+		},
+		{
+			// User-message renderer for architect. Replaces
+			// workflow/prompts.ArchitectPrompt(params).
+			ID:       "software.architect.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RoleArchitect},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.ArchitectPrompt
+				if p == nil {
+					return "", fmt.Errorf("architect user-prompt: AssemblyContext.ArchitectPrompt is nil")
+				}
+				return renderArchitectPrompt(p), nil
+			},
 		},
 		{
 			ID:       "software.architect.output-format",
@@ -979,14 +1082,14 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 			Condition: func(_ *prompt.AssemblyContext) bool {
 				return true
 			},
-			Content: `DISCOVERY BEFORE ACTION:
-1. bash('ls -la') to see the project structure and existing files
-2. Read the project config (go.mod, package.json, etc.) for the real module/package path
-3. Read existing test files and implementation files for patterns
-4. Optionally use graph_search for coding conventions and similar implementations
-5. Only AFTER you understand the codebase should you start writing tests and code
+			Content: `DISCOVERY BEFORE ACTION (in this order):
+1. graph_summary FIRST to learn what the system already knows: components, prior decisions, applicable standards. Skipping this means rediscovering things bash can't see (cross-file relationships, dependencies, who-calls-what).
+2. graph_search for the specific problem area: "how is X implemented today", "what conventions are used for Y", "are there standards for Z". Use natural language; the graph will return synthesized answers.
+3. bash('ls -la') and read project config (go.mod, package.json, etc.) only after graph orientation — to confirm paths and read specific files the graph pointed you at.
+4. Read existing test and implementation files for patterns.
+5. Only AFTER you understand the codebase should you start writing tests and code.
 Do NOT interleave discovery and implementation — investigate thoroughly, then act.
-If graph results are empty or unhelpful, fall back to bash — do not retry the same query.`,
+If graph results are empty or unhelpful, note it (the index may be cold) and fall back to bash — do not retry the same query.`,
 		},
 
 		// =====================================================================
@@ -1087,9 +1190,26 @@ Other agents may be working on the same codebase simultaneously.
 			ID:       "software.orientation",
 			Category: prompt.CategoryProviderHints,
 			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return len(ctx.AvailableTools) > 1
+				return len(ctx.AvailableTools) > 1 && ctx.HasTool("graph_summary")
 			},
-			Content: `Orient yourself briefly (graph_summary or a few bash commands), then submit your work.`,
+			Content: `Orient yourself with the knowledge graph BEFORE running any bash commands.
+
+Iteration 1 MUST call graph_summary to discover what entities exist (modules, packages, files, components, prior decisions). Iteration 2+ should use graph_search for natural-language questions about the codebase ("how does authentication work", "where is logging configured") and graph_query for structured lookups.
+
+Why this matters: bash sees the file tree but can't answer "which files implement X" or "what calls this function" without you grepping line by line. The graph already has that index — skipping it means redoing work the system already did. A single graph_summary call is faster and broader than any sequence of ls/cat/grep.
+
+Use bash for reading specific files, running tests, and writing code. Use graph_summary/graph_search/graph_query first to know WHICH files matter. If your first tool call is bash on a fresh task, you have almost certainly skipped a step.`,
+		},
+		{
+			// Fallback orientation for personas whose tool allowlist excludes
+			// the graph tools (some narrow roles). Preserves the prior
+			// "orient briefly" guidance without the graph-first directive.
+			ID:       "software.orientation.no-graph",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 1 && !ctx.HasTool("graph_summary")
+			},
+			Content: `Orient yourself briefly with bash (ls, cat, git log) before producing output. Don't explore open-ended — every tool call should advance toward submit_work.`,
 		},
 		// Gemini-specific: streaming accumulator needs explicit tool-first behavior
 		{
@@ -1423,9 +1543,23 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 
 You MUST call submit_work to deliver your verdict. This is the only valid output mechanism.
 
-You MAY use bash to inspect files mentioned in the artifacts list or to run quick checks (e.g., look at a test file's assertions). Use graph_search or graph_query to retrieve architectural context if needed.
+Start with graph_summary to ground your review in what the system already knows about this plan's domain. Use graph_search for "what does this requirement actually depend on" / "have we made decisions about X before" — judging requirement_fulfillment without consulting the graph means you can miss that a related-but-not-named integration was already committed (or rejected). After graph orientation, you MAY use bash to inspect specific files mentioned in the artifacts list or to run quick checks (e.g., look at a test file's assertions).
 
 MUST NOT skip submit_work or respond in prose. The pipeline will reject any loop that does not end with submit_work.`,
+		},
+		{
+			// User-message renderer for QA reviewer. Replaces
+			// processor/qa-reviewer/buildUserPrompt.
+			ID:       "software.plan-qa-reviewer.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RolePlanQAReviewer},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.QAReviewerPrompt
+				if p == nil {
+					return "", fmt.Errorf("qa-reviewer user-prompt: AssemblyContext.QAReviewerPrompt is nil")
+				}
+				return renderQAReviewerPrompt(p), nil
+			},
 		},
 		{
 			ID:       "software.plan-qa-reviewer.output-format",

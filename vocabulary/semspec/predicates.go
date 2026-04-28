@@ -636,6 +636,11 @@ const (
 	// Requirements form a DAG — a requirement is only ready for execution
 	// when all of its dependencies have their scenarios passing.
 	RequirementDependsOn = "semspec.requirement.depends_on"
+
+	// RequirementFilesOwned is a workspace-relative path this requirement is
+	// allowed to modify. Multi-valued — written as one triple per path.
+	// Used to detect parallel-merge conflicts at planning time.
+	RequirementFilesOwned = "semspec.requirement.files_owned"
 )
 
 // Scenario predicates define attributes for behavioral contracts.
@@ -1861,6 +1866,11 @@ func registerRequirementPredicates() {
 		vocabulary.WithDescription("Link to prerequisite requirement entity (DAG edge)"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"requirementDependsOn"))
+
+	vocabulary.Register(RequirementFilesOwned,
+		vocabulary.WithDescription("Workspace-relative path this requirement is allowed to modify"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"requirementFilesOwned"))
 
 	vocabulary.Register(TaskScenario,
 		vocabulary.WithDescription("Link to scenarios this task satisfies (SATISFIES edge)"),

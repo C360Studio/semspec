@@ -10,7 +10,6 @@ import (
 	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -187,6 +186,9 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 
 	if err := workflow.ValidateRequirementDAG(req.Requirements); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid requirement DAG: %v", err)}
+	}
+	if err := workflow.ValidateFileOwnershipPartition(req.Requirements); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid requirement file ownership: %v", err)}
 	}
 
 	c.mu.RLock()
@@ -651,7 +653,7 @@ func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *w
 // formatReviewFindings attempts to format raw findings JSON into human-readable text.
 // Falls back to the summary string if findings can't be parsed.
 func formatReviewFindings(findingsJSON json.RawMessage, summary, verdict string) string {
-	var result prompts.PlanReviewResult
+	var result workflow.PlanReviewResult
 	if err := json.Unmarshal(findingsJSON, &result.Findings); err == nil {
 		result.Summary = summary
 		result.Verdict = verdict
@@ -1268,7 +1270,7 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 // If ANY error finding targets an earlier phase, re-entry cascades from there.
 // Without phase markers, falls back to StatusApproved (clear everything).
 func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON json.RawMessage) workflow.Status {
-	var findings []prompts.PlanReviewFinding
+	var findings []workflow.PlanReviewFinding
 	if err := json.Unmarshal(findingsJSON, &findings); err != nil {
 		// Can't parse findings — fall back to clear everything.
 		plan.Requirements = nil

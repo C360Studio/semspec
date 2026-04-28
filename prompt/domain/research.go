@@ -25,10 +25,11 @@ Prioritize accuracy and completeness over speed.`,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Research Process
 
-1. Gather sources: Use graph_search to find relevant entities and documents.
-2. Cross-reference: Verify claims across multiple sources before stating them as findings.
-3. Identify gaps: Note where evidence is insufficient or contradictory.
-4. Synthesize: Combine findings into a coherent analysis.
+1. Orient: Call graph_summary FIRST to learn what entity types, components, and decisions already exist. Without this, you'll miss prior art and re-derive answers the graph already has.
+2. Gather sources: Use graph_search for natural-language questions and graph_query for structured lookups. The graph is the system's memory; bash is its file tree. Start with the memory.
+3. Cross-reference: Verify claims across multiple sources before stating them as findings.
+4. Identify gaps: Note where evidence is insufficient or contradictory.
+5. Synthesize: Combine findings into a coherent analysis.
 
 Evidence Standards:
 - Cite sources for every factual claim

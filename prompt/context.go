@@ -61,6 +61,31 @@ type AssemblyContext struct {
 	// Vocabulary provides display labels for prompt rendering.
 	// When nil, hardcoded defaults are used.
 	Vocabulary *Vocabulary
+
+	// RequirementGenerator carries data for the requirement-generator user
+	// prompt. Set by the requirement-generator component before assembly;
+	// nil for any other role.
+	RequirementGenerator *RequirementGeneratorContext
+
+	// PlannerPrompt carries data for the planner user prompt. Set by the
+	// planner component before assembly; nil for any other role.
+	PlannerPrompt *PlannerPromptContext
+
+	// ScenarioGeneratorPrompt carries data for the scenario-generator user
+	// prompt. Set by the scenario-generator component before assembly.
+	ScenarioGeneratorPrompt *ScenarioGeneratorPromptContext
+
+	// ArchitectPrompt carries data for the architect user prompt. Set by
+	// the architecture-generator component before assembly.
+	ArchitectPrompt *ArchitectPromptContext
+
+	// PlanReviewerPrompt carries data for the plan-reviewer user prompt.
+	// Set by the plan-reviewer component before assembly.
+	PlanReviewerPrompt *PlanReviewerPromptContext
+
+	// QAReviewerPrompt carries data for the QA reviewer user prompt. Set
+	// by the qa-reviewer component before assembly.
+	QAReviewerPrompt *QAReviewerPromptContext
 }
 
 // TaskContext carries data for developer task prompts.

@@ -170,6 +170,71 @@ func TestSoftwareSubmitWorkDirective(t *testing.T) {
 	}
 }
 
+// TestSoftwareOrientationGraphFirst pins the dial-#6 fix: the orientation
+// fragment must hard-direct agents to graph_summary when graph tools are
+// available (the 2026-04-28 Gemini @easy run made 0 graph_* calls because
+// the prompt said "graph_summary OR a few bash commands"). Personas without
+// graph_summary in their allowlist get the legacy bash-only orientation.
+func TestSoftwareOrientationGraphFirst(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	withGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "graph_summary", "graph_search", "graph_query"},
+	})
+	if !strings.Contains(withGraph.SystemMessage, "Iteration 1 MUST call graph_summary") {
+		t.Error("graph-equipped persona should be hard-directed to graph_summary first")
+	}
+	if strings.Contains(withGraph.SystemMessage, "graph_summary or a few bash commands") {
+		t.Error("the soft 'or a few bash commands' phrasing must not survive — that's exactly what produced the 0-graph-call run")
+	}
+
+	withoutGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if strings.Contains(withoutGraph.SystemMessage, "graph_summary") {
+		t.Error("personas without graph_summary in their allowlist must not be told to call it")
+	}
+	if !strings.Contains(withoutGraph.SystemMessage, "Orient yourself briefly") {
+		t.Error("non-graph personas should still get bash-orientation guidance")
+	}
+}
+
+// TestSoftwareRequirementGeneratorFilesOwned pins the dial-#1 prompt landing
+// in the right persona. The first attempt edited workflow/prompts/
+// requirement_generator.go which was dead code and never reached Gemini —
+// the live persona is in this domain registry. This test fails if a future
+// refactor drops the files_owned guidance.
+func TestSoftwareRequirementGeneratorFilesOwned(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	result := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleRequirementGenerator,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"submit_work", "graph_summary"},
+	})
+
+	mustContain := []string{
+		"files_owned",
+		"depends_on",
+		"Partition files across requirements",
+		"merge fails",
+		"prefer ONE requirement that owns BOTH",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(result.SystemMessage, want) {
+			t.Errorf("requirement-generator persona missing %q — dial #1 prompt did not land", want)
+		}
+	}
+}
+
 func TestSoftwareOllamaProviderHint(t *testing.T) {
 	r := prompt.NewRegistry()
 	r.RegisterAll(Software()...)
@@ -194,6 +259,31 @@ func TestSoftwareOllamaProviderHint(t *testing.T) {
 	})
 	if strings.Contains(result.SystemMessage, "function-calling tools available") {
 		t.Error("Anthropic reviewer should not get ollama-tool-enforcement hint")
+	}
+}
+
+// TestSoftwareUserPromptCoverage asserts that every role whose component
+// dispatches via the prompt registry (assembled.UserMessage) has a
+// CategoryUserPrompt fragment registered. Adding a new component that uses the
+// registry path without a user-prompt fragment would otherwise only fail at
+// runtime with an empty user message.
+func TestSoftwareUserPromptCoverage(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+
+	rolesNeedingUserPrompt := []prompt.Role{
+		prompt.RolePlanner,
+		prompt.RoleRequirementGenerator,
+		prompt.RoleScenarioGenerator,
+		prompt.RoleArchitect,
+		prompt.RolePlanReviewer,
+		prompt.RolePlanQAReviewer,
+	}
+
+	for _, role := range rolesNeedingUserPrompt {
+		if r.UserPromptFragmentFor(role) == nil {
+			t.Errorf("role %q has no CategoryUserPrompt fragment registered — components dispatching this role would emit an empty user message", role)
+		}
 	}
 }
 

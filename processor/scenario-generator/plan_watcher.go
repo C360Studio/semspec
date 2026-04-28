@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/c360studio/semspec/prompt"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -64,7 +64,7 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 	// Build architecture context once for all requirements.
 	var archContext string
 	if plan.Architecture != nil {
-		archContext = prompts.FormatArchitectureContext(
+		archContext = prompt.FormatArchitectureContext(
 			toActorInfos(plan.Architecture.Actors),
 			toIntegrationInfos(plan.Architecture.Integrations),
 		)
@@ -87,18 +87,18 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 	}
 }
 
-func toActorInfos(actors []workflow.ActorDef) []prompts.ActorInfo {
-	out := make([]prompts.ActorInfo, len(actors))
+func toActorInfos(actors []workflow.ActorDef) []prompt.ActorInfo {
+	out := make([]prompt.ActorInfo, len(actors))
 	for i, a := range actors {
-		out[i] = prompts.ActorInfo{Name: a.Name, Type: a.Type, Triggers: a.Triggers}
+		out[i] = prompt.ActorInfo{Name: a.Name, Type: a.Type, Triggers: a.Triggers}
 	}
 	return out
 }
 
-func toIntegrationInfos(integrations []workflow.IntegrationPoint) []prompts.IntegrationInfo {
-	out := make([]prompts.IntegrationInfo, len(integrations))
+func toIntegrationInfos(integrations []workflow.IntegrationPoint) []prompt.IntegrationInfo {
+	out := make([]prompt.IntegrationInfo, len(integrations))
 	for i, ip := range integrations {
-		out[i] = prompts.IntegrationInfo{Name: ip.Name, Direction: ip.Direction, Protocol: ip.Protocol}
+		out[i] = prompt.IntegrationInfo{Name: ip.Name, Direction: ip.Direction, Protocol: ip.Protocol}
 	}
 	return out
 }

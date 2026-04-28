@@ -472,16 +472,17 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
 
 	// Build assembly context.
 	asmCtx := &prompt.AssemblyContext{
-		Role:            prompt.RolePlanQAReviewer,
-		Provider:        provider,
-		Domain:          "software",
-		AvailableTools:  prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
-		SupportsTools:   true,
-		MaxTokens:       maxTokens,
-		Standards:       stdCtx,
-		QAReviewContext: qrc,
-		Persona:         prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
-		Vocabulary:      prompt.GlobalPersonas().Vocabulary(),
+		Role:             prompt.RolePlanQAReviewer,
+		Provider:         provider,
+		Domain:           "software",
+		AvailableTools:   prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
+		SupportsTools:    true,
+		MaxTokens:        maxTokens,
+		Standards:        stdCtx,
+		QAReviewContext:  qrc,
+		QAReviewerPrompt: &prompt.QAReviewerPromptContext{Plan: plan},
+		Persona:          prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
+		Vocabulary:       prompt.GlobalPersonas().Vocabulary(),
 	}
 
 	// Load role-scoped lessons.
@@ -501,15 +502,17 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
-
-	// Build user prompt.
-	userPrompt := buildUserPrompt(plan)
+	if assembled.RenderError != nil {
+		c.logger.Error("QA-reviewer user-prompt render failed", "slug", plan.Slug, "error", assembled.RenderError)
+		c.publishFailClosedVerdict(ctx, plan, fmt.Sprintf("qa-reviewer prompt render failed: %v", assembled.RenderError))
+		return
+	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "qa-review", c.availableToolNames()...),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepQAReviewing,
@@ -852,27 +855,22 @@ func buildQAReviewContext(plan *workflow.Plan) *prompt.QAReviewContext {
 	return qrc
 }
 
-// buildUserPrompt builds the user-facing prompt for the QA reviewer agent.
+// buildUserPrompt is a thin wrapper around the registry path so the existing
+// component tests can stay focused on prompt content without going through
+// the full assembler. The actual prompt body lives in
+// prompt/domain/software_render.go::renderQAReviewerPrompt; this helper
+// exists only to keep component_test.go callable. Production dispatch uses
+// assembled.UserMessage from the assembler.
 func buildUserPrompt(plan *workflow.Plan) string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Render a release-readiness verdict for plan: %s\n\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("QA level: %s\n", plan.EffectiveQALevel()))
-
-	if plan.QARun != nil {
-		if plan.QARun.Passed {
-			sb.WriteString("Test execution: PASSED\n")
-		} else {
-			sb.WriteString(fmt.Sprintf("Test execution: FAILED (%d failures)\n", len(plan.QARun.Failures)))
-		}
-		if plan.QARun.RunnerError != "" {
-			sb.WriteString(fmt.Sprintf("Runner error: %s\n", plan.QARun.RunnerError))
-		}
-	} else if plan.EffectiveQALevel() != workflow.QALevelSynthesis {
-		sb.WriteString("Warning: QA executor result unavailable — assess based on plan artifacts only.\n")
-	}
-
-	sb.WriteString("\nUse the system context for detailed plan and test information. Call submit_work with your verdict.")
-	return sb.String()
+	r := prompt.NewRegistry()
+	r.RegisterAll(promptdomain.Software()...)
+	a := prompt.NewAssembler(r)
+	out := a.Assemble(&prompt.AssemblyContext{
+		Role:             prompt.RolePlanQAReviewer,
+		Provider:         prompt.ProviderOpenAI,
+		QAReviewerPrompt: &prompt.QAReviewerPromptContext{Plan: plan},
+	})
+	return out.UserMessage
 }
 
 // qaReviewOutput is the parsed submit_work output from the QA reviewer agent.

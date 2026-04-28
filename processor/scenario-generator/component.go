@@ -30,7 +30,6 @@ import (
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -289,17 +288,17 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, req.RequirementID, uuid.New().String())
 	c.retry.SetActiveLoop(req.Slug+"/"+req.RequirementID, taskID)
 
-	params := prompts.ScenarioGeneratorParams{
-		PlanGoal:            req.PlanGoal,
-		RequirementTitle:    req.RequirementTitle,
-		RequirementDesc:     req.RequirementDescription,
-		ArchitectureContext: req.ArchitectureContext,
-		PreviousError:       previousError,
+	scenCtx := &prompt.ScenarioGeneratorPromptContext{
+		PlanGoal:               req.PlanGoal,
+		RequirementID:          req.RequirementID,
+		RequirementTitle:       req.RequirementTitle,
+		RequirementDescription: req.RequirementDescription,
+		ArchitectureContext:    req.ArchitectureContext,
+		PreviousError:          previousError,
 	}
 	if len(reviewFindings) > 0 {
-		params.ReviewFindings = reviewFindings[0]
+		scenCtx.ReviewFindings = reviewFindings[0]
 	}
-	userPrompt := prompts.ScenarioGeneratorPrompt(params)
 
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
@@ -317,14 +316,15 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
-		Role:           prompt.RoleScenarioGenerator,
-		Provider:       provider,
-		Domain:         "software",
-		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
-		SupportsTools:  true,
-		MaxTokens:      maxTokens,
-		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleScenarioGenerator),
-		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
+		Role:                    prompt.RoleScenarioGenerator,
+		Provider:                provider,
+		Domain:                  "software",
+		AvailableTools:          prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
+		SupportsTools:           true,
+		MaxTokens:               maxTokens,
+		Persona:                 prompt.GlobalPersonas().ForRole(prompt.RoleScenarioGenerator),
+		Vocabulary:              prompt.GlobalPersonas().Vocabulary(),
+		ScenarioGeneratorPrompt: scenCtx,
 	}
 
 	// Wire role-scoped lessons learned.
@@ -344,12 +344,17 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		c.logger.Error("Scenario-generator user-prompt render failed",
+			"slug", req.Slug, "requirement_id", req.RequirementID, "error", assembled.RenderError)
+		return
+	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "scenarios", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,

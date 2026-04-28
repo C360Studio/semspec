@@ -2,9 +2,9 @@ package prompt
 
 // ErrorTrend carries a resolved error category with its occurrence count.
 type ErrorTrend struct {
-	CategoryID string // e.g. "missing_tests"
-	Label      string // e.g. "Missing Tests"
-	Guidance   string // actionable remediation from the category def
+	CategoryID string
+	Label      string
+	Guidance   string
 	Count      int
 }
 
@@ -29,4 +29,19 @@ type RequirementSummary struct {
 
 	// Status is the satisfaction status: "satisfied", "partially", or "failed".
 	Status string
+}
+
+// ExistingRequirementSummary is the lightweight view of a requirement used
+// across multiple user prompts (requirement-generator partial regen,
+// architect requirement context, etc). Only the fields the user prompt
+// actually shows the LLM — keeps the prompt context decoupled from the
+// full workflow.Requirement shape. Renderers consult only the fields they
+// need; "" / nil values are silently skipped.
+type ExistingRequirementSummary struct {
+	ID          string
+	Title       string
+	Description string
+	Status      string
+	FilesOwned  []string
+	DependsOn   []string
 }

@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -159,7 +158,7 @@ func (c *Component) sendApprovalMutations(ctx context.Context, slug string, summ
 // sendRevisionMutation publishes a plan.mutation.revision request so the plan-manager
 // can increment the iteration counter and decide whether to retry or escalate.
 // Falls back to sendGenerationFailed if the mutation request fails (plan must not get stuck).
-func (c *Component) sendRevisionMutation(ctx context.Context, slug string, round reviewRound, result *prompts.PlanReviewResult) {
+func (c *Component) sendRevisionMutation(ctx context.Context, slug string, round reviewRound, result *workflow.PlanReviewResult) {
 	findingsJSON, err := json.Marshal(result.Findings)
 	if err != nil {
 		c.logger.Error("Failed to marshal review findings for revision mutation",

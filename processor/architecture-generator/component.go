@@ -31,7 +31,6 @@ import (
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -314,24 +313,24 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	c.retry.SetActiveLoop(plan.Slug, taskID)
 
 	// Build requirement summaries for the prompt.
-	reqSummaries := make([]prompts.RequirementSummary, len(plan.Requirements))
+	reqSummaries := make([]prompt.ExistingRequirementSummary, len(plan.Requirements))
 	for i, r := range plan.Requirements {
-		reqSummaries[i] = prompts.RequirementSummary{
+		reqSummaries[i] = prompt.ExistingRequirementSummary{
+			ID:          r.ID,
 			Title:       r.Title,
 			Description: r.Description,
 		}
 	}
 
-	params := prompts.ArchitectParams{
-		PlanGoal:      plan.Goal,
-		PlanContext:   plan.Context,
-		Requirements:  reqSummaries,
-		PreviousError: previousError,
+	archCtx := &prompt.ArchitectPromptContext{
+		Goal:           plan.Goal,
+		PlanContext:    plan.Context,
+		ScopeInclude:   plan.Scope.Include,
+		ScopeExclude:   plan.Scope.Exclude,
+		ScopeProtected: plan.Scope.DoNotTouch,
+		Requirements:   reqSummaries,
+		PreviousError:  previousError,
 	}
-	params.ScopeInclude = plan.Scope.Include
-	params.ScopeExclude = plan.Scope.Exclude
-	params.ScopeProtected = plan.Scope.DoNotTouch
-	userPrompt := prompts.ArchitectPrompt(params)
 
 	// Resolve model for architecture capability.
 	capability := c.config.DefaultCapability
@@ -349,14 +348,15 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
-		Role:           prompt.RoleArchitect,
-		Provider:       provider,
-		Domain:         "software",
-		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
-		SupportsTools:  true,
-		MaxTokens:      maxTokens,
-		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
-		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
+		Role:            prompt.RoleArchitect,
+		Provider:        provider,
+		Domain:          "software",
+		AvailableTools:  prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
+		SupportsTools:   true,
+		MaxTokens:       maxTokens,
+		Persona:         prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
+		Vocabulary:      prompt.GlobalPersonas().Vocabulary(),
+		ArchitectPrompt: archCtx,
 	}
 
 	// Wire role-scoped lessons learned.
@@ -376,12 +376,16 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		c.logger.Error("Architect user-prompt render failed", "slug", plan.Slug, "error", assembled.RenderError)
+		return
+	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "architecture", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,

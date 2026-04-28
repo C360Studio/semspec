@@ -39,6 +39,12 @@ const (
 	CategoryOutputFormat Category = 600
 	// CategoryGapDetection contains gap detection instructions.
 	CategoryGapDetection Category = 700
+	// CategoryUserPrompt holds the per-role user-message template. Unlike every
+	// other category, fragments in this category do NOT contribute to the
+	// system message — they render the agent's user-message via Fragment.UserPrompt.
+	// Exactly one fragment per Role may carry this category; the registry
+	// rejects duplicates at registration time.
+	CategoryUserPrompt Category = 800
 )
 
 // Provider identifies an LLM provider for formatting purposes.
@@ -92,6 +98,13 @@ type Fragment struct {
 	// ContentFunc generates content dynamically from the AssemblyContext.
 	// Takes precedence over Content when set.
 	ContentFunc func(*AssemblyContext) string
+
+	// UserPrompt generates the agent's user message from the AssemblyContext.
+	// Only valid on fragments with Category == CategoryUserPrompt; the assembler
+	// ignores it on every other category. Returning a non-nil error surfaces in
+	// AssembledPrompt.RenderError so the caller can fail loudly instead of
+	// shipping an empty user message.
+	UserPrompt func(*AssemblyContext) (string, error)
 
 	// Roles limits this fragment to specific roles. Empty means all roles.
 	Roles []Role

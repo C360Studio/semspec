@@ -118,8 +118,10 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 // requirementItem is the agent-generated JSON shape for a single requirement.
 // The agent is instructed to output an array of these objects.
 type requirementItem struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	DependsOn   []string `json:"depends_on,omitempty"`  // titles of prerequisite requirements (resolved to IDs at build time)
+	FilesOwned  []string `json:"files_owned,omitempty"` // workspace-relative paths this requirement may modify
 }
 
 // pendingDispatch records metadata for an in-flight requirement-generation dispatch.
@@ -274,8 +276,6 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 
 	taskID := fmt.Sprintf("reqgen-%s-%s", trigger.Slug, uuid.New().String())
 
-	userPrompt := c.buildUserPrompt(trigger, previousError, reviewFindings...)
-
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
 	if capability == "" {
@@ -292,14 +292,15 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
-		Role:           prompt.RoleRequirementGenerator,
-		Provider:       provider,
-		Domain:         "software",
-		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
-		SupportsTools:  true,
-		MaxTokens:      maxTokens,
-		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleRequirementGenerator),
-		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
+		Role:                 prompt.RoleRequirementGenerator,
+		Provider:             provider,
+		Domain:               "software",
+		AvailableTools:       prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
+		SupportsTools:        true,
+		MaxTokens:            maxTokens,
+		Persona:              prompt.GlobalPersonas().ForRole(prompt.RoleRequirementGenerator),
+		Vocabulary:           prompt.GlobalPersonas().Vocabulary(),
+		RequirementGenerator: buildRequirementGeneratorPromptContext(trigger, previousError, reviewFindings...),
 	}
 
 	// Wire role-scoped lessons learned.
@@ -319,12 +320,21 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		// User-prompt render failure is a registration / data-shape bug, not
+		// a transient runtime error — fail the dispatch loud rather than
+		// shipping an empty user message to the LLM.
+		c.logger.Error("Requirement-generator user-prompt render failed",
+			"slug", trigger.Slug, "error", assembled.RenderError)
+		c.sendGenerationFailed(ctx, trigger.Slug, assembled.RenderError.Error())
+		return
+	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
 		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "requirements", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
@@ -374,69 +384,43 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		"system_chars", assembled.SystemMessageChars)
 }
 
-// buildUserPrompt constructs the user prompt for the requirement-generator agent.
-// For partial regeneration (ReplaceRequirementIDs set), it includes the approved
-// requirements and rejection reasons so the agent only regenerates replacements.
-// previousError, when non-empty, appends a "Previous Attempt Failed" section so
-// the agent understands what went wrong and can correct its output.
-// reviewFindings, when non-empty, appends a "Previous Review Findings" section so
-// the agent addresses completeness gaps from a prior review round (ADR-029).
-func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorRequest, previousError string, reviewFindings ...string) string {
-	var sb strings.Builder
-
-	sb.WriteString("## Plan to Decompose\n\n")
-	if trigger.Title != "" {
-		sb.WriteString(fmt.Sprintf("**Title**: %s\n\n", trigger.Title))
-	}
-	if trigger.Goal != "" {
-		sb.WriteString(fmt.Sprintf("**Goal**: %s\n\n", trigger.Goal))
-	}
-	if trigger.Context != "" {
-		sb.WriteString(fmt.Sprintf("**Context**: %s\n\n", trigger.Context))
+// buildRequirementGeneratorPromptContext maps the trigger payload into the
+// typed prompt-package context the user-prompt fragment renders against.
+// All actual prompt content lives in
+// prompt/domain/software_render.go::renderRequirementGeneratorPrompt — this
+// function does pure data adaptation so the prompt and the dispatch logic
+// can evolve independently. Replaces the legacy c.buildUserPrompt method
+// the registry consumed before Plan B.
+func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGeneratorRequest, previousError string, reviewFindings ...string) *prompt.RequirementGeneratorContext {
+	rg := &prompt.RequirementGeneratorContext{
+		Title:                 trigger.Title,
+		Goal:                  trigger.Goal,
+		Context:               trigger.Context,
+		ReplaceRequirementIDs: trigger.ReplaceRequirementIDs,
+		RejectionReasons:      trigger.RejectionReasons,
+		PreviousError:         previousError,
 	}
 	if trigger.Scope != nil {
-		if len(trigger.Scope.Include) > 0 {
-			sb.WriteString(fmt.Sprintf("**Scope Include**: %s\n\n", strings.Join(trigger.Scope.Include, ", ")))
-		}
-		if len(trigger.Scope.Exclude) > 0 {
-			sb.WriteString(fmt.Sprintf("**Scope Exclude**: %s\n\n", strings.Join(trigger.Scope.Exclude, ", ")))
-		}
-		if len(trigger.Scope.DoNotTouch) > 0 {
-			sb.WriteString(fmt.Sprintf("**Do Not Touch**: %s\n\n", strings.Join(trigger.Scope.DoNotTouch, ", ")))
-		}
+		rg.ScopeInclude = trigger.Scope.Include
+		rg.ScopeExclude = trigger.Scope.Exclude
+		rg.ScopeDoNotTouch = trigger.Scope.DoNotTouch
 	}
-
-	if len(trigger.ReplaceRequirementIDs) > 0 {
-		sb.WriteString("## Existing Approved Requirements (DO NOT regenerate these)\n\n")
+	if len(trigger.ExistingRequirements) > 0 {
+		rg.ExistingRequirements = make([]prompt.ExistingRequirementSummary, 0, len(trigger.ExistingRequirements))
 		for _, r := range trigger.ExistingRequirements {
-			if r.Status == workflow.RequirementStatusActive {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", r.ID, r.Title))
-			}
+			rg.ExistingRequirements = append(rg.ExistingRequirements, prompt.ExistingRequirementSummary{
+				ID:         r.ID,
+				Title:      r.Title,
+				Status:     string(r.Status),
+				FilesOwned: r.FilesOwned,
+				DependsOn:  r.DependsOn,
+			})
 		}
-		sb.WriteString("\n## Rejected Requirements (regenerate replacements for these only)\n\n")
-		for _, id := range trigger.ReplaceRequirementIDs {
-			reason := trigger.RejectionReasons[id]
-			if reason == "" {
-				reason = "no reason provided"
-			}
-			sb.WriteString(fmt.Sprintf("- %s: rejected because: %s\n", id, reason))
-		}
-		sb.WriteString("\nGenerate ONLY replacement requirements for the rejected IDs above.\n")
-	} else {
-		sb.WriteString("Extract testable requirements from the above plan. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
 	}
-
-	if previousError != "" {
-		sb.WriteString(fmt.Sprintf("\n## Previous Attempt Failed\n\nYour previous output could not be processed: %s\n\nPlease fix the issue and ensure your response is valid JSON matching the required format.\n", previousError))
+	if len(reviewFindings) > 0 {
+		rg.ReviewFindings = reviewFindings[0]
 	}
-
-	// ADR-029: inject review findings from a prior review round so the generator
-	// addresses completeness gaps (e.g., missing coverage, invalid DAG).
-	if len(reviewFindings) > 0 && reviewFindings[0] != "" {
-		sb.WriteString(fmt.Sprintf("\n## Previous Review Findings (Address These)\n\nThe previous set of requirements was reviewed and rejected. Address ALL of the following findings:\n\n%s\n", reviewFindings[0]))
-	}
-
-	return sb.String()
+	return rg
 }
 
 // watchLoopCompletions watches the AGENT_LOOPS KV bucket for requirement-generation
@@ -639,6 +623,17 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // buildRequirementsFromItems converts agent-emitted items into workflow.Requirement
 // structs, assigning sequential IDs and handling the partial-regen sequence
 // offset so new IDs don't collide with existing ones on the plan.
+//
+// DependsOn comes off the wire as a list of titles (the LLM doesn't see IDs
+// at generation time); we resolve titles to IDs against the current batch
+// AND the surviving existing requirements (partial regen needs to depend on
+// kept reqs by title). Unknown titles are silently dropped — downstream
+// ValidateRequirementDAG will catch dangling references on the resolved IDs,
+// and we don't want a typo'd dependency title to block the rest of the plan.
+//
+// FilesOwned paths are normalized via normalizeFilePath before persistence so
+// "./main.go" and "main.go" don't slip past the partition validator only to
+// collide at git-merge time.
 func buildRequirementsFromItems(slug string, trigger *payloads.RequirementGeneratorRequest, items []requirementItem) []workflow.Requirement {
 	seqOffset := 0
 	if len(trigger.ReplaceRequirementIDs) > 0 {
@@ -647,16 +642,36 @@ func buildRequirementsFromItems(slug string, trigger *payloads.RequirementGenera
 	planID := workflow.PlanEntityID(slug)
 	now := time.Now()
 	out := make([]workflow.Requirement, 0, len(items))
+
+	// Title→ID lookup spans the new batch AND any kept existing requirements
+	// from a partial regen, so a new replacement can declare depends_on on a
+	// surviving sibling by title.
+	titleToID := make(map[string]string, len(items)+len(trigger.ExistingRequirements))
+	for _, r := range trigger.ExistingRequirements {
+		if r.Status == workflow.RequirementStatusActive {
+			titleToID[r.Title] = r.ID
+		}
+	}
 	for i, item := range items {
+		id := fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1)
+		titleToID[item.Title] = id // new wins; downstream validators catch dup-title cases
 		out = append(out, workflow.Requirement{
-			ID:          fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1),
+			ID:          id,
 			PlanID:      planID,
 			Title:       item.Title,
 			Description: item.Description,
+			FilesOwned:  workflow.NormalizeFilePaths(item.FilesOwned),
 			Status:      workflow.RequirementStatusActive,
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		})
+	}
+	for i, item := range items {
+		for _, depTitle := range item.DependsOn {
+			if depID, ok := titleToID[depTitle]; ok && depID != out[i].ID {
+				out[i].DependsOn = append(out[i].DependsOn, depID)
+			}
+		}
 	}
 	return out
 }
@@ -886,15 +901,20 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Requir
 			idSet[r.ID] = true
 		}
 		for i := range requirements {
-			if len(requirements[i].DependsOn) > 0 {
-				valid := requirements[i].DependsOn[:0]
-				for _, dep := range requirements[i].DependsOn {
-					if idSet[dep] {
-						valid = append(valid, dep)
-					}
-				}
-				requirements[i].DependsOn = valid
+			if len(requirements[i].DependsOn) == 0 {
+				continue
 			}
+			// Allocate a fresh slice instead of reusing the existing backing
+			// array via [:0] — the trigger.ExistingRequirements DependsOn slices
+			// can share storage with cached plan state, and an in-place rewrite
+			// would mutate that shared cache.
+			valid := make([]string, 0, len(requirements[i].DependsOn))
+			for _, dep := range requirements[i].DependsOn {
+				if idSet[dep] {
+					valid = append(valid, dep)
+				}
+			}
+			requirements[i].DependsOn = valid
 		}
 	}
 

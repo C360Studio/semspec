@@ -1,158 +1,10 @@
-package prompts
+package workflow
 
 import (
 	"encoding/json"
 	"strings"
 	"testing"
 )
-
-func TestSpecReviewerPrompt(t *testing.T) {
-	params := SpecReviewerParams{
-		SpecContent: "## Requirements\n1. Add login endpoint at POST /api/login\n2. Return JWT token on success\n3. Return 401 on invalid credentials",
-		FileDiffs:   "diff --git a/api/auth.go\n+func Login(w http.ResponseWriter, r *http.Request) {\n+  // login logic\n+}",
-		TaskScope:   []string{"api/auth.go", "api/routes.go"},
-	}
-
-	prompt := SpecReviewerPrompt(params)
-
-	tests := []struct {
-		name     string
-		contains string
-	}{
-		{"role identifier", "spec compliance reviewer"},
-		{"focus question", "Did you build what was asked"},
-		{"over-building check", "Over-building"},
-		{"under-building check", "Under-building"},
-		{"wrong scope check", "Wrong scope"},
-		{"spec content", params.SpecContent},
-		{"scope files", "api/auth.go"},
-		{"diffs", "diff --git"},
-		{"output format", `"role": "spec_reviewer"`},
-		{"verdict field", `"verdict"`},
-		{"type field", `"type"`},
-		{"spec_reference field", `"spec_reference"`},
-		{"json format", "Output ONLY valid JSON"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !strings.Contains(prompt, tt.contains) {
-				t.Errorf("prompt should contain %q", tt.contains)
-			}
-		})
-	}
-}
-
-func TestSpecReviewerPromptTokenBudget(t *testing.T) {
-	params := SpecReviewerParams{
-		SpecContent: "Short spec",
-		FileDiffs:   "Short diff",
-		TaskScope:   []string{"file.go"},
-	}
-
-	prompt := SpecReviewerPrompt(params)
-
-	// Extract system prompt only (before spec content)
-	systemPromptOnly := strings.Split(prompt, params.SpecContent)[0]
-	estimatedTokens := len(systemPromptOnly) / 4
-
-	if estimatedTokens > 600 {
-		t.Errorf("system prompt too long: ~%d tokens (target: <500)", estimatedTokens)
-	}
-}
-
-func TestSpecReviewerPromptVerdicts(t *testing.T) {
-	prompt := SpecReviewerPrompt(SpecReviewerParams{})
-
-	verdicts := []string{
-		VerdictCompliant,
-		VerdictOverBuilt,
-		VerdictUnderBuilt,
-		VerdictWrongScope,
-		VerdictMultipleIssues,
-	}
-
-	for _, verdict := range verdicts {
-		if !strings.Contains(prompt, verdict) {
-			t.Errorf("prompt should document verdict %q", verdict)
-		}
-	}
-}
-
-func TestSpecReviewerPromptFindingTypes(t *testing.T) {
-	prompt := SpecReviewerPrompt(SpecReviewerParams{})
-
-	findingTypes := []string{
-		FindingTypeOverBuilt,
-		FindingTypeUnderBuilt,
-		FindingTypeWrongScope,
-	}
-
-	for _, findingType := range findingTypes {
-		if !strings.Contains(prompt, findingType) {
-			t.Errorf("prompt should document finding type %q", findingType)
-		}
-	}
-}
-
-func TestSpecReviewerPromptExcludesOtherConcerns(t *testing.T) {
-	prompt := SpecReviewerPrompt(SpecReviewerParams{})
-
-	// Should explicitly exclude quality concerns
-	if !strings.Contains(prompt, "Do NOT evaluate code quality, style, security") {
-		t.Error("spec reviewer should explicitly exclude quality concerns")
-	}
-}
-
-func TestSpecReviewerPromptStrictRules(t *testing.T) {
-	prompt := SpecReviewerPrompt(SpecReviewerParams{})
-
-	strictRules := []string{
-		"Over-building is as bad as under-building",
-		"Nice to have",
-		"Refactoring unrelated code",
-	}
-
-	for _, rule := range strictRules {
-		if !strings.Contains(prompt, rule) {
-			t.Errorf("prompt should include strict rule about %q", rule)
-		}
-	}
-}
-
-func TestSpecReviewerPromptNoScope(t *testing.T) {
-	// When no scope is provided, should indicate that
-	params := SpecReviewerParams{
-		SpecContent: "Some spec",
-		FileDiffs:   "Some diff",
-		TaskScope:   nil, // No scope provided
-	}
-
-	prompt := SpecReviewerPrompt(params)
-
-	if !strings.Contains(prompt, "Not specified") {
-		t.Error("prompt should indicate when scope is not specified")
-	}
-}
-
-func TestSpecReviewerPromptMultipleScope(t *testing.T) {
-	params := SpecReviewerParams{
-		TaskScope: []string{
-			"api/auth.go",
-			"api/routes.go",
-			"internal/token/jwt.go",
-			"config/auth.go",
-		},
-	}
-
-	prompt := SpecReviewerPrompt(params)
-
-	for _, file := range params.TaskScope {
-		if !strings.Contains(prompt, file) {
-			t.Errorf("prompt should contain scope file %q", file)
-		}
-	}
-}
 
 func TestSpecReviewOutputStructure(t *testing.T) {
 	output := SpecReviewOutput{
@@ -190,7 +42,6 @@ func TestSpecReviewOutputStructure(t *testing.T) {
 }
 
 func TestSpecFindingTypes(t *testing.T) {
-	// Test all finding types are properly defined
 	tests := []struct {
 		findingType string
 		expected    string
@@ -199,7 +50,6 @@ func TestSpecFindingTypes(t *testing.T) {
 		{FindingTypeUnderBuilt, "under_built"},
 		{FindingTypeWrongScope, "wrong_scope"},
 	}
-
 	for _, tt := range tests {
 		if tt.findingType != tt.expected {
 			t.Errorf("FindingType constant %q != %q", tt.findingType, tt.expected)
@@ -218,106 +68,10 @@ func TestVerdictConstants(t *testing.T) {
 		{VerdictWrongScope, "wrong_scope"},
 		{VerdictMultipleIssues, "multiple_issues"},
 	}
-
 	for _, tt := range tests {
 		if tt.verdict != tt.expected {
 			t.Errorf("Verdict constant %q != %q", tt.verdict, tt.expected)
 		}
-	}
-}
-
-func TestSpecReviewerCompliantExample(t *testing.T) {
-	// Example of a compliant review output
-	output := SpecReviewOutput{
-		Role:     "spec_reviewer",
-		Verdict:  VerdictCompliant,
-		Findings: []SpecFinding{}, // Empty - no issues
-		Passed:   true,
-		Summary:  "Implementation matches specification exactly",
-	}
-
-	if !output.Passed {
-		t.Error("Compliant review should pass")
-	}
-	if len(output.Findings) != 0 {
-		t.Error("Compliant review should have no findings")
-	}
-}
-
-func TestSpecReviewerUnderBuiltExample(t *testing.T) {
-	output := SpecReviewOutput{
-		Role:    "spec_reviewer",
-		Verdict: VerdictUnderBuilt,
-		Findings: []SpecFinding{
-			{
-				Type:          FindingTypeUnderBuilt,
-				Severity:      "critical",
-				Description:   "Missing error handling per spec section 3.2",
-				SpecReference: "Section 3.2: All endpoints must return structured errors",
-			},
-		},
-		Passed:  false,
-		Summary: "Missing required error handling",
-	}
-
-	if output.Passed {
-		t.Error("Under-built review should not pass")
-	}
-	if output.Verdict != VerdictUnderBuilt {
-		t.Errorf("Expected verdict %q, got %q", VerdictUnderBuilt, output.Verdict)
-	}
-}
-
-func TestSpecReviewerWrongScopeExample(t *testing.T) {
-	output := SpecReviewOutput{
-		Role:    "spec_reviewer",
-		Verdict: VerdictWrongScope,
-		Findings: []SpecFinding{
-			{
-				Type:          FindingTypeWrongScope,
-				Severity:      "medium",
-				Description:   "Modified unrelated configuration file",
-				File:          "config/database.go",
-				SpecReference: "Task only specified changes to api/auth.go",
-			},
-		},
-		Passed:  false,
-		Summary: "Changes made outside expected scope",
-	}
-
-	if output.Passed {
-		t.Error("Wrong scope review should not pass")
-	}
-}
-
-func TestSpecReviewerMultipleIssuesExample(t *testing.T) {
-	output := SpecReviewOutput{
-		Role:    "spec_reviewer",
-		Verdict: VerdictMultipleIssues,
-		Findings: []SpecFinding{
-			{
-				Type:        FindingTypeOverBuilt,
-				Severity:    "high",
-				Description: "Added rate limiting not in spec",
-				File:        "api/middleware.go",
-				Lines:       "1-50",
-			},
-			{
-				Type:          FindingTypeUnderBuilt,
-				Severity:      "critical",
-				Description:   "Missing logout endpoint",
-				SpecReference: "Requirement 4: POST /api/logout",
-			},
-		},
-		Passed:  false,
-		Summary: "Both over-building and under-building detected",
-	}
-
-	if output.Passed {
-		t.Error("Multiple issues review should not pass")
-	}
-	if len(output.Findings) != 2 {
-		t.Errorf("Expected 2 findings, got %d", len(output.Findings))
 	}
 }
 
@@ -331,7 +85,6 @@ func TestSeverityConstants(t *testing.T) {
 		{SeverityMedium, "medium"},
 		{SeverityLow, "low"},
 	}
-
 	for _, tt := range tests {
 		if tt.severity != tt.expected {
 			t.Errorf("Severity constant %q != %q", tt.severity, tt.expected)
@@ -362,7 +115,7 @@ func TestSpecReviewOutputValidate(t *testing.T) {
 			output: SpecReviewOutput{
 				Role:     "spec_reviewer",
 				Verdict:  VerdictCompliant,
-				Findings: nil, // Nil is ok for compliant
+				Findings: nil,
 				Passed:   true,
 				Summary:  "All good",
 			},
@@ -423,7 +176,7 @@ func TestSpecReviewOutputValidate(t *testing.T) {
 				Findings: []SpecFinding{
 					{Type: FindingTypeOverBuilt, Severity: SeverityHigh, Description: "test"},
 				},
-				Passed: true, // Should be false
+				Passed: true,
 			},
 			wantErr: true,
 			errMsg:  "passed=true but verdict is not compliant",
@@ -433,7 +186,7 @@ func TestSpecReviewOutputValidate(t *testing.T) {
 			output: SpecReviewOutput{
 				Role:    "spec_reviewer",
 				Verdict: VerdictCompliant,
-				Passed:  false, // Should be true
+				Passed:  false,
 			},
 			wantErr: true,
 			errMsg:  "verdict=compliant but passed=false",
@@ -756,7 +509,7 @@ func TestSpecFindingToReviewFindingEmptySpecReference(t *testing.T) {
 		Type:          FindingTypeOverBuilt,
 		Severity:      SeverityHigh,
 		Description:   "Added feature",
-		SpecReference: "", // Empty
+		SpecReference: "",
 	}
 
 	rf := sf.ToReviewFinding()
@@ -791,36 +544,5 @@ func TestSpecReviewOutputToReviewOutput(t *testing.T) {
 	}
 	if review.Summary != "Multiple issues" {
 		t.Errorf("Summary = %q, want 'Multiple issues'", review.Summary)
-	}
-}
-
-func TestSpecReviewerPromptEmptyInputs(t *testing.T) {
-	params := SpecReviewerParams{} // All empty
-	prompt := SpecReviewerPrompt(params)
-
-	// Should still produce valid prompt
-	if !strings.Contains(prompt, "spec compliance reviewer") {
-		t.Error("empty params should still produce valid prompt")
-	}
-	if !strings.Contains(prompt, "Not specified") {
-		t.Error("empty scope should show 'Not specified'")
-	}
-}
-
-func TestSpecReviewerPromptScopeFormatting(t *testing.T) {
-	params := SpecReviewerParams{
-		TaskScope: []string{"a.go", "b.go", "c.go"},
-	}
-	prompt := SpecReviewerPrompt(params)
-
-	// Each file should be prefixed with "- "
-	if !strings.Contains(prompt, "- a.go") {
-		t.Error("first file should be prefixed with '- '")
-	}
-	if !strings.Contains(prompt, "- b.go") {
-		t.Error("middle file should be prefixed with '- '")
-	}
-	if !strings.Contains(prompt, "- c.go") {
-		t.Error("last file should be prefixed with '- '")
 	}
 }

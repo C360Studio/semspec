@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/prompts"
 )
 
 // setupRevisionComponent creates a Component with MaxReviewIterations set.
@@ -19,7 +18,7 @@ func setupRevisionComponent(t *testing.T, maxIter int) *Component {
 }
 
 // makeFindings creates a JSON-encoded PlanReviewFinding array for test payloads.
-func makeFindings(t *testing.T, findings []prompts.PlanReviewFinding) json.RawMessage {
+func makeFindings(t *testing.T, findings []workflow.PlanReviewFinding) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(findings)
 	if err != nil {
@@ -41,7 +40,7 @@ func marshalRevision(t *testing.T, req RevisionMutationRequest) []byte {
 func TestHandleRevisionMutation(t *testing.T) {
 	ctx := context.Background()
 
-	sampleFindings := []prompts.PlanReviewFinding{
+	sampleFindings := []workflow.PlanReviewFinding{
 		{
 			SOPID:      "completeness.goal",
 			SOPTitle:   "Goal Clarity",

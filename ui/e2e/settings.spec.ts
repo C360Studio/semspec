@@ -69,10 +69,12 @@ test.describe('@t0 settings', () => {
 		await expect(clearBtn).toBeVisible();
 		await clearBtn.click();
 
-		// Confirmation appears
-		await expect(page.getByText('Clear activity?')).toBeVisible();
-		const noBtn = page.getByRole('button', { name: 'No' }).first();
-		await noBtn.click();
+		// Scope the dismiss click to the confirm-group so SSE-driven page
+		// reflows in the activity feed can't shift a stale `getByRole('button',
+		// { name: 'No' }).first()` onto an unrelated element.
+		const confirmGroup = page.locator('.confirm-group').filter({ hasText: 'Clear activity?' });
+		await expect(confirmGroup).toBeVisible();
+		await confirmGroup.getByRole('button', { name: 'No' }).click();
 
 		// Confirmation dismissed, original button returns
 		await expect(clearBtn).toBeVisible();
@@ -80,9 +82,10 @@ test.describe('@t0 settings', () => {
 
 	test('clear activity confirmation executes', async ({ page }) => {
 		await page.getByRole('button', { name: /Clear Activity/i }).click();
-		await expect(page.getByText('Clear activity?')).toBeVisible();
+		const confirmGroup = page.locator('.confirm-group').filter({ hasText: 'Clear activity?' });
+		await expect(confirmGroup).toBeVisible();
 
-		await page.getByRole('button', { name: 'Yes' }).first().click();
+		await confirmGroup.getByRole('button', { name: 'Yes' }).click();
 
 		// Confirmation dismissed, button returns to normal
 		await expect(page.getByRole('button', { name: /Clear Activity/i })).toBeVisible();
@@ -90,9 +93,10 @@ test.describe('@t0 settings', () => {
 
 	test('clear messages shows confirmation then dismisses', async ({ page }) => {
 		await page.getByRole('button', { name: /Clear Messages/i }).click();
-		await expect(page.getByText('Clear messages?')).toBeVisible();
+		const confirmGroup = page.locator('.confirm-group').filter({ hasText: 'Clear messages?' });
+		await expect(confirmGroup).toBeVisible();
 
-		await page.getByRole('button', { name: 'No' }).nth(0).click();
+		await confirmGroup.getByRole('button', { name: 'No' }).click();
 		await expect(page.getByRole('button', { name: /Clear Messages/i })).toBeVisible();
 	});
 

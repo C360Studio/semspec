@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestReviewAggregatorName(t *testing.T) {
@@ -44,10 +44,10 @@ func TestSeverityRank(t *testing.T) {
 		severity string
 		want     int
 	}{
-		{prompts.SeverityCritical, 4},
-		{prompts.SeverityHigh, 3},
-		{prompts.SeverityMedium, 2},
-		{prompts.SeverityLow, 1},
+		{workflow.SeverityCritical, 4},
+		{workflow.SeverityHigh, 3},
+		{workflow.SeverityMedium, 2},
+		{workflow.SeverityLow, 1},
 		{"unknown", 0},
 		{"", 0},
 	}
@@ -65,13 +65,13 @@ func TestSeverityRank(t *testing.T) {
 func TestDeduplicateFindings(t *testing.T) {
 	tests := []struct {
 		name     string
-		findings []prompts.ReviewFinding
+		findings []workflow.ReviewFinding
 		wantLen  int
 	}{
 		{"empty", nil, 0},
 		{
 			"no duplicates",
-			[]prompts.ReviewFinding{
+			[]workflow.ReviewFinding{
 				{File: "a.go", Line: 10, Issue: "issue 1", Severity: "high"},
 				{File: "b.go", Line: 20, Issue: "issue 2", Severity: "medium"},
 			},
@@ -79,7 +79,7 @@ func TestDeduplicateFindings(t *testing.T) {
 		},
 		{
 			"duplicate same file line issue",
-			[]prompts.ReviewFinding{
+			[]workflow.ReviewFinding{
 				{File: "a.go", Line: 10, Issue: "issue 1", Severity: "medium", Role: "sop_reviewer"},
 				{File: "a.go", Line: 10, Issue: "issue 1", Severity: "high", Role: "security_reviewer"},
 			},
@@ -87,7 +87,7 @@ func TestDeduplicateFindings(t *testing.T) {
 		},
 		{
 			"same file different line",
-			[]prompts.ReviewFinding{
+			[]workflow.ReviewFinding{
 				{File: "a.go", Line: 10, Issue: "issue 1", Severity: "high"},
 				{File: "a.go", Line: 20, Issue: "issue 2", Severity: "medium"},
 			},
@@ -106,7 +106,7 @@ func TestDeduplicateFindings(t *testing.T) {
 }
 
 func TestSortBySeverity(t *testing.T) {
-	findings := []prompts.ReviewFinding{
+	findings := []workflow.ReviewFinding{
 		{File: "c.go", Line: 30, Issue: "low issue", Severity: "low"},
 		{File: "a.go", Line: 10, Issue: "critical issue", Severity: "critical"},
 		{File: "b.go", Line: 20, Issue: "high issue", Severity: "high"},
@@ -124,18 +124,18 @@ func TestSortBySeverity(t *testing.T) {
 }
 
 func TestAggregate(t *testing.T) {
-	outputs := []prompts.ReviewOutput{
+	outputs := []workflow.ReviewOutput{
 		{
 			Role:     "spec_reviewer",
 			Passed:   true,
 			Summary:  "Spec compliant",
-			Findings: []prompts.ReviewFinding{},
+			Findings: []workflow.ReviewFinding{},
 		},
 		{
 			Role:    "sop_reviewer",
 			Passed:  false,
 			Summary: "SOP violations found",
-			Findings: []prompts.ReviewFinding{
+			Findings: []workflow.ReviewFinding{
 				{Role: "sop_reviewer", File: "main.go", Line: 10, Issue: "Missing error handling", Severity: "high"},
 			},
 		},
@@ -143,13 +143,13 @@ func TestAggregate(t *testing.T) {
 			Role:     "style_reviewer",
 			Passed:   true,
 			Summary:  "Style OK",
-			Findings: []prompts.ReviewFinding{},
+			Findings: []workflow.ReviewFinding{},
 		},
 		{
 			Role:     "security_reviewer",
 			Passed:   true,
 			Summary:  "No security issues",
-			Findings: []prompts.ReviewFinding{},
+			Findings: []workflow.ReviewFinding{},
 		},
 	}
 
@@ -179,21 +179,21 @@ func TestReviewAggregatorAggregate(t *testing.T) {
 	agg := &ReviewAggregator{}
 
 	// Create agent results with ReviewOutput payloads
-	sopOutput := prompts.ReviewOutput{
+	sopOutput := workflow.ReviewOutput{
 		Role:    "sop_reviewer",
 		Passed:  true,
 		Summary: "SOP OK",
-		Findings: []prompts.ReviewFinding{
+		Findings: []workflow.ReviewFinding{
 			{File: "main.go", Line: 10, Issue: "Minor issue", Severity: "low"},
 		},
 	}
 	sopBytes, _ := json.Marshal(sopOutput)
 
-	styleOutput := prompts.ReviewOutput{
+	styleOutput := workflow.ReviewOutput{
 		Role:     "style_reviewer",
 		Passed:   true,
 		Summary:  "Style OK",
-		Findings: []prompts.ReviewFinding{},
+		Findings: []workflow.ReviewFinding{},
 	}
 	styleBytes, _ := json.Marshal(styleOutput)
 
@@ -233,12 +233,12 @@ func TestReviewAggregatorWithSpecOutput(t *testing.T) {
 	agg := &ReviewAggregator{}
 
 	// Create a SpecReviewOutput (should be converted)
-	specOutput := prompts.SpecReviewOutput{
+	specOutput := workflow.SpecReviewOutput{
 		Role:     "spec_reviewer",
-		Verdict:  prompts.VerdictCompliant,
+		Verdict:  workflow.VerdictCompliant,
 		Passed:   true,
 		Summary:  "Spec compliant",
-		Findings: []prompts.SpecFinding{},
+		Findings: []workflow.SpecFinding{},
 	}
 	specBytes, _ := json.Marshal(specOutput)
 
@@ -270,7 +270,7 @@ func TestGenerateSummary(t *testing.T) {
 		name            string
 		totalReviewers  int
 		passedReviewers int
-		findings        []prompts.ReviewFinding
+		findings        []workflow.ReviewFinding
 		bySeverity      map[string]int
 		wantContains    string
 	}{
@@ -278,7 +278,7 @@ func TestGenerateSummary(t *testing.T) {
 			name:            "all passed no findings",
 			totalReviewers:  4,
 			passedReviewers: 4,
-			findings:        []prompts.ReviewFinding{},
+			findings:        []workflow.ReviewFinding{},
 			bySeverity:      map[string]int{},
 			wantContains:    "all 4 reviewers passed",
 		},
@@ -286,7 +286,7 @@ func TestGenerateSummary(t *testing.T) {
 			name:            "some failed with findings",
 			totalReviewers:  4,
 			passedReviewers: 2,
-			findings:        []prompts.ReviewFinding{{}, {}},
+			findings:        []workflow.ReviewFinding{{}, {}},
 			bySeverity:      map[string]int{"high": 1, "medium": 1},
 			wantContains:    "2/4 reviewers passed",
 		},

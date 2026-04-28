@@ -175,12 +175,22 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		await page.goto('/');
 		await waitForHydration(page);
 
+		// LeftPanel auto-switches to Feed mode when active loops exist (which
+		// is true right after journey execution). In Feed mode the Plans-mode
+		// filter chips (All/Active/Drafts/Done) are unmounted. Click Plans
+		// mode and wait for the chip group to actually attach before reaching
+		// for Done — otherwise the radio query resolves to nothing and times
+		// out instead of reflecting "the panel hasn't switched yet".
 		const plansRadio = page.getByRole('radio', { name: 'Plans' });
-		if ((await plansRadio.getAttribute('aria-checked')) === 'false') {
-			await plansRadio.click();
-		}
-
-		await page.getByRole('radio', { name: 'Done' }).click();
+		const doneChip = page.getByRole('radio', { name: 'Done' });
+		await expect(async () => {
+			if ((await plansRadio.getAttribute('aria-checked')) !== 'true') {
+				await plansRadio.click({ timeout: 5000 });
+			}
+			await expect(doneChip).toBeAttached({ timeout: 5000 });
+			await doneChip.click({ timeout: 5000 });
+			await expect(doneChip).toHaveAttribute('aria-checked', 'true');
+		}).toPass({ timeout: 30000 });
 		await expect(planListItem(page, slug)).toBeVisible();
 	});
 

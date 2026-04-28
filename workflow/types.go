@@ -862,7 +862,8 @@ type Requirement struct {
 	Title       string            `json:"title"`
 	Description string            `json:"description"`
 	Status      RequirementStatus `json:"status"`
-	DependsOn   []string          `json:"depends_on,omitempty"` // IDs of prerequisite requirements
+	DependsOn   []string          `json:"depends_on,omitempty"`  // IDs of prerequisite requirements
+	FilesOwned  []string          `json:"files_owned,omitempty"` // workspace-relative paths this requirement owns; two requirements that both list the same path must have a DependsOn edge between them or the plan-level merge will conflict
 	CreatedAt   time.Time         `json:"created_at"`
 	UpdatedAt   time.Time         `json:"updated_at"`
 }

@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/vocabulary/semspec"
@@ -84,6 +86,151 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 	return nil
 }
 
+// ValidateFileOwnershipPartition rejects requirement sets where two requirements
+// claim the same path in FilesOwned with no dependency edge between them. The
+// plan-level merge of independent worktrees can't reconcile two parallel rewrites
+// of the same file — catching the conflict here saves the executor from running
+// the whole TDD loop and stalling at reviewing_qa.
+//
+// Two requirements may share a path if one transitively depends on the other
+// (the executor sequences them, so the second one rebases on the first's
+// changes instead of branching from the same base).
+//
+// Requirements with empty FilesOwned are not subject to this check — older
+// generators may not emit it, and we shouldn't break those plans.
+func ValidateFileOwnershipPartition(requirements []Requirement) error {
+	if len(requirements) < 2 {
+		return nil
+	}
+	ancestors := transitiveAncestors(requirements)
+	idx := make(map[string]*Requirement, len(requirements))
+	for i := range requirements {
+		idx[requirements[i].ID] = &requirements[i]
+	}
+	for i := range requirements {
+		ri := &requirements[i]
+		if len(ri.FilesOwned) == 0 {
+			continue
+		}
+		for j := i + 1; j < len(requirements); j++ {
+			rj := &requirements[j]
+			if len(rj.FilesOwned) == 0 {
+				continue
+			}
+			conflict := intersectFiles(ri.FilesOwned, rj.FilesOwned)
+			if len(conflict) == 0 {
+				continue
+			}
+			// Allow the overlap when one requirement depends on the other,
+			// transitively. The executor will sequence them, so the later
+			// requirement rebases on the earlier one's merge commit.
+			if ancestors[ri.ID][rj.ID] || ancestors[rj.ID][ri.ID] {
+				continue
+			}
+			return fmt.Errorf(
+				"requirements %q and %q both claim files_owned %v with no dependency edge between them: parallel writes to the same file deadlock the plan-level merge — either consolidate the requirements or add a depends_on edge",
+				ri.ID, rj.ID, conflict,
+			)
+		}
+	}
+	return nil
+}
+
+// transitiveAncestors returns, for each requirement ID, the set of IDs reachable
+// via DependsOn (i.e. the prerequisites). Used by ValidateFileOwnershipPartition
+// to allow file overlap between requirements that have an explicit ordering.
+//
+// Caller is expected to have already passed ValidateRequirementDAG so cycles
+// don't lead to non-termination.
+func transitiveAncestors(requirements []Requirement) map[string]map[string]bool {
+	deps := make(map[string][]string, len(requirements))
+	for _, r := range requirements {
+		deps[r.ID] = r.DependsOn
+	}
+	out := make(map[string]map[string]bool, len(requirements))
+	for _, r := range requirements {
+		seen := make(map[string]bool)
+		stack := append([]string(nil), r.DependsOn...)
+		for len(stack) > 0 {
+			top := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if seen[top] {
+				continue
+			}
+			seen[top] = true
+			stack = append(stack, deps[top]...)
+		}
+		out[r.ID] = seen
+	}
+	return out
+}
+
+// intersectFiles returns the set intersection of two path slices, comparing
+// canonical (NormalizeFilePath) forms so "./main.go" and "main.go" don't slip
+// past as distinct paths. Returns the canonical form of overlapping paths.
+// Empty input → nil; no overlap → nil.
+func intersectFiles(a, b []string) []string {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	bSet := make(map[string]struct{}, len(b))
+	for _, p := range b {
+		if np := NormalizeFilePath(p); np != "" {
+			bSet[np] = struct{}{}
+		}
+	}
+	var out []string
+	seen := make(map[string]struct{}, len(a))
+	for _, p := range a {
+		np := NormalizeFilePath(p)
+		if np == "" {
+			continue
+		}
+		if _, ok := seen[np]; ok {
+			continue
+		}
+		if _, ok := bSet[np]; ok {
+			seen[np] = struct{}{}
+			out = append(out, np)
+		}
+	}
+	return out
+}
+
+// NormalizeFilePath canonicalises a workspace-relative path so equivalent
+// spellings collapse to one form. Returns "" for empty input, the workspace
+// root (".", ""), or paths that escape the workspace ("../foo") — those
+// shouldn't reach the validator and dropping them prevents the validator from
+// silently accepting a non-canonical form.
+func NormalizeFilePath(p string) string {
+	p = strings.TrimSpace(p)
+	if p == "" {
+		return ""
+	}
+	p = strings.ReplaceAll(p, "\\", "/")
+	p = path.Clean(p)
+	p = strings.TrimPrefix(p, "./")
+	if p == "." || p == ".." || strings.HasPrefix(p, "../") {
+		return ""
+	}
+	return p
+}
+
+// NormalizeFilePaths returns a fresh slice with each path canonicalised via
+// NormalizeFilePath. Empty/escape entries are dropped. nil-in / nil-out.
+func NormalizeFilePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if np := NormalizeFilePath(p); np != "" {
+			out = append(out, np)
+		}
+	}
+	return out
+}
+
 // SaveRequirements saves requirements to ENTITY_STATES as triples.
 // Each requirement is stored as a separate entity keyed by RequirementEntityID.
 // Multi-valued fields (DependsOn) are written as individual triples.
@@ -98,6 +245,10 @@ func SaveRequirements(ctx context.Context, tw *graphutil.TripleWriter, requireme
 
 	if err := ValidateRequirementDAG(requirements); err != nil {
 		return fmt.Errorf("invalid requirement DAG: %w", err)
+	}
+
+	if err := ValidateFileOwnershipPartition(requirements); err != nil {
+		return fmt.Errorf("invalid requirement file ownership: %w", err)
 	}
 
 	planEntityID := PlanEntityID(slug)
@@ -136,6 +287,13 @@ func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, re
 	// Hash each dep ID so the stored value is the entity-ID suffix.
 	for _, dep := range req.DependsOn {
 		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, HashInstanceID(dep))
+	}
+
+	// Write each owned file path as an individual triple — multi-valued by
+	// design so queries can ask "which requirements own this path?" without
+	// parsing a JSON blob.
+	for _, path := range req.FilesOwned {
+		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementFilesOwned, path)
 	}
 
 	return nil

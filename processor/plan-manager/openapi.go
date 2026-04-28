@@ -7,7 +7,6 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/aggregation"
-	"github.com/c360studio/semspec/workflow/prompts"
 )
 
 func init() {
@@ -198,7 +197,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(aggregation.SynthesisResult{}),
 			reflect.TypeOf(aggregation.ReviewerSummary{}),
 			reflect.TypeOf(aggregation.SynthesisStats{}),
-			reflect.TypeOf(prompts.ReviewFinding{}),
+			reflect.TypeOf(workflow.ReviewFinding{}),
 		},
 		RequestBodyTypes: []reflect.Type{
 			reflect.TypeOf(CreatePlanRequest{}),

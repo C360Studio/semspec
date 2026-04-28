@@ -17,6 +17,7 @@ type CreateRequirementHTTPRequest struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty"`
+	FilesOwned  []string `json:"files_owned,omitempty"`
 }
 
 // UpdateRequirementHTTPRequest is the HTTP request body for PATCH /plans/{slug}/requirements/{reqId}.
@@ -24,6 +25,7 @@ type UpdateRequirementHTTPRequest struct {
 	Title       *string  `json:"title,omitempty"`
 	Description *string  `json:"description,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty"`
+	FilesOwned  []string `json:"files_owned,omitempty"`
 }
 
 // extractSlugRequirementAndAction extracts slug, requirementID, and action from paths like:
@@ -188,6 +190,7 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 		Description: body.Description,
 		Status:      workflow.RequirementStatusActive,
 		DependsOn:   body.DependsOn,
+		FilesOwned:  workflow.NormalizeFilePaths(body.FilesOwned),
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
@@ -196,6 +199,16 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 	if len(body.DependsOn) > 0 {
 		candidate := append(plan.Requirements, newReq)
 		if err := workflow.ValidateRequirementDAG(candidate); err != nil {
+			writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+	}
+	// Validate file-ownership partition whenever the new req declares any
+	// owned files — a brand-new req with files_owned can collide with an
+	// existing req even if it has no depends_on edge.
+	if len(body.FilesOwned) > 0 {
+		candidate := append(plan.Requirements, newReq)
+		if err := workflow.ValidateFileOwnershipPartition(candidate); err != nil {
 			writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
 			return
 		}
@@ -254,11 +267,24 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 	if depsChanged {
 		plan.Requirements[idx].DependsOn = body.DependsOn
 	}
+	filesChanged := body.FilesOwned != nil
+	if filesChanged {
+		plan.Requirements[idx].FilesOwned = workflow.NormalizeFilePaths(body.FilesOwned)
+	}
 	plan.Requirements[idx].UpdatedAt = time.Now()
 
 	// Validate DAG only when dependencies changed.
 	if depsChanged {
 		if err := workflow.ValidateRequirementDAG(plan.Requirements); err != nil {
+			writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+	}
+	// Re-check file-ownership partition when either deps OR files changed —
+	// a deps change can resolve a previously conflicting overlap, and a
+	// files change can introduce a new one.
+	if depsChanged || filesChanged {
+		if err := workflow.ValidateFileOwnershipPartition(plan.Requirements); err != nil {
 			writeJSONError(w, err.Error(), http.StatusUnprocessableEntity)
 			return
 		}

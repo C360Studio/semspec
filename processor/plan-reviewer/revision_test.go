@@ -4,16 +4,16 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestRevisionPayloadMarshal(t *testing.T) {
 	// Verify the revision mutation payload is correctly structured
 	// for the plan-manager's RevisionMutationRequest.
-	result := &prompts.PlanReviewResult{
+	result := &workflow.PlanReviewResult{
 		Verdict: "needs_changes",
 		Summary: "Goal is too vague",
-		Findings: []prompts.PlanReviewFinding{
+		Findings: []workflow.PlanReviewFinding{
 			{
 				SOPID:      "completeness.goal",
 				SOPTitle:   "Goal Clarity",
@@ -70,7 +70,7 @@ func TestRevisionPayloadMarshal(t *testing.T) {
 	}
 
 	// Verify findings can be deserialized back.
-	var findings []prompts.PlanReviewFinding
+	var findings []workflow.PlanReviewFinding
 	if err := json.Unmarshal(parsed.Findings, &findings); err != nil {
 		t.Fatalf("unmarshal findings: %v", err)
 	}
@@ -83,10 +83,10 @@ func TestRevisionPayloadMarshal(t *testing.T) {
 }
 
 func TestRevisionPayloadRound2(t *testing.T) {
-	result := &prompts.PlanReviewResult{
+	result := &workflow.PlanReviewResult{
 		Verdict: "needs_changes",
 		Summary: "Missing requirement coverage",
-		Findings: []prompts.PlanReviewFinding{
+		Findings: []workflow.PlanReviewFinding{
 			{
 				SOPID:    "completeness.coverage",
 				SOPTitle: "Requirement Coverage",

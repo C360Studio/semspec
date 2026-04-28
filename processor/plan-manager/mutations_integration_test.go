@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -74,7 +73,7 @@ func TestIntegration_RevisionMutation_R1Retry(t *testing.T) {
 	}
 
 	// Send revision request via NATS request/reply.
-	findings := []prompts.PlanReviewFinding{{
+	findings := []workflow.PlanReviewFinding{{
 		SOPID:    "completeness.goal",
 		SOPTitle: "Goal Clarity",
 		Severity: "error",

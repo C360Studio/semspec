@@ -12,7 +12,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow"
 )
 
 // AgentResult represents the result from a single agent step in a parallel workflow.
@@ -81,16 +81,16 @@ func (a *ReviewAggregator) Aggregate(ctx context.Context, results []AgentResult)
 	}
 
 	// Parse reviewer outputs
-	var outputs []prompts.ReviewOutput
+	var outputs []workflow.ReviewOutput
 	for _, r := range results {
 		if r.Status != "success" {
 			continue
 		}
 
-		var output prompts.ReviewOutput
+		var output workflow.ReviewOutput
 		if err := json.Unmarshal(r.Output, &output); err != nil {
 			// Try parsing as SpecReviewOutput and convert
-			var specOutput prompts.SpecReviewOutput
+			var specOutput workflow.SpecReviewOutput
 			if specErr := json.Unmarshal(r.Output, &specOutput); specErr == nil {
 				output = specOutput.ToReviewOutput()
 			} else {
@@ -131,12 +131,12 @@ func (a *ReviewAggregator) Aggregate(ctx context.Context, results []AgentResult)
 
 // SynthesisResult is the aggregated output from all reviewers.
 type SynthesisResult struct {
-	Verdict   string                  `json:"verdict"`
-	Passed    bool                    `json:"passed"`
-	Findings  []prompts.ReviewFinding `json:"findings"`
-	Reviewers []ReviewerSummary       `json:"reviewers"`
-	Summary   string                  `json:"summary"`
-	Stats     SynthesisStats          `json:"stats"`
+	Verdict   string                   `json:"verdict"`
+	Passed    bool                     `json:"passed"`
+	Findings  []workflow.ReviewFinding `json:"findings"`
+	Reviewers []ReviewerSummary        `json:"reviewers"`
+	Summary   string                   `json:"summary"`
+	Stats     SynthesisStats           `json:"stats"`
 }
 
 // ReviewerSummary contains a summary from a single reviewer.
@@ -157,8 +157,8 @@ type SynthesisStats struct {
 }
 
 // aggregate combines multiple reviewer outputs into a synthesis result.
-func aggregate(outputs []prompts.ReviewOutput) *SynthesisResult {
-	var allFindings []prompts.ReviewFinding
+func aggregate(outputs []workflow.ReviewOutput) *SynthesisResult {
+	var allFindings []workflow.ReviewFinding
 	reviewerSummaries := make([]ReviewerSummary, 0, len(outputs))
 	bySeverity := make(map[string]int)
 	byReviewer := make(map[string]int)
@@ -190,7 +190,7 @@ func aggregate(outputs []prompts.ReviewOutput) *SynthesisResult {
 			bySeverity[finding.Severity]++
 			byReviewer[output.Role]++
 
-			if finding.Severity == prompts.SeverityCritical {
+			if finding.Severity == workflow.SeverityCritical {
 				hasCritical = true
 			}
 		}
@@ -233,13 +233,13 @@ func determineVerdict(hasCritical, anyFailed bool, findingCount int) string {
 	return VerdictApproved
 }
 
-func deduplicateFindings(findings []prompts.ReviewFinding) []prompts.ReviewFinding {
+func deduplicateFindings(findings []workflow.ReviewFinding) []workflow.ReviewFinding {
 	if len(findings) == 0 {
 		return findings
 	}
 
 	type dedupEntry struct {
-		finding prompts.ReviewFinding
+		finding workflow.ReviewFinding
 		roles   []string
 	}
 
@@ -268,7 +268,7 @@ func deduplicateFindings(findings []prompts.ReviewFinding) []prompts.ReviewFindi
 		}
 	}
 
-	result := make([]prompts.ReviewFinding, 0, len(groups))
+	result := make([]workflow.ReviewFinding, 0, len(groups))
 	for _, entry := range groups {
 		if len(entry.roles) > 1 {
 			entry.finding.Role = strings.Join(entry.roles, ", ")
@@ -279,7 +279,7 @@ func deduplicateFindings(findings []prompts.ReviewFinding) []prompts.ReviewFindi
 	return result
 }
 
-func dedupKey(f prompts.ReviewFinding) string {
+func dedupKey(f workflow.ReviewFinding) string {
 	h := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(f.Issue))))
 	issueHash := fmt.Sprintf("%x", h[:8])
 	return fmt.Sprintf("%s:%d:%s", f.File, f.Line, issueHash)
@@ -287,20 +287,20 @@ func dedupKey(f prompts.ReviewFinding) string {
 
 func severityRank(severity string) int {
 	switch severity {
-	case prompts.SeverityCritical:
+	case workflow.SeverityCritical:
 		return 4
-	case prompts.SeverityHigh:
+	case workflow.SeverityHigh:
 		return 3
-	case prompts.SeverityMedium:
+	case workflow.SeverityMedium:
 		return 2
-	case prompts.SeverityLow:
+	case workflow.SeverityLow:
 		return 1
 	default:
 		return 0
 	}
 }
 
-func sortBySeverity(findings []prompts.ReviewFinding) {
+func sortBySeverity(findings []workflow.ReviewFinding) {
 	sort.Slice(findings, func(i, j int) bool {
 		ri := severityRank(findings[i].Severity)
 		rj := severityRank(findings[j].Severity)
@@ -314,7 +314,7 @@ func sortBySeverity(findings []prompts.ReviewFinding) {
 	})
 }
 
-func generateSummary(totalReviewers, passedReviewers int, findings []prompts.ReviewFinding, bySeverity map[string]int) string {
+func generateSummary(totalReviewers, passedReviewers int, findings []workflow.ReviewFinding, bySeverity map[string]int) string {
 	var parts []string
 
 	if passedReviewers == totalReviewers {
@@ -327,16 +327,16 @@ func generateSummary(totalReviewers, passedReviewers int, findings []prompts.Rev
 		parts = append(parts, "No issues found.")
 	} else {
 		var severityParts []string
-		if n := bySeverity[prompts.SeverityCritical]; n > 0 {
+		if n := bySeverity[workflow.SeverityCritical]; n > 0 {
 			severityParts = append(severityParts, fmt.Sprintf("%d critical", n))
 		}
-		if n := bySeverity[prompts.SeverityHigh]; n > 0 {
+		if n := bySeverity[workflow.SeverityHigh]; n > 0 {
 			severityParts = append(severityParts, fmt.Sprintf("%d high", n))
 		}
-		if n := bySeverity[prompts.SeverityMedium]; n > 0 {
+		if n := bySeverity[workflow.SeverityMedium]; n > 0 {
 			severityParts = append(severityParts, fmt.Sprintf("%d medium", n))
 		}
-		if n := bySeverity[prompts.SeverityLow]; n > 0 {
+		if n := bySeverity[workflow.SeverityLow]; n > 0 {
 			severityParts = append(severityParts, fmt.Sprintf("%d low", n))
 		}
 		parts = append(parts, fmt.Sprintf("Found %d issues (%s).", len(findings), strings.Join(severityParts, ", ")))
