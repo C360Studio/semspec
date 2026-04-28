@@ -67,7 +67,7 @@ See [Project Setup](docs/project-setup.md) for config details.
 
 Requires Go 1.25+, Docker, and [Task](https://taskfile.dev/).
 
-Semspec runs alongside 5 services (NATS, sandbox, semsource, UI, gateway).
+Semspec runs alongside 6 services (NATS, sandbox, semsource, qa-runner, UI, gateway).
 The simplest way to build from source is `task local:up`, which compiles the
 Go binary inside Docker and starts the full stack:
 
@@ -149,8 +149,10 @@ into a final release-readiness verdict. The plan transitions through `reviewing_
 to `complete` when `qa_level=none`) before reaching `complete`. The gate counts completed
 requirements, not scenarios. Inputs vary by `qa_level`: `synthesis` reads plan+impl only;
 `unit`/`integration`/`full` first route through `ready_for_qa` so sandbox or qa-runner can run
-project tests, then feed results into the reviewer. The older `reviewing_rollup` stage is kept
-for in-flight plans on upgrade but no new code emits it.
+project tests, then feed results into the reviewer.
+
+> Older plans may show a `reviewing_rollup` status. That stage is kept for in-flight plans on
+> upgrade but no new code emits it.
 
 **Rules Engine** — Declarative JSON rules in `configs/rules/` react to graph entity state changes.
 Components write workflow phases; rules handle terminal transitions — approved tasks trigger the

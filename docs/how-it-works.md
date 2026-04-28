@@ -49,28 +49,29 @@ task structure for each Requirement when it is ready to execute.
 
 ### Agent Tool Set
 
-Semspec uses an 11-tool bash-first approach. All file, git, and shell operations go through `bash`.
-Specialized tools exist only for things bash cannot do.
+Semspec takes a bash-first approach: all file, git, and shell operations go
+through `bash`. Specialized tools exist only for things bash cannot do.
+Registration happens once at startup in `tools/register.go`.
 
-**Always-available tools:**
+**Always registered (semspec runs with NATS):**
 
 | Tool | Description |
 |------|-------------|
 | `bash` | Universal shell — files, git, builds, tests, any shell command |
 | `submit_work` | Signal task completion with structured deliverable (terminal: StopLoop=true) |
+| `decompose_task` | Decompose a goal into a validated TaskDAG; loop exits with DAG as result |
+| `http_request` | Fetch URLs; persists content to the graph as `source.web.*` entities |
 | `ask_question` | Signal a blocker requiring human or agent answer (terminal: StopLoop=true) |
 | `answer_question` | Provide an answer to a pending question |
-| `decompose_task` | Decompose a goal into a validated TaskDAG; loop exits with DAG as result |
+| `graph_search` | Graph gateway query — synthesized answer from `globalSearch` |
+| `graph_query` | Graph gateway query — raw GraphQL for entity lookup |
+| `graph_summary` | Graph gateway query — knowledge graph overview (call once first) |
 
-**Conditional tools** (enabled when the relevant service or API key is configured):
+**Conditional:**
 
 | Tool | Condition |
 |------|-----------|
-| `graph_search` | Graph gateway available — synthesized answer from `globalSearch` |
-| `graph_query` | Graph gateway available — raw GraphQL for entity lookup |
-| `graph_summary` | Graph gateway available — knowledge graph overview (call once first) |
 | `web_search` | `BRAVE_SEARCH_API_KEY` set |
-| `http_request` | Always registered; persists fetched content to graph as `source.web.*` entities |
 
 ### PlanDecision Cancellation
 
@@ -126,6 +127,7 @@ With Docker Compose (recommended):
 | **semspec** | All 16 semspec components + semstreams infrastructure |
 | **sandbox** | Isolated code execution environment for agents |
 | **semsource** | Source code indexing (AST, git, docs) → knowledge graph |
+| **qa-runner** | Runs `.github/workflows/qa.yml` via nektos/act for `qa_level=integration`/`full` |
 | **ui** | SvelteKit frontend (SSR) |
 | **gateway** | Caddy reverse proxy — routes API to semspec, UI to frontend |
 
