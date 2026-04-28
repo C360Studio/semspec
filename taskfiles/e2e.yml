@@ -145,11 +145,25 @@ tasks:
 
   cleanup-mock:
     internal: true
-    desc: Post-test cleanup for mock E2E tests (called by defer)
+    desc: Post-test cleanup for mock E2E tests (called by defer). With DEBUG=1, keeps the stack up for poking.
     cmds:
-      - echo "[E2E CLEANUP] Stopping mock infrastructure..."
-      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[OK] Cleanup complete"
+      - |
+        if [ -n "$DEBUG" ]; then
+          echo ""
+          echo "[DEBUG] Stack kept running. Poke around:"
+          echo "  Semspec HTTP:    http://localhost:8180"
+          echo "  NATS monitor:    http://localhost:8322"
+          echo "  Mock LLM stats:  curl -s http://localhost:11535/stats | jq ."
+          echo "  Semspec logs:    docker logs -f semspec-e2e-semspec-1"
+          echo "  Message logger:  curl -s http://localhost:8180/message-logger/entries?limit=10 | jq '.[].subject'"
+          echo "  PLAN_STATES:     curl -s http://localhost:8180/message-logger/kv/PLAN_STATES | jq ."
+          echo "  Stop:            task e2e:down:mock"
+          echo ""
+        else
+          echo "[E2E CLEANUP] Stopping mock infrastructure..."
+          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+          echo "[OK] Cleanup complete"
+        fi
 
   cleanup-mock-pressure:
     internal: true
