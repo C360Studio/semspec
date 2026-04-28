@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"scenarios\": [{\"given\": \"buildMux() has been called and a GET request to /goodbye is dispatched via httptest\", \"when\": \"the response is recorded\", \"then\": [\"the status code is 200\", \"the response body decodes as JSON with message='Goodbye, World!'\"], \"title\": \"Goodbye returns 200 + JSON body\"}, {\"given\": \"buildMux() has been called\", \"when\": \"a GET to /goodbye is dispatched\", \"then\": [\"the Content-Type response header is application/json\"], \"title\": \"Goodbye sets Content-Type application/json\"}]}"
+        "arguments": "{\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /goodbye\", \"then\": [\"a 200 status code is returned\", \"the response body contains JSON with message 'Goodbye, World!'\"], \"title\": \"A GET request is sent to /goodbye\"}, {\"given\": \"the API server is running with the /goodbye endpoint\", \"when\": \"the endpoint is called and the response is checked\", \"then\": [\"the Content-Type header is application/json\", \"the response is valid JSON\"], \"title\": \"The endpoint is called and the response is checked\"}]}"
       }
     }
   ],

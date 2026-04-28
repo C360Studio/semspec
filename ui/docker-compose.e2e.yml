@@ -32,7 +32,7 @@ services:
       # avoid the backend E2E stack's 9090.
       - "9190:9090"
     volumes:
-      - ../test/e2e/fixtures/go-project:/workspace
+      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/workspace
     depends_on:
       nats:
         condition: service_healthy
@@ -96,7 +96,7 @@ services:
       - PROJECT_HOST_PATH=${SEMSPEC_REPO:-/workspace}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../test/e2e/fixtures/go-project:/workspace
+      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/workspace
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
       interval: 10s

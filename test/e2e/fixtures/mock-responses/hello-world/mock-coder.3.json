@@ -1,12 +1,12 @@
 {
-  "content": "TDD complete. Implementation in main.go and tests in main_test.go.",
+  "content": "TDD complete. Tests and implementation for /goodbye endpoint.",
   "tool_calls": [
     {
       "id": "call_submit_work",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Refactored main.go to expose buildMux() and added /goodbye handler returning JSON; added main_test.go covering status, content-type, and body.\", \"files_modified\": [\"main.go\", \"main_test.go\"]}"
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests in api/test_goodbye.py and endpoint in api/app.py\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
       }
     }
   ],

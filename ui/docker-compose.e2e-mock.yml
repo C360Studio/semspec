@@ -38,7 +38,7 @@ services:
       - "8191:8090"  # Offset from backend E2E (8190)
     command: ["--addr", ":8090", "--repo", "/workspace"]
     volumes:
-      - ../test/e2e/fixtures/go-project:/workspace
+      - ../test/e2e/fixtures/${E2E_FIXTURE:-hello-world-py}:/workspace
     deploy:
       resources:
         limits:

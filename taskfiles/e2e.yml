@@ -247,7 +247,7 @@ tasks:
 
   debug:
     desc: Start infrastructure for interactive debugging
-    deps: [clean, check-ports, build, build-image]
+    deps: [clean, clean-workspace, check-ports, build, build-image]
     cmds:
       - echo "[DEBUG] Starting infrastructure for debugging..."
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
@@ -265,7 +265,7 @@ tasks:
   # Mock infrastructure management (for debugging)
   up:mock:
     desc: "Start mock infrastructure - usage: task e2e:up:mock -- <scenario>"
-    deps: [clean, check-ports, build, build-image, build-mock-image]
+    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
     vars:
       SCENARIO:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
@@ -321,7 +321,7 @@ tasks:
 
   debug:mock:
     desc: "Start mock infrastructure and tail logs - usage: task e2e:debug:mock -- <scenario>"
-    deps: [clean, check-ports, build, build-image, build-mock-image]
+    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
     vars:
       SCENARIO:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
@@ -475,6 +475,8 @@ tasks:
   ui:test:mock:
     desc: "Full lifecycle: build + start mock stack + run all @mock tests + cleanup"
     deps: [check-ports:ui]
+    env:
+      E2E_FIXTURE: hello-world-py
     cmds:
       - echo "[UI:TEST:MOCK] Building and starting mock stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 10 2>/dev/null
@@ -585,6 +587,8 @@ tasks:
   ui:mock:up:
     desc: Start UI E2E Docker stack with mock LLM (for interactive debugging)
     deps: [check-ports:ui]
+    env:
+      E2E_FIXTURE: hello-world-py
     cmds:
       - echo "[UI:MOCK:UP] Cleaning stale state..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 10 2>/dev/null
@@ -654,7 +658,7 @@ tasks:
     desc: Reset e2e fixture repos to their initial commits and prune accumulated agent/semspec branches.
     cmds:
       - |
-        for fixture in test/e2e/fixtures/go-project test/e2e/fixtures/osh-driver-meshtastic; do
+        for fixture in test/e2e/fixtures/go-project test/e2e/fixtures/hello-world-py test/e2e/fixtures/osh-driver-meshtastic; do
           if [ ! -d "$fixture/.git" ]; then
             continue
           fi
@@ -691,6 +695,8 @@ tasks:
 
   ui:cleanup:mock:
     internal: true
+    env:
+      E2E_FIXTURE: hello-world-py
     cmds:
       - |
         if [ -n "$DEBUG" ]; then
