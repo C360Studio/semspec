@@ -1,0 +1,28 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-04-28T00:00:00Z",
+  "checks": [
+    {
+      "name": "pip-install",
+      "command": "cd api && pip install --break-system-packages -q -r requirements.txt",
+      "trigger": [],
+      "category": "setup",
+      "required": true,
+      "timeout": "120s",
+      "description": "Install Python project dependencies",
+      "working_dir": "."
+    },
+    {
+      "name": "pytest",
+      "command": "cd api && python3 -m pytest . -q",
+      "trigger": [
+        "*.py"
+      ],
+      "category": "test",
+      "required": true,
+      "timeout": "120s",
+      "description": "Run pytest from the api/ subdir where tests live",
+      "working_dir": "."
+    }
+  ]
+}

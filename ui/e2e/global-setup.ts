@@ -6,6 +6,11 @@
  * `/settings` by the layout's hard-gate effect. settings-gate.spec.ts still
  * exercises the gate-aware UI directly; this only seeds the precondition that
  * an onboarded project would already have.
+ *
+ * Per-fixture checklist content is owned by each fixture's own
+ * `.semspec/checklist.json`. project-manager's /init now respects existing
+ * config files (returns them in `files_skipped`) instead of overwriting,
+ * so we don't need to re-PATCH the checklist after init from this script.
  */
 
 const API_BASE = process.env.E2E_API_BASE ?? 'http://localhost:3000';
@@ -25,7 +30,9 @@ async function autoInit(): Promise<void> {
 	// Mirror the UI's setupStore.autoInit() — detect languages/frameworks,
 	// then POST /init with minimal defaults. The UI normally drives this on
 	// first page load; globalSetup runs before any browser navigates, so we
-	// have to trigger it ourselves.
+	// have to trigger it ourselves. Init is idempotent: any pre-existing
+	// fixture config files (e.g. hello-world-py's checklist.json with the
+	// correct cd-api commands) are returned in `files_skipped` and left alone.
 	const detectRes = await fetch(`${API_BASE}/project-manager/detect`, { method: 'POST' });
 	if (!detectRes.ok) throw new Error(`detect failed: ${detectRes.status} ${await detectRes.text()}`);
 	const detection = (await detectRes.json()) as {
@@ -66,45 +73,12 @@ async function ensureOrg(): Promise<void> {
 	}
 }
 
-async function ensureFixtureChecklist(): Promise<void> {
-	// hello-world-py fixture nests its Python project under api/. semspec's
-	// auto-init Python checklist runs `pip install -r requirements.txt` and
-	// `python3 -m pytest .` from the workspace root, which can't find the
-	// requirements file or the tests. Patch the checklist with cd-prefixed
-	// commands so structural validation can actually pass once the developer
-	// agent writes its test file.
-	if ((process.env.E2E_FIXTURE ?? 'hello-world-py') !== 'hello-world-py') return;
-	const checks = [
-		{
-			name: 'pip-install',
-			command: 'cd api && pip install --break-system-packages -q -r requirements.txt',
-			category: 'setup',
-			required: true
-		},
-		{
-			name: 'pytest',
-			command: 'cd api && python3 -m pytest . -q',
-			category: 'test',
-			required: true
-		}
-	];
-	const res = await fetch(`${API_BASE}/project-manager/checklist`, {
-		method: 'PATCH',
-		headers: { 'Content-Type': 'application/json' },
-		body: JSON.stringify({ checks })
-	});
-	if (!res.ok) {
-		throw new Error(`PATCH checklist failed: ${res.status} ${await res.text()}`);
-	}
-}
-
 export default async function globalSetup(): Promise<void> {
 	const deadline = Date.now() + 30_000;
 	let lastErr: unknown;
 	while (Date.now() < deadline) {
 		try {
 			await ensureOrg();
-			await ensureFixtureChecklist();
 			return;
 		} catch (err) {
 			lastErr = err;

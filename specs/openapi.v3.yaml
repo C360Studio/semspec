@@ -1759,6 +1759,10 @@ components:
             type: object
         InitResponse:
             properties:
+                files_skipped:
+                    items:
+                        type: string
+                    type: array
                 files_written:
                     items:
                         type: string
@@ -2312,6 +2316,10 @@ components:
                                 type: array
                             description:
                                 type: string
+                            files_owned:
+                                items:
+                                    type: string
+                                type: array
                             id:
                                 type: string
                             plan_id:
@@ -2802,6 +2810,10 @@ components:
                                 type: array
                             description:
                                 type: string
+                            files_owned:
+                                items:
+                                    type: string
+                                type: array
                             id:
                                 type: string
                             plan_id:

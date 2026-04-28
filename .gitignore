@@ -10,10 +10,24 @@
 # E2E test workspace (generated during runs)
 /test/e2e/workspace/
 
-# E2E fixture artifacts (generated during test runs — agent code, worktrees, plans)
+# E2E fixture artifacts (generated during test runs — agent code, worktrees, plans).
+# Each fixture has tracked baseline configs (.semspec/checklist.json etc.) that
+# project-manager's init now respects; only the agent-generated runtime state
+# below is ignored.
 /test/e2e/fixtures/go-project/.semspec/projects/*/plans/
 /test/e2e/fixtures/go-project/.semspec/worktrees/
+/test/e2e/fixtures/go-project/.semspec/plans/
 /test/e2e/fixtures/go-project/internal/
+/test/e2e/fixtures/hello-world-py/.semspec/projects/*/plans/
+/test/e2e/fixtures/hello-world-py/.semspec/worktrees/
+/test/e2e/fixtures/hello-world-py/.semspec/plans/
+/test/e2e/fixtures/hello-world-py/.semspec/project.json
+/test/e2e/fixtures/hello-world-py/.semspec/standards.json
+/test/e2e/fixtures/hello-world-py/.semspec/scaffold.json
+/test/e2e/fixtures/hello-world-py/api/test_*.py
+/test/e2e/fixtures/osh-driver-meshtastic/.semspec/projects/*/plans/
+/test/e2e/fixtures/osh-driver-meshtastic/.semspec/worktrees/
+/test/e2e/fixtures/osh-driver-meshtastic/.semspec/plans/
 
 # Mock LLM build artifacts
 /mock-llm

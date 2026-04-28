@@ -234,11 +234,18 @@ type InitRequest struct {
 
 // InitResponse is the response body for POST /project-manager/init.
 type InitResponse struct {
-	// Success is true when all files were written without error.
+	// Success is true when init completed without error.
 	Success bool `json:"success"`
 
 	// FilesWritten lists the relative paths of files written (relative to repo root).
 	FilesWritten []string `json:"files_written"`
+
+	// FilesSkipped lists files that already existed on disk and were left
+	// untouched. Init is idempotent: if a config file is already there, the
+	// caller's request is ignored for that file. Use the explicit
+	// PATCH /project-manager/{config,checklist,standards} endpoints to
+	// overwrite an existing file.
+	FilesSkipped []string `json:"files_skipped,omitempty"`
 }
 
 // handleInit writes all confirmed configuration to disk and cache.
@@ -286,7 +293,7 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 		Items:         standardsItems,
 	}
 
-	written, err := c.persistInitConfigs(r, w, semspecDir, projectConfig, checklist, standards)
+	written, skipped, err := c.persistInitConfigs(r, w, semspecDir, projectConfig, checklist, standards)
 	if err != nil {
 		// persistInitConfigs already wrote the HTTP error response.
 		return
@@ -299,8 +306,8 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 			"repo_path", c.repoPath, "error", err)
 	}
 
-	c.logger.Info("Project initialized", "name", req.Project.Name, "files", written)
-	writeJSON(w, http.StatusOK, InitResponse{Success: true, FilesWritten: written})
+	c.logger.Info("Project initialized", "name", req.Project.Name, "files_written", written, "files_skipped", skipped)
+	writeJSON(w, http.StatusOK, InitResponse{Success: true, FilesWritten: written, FilesSkipped: skipped})
 }
 
 // ensureInitDirs creates the .semspec and sources/docs directories.
@@ -319,74 +326,113 @@ func (c *Component) ensureInitDirs(semspecDir string) error {
 }
 
 // persistInitConfigs writes the three config files through the store (when
-// available) or directly to disk. It writes the HTTP error and returns a
-// non-nil error when any write fails so handleInit can bail early.
+// available) or directly to disk. Init is idempotent at file granularity:
+// any of the three files that already exists on disk is left untouched and
+// returned in `skipped` so the caller knows their request was respected, not
+// applied. This protects pre-existing operator-edited configs (and tracked
+// e2e fixture files) from being clobbered when something — UI auto-init,
+// global-setup, a scripted onboarding — re-runs init against an already
+// initialized workspace. To overwrite, callers use the explicit PATCH
+// endpoints (/config, /checklist, /standards).
+//
+// On any write error the HTTP response has already been populated and a
+// non-nil error is returned so handleInit can bail early.
 func (c *Component) persistInitConfigs(
 	r *http.Request, w http.ResponseWriter,
 	semspecDir string,
 	projectConfig workflow.ProjectConfig,
 	checklist workflow.Checklist,
 	standards workflow.Standards,
-) ([]string, error) {
-	var written []string
+) (written, skipped []string, err error) {
+	projectExists := fileExists(filepath.Join(semspecDir, workflow.ProjectConfigFile))
+	checklistExists := fileExists(filepath.Join(semspecDir, workflow.ChecklistFile))
+	standardsExists := fileExists(filepath.Join(semspecDir, workflow.StandardsFile))
+
 	s := c.getStore()
 	if s != nil {
-		return c.persistViaStore(r, w, s, projectConfig, checklist, standards)
+		return c.persistViaStore(r, w, s, projectConfig, checklist, standards,
+			projectExists, checklistExists, standardsExists)
 	}
 	// Fallback: direct file write (pre-Start).
-	if err := writeJSONFile(filepath.Join(semspecDir, workflow.ProjectConfigFile), projectConfig); err != nil {
-		c.logger.Error("Failed to write project.json", "error", err)
-		http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
-		return nil, err
+	if projectExists {
+		skipped = append(skipped, ".semspec/"+workflow.ProjectConfigFile)
+	} else {
+		if writeErr := writeJSONFile(filepath.Join(semspecDir, workflow.ProjectConfigFile), projectConfig); writeErr != nil {
+			c.logger.Error("Failed to write project.json", "error", writeErr)
+			http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
+			return nil, nil, writeErr
+		}
+		written = append(written, ".semspec/"+workflow.ProjectConfigFile)
 	}
-	written = append(written, ".semspec/"+workflow.ProjectConfigFile)
 
-	if err := writeJSONFile(filepath.Join(semspecDir, workflow.ChecklistFile), checklist); err != nil {
-		c.logger.Error("Failed to write checklist.json", "error", err)
-		http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
-		return nil, err
+	if checklistExists {
+		skipped = append(skipped, ".semspec/"+workflow.ChecklistFile)
+	} else {
+		if writeErr := writeJSONFile(filepath.Join(semspecDir, workflow.ChecklistFile), checklist); writeErr != nil {
+			c.logger.Error("Failed to write checklist.json", "error", writeErr)
+			http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
+			return nil, nil, writeErr
+		}
+		written = append(written, ".semspec/"+workflow.ChecklistFile)
 	}
-	written = append(written, ".semspec/"+workflow.ChecklistFile)
 
-	if err := writeJSONFile(filepath.Join(semspecDir, workflow.StandardsFile), standards); err != nil {
-		c.logger.Error("Failed to write standards.json", "error", err)
-		http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
-		return nil, err
+	if standardsExists {
+		skipped = append(skipped, ".semspec/"+workflow.StandardsFile)
+	} else {
+		if writeErr := writeJSONFile(filepath.Join(semspecDir, workflow.StandardsFile), standards); writeErr != nil {
+			c.logger.Error("Failed to write standards.json", "error", writeErr)
+			http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
+			return nil, nil, writeErr
+		}
+		written = append(written, ".semspec/"+workflow.StandardsFile)
 	}
-	written = append(written, ".semspec/"+workflow.StandardsFile)
-	return written, nil
+	return written, skipped, nil
 }
 
 // persistViaStore writes configs through the component store (triples + cache + file).
+// Per-file gating mirrors persistInitConfigs: if the corresponding *Exists flag
+// is true the file is left untouched and reported in skipped instead of written.
 func (c *Component) persistViaStore(
 	r *http.Request, w http.ResponseWriter,
 	s *projectStore,
 	projectConfig workflow.ProjectConfig,
 	checklist workflow.Checklist,
 	standards workflow.Standards,
-) ([]string, error) {
-	var written []string
-	if err := s.saveConfig(r.Context(), &projectConfig); err != nil {
-		c.logger.Error("Failed to save project config", "error", err)
-		http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
-		return nil, err
+	projectExists, checklistExists, standardsExists bool,
+) (written, skipped []string, err error) {
+	if projectExists {
+		skipped = append(skipped, ".semspec/"+workflow.ProjectConfigFile)
+	} else {
+		if saveErr := s.saveConfig(r.Context(), &projectConfig); saveErr != nil {
+			c.logger.Error("Failed to save project config", "error", saveErr)
+			http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
+			return nil, nil, saveErr
+		}
+		written = append(written, ".semspec/"+workflow.ProjectConfigFile)
 	}
-	written = append(written, ".semspec/"+workflow.ProjectConfigFile)
 
-	if err := s.saveChecklist(r.Context(), &checklist); err != nil {
-		c.logger.Error("Failed to save checklist", "error", err)
-		http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
-		return nil, err
+	if checklistExists {
+		skipped = append(skipped, ".semspec/"+workflow.ChecklistFile)
+	} else {
+		if saveErr := s.saveChecklist(r.Context(), &checklist); saveErr != nil {
+			c.logger.Error("Failed to save checklist", "error", saveErr)
+			http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
+			return nil, nil, saveErr
+		}
+		written = append(written, ".semspec/"+workflow.ChecklistFile)
 	}
-	written = append(written, ".semspec/"+workflow.ChecklistFile)
 
-	if err := s.saveStandards(r.Context(), &standards); err != nil {
-		c.logger.Error("Failed to save standards", "error", err)
-		http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
-		return nil, err
+	if standardsExists {
+		skipped = append(skipped, ".semspec/"+workflow.StandardsFile)
+	} else {
+		if saveErr := s.saveStandards(r.Context(), &standards); saveErr != nil {
+			c.logger.Error("Failed to save standards", "error", saveErr)
+			http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
+			return nil, nil, saveErr
+		}
+		written = append(written, ".semspec/"+workflow.StandardsFile)
 	}
-	written = append(written, ".semspec/"+workflow.StandardsFile)
-	return written, nil
+	return written, skipped, nil
 }
 
 // ----------------------------------------------------------------------------

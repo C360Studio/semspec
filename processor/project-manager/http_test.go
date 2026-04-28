@@ -507,6 +507,91 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 	}
 }
 
+// TestHandleInit_RespectsExistingFiles pins the rule that init is idempotent
+// at file granularity: if checklist.json already exists when init runs, the
+// caller's checklist is left out of the response's files_written and the
+// original on-disk content is unchanged. Regression for the e2e fixture
+// pollution where UI auto-init clobbered hello-world-py's tracked
+// checklist.json with auto-detected (incorrect) Python commands.
+func TestHandleInit_RespectsExistingFiles(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	// Seed an existing checklist.json the way a fixture would — caller did
+	// the work to land the right content; init must not undo it.
+	semspecDir := filepath.Join(repoRoot, ".semspec")
+	if err := os.MkdirAll(semspecDir, 0755); err != nil {
+		t.Fatalf("mkdir semspec: %v", err)
+	}
+	preExisting := workflow.Checklist{
+		Version:   "1.0.0",
+		CreatedAt: time.Now(),
+		Checks: []workflow.Check{
+			{Name: "fixture-owned", Command: "echo respected", Category: workflow.CheckCategoryTest, Required: true, Timeout: "10s"},
+		},
+	}
+	preData, err := json.MarshalIndent(preExisting, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal preExisting: %v", err)
+	}
+	checklistPath := filepath.Join(semspecDir, workflow.ChecklistFile)
+	if err := os.WriteFile(checklistPath, preData, 0644); err != nil {
+		t.Fatalf("seed checklist: %v", err)
+	}
+
+	// Init request carries a *different* checklist that should NOT win.
+	req := InitRequest{
+		Project: ProjectInitInput{Name: "respects-existing", Languages: []string{"Python"}},
+		Checklist: []workflow.Check{
+			{Name: "should-not-overwrite", Command: "exit 1", Category: workflow.CheckCategoryCompile, Required: true, Timeout: "60s"},
+		},
+		Standards: StandardsInput{Version: "1.0.0"},
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	resp, err := http.Post(srv.URL+"/api/project/init", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST /init: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var initResp InitResponse
+	if err := json.NewDecoder(resp.Body).Decode(&initResp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	// project.json + standards.json get written; checklist.json is reported in skipped.
+	wantSkipped := ".semspec/" + workflow.ChecklistFile
+	foundSkipped := false
+	for _, f := range initResp.FilesSkipped {
+		if f == wantSkipped {
+			foundSkipped = true
+		}
+	}
+	if !foundSkipped {
+		t.Errorf("FilesSkipped should contain %q, got %v", wantSkipped, initResp.FilesSkipped)
+	}
+	for _, f := range initResp.FilesWritten {
+		if f == wantSkipped {
+			t.Errorf("FilesWritten unexpectedly contains skipped file %q", wantSkipped)
+		}
+	}
+
+	// Re-read on-disk file: pre-existing content must survive verbatim.
+	var checklistOnDisk workflow.Checklist
+	readJSONFile(t, checklistPath, &checklistOnDisk)
+	if len(checklistOnDisk.Checks) != 1 || checklistOnDisk.Checks[0].Name != "fixture-owned" {
+		t.Errorf("existing checklist was overwritten: %+v", checklistOnDisk.Checks)
+	}
+}
+
 // TestHandleInit_CreatesSOPDirectory verifies the sources/docs directory is created.
 func TestHandleInit_CreatesSOPDirectory(t *testing.T) {
 	c, repoRoot := setupTestComponent(t)
