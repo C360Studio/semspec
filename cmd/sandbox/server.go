@@ -542,6 +542,11 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 //	    Returns handled=false so the caller falls through to mergeIntoMainRepo
 //	    using the existing worktree hash.
 //
+// Empty req.TargetBranch falls back to the main repo's current HEAD branch
+// — this matches the default mergeIntoMainRepo will resolve, so the
+// reachability check evaluates against the same target the actual merge
+// would use. Worth preserving as an invariant.
+//
 // Errors are written to w directly; handled=true also covers the error case.
 func (s *Server) handleNothingToCommit(ctx context.Context, w http.ResponseWriter, worktreePath, taskID, hash, targetBranch string) (handled bool) {
 	mergeTarget := targetBranch
@@ -553,8 +558,20 @@ func (s *Server) handleNothingToCommit(ctx context.Context, w http.ResponseWrite
 		}
 		mergeTarget = strings.TrimSpace(cur)
 	}
+	// Validate the target ref exists BEFORE the ancestor check. Without this,
+	// a non-existent target makes `merge-base --is-ancestor` return exit 128
+	// ("unknown revision"), which the ancestor check below would mis-classify
+	// as sub-case (b) — falling through to mergeIntoMainRepo, which then
+	// fails noisily on checkout. Surfacing the bad-ref as a 400 keeps the
+	// classification honest.
+	if _, refErr := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", mergeTarget); refErr != nil {
+		writeError(w, http.StatusBadRequest, "merge target branch not found: "+mergeTarget)
+		return true
+	}
 	// `git merge-base --is-ancestor <hash> <target>` returns exit code 0
 	// when hash is an ancestor of (or equal to) target — fully merged.
+	// Exit code 1 means non-ancestor (sub-case b). Higher exit codes are
+	// classification errors (bad ref) which the rev-parse above caught.
 	if runGit(ctx, s.repoPath, "merge-base", "--is-ancestor", hash, mergeTarget) != nil {
 		// Sub-case (b): worktree HEAD has unmerged commits.
 		s.logger.Info("Worktree had no new changes but HEAD is unmerged — proceeding with merge",

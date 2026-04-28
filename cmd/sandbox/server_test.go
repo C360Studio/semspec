@@ -2523,17 +2523,49 @@ func TestMergeWorktree_RetryAfterUnmergedCommits_DoesNotSilentlyNoOp(t *testing.
 	var result mergeResponse
 	decodeJSON(t, mergeResp, &result)
 
-	// Today: result is Status:"merged" Commit:"" Note:"nothing_to_commit"
-	// because stageAndCommitWorktree returns nothingToCommit=true (nothing
+	// Pre-fix: result was Status:"merged" Commit:"" Note:"nothing_to_commit"
+	// because stageAndCommitWorktree returned nothingToCommit=true (nothing
 	// new staged) — but the worktree commit was never propagated to main.
-	// EXPECTED RED.
+	// Post-fix: handleNothingToCommit detects the unmerged-commits sub-case
+	// via `git merge-base --is-ancestor <hash> <target>` and falls through
+	// to mergeIntoMainRepo so the work actually lands.
 	if result.Status == "merged" && result.Commit == "" {
-		// Verify the bug: main repo has zero commits from this task.
 		mainLog := runOutput(t, srv.repoPath, "git", "log", "--oneline", "--all")
 		if !strings.Contains(mainLog, "first attempt") {
 			t.Errorf("merge returned Status=%q Commit=%q (silent no-op), but the worktree commit 'first attempt' is NOT in main. Work was silently dropped. Main log:\n%s",
 				result.Status, result.Commit, mainLog)
 		}
+	}
+	// Positive contract: the merge produced a real commit and the
+	// worktree's "first attempt" commit is now reachable from main.
+	if result.Commit == "" {
+		t.Errorf("expected a non-empty merge commit; got %+v", result)
+	}
+	mainLog := runOutput(t, srv.repoPath, "git", "log", "--oneline")
+	if !strings.Contains(mainLog, "first attempt") {
+		t.Errorf("expected 'first attempt' commit to be reachable from main after merge; main log:\n%s", mainLog)
+	}
+}
+
+// TestMergeWorktree_NothingToCommit_UnknownTargetBranch_Returns400 — when
+// stage+commit produced no new work AND the caller specified a target
+// branch that does not exist, we must surface the bad-ref classification
+// up front (HTTP 400) rather than letting `merge-base --is-ancestor`
+// return exit 128 and falsely falling through to the unmerged-retry
+// path. Pins the reviewer's MEDIUM finding from the bug-#9 series review.
+func TestMergeWorktree_NothingToCommit_UnknownTargetBranch_Returns400(t *testing.T) {
+	_, ts := newTestServer(t)
+
+	createWorktree(t, ts, "test-bad-ref")
+	// No file writes — worktree is empty so the no-op handler runs first.
+
+	resp := doRequest(t, ts, http.MethodPost, "/worktree/test-bad-ref/merge", mergeRequest{
+		TargetBranch: "semspec/does-not-exist",
+	})
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("merge with unknown target on empty worktree: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
 
