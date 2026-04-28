@@ -1,0 +1,14 @@
+{
+  "content": "Code review verdict: needs_changes (cycle 4).",
+  "tool_calls": [
+    {
+      "id": "call_review_reject_4",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"needs_changes\", \"feedback\": \"Cycle 4: implementation doesn't fully cover the scenario yet.\", \"summary\": \"Cycle 4 rejected \\u2014 fixable.\", \"rejection_type\": \"fixable\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

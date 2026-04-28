@@ -1,12 +1,12 @@
 {
-  "content": "Done.",
+  "content": "Submitting work.",
   "tool_calls": [
     {
-      "id": "c",
+      "id": "call_submit",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Done\"}"
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
       }
     }
   ],
