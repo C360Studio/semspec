@@ -56,10 +56,14 @@ type Config struct {
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
 
-	// ReviewerModel is the model endpoint for the code reviewer agent. When empty,
-	// falls back to Model. Separate model lets mock fixtures dispatch to a review-shaped
-	// fixture set instead of forcing the developer mock to alternate dev/review shapes.
-	ReviewerModel string `json:"reviewer_model" schema:"type:string,description:Model endpoint for code reviewer agent,category:advanced"`
+	// CodeReviewerModel is the model endpoint for the in-TDD-cycle code-reviewer
+	// agent (dispatched after structural validation passes, before merge). When
+	// empty, falls back to Model. Distinct from requirement-executor.ReviewerModel
+	// (which dispatches the post-merge requirement reviewer) so production
+	// configs can match each role to its best-suited model — e.g. a fast,
+	// code-aware model for the tight TDD loop and a reasoning-heavy model for
+	// the broader semantic requirement review.
+	CodeReviewerModel string `json:"code_reviewer_model" schema:"type:string,description:Model endpoint for in-TDD-cycle code reviewer agent,category:advanced"`
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`

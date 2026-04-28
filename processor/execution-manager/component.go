@@ -1484,7 +1484,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		reviewSubject.WriteString(strings.Join(exec.FilesModified, ", "))
 	}
 
-	reviewerModel := c.config.ReviewerModel
+	reviewerModel := c.config.CodeReviewerModel
 	if reviewerModel == "" {
 		reviewerModel = exec.Model
 	}

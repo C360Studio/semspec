@@ -124,6 +124,14 @@
         "supports_tools": true,
         "tool_format": "openai"
       },
+      "mock-code-reviewer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-code-reviewer",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
+      },
       "mock-requirement-generator": {
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
@@ -544,7 +552,7 @@
         "max_tdd_cycles": 3,
         "timeout_seconds": 300,
         "model": "mock-coder",
-        "reviewer_model": "mock-reviewer",
+        "code_reviewer_model": "mock-code-reviewer",
         "sandbox_url": "http://sandbox:8090"
       }
     },

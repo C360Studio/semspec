@@ -11,6 +11,11 @@
       "default": 3,
       "category": "advanced"
     },
+    "code_reviewer_model": {
+      "type": "string",
+      "description": "Model endpoint for in-TDD-cycle code reviewer agent",
+      "category": "advanced"
+    },
     "execution_state_bucket": {
       "type": "string",
       "description": "KV bucket for execution state (observable twofer)",
@@ -61,11 +66,6 @@
       "type": "boolean",
       "description": "Fail task on developer-claimed-but-sandbox-observed-no-commit mismatch",
       "default": true,
-      "category": "advanced"
-    },
-    "reviewer_model": {
-      "type": "string",
-      "description": "Model endpoint for code reviewer agent",
       "category": "advanced"
     },
     "sandbox_url": {
