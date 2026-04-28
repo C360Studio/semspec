@@ -62,7 +62,16 @@ func newExecutionStore(ctx context.Context, kvStore *natsclient.KVStore, tw *gra
 // ---------------------------------------------------------------------------
 
 // getTask returns a shallow copy of a task execution by KV key.
+// Refuses non-task keys to prevent cross-cache pollution: a req.* key's bytes
+// happen to deserialize cleanly into a TaskExecution (Go's JSON ignores unknown
+// fields and shared fields like Stage/Slug populate), and the resulting stale
+// entry would get cached in taskCache. handleExecClaimMutation's "try task,
+// then req" dispatch then short-circuits on the polluted task hit and never
+// reaches getReq for what is genuinely a req key.
 func (s *executionStore) getTask(key string) (*workflow.TaskExecution, bool) {
+	if !strings.HasPrefix(key, "task.") {
+		return nil, false
+	}
 	if exec, ok := s.taskCache.Get(key); ok {
 		e := *exec
 		return &e, true
@@ -184,7 +193,11 @@ func (s *executionStore) listReqsForSlug(ctx context.Context, slug string) []*wo
 // ---------------------------------------------------------------------------
 
 // getReq returns a shallow copy of a requirement execution by KV key.
+// Refuses non-req keys for symmetry with getTask's prefix guard.
 func (s *executionStore) getReq(key string) (*workflow.RequirementExecution, bool) {
+	if !strings.HasPrefix(key, "req.") {
+		return nil, false
+	}
 	if exec, ok := s.reqCache.Get(key); ok {
 		e := *exec
 		return &e, true
