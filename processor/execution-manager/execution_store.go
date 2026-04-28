@@ -245,10 +245,17 @@ func (s *executionStore) saveReq(ctx context.Context, key string, exec *workflow
 }
 
 // deleteReq removes a requirement execution from cache and KV.
+// Cache delete errors are non-fatal (cache may already be cleared via TTL).
+// KV delete errors are logged at INFO — a silent failure here can leave the
+// KV entry stranded and break post-/retry recovery (the orchestrator's
+// subsequent re-create would fail with "req execution already exists").
 func (s *executionStore) deleteReq(ctx context.Context, key string) {
 	s.reqCache.Delete(key) //nolint:errcheck
 	if s.kvStore != nil {
-		_ = s.kvStore.Delete(ctx, key)
+		if err := s.kvStore.Delete(ctx, key); err != nil {
+			s.logger.Info("deleteReq: KV delete failed (cache cleared, KV may have stranded entry)",
+				"key", key, "error", err)
+		}
 	}
 }
 
