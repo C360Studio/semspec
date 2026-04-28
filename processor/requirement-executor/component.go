@@ -1130,13 +1130,13 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 
 // handleApprovedClaimMismatchLocked enforces the requirement-scope claim/
 // observation cross-check. Defense-in-depth against the bug #9 pattern:
-// even when execution-manager's FIX-B guard is in place, the requirement
-// reviewer should not be the last word on completion if any node claimed
-// files but produced no commit observation. Gated by
-// config.RequireCommitObservation because the upstream wiring
-// (execution-manager → req-executor → NodeResult.CommitSHA) is not yet in
-// place; turning the gate on without that wiring would fail every
-// requirement that has any claimed work.
+// even when execution-manager's mergeWorktree guard is in place, the
+// requirement reviewer should not be the last word on completion if any
+// node claimed files but produced no commit observation. Gated by
+// config.RequireCommitObservation (default true; the upstream wiring is
+// in place — execution-manager records MergeCommit on the task execution,
+// req-executor surfaces it via the synthetic completion event Result, and
+// handleNodeCompleteLocked populates NodeResult.CommitSHA).
 //
 // Returns true when the gate fired and the requirement was marked failed —
 // caller must NOT proceed to markCompletedLocked.

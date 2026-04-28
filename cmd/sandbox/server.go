@@ -481,6 +481,19 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Semantic ref check: the target branch must exist in the main repo.
+	// Without this, the no-op path's `merge-base --is-ancestor` and the
+	// with-changes path's `git checkout <target>` both fail with exit 128
+	// ("unknown revision") which the existing error mapping classifies as
+	// either sub-case (b) (silent fallthrough) or HTTP 409 conflict —
+	// both wrong for "the caller asked for a branch that doesn't exist".
+	if req.TargetBranch != "" {
+		if _, err := gitOutput(r.Context(), s.repoPath, "rev-parse", "--verify", req.TargetBranch); err != nil {
+			writeError(w, http.StatusBadRequest, "merge target branch not found: "+req.TargetBranch)
+			return
+		}
+	}
+
 	worktreePath := filepath.Join(s.worktreeRoot, taskID)
 	ctx := r.Context()
 
@@ -558,16 +571,9 @@ func (s *Server) handleNothingToCommit(ctx context.Context, w http.ResponseWrite
 		}
 		mergeTarget = strings.TrimSpace(cur)
 	}
-	// Validate the target ref exists BEFORE the ancestor check. Without this,
-	// a non-existent target makes `merge-base --is-ancestor` return exit 128
-	// ("unknown revision"), which the ancestor check below would mis-classify
-	// as sub-case (b) — falling through to mergeIntoMainRepo, which then
-	// fails noisily on checkout. Surfacing the bad-ref as a 400 keeps the
-	// classification honest.
-	if _, refErr := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", mergeTarget); refErr != nil {
-		writeError(w, http.StatusBadRequest, "merge target branch not found: "+mergeTarget)
-		return true
-	}
+	// Caller (handleMergeWorktree) already verified `mergeTarget` resolves —
+	// when targetBranch was passed explicitly. The empty-target fallback
+	// resolves the main repo's current HEAD, which is always present.
 	// `git merge-base --is-ancestor <hash> <target>` returns exit code 0
 	// when hash is an ancestor of (or equal to) target — fully merged.
 	// Exit code 1 means non-ancestor (sub-case b). Higher exit codes are

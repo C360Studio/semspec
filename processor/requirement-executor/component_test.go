@@ -2260,13 +2260,11 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 // approve based on the worktree state (which has the work, just unmerged),
 // and the requirement gets marked completed despite zero impact on main.
 //
-// Contract (gated by config.RequireCommitObservation): when any NodeResult
-// claims FilesModified but its CommitSHA is empty, markCompletedLocked must
-// NOT be called — the requirement fails with a claim/observation mismatch
-// reason. The gate is opt-in until upstream wiring (execution-manager →
-// req-executor → NodeResult.CommitSHA) lands; turning it on without that
-// wiring would fail every requirement that has any claimed files. The test
-// enables the gate explicitly.
+// Contract (config.RequireCommitObservation, default true): when any
+// NodeResult claims FilesModified but its CommitSHA is empty,
+// markCompletedLocked must NOT be called — the requirement fails with a
+// claim/observation mismatch reason. The test enables the gate explicitly
+// to be robust against future config-default flips.
 func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testing.T) {
 	c := newTestComponent(t)
 	gateOn := true

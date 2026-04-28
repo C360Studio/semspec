@@ -1461,8 +1461,14 @@ func TestMergeWorktree_NonexistentTargetBranch(t *testing.T) {
 	resp := doRequest(t, ts, http.MethodPost, "/worktree/test-noexist-target/merge", mergeRequest{
 		TargetBranch: "does/not/exist",
 	})
-	if resp.StatusCode != http.StatusConflict {
-		t.Errorf("merge with nonexistent target_branch: got %d, want %d", resp.StatusCode, http.StatusConflict)
+	// 400 (not 409) — a non-existent target is a bad-ref classification,
+	// not a merge conflict. Pre-existing assertion was 409, which fell out
+	// of the old code path where mergeIntoMainRepo's `git checkout <target>`
+	// failed with exit 128 and got mapped to 409 by writeMergeError.
+	// handleMergeWorktree now validates target ref existence with
+	// `git rev-parse --verify` before proceeding, surfacing 400 for bad refs.
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("merge with nonexistent target_branch: got %d, want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 	resp.Body.Close()
 }
