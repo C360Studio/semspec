@@ -330,30 +330,25 @@ func (s *PlanPhaseScenario) stageVerifyMockStats(ctx context.Context, result *Re
 	}
 	defer resp.Body.Close()
 
-	// Mock LLM stats format: {"models": {"mock-planner": {"count": 1}, ...}}
-	// or flat: {"mock-planner": 1, ...}. Handle both.
-	var rawStats map[string]json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&rawStats); err != nil {
+	// Stats format: {"calls_by_model": {"mock-planner": 2, ...}, "total_calls": N}.
+	// Matches the shape execution_phase.go reads — keep these in sync; the
+	// previous flat/nested-with-count guesses silently mis-parsed and emitted
+	// false-positive "mock model not called" warnings on every plan-phase run.
+	var mockStats struct {
+		CallsByModel map[string]int `json:"calls_by_model"`
+		TotalCalls   int            `json:"total_calls"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&mockStats); err != nil {
 		return fmt.Errorf("parse mock stats: %w", err)
 	}
 
-	stats := make(map[string]int)
-	for model, raw := range rawStats {
-		var count int
-		if json.Unmarshal(raw, &count) == nil {
-			stats[model] = count
-			continue
-		}
-		// Try nested {"count": N} format.
-		var nested struct {
-			Count int `json:"count"`
-		}
-		if json.Unmarshal(raw, &nested) == nil {
-			stats[model] = nested.Count
-		}
+	stats := mockStats.CallsByModel
+	if stats == nil {
+		stats = make(map[string]int)
 	}
 
-	result.SetDetail("mock_stats", stats)
+	result.SetDetail("mock_stats", mockStats)
+	result.SetDetail("mock_total_calls", mockStats.TotalCalls)
 
 	// Verify expected models were called.
 	expectedModels := []string{"mock-planner", "mock-reviewer", "mock-architecture-generator"}
