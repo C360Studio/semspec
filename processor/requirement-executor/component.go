@@ -668,10 +668,12 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 			FilesModified []string `json:"files_modified"`
 			FilesCreated  []string `json:"files_created"`
 			Summary       string   `json:"changes_summary"`
+			MergeCommit   string   `json:"merge_commit"`
 		}
 		if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &parsed); err == nil {
 			nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
 			nodeResult.Summary = parsed.Summary
+			nodeResult.CommitSHA = parsed.MergeCommit
 		}
 	}
 	exec.NodeResults = append(exec.NodeResults, nodeResult)
@@ -1141,7 +1143,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 //
 // Caller must hold exec.mu.
 func (c *Component) handleApprovedClaimMismatchLocked(ctx context.Context, exec *requirementExecution) bool {
-	if !c.config.RequireCommitObservation {
+	if !c.config.requireCommitObservation() {
 		return false
 	}
 	var unobserved []string

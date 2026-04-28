@@ -2269,7 +2269,8 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 // enables the gate explicitly.
 func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testing.T) {
 	c := newTestComponent(t)
-	c.config.RequireCommitObservation = true
+	gateOn := true
+	c.config.RequireCommitObservation = &gateOn
 
 	exec := &requirementExecution{
 		EntityID:      "semspec.local.exec.req.run.test-claim-only",

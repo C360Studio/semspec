@@ -58,11 +58,13 @@ type Config struct {
 	// that claimed FilesModified having a non-empty CommitSHA. Sibling guard
 	// to execution-manager's claim/observation cross-check (bug #9): even if a
 	// reviewer somehow approves work that never reached main, the requirement
-	// will fail rather than be silently completed. Defaults to false until
-	// execution-manager wires CommitSHA through to NodeResult; turning it on
-	// without that wiring will fail every requirement that has any claimed
-	// files.
-	RequireCommitObservation bool `json:"require_commit_observation,omitempty" schema:"type:bool,description:Fail requirement-completion when any node claimed files but produced no commit observation,category:advanced,default:false"`
+	// will fail rather than be silently completed. Default true now that the
+	// upstream wiring is in place — execution-manager records MergeCommit on
+	// the task execution, req-executor surfaces it via the synthetic completion
+	// event Result, and handleNodeCompleteLocked populates NodeResult.CommitSHA
+	// from the parsed payload. Set to false only for tests/fixtures that
+	// deliberately bypass the wiring.
+	RequireCommitObservation *bool `json:"require_commit_observation,omitempty" schema:"type:bool,description:Fail requirement-completion when any node claimed files but produced no commit observation,category:advanced,default:true"`
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
@@ -76,6 +78,18 @@ func (c *Config) enforceScenarioCoverage() bool {
 		return true
 	}
 	return *c.EnforceScenarioCoverage
+}
+
+// requireCommitObservation returns true when the claim/observation gate is on.
+// Defaults to true when unset — production has the upstream wiring (execution-
+// manager → workflow.TaskExecution.MergeCommit → req-executor synthetic event
+// Result → NodeResult.CommitSHA). Set to false only for tests/fixtures that
+// bypass the wiring.
+func (c *Config) requireCommitObservation() bool {
+	if c.RequireCommitObservation == nil {
+		return true
+	}
+	return *c.RequireCommitObservation
 }
 
 // DefaultConfig returns a Config with sensible defaults.

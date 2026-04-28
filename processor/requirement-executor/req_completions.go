@@ -205,11 +205,24 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 		"task_id", taskExec.TaskID,
 		"stage", taskExec.Stage,
 		"outcome", outcome,
+		"merge_commit", taskExec.MergeCommit,
 	)
+
+	// Surface FilesModified + MergeCommit to handleNodeCompleteLocked via
+	// the synthetic event payload. The Result string is the contract
+	// handleNodeCompleteLocked already parses for files_modified and
+	// changes_summary; we extend it with merge_commit so the requirement-
+	// scope claim/observation gate can verify each node's work landed.
+	resultPayload, _ := json.Marshal(map[string]any{
+		"files_modified":  taskExec.FilesModified,
+		"changes_summary": "",
+		"merge_commit":    taskExec.MergeCommit,
+	})
 
 	event := &agentic.LoopCompletedEvent{
 		TaskID:       taskExec.TaskID,
 		Outcome:      outcome,
+		Result:       string(resultPayload),
 		WorkflowStep: taskExec.TaskID,
 		CompletedAt:  taskExec.UpdatedAt,
 	}

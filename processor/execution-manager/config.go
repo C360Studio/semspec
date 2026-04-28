@@ -62,6 +62,27 @@ type Config struct {
 	// ExecutionStateBucket is the KV bucket name for execution state.
 	// The write IS the event — downstream components watch this bucket.
 	ExecutionStateBucket string `json:"execution_state_bucket,omitempty" schema:"type:string,description:KV bucket for execution state (observable twofer),category:advanced,default:EXECUTION_STATES"`
+
+	// RequireMergeObservation enables the claim/observation cross-check at
+	// the end of mergeWorktree: when the developer reports FilesModified but
+	// the sandbox returns NothingToCommit (or empty Commit), the task is
+	// marked errored instead of approved. Closes bug #9 (silent merge no-op
+	// drops work despite "merged" status). Default true. Disable only in
+	// test fixtures where the developer's claims are decoupled from the
+	// sandbox state — e.g. mock-LLM hello-world fixtures whose bash
+	// commands target paths that don't exist in the workspace fixture (the
+	// gate would correctly fire but mask the more useful test signal until
+	// fixtures are overhauled).
+	RequireMergeObservation *bool `json:"require_merge_observation,omitempty" schema:"type:bool,description:Fail task on developer-claimed-but-sandbox-observed-no-commit mismatch,category:advanced,default:true"`
+}
+
+// requireMergeObservation returns true when the gate is on. Defaults to
+// true when unset.
+func (c *Config) requireMergeObservation() bool {
+	if c.RequireMergeObservation == nil {
+		return true
+	}
+	return *c.RequireMergeObservation
 }
 
 // DefaultConfig returns a Config with sensible defaults.

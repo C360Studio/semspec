@@ -1681,7 +1681,7 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 	//   - Sandbox returned an empty Commit without NothingToCommit (a
 	//     malformed response that pre-FIX-A could happen on certain retry
 	//     paths). Defensive — fail rather than trust a malformed response.
-	if len(exec.FilesModified) > 0 && (result.NothingToCommit || result.Commit == "") {
+	if c.config.requireMergeObservation() && len(exec.FilesModified) > 0 && (result.NothingToCommit || result.Commit == "") {
 		c.logger.Error("Merge claim/observation mismatch — developer reported files_modified but sandbox observed no commit",
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
@@ -1706,6 +1706,12 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 			exec.FilesModified[i] = f.Path
 		}
 	}
+	// Record the merge commit so requirement-executor's claim/observation
+	// gate can read it from EXECUTION_STATES KV. Empty for the legitimate
+	// no-op case (NothingToCommit==true with no claimed files), which is
+	// indistinguishable from "task never had a worktree" — the downstream
+	// gate only fires when FilesModified is non-empty.
+	exec.MergeCommit = result.Commit
 
 	// Wait for semsource to index the merge commit so dependent tasks
 	// get fresh graph context. Soft gate: proceeds with warning on timeout.

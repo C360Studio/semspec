@@ -55,6 +55,12 @@ type TaskExecution struct {
 	FilesModified    []string `json:"files_modified,omitempty"`
 	TestsPassed      bool     `json:"tests_passed,omitempty"`
 	ValidationPassed bool     `json:"validation_passed,omitempty"`
+	// MergeCommit is the SHA produced when the worktree merged into the
+	// task's target branch. Empty until execution-manager.mergeWorktree
+	// completes successfully. Required for downstream claim/observation
+	// cross-checks (bug #9: silent merge no-ops drop the work). Empty after
+	// terminal stages other than "approved" because the merge never ran.
+	MergeCommit string `json:"merge_commit,omitempty"`
 
 	// Routing — task IDs for completion event dispatch.
 	// Persisted so restart can re-route in-flight completions.
