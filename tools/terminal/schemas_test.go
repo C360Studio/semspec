@@ -15,6 +15,7 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"}},
 		{"review", []string{"verdict", "feedback"}},
 		{"developer", []string{"summary", "files_modified"}},
+		{"lesson", []string{"summary", "detail", "injection_form", "root_cause_role"}},
 		{"", []string{"summary", "files_modified"}}, // default
 	}
 

@@ -376,6 +376,159 @@ func formatScopeListLocal(items []string, defaultValue string) string {
 	return strings.Join(items, ", ")
 }
 
+// renderLessonDecomposerPrompt produces the lesson-decomposer agent's user
+// message. Lays out the rejection signal as a structured incident report:
+// what the reviewer said, what scenario the work was supposed to satisfy,
+// what the developer's trajectory looked like, and which lessons already
+// exist for the role. The decomposer's job is to turn that into one
+// evidence-cited Lesson — see software.go for the persona and output-format
+// fragments. Renderer never invents data; missing inputs simply skip their
+// section so the prompt scales down for early lessons that have less
+// trajectory captured.
+func renderLessonDecomposerPrompt(p *prompt.LessonDecomposerPromptContext) string {
+	var sb strings.Builder
+
+	source := p.Source
+	if source == "" {
+		source = "execution-manager"
+	}
+	target := p.TargetRole
+	if target == "" {
+		target = "developer"
+	}
+
+	fmt.Fprintf(&sb, "## Incident\n\nA %s rejection occurred during the %s pipeline. Decompose it into a single auditable lesson for the %q role.\n\n",
+		p.Verdict, source, target)
+
+	renderDecomposerFeedback(&sb, p.Feedback)
+	renderDecomposerScenario(&sb, p.Scenario)
+	renderDecomposerDeveloperTrajectory(&sb, p.DeveloperLoopID, p.DeveloperSteps)
+	renderDecomposerReviewerTrajectory(&sb, p.ReviewerLoopID, p.ReviewerSteps)
+	renderDecomposerWorktree(&sb, p.WorktreeDiffSummary, p.FilesModified)
+	renderDecomposerCatalog(&sb, p.CategoryCatalog)
+	renderDecomposerExistingLessons(&sb, target, p.ExistingLessons)
+	renderDecomposerCommitSHA(&sb, p.CommitSHA)
+	renderDecomposerTaskInstructions(&sb)
+
+	return sb.String()
+}
+
+func renderDecomposerFeedback(sb *strings.Builder, feedback string) {
+	if feedback == "" {
+		return
+	}
+	sb.WriteString("## Reviewer Feedback (verbatim)\n\n")
+	sb.WriteString(feedback)
+	sb.WriteString("\n\nDo not parrot this back. Identify the underlying root cause and frame the lesson around the pattern, not the specific reviewer wording.\n\n")
+}
+
+func renderDecomposerScenario(sb *strings.Builder, sc *prompt.DecomposerScenarioContext) {
+	if sc == nil || (sc.Given == "" && sc.When == "" && len(sc.Then) == 0) {
+		return
+	}
+	sb.WriteString("## Scenario the work was supposed to satisfy\n\n")
+	if sc.ID != "" {
+		fmt.Fprintf(sb, "**ID:** %s\n", sc.ID)
+	}
+	if sc.Given != "" {
+		fmt.Fprintf(sb, "**Given:** %s\n", sc.Given)
+	}
+	if sc.When != "" {
+		fmt.Fprintf(sb, "**When:** %s\n", sc.When)
+	}
+	if len(sc.Then) > 0 {
+		sb.WriteString("**Then:**\n")
+		for _, t := range sc.Then {
+			fmt.Fprintf(sb, "  - %s\n", t)
+		}
+	}
+	sb.WriteString("\n")
+}
+
+func renderDecomposerDeveloperTrajectory(sb *strings.Builder, loopID string, steps []prompt.TrajectoryStepSummary) {
+	if len(steps) > 0 {
+		fmt.Fprintf(sb, "## Developer Trajectory (loop %s)\n\nEach line is one step of the agentic loop that produced the rejected code. Cite step indices in `evidence_steps` to ground the lesson.\n\n",
+			loopID)
+		for _, s := range steps {
+			fmt.Fprintf(sb, "- [%d] %s\n", s.Index, s.Summary)
+		}
+		sb.WriteString("\n")
+		return
+	}
+	if loopID != "" {
+		fmt.Fprintf(sb, "## Developer Trajectory\n\nLoop %s exists but its trajectory could not be retrieved. Build the lesson from the reviewer feedback alone; leave `evidence_steps` empty if you cannot cite specific steps.\n\n",
+			loopID)
+	}
+}
+
+func renderDecomposerReviewerTrajectory(sb *strings.Builder, loopID string, steps []prompt.TrajectoryStepSummary) {
+	if len(steps) == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "## Reviewer Trajectory (loop %s)\n\nReviewer's reasoning is included so you can understand *how* the rejection was reached. Cite reviewer steps only when the reviewer's behaviour itself is the lesson (rare).\n\n",
+		loopID)
+	for _, s := range steps {
+		fmt.Fprintf(sb, "- [%d] %s\n", s.Index, s.Summary)
+	}
+	sb.WriteString("\n")
+}
+
+func renderDecomposerWorktree(sb *strings.Builder, diffSummary string, files []string) {
+	if diffSummary != "" {
+		sb.WriteString("## Worktree State at Rejection\n\n")
+		sb.WriteString(diffSummary)
+		sb.WriteString("\n\n")
+	}
+	if len(files) > 0 {
+		sb.WriteString("## Files Modified by Developer\n\nUse these paths in `evidence_files` when the lesson points to a specific code region.\n\n")
+		for _, f := range files {
+			fmt.Fprintf(sb, "- %s\n", f)
+		}
+		sb.WriteString("\n")
+	}
+}
+
+func renderDecomposerCatalog(sb *strings.Builder, catalog []string) {
+	if len(catalog) == 0 {
+		return
+	}
+	sb.WriteString("## Available Error Categories\n\nPick `category_ids` from this list. Inventing new IDs makes the lesson harder to retire and rank — match the closest existing category.\n\n")
+	for _, cat := range catalog {
+		fmt.Fprintf(sb, "- %s\n", cat)
+	}
+	sb.WriteString("\n")
+}
+
+func renderDecomposerExistingLessons(sb *strings.Builder, target string, lessons []string) {
+	if len(lessons) == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "## Existing Lessons for the %s role\n\nThese lessons are already in the graph. If your new lesson would say substantially the same thing, prefer matching the existing categorisation; if the rejection is a fresh pattern, file a distinct lesson.\n\n",
+		target)
+	for _, l := range lessons {
+		fmt.Fprintf(sb, "- %s\n", l)
+	}
+	sb.WriteString("\n")
+}
+
+func renderDecomposerCommitSHA(sb *strings.Builder, sha string) {
+	if sha == "" {
+		return
+	}
+	fmt.Fprintf(sb, "## Commit SHA\n\nUse this in `evidence_files[].commit_sha` so the retirement sweep can detect when the cited code has been rewritten:\n\n%s\n\n",
+		sha)
+}
+
+func renderDecomposerTaskInstructions(sb *strings.Builder) {
+	sb.WriteString("## Your Task\n\n")
+	sb.WriteString("Produce ONE Lesson via submit_work. The lesson must:\n\n")
+	sb.WriteString("- Identify the *root cause* pattern, not just the surface symptom the reviewer named.\n")
+	sb.WriteString("- Be auditable: every claim in `detail` must trace back to a step in the developer trajectory or a region in evidence_files.\n")
+	sb.WriteString("- Be useful next time: `injection_form` will be rendered into a future agent's prompt, so it must read as concrete advice (\"Run the test before submitting\"), not retrospective narration (\"The developer didn't run the test\").\n")
+	sb.WriteString("- Cite at least one of `evidence_steps` (preferred) or `evidence_files`. A lesson with no evidence will be rejected by the writer in Phase 3 and is hard to evaluate even now.\n")
+	sb.WriteString("- Set `root_cause_role` to the role whose upstream defect created the failure — usually the same as the target role, but sometimes the planner / scenario-generator if the work was set up to fail.\n")
+}
+
 const planReviewerCompletenessR1 = `## Completeness Criteria (Round 1 — Plan Document)
 
 In addition to SOP compliance, verify the following structural completeness checks.

@@ -86,6 +86,11 @@ type AssemblyContext struct {
 	// QAReviewerPrompt carries data for the QA reviewer user prompt. Set
 	// by the qa-reviewer component before assembly.
 	QAReviewerPrompt *QAReviewerPromptContext
+
+	// LessonDecomposerPrompt carries data for the lesson-decomposer user
+	// prompt. Set by the lesson-decomposer component before assembly
+	// (ADR-033 Phase 2b); nil for any other role.
+	LessonDecomposerPrompt *LessonDecomposerPromptContext
 }
 
 // TaskContext carries data for developer task prompts.

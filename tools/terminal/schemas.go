@@ -57,6 +57,8 @@ func schemaForDeliverable(deliverableType string) map[string]any {
 		return reviewSchema()
 	case "qa-review":
 		return qaReviewSchema()
+	case "lesson":
+		return lessonSchema()
 	default:
 		return developerSchema()
 	}
@@ -362,6 +364,75 @@ func developerSchema() map[string]any {
 			},
 		},
 		"required": []string{"summary", "files_modified"},
+	}
+}
+
+// lessonSchema returns the submit_work parameter schema for the
+// lesson-decomposer role (ADR-033 Phase 2b). The decomposer emits one
+// audited lesson per rejection — Detail traces the root cause with file:line
+// evidence, InjectionForm is the ≤80-token form rendered into future agent
+// prompts. Required fields match what workflow/lessons.Writer enforces in
+// Phase 3: at least one of evidence_steps or evidence_files must be
+// populated by the decomposer (the writer's strict mode rejects otherwise).
+func lessonSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"summary": map[string]any{
+				"type":        "string",
+				"description": "1-2 sentence actionable summary of the lesson — short title used for indexing and counts.",
+			},
+			"detail": map[string]any{
+				"type":        "string",
+				"description": "Long-form root-cause narrative. Used for audit and human review. Every claim should trace to evidence_steps or evidence_files.",
+			},
+			"injection_form": map[string]any{
+				"type":        "string",
+				"description": "Compressed case-study text (≤80 tokens) rendered into future agent prompts. Frame as concrete advice for the next agent, not retrospective narration about this run.",
+			},
+			"category_ids": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Category IDs from the supplied error_categories catalog. Inventing new IDs hurts retirement and ranking — match the closest existing category.",
+			},
+			"root_cause_role": map[string]any{
+				"type":        "string",
+				"description": "Role responsible for the upstream defect. Often the same as the role that surfaced the failure, but may be planner / scenario-generator / architect when the work was set up to fail.",
+			},
+			"evidence_steps": map[string]any{
+				"type":        "array",
+				"description": "Trajectory step citations. Each entry points to a step in the developer (or reviewer) loop that captured the failure pattern.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"loop_id": map[string]any{
+							"type":        "string",
+							"description": "Agentic-loop ID — typically the developer's loop that produced the rejected code.",
+						},
+						"step_index": map[string]any{
+							"type":        "integer",
+							"description": "Zero-based step index inside the trajectory.",
+						},
+					},
+					"required": []string{"loop_id", "step_index"},
+				},
+			},
+			"evidence_files": map[string]any{
+				"type":        "array",
+				"description": "File-region citations. Used by the retirement sweep (Phase 5) to expire lessons whose cited code has been rewritten or deleted.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path":       map[string]any{"type": "string", "description": "Workspace-relative file path."},
+						"line_start": map[string]any{"type": "integer", "description": "First cited line (1-based). Omit for whole-file citation."},
+						"line_end":   map[string]any{"type": "integer", "description": "Last cited line (1-based, inclusive). Omit for whole-file citation."},
+						"commit_sha": map[string]any{"type": "string", "description": "Commit SHA the citation refers to. Used by the retirement sweep to detect drift."},
+					},
+					"required": []string{"path"},
+				},
+			},
+		},
+		"required": []string{"summary", "detail", "injection_form", "root_cause_role"},
 	}
 }
 

@@ -76,6 +76,7 @@ const (
 	RoleArchitect            Role = "architect"
 	RoleQA                   Role = "qa"
 	RolePlanQAReviewer       Role = "plan-qa-reviewer"
+	RoleLessonDecomposer     Role = "lesson-decomposer"
 )
 
 // Fragment is the atomic unit of prompt composition.

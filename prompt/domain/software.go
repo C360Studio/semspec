@@ -1297,7 +1297,7 @@ Use the right tool for the question: graph for indexing, relationships, and prio
 			Content:   `CRITICAL: Your output goes IN the submit_work parameters, not in your text response. Do NOT call submit_work with empty parameters. Pass your data as named arguments.`,
 		},
 	}
-	return append(base, scenarioReviewerFragments()...)
+	return append(append(base, scenarioReviewerFragments()...), lessonDecomposerFragments()...)
 }
 
 // =====================================================================
@@ -1644,6 +1644,99 @@ Needs-changes example (integration/full — flaky test):
 
 				return sb.String()
 			},
+		},
+	}
+}
+
+// =====================================================================
+// Lesson Decomposer fragments (ADR-033 Phase 2b)
+// =====================================================================
+//
+// The lesson-decomposer is the antidote to the keyword-classifier
+// Goodhart loop ADR-033 calls out: a separate model run reads the
+// developer's trajectory and the reviewer's verdict, then writes ONE
+// audited lesson with file:line evidence. Output is consumed by
+// workflow/lessons.Writer (Phase 1 schema). Phase 3 will swap it in for
+// the keyword classifier; Phase 2b ships it alongside for A/B.
+
+func lessonDecomposerFragments() []*prompt.Fragment {
+	return []*prompt.Fragment{
+		{
+			ID:       "software.lesson-decomposer.system-base",
+			Category: prompt.CategorySystemBase,
+			Roles:    []prompt.Role{prompt.RoleLessonDecomposer},
+			Content: `You are a Lesson Decomposer.
+
+When a reviewer rejects an agent's work, you produce ONE durable, evidence-cited lesson the team can apply to future work. You do NOT decide whether the rejection was correct — that has already been settled. Your job is to extract the *root cause pattern* so the next agent in the same role does not repeat it.
+
+You are run rarely. The team relies on your output to seed prompts for many subsequent runs, so quality matters more than speed.
+
+You optimize for: a lesson whose Detail traces directly to specific trajectory steps or file regions; an InjectionForm short enough that injecting it into a future agent's prompt costs no more than 80 tokens; a RootCauseRole that names the role responsible for the upstream defect, even when that role differs from the role that surfaced the failure.`,
+		},
+		{
+			ID:       "software.lesson-decomposer.role-context",
+			Category: prompt.CategoryRoleContext,
+			Roles:    []prompt.Role{prompt.RoleLessonDecomposer},
+			Content: `Decomposition Process:
+
+1. Read the reviewer feedback to understand WHAT went wrong.
+2. Walk the developer trajectory step-by-step. Identify the moment(s) where the failure became inevitable — usually NOT the same moment the reviewer flagged.
+3. Determine the root cause pattern. Phrase it as "When X, do Y because Z" — concrete and predictive, not retrospective.
+4. Cite evidence. Every claim in Detail must trace back to either a trajectory step (by index) or a file region (path + line range + commit_sha).
+5. Choose category_ids from the supplied catalog. If nothing matches well, pick the closest category and explain in Detail — do not invent new IDs.
+6. Compress to InjectionForm. Read it as a prompt fragment for the next agent: it must be advice they can act on, not a story about a past run.
+
+Boundaries:
+- Do NOT propose code changes. The lesson is meta-feedback — improving how future agents approach the work, not fixing this specific bug.
+- Do NOT speculate beyond the evidence. If the trajectory does not show what went wrong, say so plainly in Detail and leave evidence_steps focused on what IS visible. Better an honest narrow lesson than a fabricated comprehensive one.
+- Do NOT optimize for the reviewer's exact wording. Reviewers describe symptoms; lessons must capture causes.
+- Do NOT file lessons that duplicate existing ones. If "Existing Lessons for the role" already covers the pattern, choose its categories and write a Detail that supplements rather than restates.
+
+Useful framings:
+- "The agent treated X as Y when X is actually Z." (mental model bug)
+- "The agent skipped step S, which the SOP required because [reason]." (process bug)
+- "The agent wrote tests for behavior they implemented, not behavior the scenario specified." (verification bug)
+- "The agent declared work complete before running the verification command." (premature submission)`,
+		},
+		{
+			ID:       "software.lesson-decomposer.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RoleLessonDecomposer},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.LessonDecomposerPrompt
+				if p == nil {
+					return "", fmt.Errorf("lesson-decomposer user-prompt: AssemblyContext.LessonDecomposerPrompt is nil")
+				}
+				return renderLessonDecomposerPrompt(p), nil
+			},
+		},
+		{
+			ID:       "software.lesson-decomposer.output-format",
+			Category: prompt.CategoryOutputFormat,
+			Roles:    []prompt.Role{prompt.RoleLessonDecomposer},
+			Content: `When your decomposition is complete, call the submit_work tool with these JSON fields:
+
+{
+  "summary": "When refactoring shared types, run the consumer's test suite before submitting — submit_work's static check only verifies the file you edited compiles.",
+  "detail": "On step [12] the developer ran 'go build ./pkg/foo/' and saw it pass, then called submit_work. The reviewer's diff (main.go:45-58) showed pkg/bar consuming the type with a now-broken signature. The trajectory shows the developer never ran 'go test ./...' nor inspected pkg/bar. Root pattern: trusting per-package compilation as a proxy for full-build health when changing exported symbols.",
+  "injection_form": "When changing exported symbols of a shared type, run the FULL test suite before submit_work — per-package builds miss broken consumers.",
+  "category_ids": ["incomplete_verification"],
+  "root_cause_role": "developer",
+  "evidence_steps": [
+    {"loop_id": "abc-123", "step_index": 12}
+  ],
+  "evidence_files": [
+    {"path": "pkg/foo/types.go", "line_start": 18, "line_end": 32, "commit_sha": "deadbeef"},
+    {"path": "pkg/bar/consumer.go", "line_start": 45, "line_end": 58, "commit_sha": "deadbeef"}
+  ]
+}
+
+Required: summary, detail, injection_form, root_cause_role.
+Required: at least one entry in evidence_steps OR evidence_files. A lesson with no evidence is rejected by the writer.
+Optional: category_ids (array of strings from the catalogue).
+Optional: evidence_files entries — line_start, line_end, and commit_sha can be omitted when only a path is known.
+
+Respond ONLY via the submit_work tool call. No markdown prose, no preamble, no explanation outside the tool call.`,
 		},
 	}
 }
