@@ -1123,10 +1123,12 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
 		// so even first-time errors surface in the retry prompt. Graph reads use
-		// a detached context so they survive caller cancellation.
+		// a detached context so they survive caller cancellation. Role is the
+		// caller-supplied prompt role — counts must match the prompt being
+		// assembled, not be hardcoded against developer.
 		if c.lessonWriter != nil && c.errorCategories != nil {
 			graphCtx := context.WithoutCancel(ctx)
-			if counts, err := c.lessonWriter.GetRoleLessonCounts(graphCtx, "developer"); err == nil {
+			if counts, err := c.lessonWriter.GetRoleLessonCounts(graphCtx, string(role)); err == nil {
 				for catID, count := range counts.Counts {
 					if catDef, ok := c.errorCategories.Get(string(catID)); ok {
 						asmCtx.TaskContext.ErrorTrends = append(asmCtx.TaskContext.ErrorTrends, prompt.ErrorTrend{
@@ -1141,10 +1143,12 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		}
 	}
 
-	// Wire role-scoped lessons learned.
+	// Wire role-scoped lessons learned. Lessons are fetched for the role this
+	// prompt is being assembled for — without this, the reviewer prompt would
+	// surface developer lessons (Phase 0 bug 0.1 in ADR-033).
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		lessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, "developer", 10)
+		lessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, string(role), 10)
 		if err == nil && len(lessons) > 0 {
 			tk := &prompt.LessonsLearned{}
 			for _, les := range lessons {

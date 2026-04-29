@@ -375,7 +375,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			maxTokens = ep.MaxTokens
 		}
 	}
-	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RolePlanReviewer,
 		Provider:       provider,
 		Domain:         "software",
@@ -391,7 +391,30 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			HasStandards: hasStandards,
 			Round:        int(round),
 		},
-	})
+	}
+
+	// Wire role-scoped lessons learned. plan-reviewer was the lone agentic
+	// component without lesson injection (Phase 0 bug 0.2 in ADR-033). No
+	// producer creates plan-reviewer-targeted lessons today (deferred to
+	// Phase 1+ alongside the decomposer); this wire-up lands now so when the
+	// producer ships it is a one-line change to make lessons reach this
+	// prompt.
+	if c.lessonWriter != nil {
+		graphCtx := context.WithoutCancel(ctx)
+		if roleLessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, string(prompt.RolePlanReviewer), 10); err == nil && len(roleLessons) > 0 {
+			tk := &prompt.LessonsLearned{}
+			for _, les := range roleLessons {
+				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{
+					Category: les.Source,
+					Summary:  les.Summary,
+					Role:     les.Role,
+				})
+			}
+			asmCtx.LessonsLearned = tk
+		}
+	}
+
+	assembled := c.assembler.Assemble(asmCtx)
 	if assembled.RenderError != nil {
 		c.logger.Error("Plan-reviewer user-prompt render failed", "slug", slug, "round", round, "error", assembled.RenderError)
 		return
