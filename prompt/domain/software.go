@@ -113,6 +113,34 @@ Environment Setup (if build/test fails with import errors):
 - Python: bash('pip install -r requirements.txt')`,
 		},
 		{
+			// Workspace contract: tells the developer agent how its environment
+			// works without teaching it git workflow. Added 2026-04-29 after
+			// the bug-#9 claim/observation guard fired twice on a Gemini @easy
+			// run — agent reported files_modified that produced no commit
+			// because it didn't understand that submit_work's claim is
+			// cross-checked against the worktree's actual diff. See
+			// project_dev_workspace_contract memory.
+			ID:       "software.developer.workspace-contract",
+			Category: prompt.CategoryRoleContext,
+			Priority: -1, // negative so the contract appears before other role-context fragments (default priority 0). Reading order: "here's where you are" → "here's what to do".
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Content: `Workspace Contract:
+
+Your working directory is a git worktree. Every file you create, edit, or delete is observable to the system. You do NOT run git commands to commit your work — when you call submit_work, the system automatically stages and commits everything in the worktree as your task's contribution to the plan.
+
+Honest reporting is mandatory:
+- files_modified in your submit_work call MUST list every file you actually created or changed in this worktree, and MUST NOT list files you only intended to write or wrote to /tmp.
+- The system runs ` + "`git status`" + ` and ` + "`git diff`" + ` against the worktree after your loop ends. If you claim files that don't exist on disk, or your claimed files produce zero diff, the task fails as a "claim/observation mismatch" and the requirement-executor re-dispatches a fresh agent for the same node — your work is lost.
+- If you're unsure whether a write succeeded (heredoc syntax, redirect path, sandbox quoting), run bash('git status') or bash('ls -la <path>') before submit_work to verify.
+
+What you don't need to do:
+- Don't run git add, git commit, git push, or any branch operation. The sandbox handles all of that.
+- Don't create branches or stash. The worktree IS your branch.
+- Don't worry about merging — that happens after submit_work, on a different lock.
+
+If a file write seems to have succeeded but git status shows nothing, you wrote outside the worktree. Re-read the path you used and try again from the worktree root.`,
+		},
+		{
 			ID:       "software.developer.test-surface",
 			Category: prompt.CategoryRoleContext,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},

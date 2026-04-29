@@ -84,6 +84,13 @@ services:
     image: ghcr.io/c360studio/semspec:main
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    ports:
+      # Prometheus metrics scrape — exposed so host-side ops tooling and the
+      # ops-glass UI can read agentic loop counters, context utilization,
+      # tool call rates, etc. without exec'ing into the container. Path:
+      # http://localhost:9090/metrics. The metrics service itself is
+      # auto-registered by ensureMetricsConfig() in cmd/semspec/main.go.
+      - "9090:9090"
     depends_on:
       nats:
         condition: service_healthy
