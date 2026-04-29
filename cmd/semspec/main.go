@@ -569,6 +569,11 @@ func validateModelRegistryFromConfig(data []byte) error {
 
 	slog.Info("Model registry validated from config",
 		"endpoints", len(registry.ListEndpoints()))
+
+	// Optional liveness probe: confirm ollama-provider endpoints actually
+	// resolve to pulled models. Non-fatal — emits WARN per missing model
+	// so the operator hears about it at boot rather than at first dispatch.
+	model.ProbeOllamaEndpoints(context.Background(), registry, slog.Default())
 	return nil
 }
 
