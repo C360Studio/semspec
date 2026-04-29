@@ -185,11 +185,32 @@ func TestSoftwareOrientationGraphFirst(t *testing.T) {
 		Provider:       prompt.ProviderOpenAI,
 		AvailableTools: []string{"bash", "submit_work", "graph_summary", "graph_search", "graph_query"},
 	})
-	if !strings.Contains(withGraph.SystemMessage, "Iteration 1 MUST call graph_summary") {
-		t.Error("graph-equipped persona should be hard-directed to graph_summary first")
+	// Reasons-not-rules orientation: explain why graph indexing matters and
+	// distinguish entity IDs from filesystem paths. The earlier "Iteration 1
+	// MUST call graph_summary" framing produced cargo-cult behavior on small
+	// models (architect at qwen3:14b@temp0.6 passed entity IDs to bash as
+	// paths four iterations in a row, never recovered). Reasons let small
+	// models pick the right tool from understanding instead of compliance.
+	if !strings.Contains(withGraph.SystemMessage, "Semantic Knowledge Graph") {
+		t.Error("orientation must establish that the graph is an SKG of THIS workspace (not generic)")
+	}
+	if !strings.Contains(withGraph.SystemMessage, "semsource") {
+		t.Error("orientation must name semsource as the curator so agents know the graph is live and authoritative")
+	}
+	if !strings.Contains(withGraph.SystemMessage, "shared, durable memory") {
+		t.Error("orientation must establish the graph as cross-agent shared memory — that's the why-they-should-care")
+	}
+	if !strings.Contains(withGraph.SystemMessage, "graph indexes the workspace") {
+		t.Error("graph-equipped persona should explain WHY the graph matters (indexing), not prescribe MUST")
+	}
+	if !strings.Contains(withGraph.SystemMessage, "Entity IDs are graph keys") {
+		t.Error("orientation must distinguish entity IDs from filesystem paths to prevent cargo-culting IDs into bash args")
 	}
 	if strings.Contains(withGraph.SystemMessage, "graph_summary or a few bash commands") {
 		t.Error("the soft 'or a few bash commands' phrasing must not survive — that's exactly what produced the 0-graph-call run")
+	}
+	if strings.Contains(withGraph.SystemMessage, "Iteration 1 MUST call graph_summary") {
+		t.Error("the prescriptive 'MUST call' framing is the Goodhart trap that produced entity-ID-as-bash-path cargo-culting")
 	}
 
 	withoutGraph := a.Assemble(&prompt.AssemblyContext{
