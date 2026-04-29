@@ -11,49 +11,41 @@ import (
 	"github.com/google/uuid"
 )
 
-// extractLessons creates role-scoped Lesson entries from reviewer rejection
-// feedback and stores them via the lesson writer (TripleWriter → graph-ingest).
-// Called after the reviewer completes — only non-approved verdicts produce lessons.
-func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, feedback, verdict string) {
-	if c.lessonWriter == nil {
+// checkRejectionPatterns tallies recurring error patterns when the reviewer
+// rejects a task. Triggers a structured "Recurring error pattern detected"
+// log when any role-scoped error category exceeds the configured threshold.
+//
+// ADR-033 Phase 3: replaces the keyword-classifier path that wrote a
+// `Source="reviewer-feedback"` Lesson on every rejection. The decomposer
+// (Phase 2b, see publishLessonDecomposeRequest) is now the sole producer
+// for code-review rejections — its evidence-cited Lesson is written
+// asynchronously when the agentic loop completes. Threshold detection
+// remains synchronous on the rejection path because it surfaces operational
+// signal regardless of when the new lesson lands.
+func (c *Component) checkRejectionPatterns(ctx context.Context, _ *taskExecution, feedback, verdict string) {
+	if c.lessonWriter == nil || verdict != "rejected" || feedback == "" {
 		return
 	}
 
-	role := "developer" // default role for execution pipeline
-
-	// Rejection lesson from reviewer feedback.
-	if verdict == "rejected" && feedback != "" {
-		var categoryIDs []string
-		if c.errorCategories != nil {
-			matches := c.errorCategories.MatchSignals(feedback)
-			for _, m := range matches {
-				categoryIDs = append(categoryIDs, m.Category.ID)
-			}
-		}
-
-		lesson := workflow.Lesson{
-			ID:          uuid.New().String(),
-			Source:      "reviewer-feedback",
-			ScenarioID:  exec.TaskID,
-			Summary:     truncateInsight(feedback, 200),
-			CategoryIDs: categoryIDs,
-			Role:        role,
-			CreatedAt:   time.Now(),
-		}
-
-		if err := c.lessonWriter.RecordLesson(ctx, lesson); err != nil {
-			c.logger.Warn("Failed to record lesson", "role", role, "error", err)
-		}
-
-		// Increment per-role pattern counts and check threshold.
-		if len(categoryIDs) > 0 {
-			if err := c.lessonWriter.IncrementRoleLessonCounts(ctx, role, categoryIDs); err != nil {
-				c.logger.Warn("Failed to increment lesson counts", "role", role, "error", err)
-			}
-			c.checkLessonThreshold(ctx, role, categoryIDs)
-		}
+	role := "developer"
+	if c.errorCategories == nil {
+		// No registry → no category match → threshold check is a graph-only
+		// scan that still works, just without classifier-derived hints.
+		c.checkLessonThreshold(ctx, role, nil)
+		return
 	}
 
+	matches := c.errorCategories.MatchSignals(feedback)
+	if len(matches) == 0 {
+		c.checkLessonThreshold(ctx, role, nil)
+		return
+	}
+
+	categoryIDs := make([]string, 0, len(matches))
+	for _, m := range matches {
+		categoryIDs = append(categoryIDs, m.Category.ID)
+	}
+	c.checkLessonThreshold(ctx, role, categoryIDs)
 }
 
 // extractStructuralLessons creates one developer-scoped Lesson per failed
