@@ -1632,6 +1632,25 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 	// the sandbox repo lock is contended. EXCEPT when the sandbox has flagged
 	// itself as needing reconciliation: retrying against a wedged repo just
 	// burns tokens and delays the human signal.
+	//
+	// Layer-1 retry (this loop): transient INFRASTRUCTURE failures —
+	// repoMu contention between parallel merges, transient git plumbing
+	// errors ("stash failed: exit status 128" from auto-stash on a busy
+	// repo, etc.). Same worktree, same hash, retry verbatim.
+	// Origin: commit 2ff4b6f (2026-04-16, Gemini @easy E2E surfacing).
+	//
+	// Layer-2 retry lives in processor/requirement-executor/component.go's
+	// node-failure path: when this loop exhausts its 3 attempts and the
+	// task moves to stage=error, requirement-executor decides whether to
+	// re-dispatch the developer agent for the SAME node with the prior
+	// workspace + feedback. That layer fixes AGENT flakes (TDD budget
+	// exhaustion, bug-#9 claim/observation mismatch, code that doesn't
+	// compile). Different cause, different remedy, do not collapse.
+	//
+	// Today's repro (2026-04-29 Gemini @easy success) had 1 layer-1 retry
+	// loop succeed first try, but layer-2 fire twice on a different node
+	// because the developer reported files_modified that produced no
+	// commit. The third re-dispatch wrote real code and the merge worked.
 	var result *sandbox.MergeResult
 	var err error
 	for attempt := range 3 {

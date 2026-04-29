@@ -627,6 +627,24 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 		// On node failure, check if we can retry at the requirement level.
 		// This catches escalated tasks (TDD budget exhausted) and gives them
 		// one more chance with the prior workspace intact.
+		//
+		// Layer-2 retry (this branch): AGENT failures — the developer ran
+		// out of TDD cycles, the bug-#9 claim/observation guard fired
+		// because the developer reported files_modified that produced no
+		// commit, the code didn't compile, etc. Re-dispatch the developer
+		// for the SAME node with prior workspace + feedback so a NEW
+		// generation can fix what the prior one missed.
+		//
+		// Layer-1 retry lives in processor/execution-manager/component.go's
+		// mergeWorktree (see that comment for cross-reference). Layer-1
+		// fixes INFRASTRUCTURE flakes (repoMu contention, transient git
+		// plumbing) by retrying the merge of the same hash. Different
+		// cause, different remedy, do not collapse.
+		//
+		// 2026-04-29 Gemini @easy run validated the split: layer-2 fired
+		// twice on test-health-endpoint (claim/observation mismatch on
+		// attempts 1+2); third re-dispatch produced real test code and
+		// the merge succeeded.
 		if exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
 			exec.RetryCount++
 			exec.LastReviewFeedback = fmt.Sprintf("Node %q failed (outcome=%s). Retry the implementation.", nodeID, event.Outcome)

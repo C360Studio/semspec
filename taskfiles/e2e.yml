@@ -692,7 +692,17 @@ tasks:
           # without -f the switch aborts.
           git -C "$fixture" checkout -q -f -B main "$ROOT"
           git -C "$fixture" reset --hard -q "$ROOT"
-          git -C "$fixture" clean -fd -q
+          # Clean untracked agent files (main_test.go, health.go, etc.) but
+          # exclude .semspec/ — that directory holds files tracked by the
+          # PARENT semspec repo (e.g. hello-world-py/.semspec/checklist.json
+          # is committed to /Users/.../semspec, not to the fixture's own
+          # nested .git). Without the exclude, `git clean -fd` from the
+          # fixture's git sees those parent-tracked files as untracked and
+          # deletes them, leaving the parent repo with a phantom `D` in
+          # `git status`. Caught 2026-04-29 — see project_reset_fixtures_amnesty.
+          # The explicit `rm -rf` below handles known runtime cruft inside
+          # .semspec/.
+          git -C "$fixture" clean -fd -q -e .semspec/
           # Remove the .semspec/worktrees/ directory so `git worktree prune`
           # forgets the worktrees the agents created during prior runs. Then
           # branch -D works because no worktree pins the ref anymore.
