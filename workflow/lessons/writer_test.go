@@ -209,6 +209,157 @@ func TestGetRoleLessonCounts_AggregatesCategories(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ADR-033 Phase 1 schema round-trip tests
+// ---------------------------------------------------------------------------
+
+func TestParseLessonFromTriples_Phase1FieldsRoundTrip(t *testing.T) {
+	retired := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	lastInj := time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)
+
+	triples := map[string]string{
+		agentgraph.PredicateLessonID:             "abc",
+		agentgraph.PredicateLessonRole:           "developer",
+		agentgraph.PredicateLessonDetail:         "long-form root-cause narrative",
+		agentgraph.PredicateLessonInjectionForm:  "case study form",
+		agentgraph.PredicateLessonRootCauseRole:  "architect",
+		agentgraph.PredicateLessonPositive:       "true",
+		agentgraph.PredicateLessonRetiredAt:      retired.Format(time.RFC3339),
+		agentgraph.PredicateLessonLastInjectedAt: lastInj.Format(time.RFC3339),
+		agentgraph.PredicateLessonEvidenceSteps:  `[{"loop_id":"l1","step_index":3},{"loop_id":"l2","step_index":7}]`,
+		agentgraph.PredicateLessonEvidenceFiles:  `[{"path":"main.go","line_start":10,"line_end":20,"commit_sha":"deadbeef"}]`,
+	}
+
+	lesson := parseLessonFromTriples(triples)
+
+	if lesson.Detail != "long-form root-cause narrative" {
+		t.Errorf("Detail = %q, want long-form...", lesson.Detail)
+	}
+	if lesson.InjectionForm != "case study form" {
+		t.Errorf("InjectionForm = %q", lesson.InjectionForm)
+	}
+	if lesson.RootCauseRole != "architect" {
+		t.Errorf("RootCauseRole = %q, want architect", lesson.RootCauseRole)
+	}
+	if !lesson.Positive {
+		t.Error("Positive should be true")
+	}
+	if lesson.RetiredAt == nil || !lesson.RetiredAt.Equal(retired) {
+		t.Errorf("RetiredAt = %v, want %v", lesson.RetiredAt, retired)
+	}
+	if lesson.LastInjectedAt == nil || !lesson.LastInjectedAt.Equal(lastInj) {
+		t.Errorf("LastInjectedAt = %v, want %v", lesson.LastInjectedAt, lastInj)
+	}
+	if len(lesson.EvidenceSteps) != 2 || lesson.EvidenceSteps[0].LoopID != "l1" || lesson.EvidenceSteps[1].StepIndex != 7 {
+		t.Errorf("EvidenceSteps = %+v", lesson.EvidenceSteps)
+	}
+	if len(lesson.EvidenceFiles) != 1 || lesson.EvidenceFiles[0].Path != "main.go" || lesson.EvidenceFiles[0].LineEnd != 20 || lesson.EvidenceFiles[0].CommitSHA != "deadbeef" {
+		t.Errorf("EvidenceFiles = %+v", lesson.EvidenceFiles)
+	}
+}
+
+func TestParseLessonFromTriples_Phase1FieldsAbsent(t *testing.T) {
+	// Legacy lesson — only the original predicates set.
+	triples := map[string]string{
+		agentgraph.PredicateLessonID:   "legacy",
+		agentgraph.PredicateLessonRole: "developer",
+	}
+	lesson := parseLessonFromTriples(triples)
+	if lesson.Detail != "" || lesson.InjectionForm != "" || lesson.RootCauseRole != "" {
+		t.Errorf("expected empty Phase 1 string fields, got Detail=%q InjectionForm=%q RootCauseRole=%q",
+			lesson.Detail, lesson.InjectionForm, lesson.RootCauseRole)
+	}
+	if lesson.Positive {
+		t.Error("Positive should default to false")
+	}
+	if lesson.RetiredAt != nil {
+		t.Errorf("RetiredAt should be nil, got %v", lesson.RetiredAt)
+	}
+	if lesson.LastInjectedAt != nil {
+		t.Errorf("LastInjectedAt should be nil, got %v", lesson.LastInjectedAt)
+	}
+	if lesson.EvidenceSteps != nil {
+		t.Errorf("EvidenceSteps should be nil, got %v", lesson.EvidenceSteps)
+	}
+	if lesson.EvidenceFiles != nil {
+		t.Errorf("EvidenceFiles should be nil, got %v", lesson.EvidenceFiles)
+	}
+}
+
+func TestParseLessonFromTriples_MalformedEvidenceJSON(t *testing.T) {
+	triples := map[string]string{
+		agentgraph.PredicateLessonID:            "x",
+		agentgraph.PredicateLessonEvidenceSteps: "not-json",
+		agentgraph.PredicateLessonEvidenceFiles: `{"not":"an array"}`,
+	}
+	lesson := parseLessonFromTriples(triples)
+	if lesson.EvidenceSteps != nil {
+		t.Errorf("malformed evidence_steps must yield nil, got %v", lesson.EvidenceSteps)
+	}
+	if lesson.EvidenceFiles != nil {
+		t.Errorf("malformed evidence_files must yield nil, got %v", lesson.EvidenceFiles)
+	}
+}
+
+func TestParseLessonFromTriples_PositiveFalseValue(t *testing.T) {
+	triples := map[string]string{
+		agentgraph.PredicateLessonID:       "x",
+		agentgraph.PredicateLessonPositive: "false",
+	}
+	lesson := parseLessonFromTriples(triples)
+	if lesson.Positive {
+		t.Error("Positive should be false when triple value is \"false\"")
+	}
+}
+
+func TestParseLessonFromTriples_MalformedTimestampFields(t *testing.T) {
+	triples := map[string]string{
+		agentgraph.PredicateLessonID:             "x",
+		agentgraph.PredicateLessonRetiredAt:      "not-a-date",
+		agentgraph.PredicateLessonLastInjectedAt: "also-not-a-date",
+	}
+	lesson := parseLessonFromTriples(triples)
+	if lesson.RetiredAt != nil {
+		t.Errorf("malformed RetiredAt must yield nil, got %v", lesson.RetiredAt)
+	}
+	if lesson.LastInjectedAt != nil {
+		t.Errorf("malformed LastInjectedAt must yield nil, got %v", lesson.LastInjectedAt)
+	}
+}
+
+func TestRecordLesson_AcceptsLessonWithEvidence(t *testing.T) {
+	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
+	now := time.Now()
+	lesson := workflow.Lesson{
+		Source:        "decomposer",
+		Summary:       "test",
+		Role:          "developer",
+		Detail:        "narrative",
+		InjectionForm: "case study",
+		EvidenceSteps: []workflow.StepRef{{LoopID: "l1", StepIndex: 1}},
+		EvidenceFiles: []workflow.FileRef{{Path: "x.go", LineStart: 1, LineEnd: 2, CommitSHA: "abc"}},
+		RootCauseRole: "architect",
+		Positive:      true,
+		RetiredAt:     &now,
+	}
+	if err := w.RecordLesson(context.Background(), lesson); err != nil {
+		t.Fatalf("RecordLesson with evidence should succeed, got %v", err)
+	}
+}
+
+func TestRecordLesson_AcceptsLegacyLessonWithoutEvidence(t *testing.T) {
+	// Phase 1: warn-only, no rejection.
+	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
+	lesson := workflow.Lesson{
+		Source:  "reviewer-feedback",
+		Summary: "legacy",
+		Role:    "developer",
+	}
+	if err := w.RecordLesson(context.Background(), lesson); err != nil {
+		t.Fatalf("RecordLesson without evidence should still succeed in Phase 1, got %v", err)
+	}
+}
+
 // nilTripleWriter returns a TripleWriter with nil NATSClient.
 // WriteTriple returns nil (no-op), ReadEntity/ReadEntitiesByPrefix return errors.
 func nilTripleWriter() *graphutil.TripleWriter {

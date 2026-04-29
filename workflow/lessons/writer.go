@@ -25,6 +25,11 @@ type Writer struct {
 }
 
 // RecordLesson writes a lesson entity to the graph as triples.
+//
+// ADR-033 Phase 1: writer accepts lessons with or without evidence pointers.
+// When evidence is missing, a Debug log is emitted (warn-only-but-quiet
+// during the migration window — most legacy lessons lack evidence and would
+// flood the warn channel). Phase 3 will flip this to a hard reject.
 func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error {
 	if lesson.ID == "" {
 		lesson.ID = uuid.New().String()
@@ -53,6 +58,70 @@ func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error
 		{agentgraph.PredicateLessonCategories, string(categoriesJSON)},
 		{agentgraph.PredicateLessonRole, lesson.Role},
 		{agentgraph.PredicateLessonCreatedAt, lesson.CreatedAt.Format(time.RFC3339)},
+	}
+
+	// ADR-033 Phase 1+ optional fields — only written when set, to keep
+	// triple count small for legacy lessons.
+	if lesson.Detail != "" {
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonDetail, lesson.Detail})
+	}
+	if lesson.InjectionForm != "" {
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonInjectionForm, lesson.InjectionForm})
+	}
+	if len(lesson.EvidenceSteps) > 0 {
+		stepsJSON, err := json.Marshal(lesson.EvidenceSteps)
+		if err != nil {
+			return fmt.Errorf("lessons: marshal evidence_steps: %w", err)
+		}
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonEvidenceSteps, string(stepsJSON)})
+	}
+	if len(lesson.EvidenceFiles) > 0 {
+		filesJSON, err := json.Marshal(lesson.EvidenceFiles)
+		if err != nil {
+			return fmt.Errorf("lessons: marshal evidence_files: %w", err)
+		}
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonEvidenceFiles, string(filesJSON)})
+	}
+	if lesson.RootCauseRole != "" {
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonRootCauseRole, lesson.RootCauseRole})
+	}
+	if lesson.Positive {
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonPositive, "true"})
+	}
+	if lesson.RetiredAt != nil {
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonRetiredAt, lesson.RetiredAt.Format(time.RFC3339)})
+	}
+	if lesson.LastInjectedAt != nil {
+		triples = append(triples, struct {
+			predicate string
+			value     any
+		}{agentgraph.PredicateLessonLastInjectedAt, lesson.LastInjectedAt.Format(time.RFC3339)})
+	}
+
+	if len(lesson.EvidenceSteps) == 0 && len(lesson.EvidenceFiles) == 0 && w.Logger != nil {
+		w.Logger.Debug("Lesson recorded without evidence pointers (Phase 1 warn-only)",
+			"lesson_id", lesson.ID, "source", lesson.Source, "role", lesson.Role)
 	}
 
 	for _, t := range triples {
@@ -118,6 +187,8 @@ func (w *Writer) GetRoleLessonCounts(ctx context.Context, role string) (workflow
 }
 
 // parseLessonFromTriples reconstructs a Lesson from a predicate→value map.
+// ADR-033 Phase 1+ fields are optional — missing predicates leave the
+// corresponding Lesson fields at their zero value.
 func parseLessonFromTriples(triples map[string]string) workflow.Lesson {
 	var lesson workflow.Lesson
 	lesson.ID = triples[agentgraph.PredicateLessonID]
@@ -125,12 +196,34 @@ func parseLessonFromTriples(triples map[string]string) workflow.Lesson {
 	lesson.ScenarioID = triples[agentgraph.PredicateLessonScenarioID]
 	lesson.Summary = triples[agentgraph.PredicateLessonSummary]
 	lesson.Role = triples[agentgraph.PredicateLessonRole]
+	lesson.Detail = triples[agentgraph.PredicateLessonDetail]
+	lesson.InjectionForm = triples[agentgraph.PredicateLessonInjectionForm]
+	lesson.RootCauseRole = triples[agentgraph.PredicateLessonRootCauseRole]
 
 	if raw, ok := triples[agentgraph.PredicateLessonCategories]; ok {
 		_ = json.Unmarshal([]byte(raw), &lesson.CategoryIDs)
 	}
 	if raw, ok := triples[agentgraph.PredicateLessonCreatedAt]; ok {
 		lesson.CreatedAt, _ = time.Parse(time.RFC3339, raw)
+	}
+	if raw, ok := triples[agentgraph.PredicateLessonEvidenceSteps]; ok {
+		_ = json.Unmarshal([]byte(raw), &lesson.EvidenceSteps)
+	}
+	if raw, ok := triples[agentgraph.PredicateLessonEvidenceFiles]; ok {
+		_ = json.Unmarshal([]byte(raw), &lesson.EvidenceFiles)
+	}
+	if raw, ok := triples[agentgraph.PredicateLessonPositive]; ok {
+		lesson.Positive = raw == "true"
+	}
+	if raw, ok := triples[agentgraph.PredicateLessonRetiredAt]; ok && raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			lesson.RetiredAt = &t
+		}
+	}
+	if raw, ok := triples[agentgraph.PredicateLessonLastInjectedAt]; ok && raw != "" {
+		if t, err := time.Parse(time.RFC3339, raw); err == nil {
+			lesson.LastInjectedAt = &t
+		}
 	}
 
 	return lesson

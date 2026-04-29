@@ -13,7 +13,7 @@ type Lesson struct {
 	ID string
 
 	// Source identifies where this lesson came from.
-	// Values: "reviewer-feedback", "validation-failure", "plan-review"
+	// Values: "reviewer-feedback", "structural-validation", "plan-review", "decomposer".
 	Source string
 
 	// ScenarioID is which scenario or plan slug produced this lesson.
@@ -26,12 +26,74 @@ type Lesson struct {
 	// Used for filtering: only lessons matching the current error patterns are injected.
 	CategoryIDs []string
 
-	// Role is the pipeline role this lesson applies to: "planner", "developer", "reviewer", etc.
-	// All components sharing a role see the same lessons.
+	// Role is the proximate pipeline role this lesson applies to (where the
+	// failure surfaced): "planner", "developer", "reviewer", etc. All
+	// components sharing a role see the same lessons.
 	Role string
 
 	// CreatedAt is when this lesson was recorded.
 	CreatedAt time.Time
+
+	// --- ADR-033 Phase 1+ fields. Empty/zero for legacy lessons. ---
+
+	// Detail is a long-form root-cause narrative. Used for audit and human
+	// review only — never injected verbatim into prompts. May be 1KB+.
+	// Populated by the decomposer (Phase 2+).
+	Detail string
+
+	// InjectionForm is the compressed case-study text rendered into prompts.
+	// Hard-capped at ~80 tokens by the decomposer. When empty, the
+	// team-knowledge fragment falls back to Summary (Phase 4 wires this).
+	InjectionForm string
+
+	// EvidenceSteps cites trajectory steps that captured the failure,
+	// making the lesson auditable. Required by the writer in Phase 3+;
+	// warn-only in Phase 1.
+	EvidenceSteps []StepRef
+
+	// EvidenceFiles cites file regions where the failure manifested.
+	// Used by the retirement sweep (Phase 5) to expire lessons whose
+	// cited code has been rewritten or deleted.
+	EvidenceFiles []FileRef
+
+	// RootCauseRole identifies the role responsible for the upstream
+	// defect, which may differ from Role. Cross-role attribution lands
+	// with the decomposer (Phase 2+); empty for legacy lessons.
+	RootCauseRole string
+
+	// Positive marks best-practice lessons emitted from approved-on-first-try
+	// trajectories with rating >= 4. Renders as "BEST PRACTICE" rather than
+	// "AVOID" in the team-knowledge fragment (Phase 6).
+	Positive bool
+
+	// RetiredAt marks a lesson as no longer eligible for injection. Set by
+	// the retirement sweep (Phase 5) when evidence files are deleted/
+	// rewritten or when the lesson has not been injected in N weeks.
+	// Nil = active.
+	RetiredAt *time.Time
+
+	// LastInjectedAt is updated each time the lesson is rendered into a
+	// prompt. Used for low-relevance pruning by the retirement sweep.
+	LastInjectedAt *time.Time
+}
+
+// StepRef points to a single step in an agentic-loop trajectory. Used in
+// Lesson.EvidenceSteps to make a lesson auditable — a reviewer can click
+// through to the cited step in the trajectory viewer.
+type StepRef struct {
+	LoopID    string `json:"loop_id"`
+	StepIndex int    `json:"step_index"`
+}
+
+// FileRef points to a region of a file at a specific commit. Used in
+// Lesson.EvidenceFiles so the retirement sweep can expire lessons whose
+// cited code has moved or disappeared. Zero LineStart/LineEnd means the
+// whole file is cited.
+type FileRef struct {
+	Path      string `json:"path"`
+	LineStart int    `json:"line_start,omitempty"`
+	LineEnd   int    `json:"line_end,omitempty"`
+	CommitSHA string `json:"commit_sha,omitempty"`
 }
 
 // RoleLessonCounts tracks per-category error occurrence counts for a single role.

@@ -56,6 +56,16 @@ const (
 	PredicateLessonRole       = "lesson.role"
 	PredicateLessonCreatedAt  = "lesson.created_at"
 	PredicateLessonCounts     = "lesson.counts"
+
+	// ADR-033 Phase 1+ lesson predicates. Empty/absent for legacy lessons.
+	PredicateLessonDetail         = "lesson.detail"
+	PredicateLessonInjectionForm  = "lesson.injection_form"
+	PredicateLessonEvidenceSteps  = "lesson.evidence_steps"
+	PredicateLessonEvidenceFiles  = "lesson.evidence_files"
+	PredicateLessonRootCauseRole  = "lesson.root_cause_role"
+	PredicateLessonPositive       = "lesson.positive"
+	PredicateLessonRetiredAt      = "lesson.retired_at"
+	PredicateLessonLastInjectedAt = "lesson.last_injected_at"
 )
 
 // KVStore defines the KV operations used by the agent graph helper.
