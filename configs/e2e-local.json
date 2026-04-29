@@ -1,5 +1,5 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.7",
   "persona_preset": "bmad",
   "platform": {
     "org": "semspec",
@@ -21,17 +21,17 @@
       "qwen3-coder-30b": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "qwen3-coder:30b",
+        "model": "semspec/qwen3-coder-30b-128k",
         "max_tokens": 131072,
         "supports_tools": true,
         "stream": false,
         "request_timeout": "900s"
       },
-      "qwen-coder-14b": {
+      "qwen3-14b": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "qwen2.5-coder:14b",
-        "max_tokens": 131072,
+        "model": "semspec/qwen3-14b-32k",
+        "max_tokens": 32768,
         "supports_tools": true,
         "stream": false,
         "request_timeout": "900s"
@@ -39,7 +39,7 @@
       "qwen3-fast": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "qwen3:1.7b",
+        "model": "semspec/qwen3-fast-32k",
         "max_tokens": 32768,
         "supports_tools": true,
         "stream": false,
@@ -48,7 +48,7 @@
       "qwen35-coder-35b": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "mdq100/qwen3.5-coder:35b",
+        "model": "semspec/qwen35-coder-35b-128k",
         "max_tokens": 131072,
         "supports_tools": true,
         "stream": false,
@@ -59,85 +59,82 @@
       "planning": {
         "description": "High-level reasoning, architecture decisions",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "writing": {
         "description": "Documentation, proposals, specifications",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "coding": {
         "description": "Code generation, implementation",
         "preferred": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
-          "qwen35-coder-35b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen3-coder-30b",
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "plan_review": {
         "description": "Strategic plan assessment, SOP compliance, completeness validation",
         "preferred": [
-          "qwen35-coder-35b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen3-coder-30b",
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "architecture": {
         "description": "Technology choices, component boundaries, deployment topology",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition from plans",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation from requirements",
         "preferred": [
-          "qwen35-coder-35b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen3-coder-30b",
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "qa": {
         "description": "QA rollup review, integration validation, cross-requirement testing",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3-14b"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       },
       "fast": {
@@ -146,12 +143,12 @@
           "qwen3-fast"
         ],
         "fallback": [
-          "qwen-coder-14b"
+          "qwen3-14b"
         ]
       }
     },
     "defaults": {
-      "model": "qwen-coder-14b"
+      "model": "qwen3-14b"
     }
   },
   "services": {
@@ -492,8 +489,8 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 900,
-        "model": "qwen-coder-14b",
-        "decomposer_model": "qwen3-coder-30b",
+        "model": "qwen3-14b",
+        "decomposer_model": "qwen3-14b",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
@@ -519,7 +516,7 @@
       "config": {
         "max_tdd_cycles": 3,
         "timeout_seconds": 900,
-        "model": "qwen-coder-14b",
+        "model": "qwen3-14b",
         "sandbox_url": "http://sandbox:8090"
       }
     },
