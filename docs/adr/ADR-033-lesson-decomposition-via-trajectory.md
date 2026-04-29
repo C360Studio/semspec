@@ -240,7 +240,7 @@ Phased — no big-bang.
 
    Closes the gap where structural-validation failures re-dispatched the developer in-loop with feedback but never accumulated into the role-scoped lessons graph.
 
-1. **Phase 1 — schema:** Add new fields to `workflow.Lesson` and predicates to `agentgraph`. Writer accepts but does not require evidence (warn-only). No behavior change.
+1. **Phase 1 — schema. [SHIPPED 2026-04-29 commit `b9d5a5e`]** Added new fields to `workflow.Lesson` (`Detail`, `InjectionForm`, `EvidenceSteps`, `EvidenceFiles`, `RootCauseRole`, `Positive`, `RetiredAt`, `LastInjectedAt`) and matching predicates to `agentgraph`. Writer accepts but does not require evidence — Phase 1 logs Debug rather than Warn for missing evidence, since every existing producer (reviewer-feedback, structural-validation, plan-review) lacks evidence and loud Warn would flood logs without signal. Phase 3 will flip this to a hard reject. Slice fields (`EvidenceSteps`, `EvidenceFiles`) serialize as JSON strings, matching the existing `CategoryIDs` pattern; the decomposer (Phase 2+) will set producer shape. No behavior change for existing pipelines.
 2. **Phase 2 — decomposer:** Ship `lesson-decomposer` component, wired to execution-manager rejections only (smallest blast radius). Lessons from plan-reviewer and qa-reviewer continue using current path. Compare quality manually for a week.
 3. **Phase 3 — enforce evidence:** Writer rejects lessons without evidence. Existing recording sites (plan-reviewer, qa-reviewer) migrate to publish `lesson.decompose.requested` instead.
 4. **Phase 4 — relevance ranking + injection_form:** Replace recency selector in `ListLessonsForRole`. Update prompt fragment to render `injection_form` with `Summary` fallback.
