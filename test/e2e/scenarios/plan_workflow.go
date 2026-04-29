@@ -230,18 +230,35 @@ func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *R
 		return fmt.Errorf("plan missing 'approved_at' field")
 	}
 
-	// B1/B3: Verify stage field is set and correct for approved status.
+	// B1/B3: Verify stage field is set and reflects post-promote progress.
 	if plan.Stage == "" {
 		return fmt.Errorf("plan stage field is empty after approval")
 	}
 	result.SetDetail("approve_stage", plan.Stage)
-	// After promote the status is "approved", so stage should be "approved".
-	if plan.Stage != "approved" {
-		return fmt.Errorf("expected stage=approved after promote, got %q", plan.Stage)
+	// After promote, the plan starts at "approved" but reactive_mode auto-
+	// progresses through requirement-generation → architecture → scenarios →
+	// ready_for_execution. Any of those is a valid post-promote stage; the
+	// non-valid set is the pre-approval stages. Asserting strict equality on
+	// "approved" was a timing race that worked only when the downstream
+	// processors were slow enough to lose to the read.
+	if !isPostApproveStage(plan.Stage) {
+		return fmt.Errorf("expected post-approve stage after promote, got %q (plan.Approved=%v)", plan.Stage, plan.Approved)
 	}
 
 	result.SetDetail("approve_verified", true)
 	return nil
+}
+
+// isPostApproveStage reports whether the given stage is consistent with
+// "promote has succeeded" — i.e., not one of the pre-approval drafting
+// stages. Reactive mode auto-progresses past "approved" so tests that
+// observe the plan after promote may legitimately see any downstream stage.
+func isPostApproveStage(stage string) bool {
+	switch stage {
+	case "drafting", "ready_for_approval", "reviewed", "needs_changes":
+		return false
+	}
+	return stage != ""
 }
 
 // stageRequirementCRUD exercises the full requirement CRUD lifecycle via REST API.
