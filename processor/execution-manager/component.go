@@ -1177,9 +1177,10 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			tk := &prompt.LessonsLearned{}
 			for _, les := range lessons {
 				lesson := prompt.LessonEntry{
-					Category: les.Source,
-					Summary:  les.Summary,
-					Role:     les.Role,
+					Category:      les.Source,
+					Summary:       les.Summary,
+					InjectionForm: les.InjectionForm,
+					Role:          les.Role,
 				}
 				if len(les.CategoryIDs) > 0 && c.errorCategories != nil {
 					if catDef, ok := c.errorCategories.Get(les.CategoryIDs[0]); ok {

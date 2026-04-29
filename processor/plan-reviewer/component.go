@@ -410,9 +410,10 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			tk := &prompt.LessonsLearned{}
 			for _, les := range roleLessons {
 				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{
-					Category: les.Source,
-					Summary:  les.Summary,
-					Role:     les.Role,
+					Category:      les.Source,
+					Summary:       les.Summary,
+					InjectionForm: les.InjectionForm,
+					Role:          les.Role,
 				})
 			}
 			asmCtx.LessonsLearned = tk

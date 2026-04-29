@@ -1059,11 +1059,21 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.LessonsLearned != nil && len(ctx.LessonsLearned.Lessons) > 0
 			},
+			// ADR-033 Phase 4: prefer the decomposer's InjectionForm
+			// (compressed advice for the next agent, ≤80 tokens) over the
+			// raw Summary. Summary is the legacy fallback for lessons
+			// recorded before the decomposer was wired or for direct-write
+			// producers (plan-reviewer/qa-reviewer/structural-validation)
+			// that ship a finding-shaped Summary as their "AVOID" line.
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				var sb strings.Builder
 				sb.WriteString("TEAM KNOWLEDGE — Lessons from previous tasks:\n\n")
 				for _, lesson := range ctx.LessonsLearned.Lessons {
-					fmt.Fprintf(&sb, "- [AVOID][%s] %s", lesson.Role, lesson.Summary)
+					rendered := lesson.InjectionForm
+					if rendered == "" {
+						rendered = lesson.Summary
+					}
+					fmt.Fprintf(&sb, "- [AVOID][%s] %s", lesson.Role, rendered)
 					if lesson.Guidance != "" {
 						fmt.Fprintf(&sb, " GUIDANCE: %s", lesson.Guidance)
 					}
