@@ -11,16 +11,27 @@ import (
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
-func TestParseLessonFromTriples(t *testing.T) {
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:         "abc-123",
-		agentgraph.PredicateLessonSource:     "reviewer-feedback",
-		agentgraph.PredicateLessonScenarioID: "task-42",
-		agentgraph.PredicateLessonSummary:    "Missing error handling",
-		agentgraph.PredicateLessonRole:       "developer",
-		agentgraph.PredicateLessonCategories: `["missing_tests","sop_violation"]`,
-		agentgraph.PredicateLessonCreatedAt:  "2026-04-03T12:00:00Z",
+// mv builds a multi-valued triples map from variadic key/value pairs. Each
+// key is the predicate; each value is appended to that predicate's slice.
+func mv(pairs ...string) map[string][]string {
+	out := make(map[string][]string)
+	for i := 0; i+1 < len(pairs); i += 2 {
+		out[pairs[i]] = append(out[pairs[i]], pairs[i+1])
 	}
+	return out
+}
+
+func TestParseLessonFromTriples(t *testing.T) {
+	triples := mv(
+		agentgraph.PredicateLessonID, "abc-123",
+		agentgraph.PredicateLessonSource, "reviewer-feedback",
+		agentgraph.PredicateLessonScenarioID, "task-42",
+		agentgraph.PredicateLessonSummary, "Missing error handling",
+		agentgraph.PredicateLessonRole, "developer",
+		agentgraph.PredicateLessonCategories, "missing_tests",
+		agentgraph.PredicateLessonCategories, "sop_violation",
+		agentgraph.PredicateLessonCreatedAt, "2026-04-03T12:00:00Z",
+	)
 
 	lesson := parseLessonFromTriples(triples)
 
@@ -39,7 +50,7 @@ func TestParseLessonFromTriples(t *testing.T) {
 	if lesson.Role != "developer" {
 		t.Errorf("Role = %q, want %q", lesson.Role, "developer")
 	}
-	if len(lesson.CategoryIDs) != 2 || lesson.CategoryIDs[0] != "missing_tests" {
+	if len(lesson.CategoryIDs) != 2 || lesson.CategoryIDs[0] != "missing_tests" || lesson.CategoryIDs[1] != "sop_violation" {
 		t.Errorf("CategoryIDs = %v, want [missing_tests, sop_violation]", lesson.CategoryIDs)
 	}
 	if lesson.CreatedAt.IsZero() {
@@ -47,29 +58,56 @@ func TestParseLessonFromTriples(t *testing.T) {
 	}
 }
 
+func TestParseLessonFromTriples_LegacyJSONCategories(t *testing.T) {
+	// Backwards compat: a single triple holding a JSON-array string (the
+	// pre-atomic encoding) must still decode correctly.
+	triples := mv(
+		agentgraph.PredicateLessonID, "legacy-cats",
+		agentgraph.PredicateLessonCategories, `["missing_tests","sop_violation"]`,
+	)
+	lesson := parseLessonFromTriples(triples)
+	if len(lesson.CategoryIDs) != 2 || lesson.CategoryIDs[0] != "missing_tests" {
+		t.Errorf("legacy JSON categories: CategoryIDs = %v", lesson.CategoryIDs)
+	}
+}
+
 func TestParseLessonFromTriples_EmptyMap(t *testing.T) {
-	lesson := parseLessonFromTriples(map[string]string{})
+	lesson := parseLessonFromTriples(map[string][]string{})
 	if lesson.ID != "" || lesson.Source != "" || lesson.Role != "" {
 		t.Errorf("expected empty lesson from empty triples, got %+v", lesson)
 	}
 }
 
 func TestParseLessonFromTriples_MalformedCategories(t *testing.T) {
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:         "abc",
-		agentgraph.PredicateLessonCategories: "not-json",
+	// A single non-array value that doesn't start with `[` is treated as a
+	// raw atomic category ID.
+	triples := mv(
+		agentgraph.PredicateLessonID, "abc",
+		agentgraph.PredicateLessonCategories, "not-json",
+	)
+	lesson := parseLessonFromTriples(triples)
+	if len(lesson.CategoryIDs) != 1 || lesson.CategoryIDs[0] != "not-json" {
+		t.Errorf("expected single atomic category, got %v", lesson.CategoryIDs)
 	}
+}
+
+func TestParseLessonFromTriples_MalformedLegacyJSONCategories(t *testing.T) {
+	// A single value starting with `[` that fails to JSON-decode yields nil.
+	triples := mv(
+		agentgraph.PredicateLessonID, "abc",
+		agentgraph.PredicateLessonCategories, `[broken json`,
+	)
 	lesson := parseLessonFromTriples(triples)
 	if lesson.CategoryIDs != nil {
-		t.Errorf("expected nil CategoryIDs for malformed JSON, got %v", lesson.CategoryIDs)
+		t.Errorf("expected nil for malformed legacy JSON, got %v", lesson.CategoryIDs)
 	}
 }
 
 func TestParseLessonFromTriples_MalformedTimestamp(t *testing.T) {
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:        "abc",
-		agentgraph.PredicateLessonCreatedAt: "not-a-date",
-	}
+	triples := mv(
+		agentgraph.PredicateLessonID, "abc",
+		agentgraph.PredicateLessonCreatedAt, "not-a-date",
+	)
 	lesson := parseLessonFromTriples(triples)
 	if !lesson.CreatedAt.IsZero() {
 		t.Errorf("expected zero time for malformed timestamp, got %v", lesson.CreatedAt)
@@ -77,8 +115,6 @@ func TestParseLessonFromTriples_MalformedTimestamp(t *testing.T) {
 }
 
 func TestGetRoleLessonCounts_ErrorsWithNoNATS(t *testing.T) {
-	// With nil NATSClient, the prefix scan fails. GetRoleLessonCounts
-	// propagates the error (no silent swallowing).
 	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
 
 	_, err := w.GetRoleLessonCounts(context.Background(), "developer")
@@ -97,7 +133,6 @@ func TestIncrementRoleLessonCounts_IsNoOp(t *testing.T) {
 }
 
 func TestRecordLesson_GeneratesIDAndTimestamp(t *testing.T) {
-	// With nil NATSClient, WriteTriple is a no-op (returns nil).
 	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
 
 	lesson := workflow.Lesson{
@@ -106,48 +141,20 @@ func TestRecordLesson_GeneratesIDAndTimestamp(t *testing.T) {
 		Role:    "developer",
 	}
 
-	err := w.RecordLesson(context.Background(), lesson)
-	if err != nil {
+	if err := w.RecordLesson(context.Background(), lesson); err != nil {
 		t.Fatalf("unexpected error: %v", err)
-	}
-	// Can't verify the generated ID/timestamp since WriteTriple is a no-op,
-	// but this confirms no panics and the code path completes.
-}
-
-func TestListLessonsForRole_SortsMostRecentFirst(t *testing.T) {
-	// Test the sort logic via parseLessonFromTriples + sort behavior.
-	now := time.Now()
-	older := now.Add(-1 * time.Hour)
-	newest := now.Add(1 * time.Hour)
-
-	lessons := []workflow.Lesson{
-		{ID: "mid", CreatedAt: now, Role: "developer"},
-		{ID: "old", CreatedAt: older, Role: "developer"},
-		{ID: "new", CreatedAt: newest, Role: "developer"},
-	}
-
-	// Verify sort order matches what ListLessonsForRole would produce.
-	sorted := make([]workflow.Lesson, len(lessons))
-	copy(sorted, lessons)
-	workflow.FilterLessons(sorted, "developer", nil, 0) // uses same sort
-
-	// Manual sort check — newest first.
-	if lessons[0].ID == "new" && lessons[1].ID == "mid" && lessons[2].ID == "old" {
-		// Already sorted — this shouldn't happen with our input order.
-		t.Skip("input happened to be sorted")
 	}
 }
 
 func TestListLessonsForRole_FiltersRole(t *testing.T) {
-	// Verify the role filter in parseLessonFromTriples + the filtering logic.
-	devTriples := map[string]string{
-		agentgraph.PredicateLessonID:   "1",
-		agentgraph.PredicateLessonRole: "developer",
-	}
-	planTriples := map[string]string{
-		agentgraph.PredicateLessonID:   "2",
-		agentgraph.PredicateLessonRole: "planner",
-	}
+	devTriples := mv(
+		agentgraph.PredicateLessonID, "1",
+		agentgraph.PredicateLessonRole, "developer",
+	)
+	planTriples := mv(
+		agentgraph.PredicateLessonID, "2",
+		agentgraph.PredicateLessonRole, "planner",
+	)
 
 	devLesson := parseLessonFromTriples(devTriples)
 	planLesson := parseLessonFromTriples(planTriples)
@@ -158,36 +165,9 @@ func TestListLessonsForRole_FiltersRole(t *testing.T) {
 	if planLesson.Role != "planner" {
 		t.Errorf("expected planner, got %q", planLesson.Role)
 	}
-
-	// Simulate the role filter from ListLessonsForRole.
-	all := []workflow.Lesson{devLesson, planLesson}
-	var filtered []workflow.Lesson
-	for _, l := range all {
-		if l.Role == "developer" {
-			filtered = append(filtered, l)
-		}
-	}
-	if len(filtered) != 1 || filtered[0].ID != "1" {
-		t.Errorf("expected 1 developer lesson, got %v", filtered)
-	}
-}
-
-func TestListLessonsForRole_LimitTruncates(t *testing.T) {
-	// Verify limit logic.
-	lessons := []workflow.Lesson{
-		{ID: "1"}, {ID: "2"}, {ID: "3"},
-	}
-	limit := 2
-	if limit > 0 && len(lessons) > limit {
-		lessons = lessons[:limit]
-	}
-	if len(lessons) != 2 {
-		t.Errorf("expected 2 after limit, got %d", len(lessons))
-	}
 }
 
 func TestGetRoleLessonCounts_AggregatesCategories(t *testing.T) {
-	// Test the count computation logic directly.
 	lessons := []workflow.Lesson{
 		{Role: "developer", CategoryIDs: []string{"missing_tests", "sop_violation"}},
 		{Role: "developer", CategoryIDs: []string{"missing_tests"}},
@@ -210,30 +190,86 @@ func TestGetRoleLessonCounts_AggregatesCategories(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ADR-033 Phase 1 schema round-trip tests
+// ADR-033 Phase 1 schema round-trip tests (post atomic-triples switch)
 // ---------------------------------------------------------------------------
+
+func TestStepRefRoundTrip(t *testing.T) {
+	step := workflow.StepRef{LoopID: "550e8400-e29b-41d4-a716-446655440000", StepIndex: 7}
+	encoded := encodeStepRef(step)
+	decoded, ok := decodeStepRef(encoded)
+	if !ok {
+		t.Fatalf("decode failed for %q", encoded)
+	}
+	if decoded != step {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", decoded, step)
+	}
+}
+
+func TestDecodeStepRef_Malformed(t *testing.T) {
+	cases := []string{"", "no-pipe", "|empty-loop", "loop|notanint"}
+	for _, c := range cases {
+		if _, ok := decodeStepRef(c); ok {
+			t.Errorf("decodeStepRef(%q) should fail", c)
+		}
+	}
+}
+
+func TestFileRefRoundTrip(t *testing.T) {
+	f := workflow.FileRef{Path: "main.go", LineStart: 10, LineEnd: 20, CommitSHA: "deadbeef"}
+	encoded := encodeFileRef(f)
+	decoded, ok := decodeFileRef(encoded)
+	if !ok {
+		t.Fatalf("decode failed for %q", encoded)
+	}
+	if decoded != f {
+		t.Errorf("round-trip mismatch: got %+v, want %+v", decoded, f)
+	}
+}
+
+func TestFileRefRoundTrip_PathContainsDelimiter(t *testing.T) {
+	// Path is encoded last so SplitN(_, 4) preserves "|" inside the path.
+	f := workflow.FileRef{Path: "weird|path.go", LineStart: 1, LineEnd: 2, CommitSHA: "abc"}
+	encoded := encodeFileRef(f)
+	decoded, ok := decodeFileRef(encoded)
+	if !ok {
+		t.Fatalf("decode failed for %q", encoded)
+	}
+	if decoded != f {
+		t.Errorf("path-with-pipe round-trip: got %+v, want %+v", decoded, f)
+	}
+}
+
+func TestDecodeFileRef_Malformed(t *testing.T) {
+	cases := []string{"", "1|2|abc", "1|2|abc|", "x|2|abc|main.go", "1|y|abc|main.go"}
+	for _, c := range cases {
+		if _, ok := decodeFileRef(c); ok {
+			t.Errorf("decodeFileRef(%q) should fail", c)
+		}
+	}
+}
 
 func TestParseLessonFromTriples_Phase1FieldsRoundTrip(t *testing.T) {
 	retired := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	lastInj := time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)
 
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:             "abc",
-		agentgraph.PredicateLessonRole:           "developer",
-		agentgraph.PredicateLessonDetail:         "long-form root-cause narrative",
-		agentgraph.PredicateLessonInjectionForm:  "case study form",
-		agentgraph.PredicateLessonRootCauseRole:  "architect",
-		agentgraph.PredicateLessonPositive:       "true",
-		agentgraph.PredicateLessonRetiredAt:      retired.Format(time.RFC3339),
-		agentgraph.PredicateLessonLastInjectedAt: lastInj.Format(time.RFC3339),
-		agentgraph.PredicateLessonEvidenceSteps:  `[{"loop_id":"l1","step_index":3},{"loop_id":"l2","step_index":7}]`,
-		agentgraph.PredicateLessonEvidenceFiles:  `[{"path":"main.go","line_start":10,"line_end":20,"commit_sha":"deadbeef"}]`,
-	}
+	triples := mv(
+		agentgraph.PredicateLessonID, "abc",
+		agentgraph.PredicateLessonRole, "developer",
+		agentgraph.PredicateLessonDetail, "long-form root-cause narrative",
+		agentgraph.PredicateLessonInjectionForm, "case study form",
+		agentgraph.PredicateLessonRootCauseRole, "architect",
+		agentgraph.PredicateLessonPositive, "true",
+		agentgraph.PredicateLessonRetiredAt, retired.Format(time.RFC3339),
+		agentgraph.PredicateLessonLastInjectedAt, lastInj.Format(time.RFC3339),
+		agentgraph.PredicateLessonEvidenceSteps, "l1|3",
+		agentgraph.PredicateLessonEvidenceSteps, "l2|7",
+		agentgraph.PredicateLessonEvidenceFiles, "10|20|deadbeef|main.go",
+	)
 
 	lesson := parseLessonFromTriples(triples)
 
 	if lesson.Detail != "long-form root-cause narrative" {
-		t.Errorf("Detail = %q, want long-form...", lesson.Detail)
+		t.Errorf("Detail = %q", lesson.Detail)
 	}
 	if lesson.InjectionForm != "case study form" {
 		t.Errorf("InjectionForm = %q", lesson.InjectionForm)
@@ -258,12 +294,28 @@ func TestParseLessonFromTriples_Phase1FieldsRoundTrip(t *testing.T) {
 	}
 }
 
-func TestParseLessonFromTriples_Phase1FieldsAbsent(t *testing.T) {
-	// Legacy lesson — only the original predicates set.
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:   "legacy",
-		agentgraph.PredicateLessonRole: "developer",
+func TestParseLessonFromTriples_LegacyJSONEvidence(t *testing.T) {
+	// Backwards compat: lessons recorded under the pre-atomic Phase 1
+	// encoding stored evidence as a single JSON-array string.
+	triples := mv(
+		agentgraph.PredicateLessonID, "legacy",
+		agentgraph.PredicateLessonEvidenceSteps, `[{"loop_id":"l1","step_index":3},{"loop_id":"l2","step_index":7}]`,
+		agentgraph.PredicateLessonEvidenceFiles, `[{"path":"main.go","line_start":10,"line_end":20,"commit_sha":"deadbeef"}]`,
+	)
+	lesson := parseLessonFromTriples(triples)
+	if len(lesson.EvidenceSteps) != 2 || lesson.EvidenceSteps[1].StepIndex != 7 {
+		t.Errorf("legacy EvidenceSteps = %+v", lesson.EvidenceSteps)
 	}
+	if len(lesson.EvidenceFiles) != 1 || lesson.EvidenceFiles[0].Path != "main.go" {
+		t.Errorf("legacy EvidenceFiles = %+v", lesson.EvidenceFiles)
+	}
+}
+
+func TestParseLessonFromTriples_Phase1FieldsAbsent(t *testing.T) {
+	triples := mv(
+		agentgraph.PredicateLessonID, "legacy",
+		agentgraph.PredicateLessonRole, "developer",
+	)
 	lesson := parseLessonFromTriples(triples)
 	if lesson.Detail != "" || lesson.InjectionForm != "" || lesson.RootCauseRole != "" {
 		t.Errorf("expected empty Phase 1 string fields, got Detail=%q InjectionForm=%q RootCauseRole=%q",
@@ -286,12 +338,14 @@ func TestParseLessonFromTriples_Phase1FieldsAbsent(t *testing.T) {
 	}
 }
 
-func TestParseLessonFromTriples_MalformedEvidenceJSON(t *testing.T) {
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:            "x",
-		agentgraph.PredicateLessonEvidenceSteps: "not-json",
-		agentgraph.PredicateLessonEvidenceFiles: `{"not":"an array"}`,
-	}
+func TestParseLessonFromTriples_MalformedEvidence(t *testing.T) {
+	// Atomic-format malformed values are silently skipped (no panic, no
+	// half-built ref).
+	triples := mv(
+		agentgraph.PredicateLessonID, "x",
+		agentgraph.PredicateLessonEvidenceSteps, "no-pipe-no-int",
+		agentgraph.PredicateLessonEvidenceFiles, "1|2|abc", // missing path field
+	)
 	lesson := parseLessonFromTriples(triples)
 	if lesson.EvidenceSteps != nil {
 		t.Errorf("malformed evidence_steps must yield nil, got %v", lesson.EvidenceSteps)
@@ -302,10 +356,10 @@ func TestParseLessonFromTriples_MalformedEvidenceJSON(t *testing.T) {
 }
 
 func TestParseLessonFromTriples_PositiveFalseValue(t *testing.T) {
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:       "x",
-		agentgraph.PredicateLessonPositive: "false",
-	}
+	triples := mv(
+		agentgraph.PredicateLessonID, "x",
+		agentgraph.PredicateLessonPositive, "false",
+	)
 	lesson := parseLessonFromTriples(triples)
 	if lesson.Positive {
 		t.Error("Positive should be false when triple value is \"false\"")
@@ -313,11 +367,11 @@ func TestParseLessonFromTriples_PositiveFalseValue(t *testing.T) {
 }
 
 func TestParseLessonFromTriples_MalformedTimestampFields(t *testing.T) {
-	triples := map[string]string{
-		agentgraph.PredicateLessonID:             "x",
-		agentgraph.PredicateLessonRetiredAt:      "not-a-date",
-		agentgraph.PredicateLessonLastInjectedAt: "also-not-a-date",
-	}
+	triples := mv(
+		agentgraph.PredicateLessonID, "x",
+		agentgraph.PredicateLessonRetiredAt, "not-a-date",
+		agentgraph.PredicateLessonLastInjectedAt, "also-not-a-date",
+	)
 	lesson := parseLessonFromTriples(triples)
 	if lesson.RetiredAt != nil {
 		t.Errorf("malformed RetiredAt must yield nil, got %v", lesson.RetiredAt)
@@ -348,7 +402,6 @@ func TestRecordLesson_AcceptsLessonWithEvidence(t *testing.T) {
 }
 
 func TestRecordLesson_AcceptsLegacyLessonWithoutEvidence(t *testing.T) {
-	// Phase 1: warn-only, no rejection.
 	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
 	lesson := workflow.Lesson{
 		Source:  "reviewer-feedback",

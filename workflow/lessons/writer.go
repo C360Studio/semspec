@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/agentgraph"
@@ -24,12 +26,24 @@ type Writer struct {
 	Logger *slog.Logger
 }
 
+// stepRefDelim separates fields inside a StepRef triple value.
+// StepRef.LoopID is a UUID and never contains "|".
+const stepRefDelim = "|"
+
+// fileRefDelim separates fields inside a FileRef triple value.
+// Layout puts Path last so SplitN(_, 4) keeps a "|"-containing path intact.
+const fileRefDelim = "|"
+
 // RecordLesson writes a lesson entity to the graph as triples.
 //
 // ADR-033 Phase 1: writer accepts lessons with or without evidence pointers.
 // When evidence is missing, a Debug log is emitted (warn-only-but-quiet
 // during the migration window — most legacy lessons lack evidence and would
 // flood the warn channel). Phase 3 will flip this to a hard reject.
+//
+// Multi-valued fields (CategoryIDs, EvidenceSteps, EvidenceFiles) are
+// written as one triple per element to keep triples atomic per
+// feedback_no_json_in_triples — never json.Marshal into a triple object.
 func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error {
 	if lesson.ID == "" {
 		lesson.ID = uuid.New().String()
@@ -40,83 +54,49 @@ func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error
 
 	eid := agentgraph.LessonEntityID(lesson.ID)
 
-	categoriesJSON, err := json.Marshal(lesson.CategoryIDs)
-	if err != nil {
-		return fmt.Errorf("lessons: marshal categories: %w", err)
-	}
-
-	// Write each field as a triple. TripleWriter handles NATS request-reply
-	// to graph-ingest which does the CAS write to ENTITY_STATES.
-	triples := []struct {
+	type triple struct {
 		predicate string
 		value     any
-	}{
+	}
+	triples := []triple{
 		{agentgraph.PredicateLessonID, lesson.ID},
 		{agentgraph.PredicateLessonSource, lesson.Source},
 		{agentgraph.PredicateLessonScenarioID, lesson.ScenarioID},
 		{agentgraph.PredicateLessonSummary, lesson.Summary},
-		{agentgraph.PredicateLessonCategories, string(categoriesJSON)},
 		{agentgraph.PredicateLessonRole, lesson.Role},
 		{agentgraph.PredicateLessonCreatedAt, lesson.CreatedAt.Format(time.RFC3339)},
+	}
+
+	// One triple per category ID — atomic, no JSON encoding.
+	for _, cat := range lesson.CategoryIDs {
+		triples = append(triples, triple{agentgraph.PredicateLessonCategories, cat})
 	}
 
 	// ADR-033 Phase 1+ optional fields — only written when set, to keep
 	// triple count small for legacy lessons.
 	if lesson.Detail != "" {
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonDetail, lesson.Detail})
+		triples = append(triples, triple{agentgraph.PredicateLessonDetail, lesson.Detail})
 	}
 	if lesson.InjectionForm != "" {
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonInjectionForm, lesson.InjectionForm})
+		triples = append(triples, triple{agentgraph.PredicateLessonInjectionForm, lesson.InjectionForm})
 	}
-	if len(lesson.EvidenceSteps) > 0 {
-		stepsJSON, err := json.Marshal(lesson.EvidenceSteps)
-		if err != nil {
-			return fmt.Errorf("lessons: marshal evidence_steps: %w", err)
-		}
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonEvidenceSteps, string(stepsJSON)})
+	for _, step := range lesson.EvidenceSteps {
+		triples = append(triples, triple{agentgraph.PredicateLessonEvidenceSteps, encodeStepRef(step)})
 	}
-	if len(lesson.EvidenceFiles) > 0 {
-		filesJSON, err := json.Marshal(lesson.EvidenceFiles)
-		if err != nil {
-			return fmt.Errorf("lessons: marshal evidence_files: %w", err)
-		}
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonEvidenceFiles, string(filesJSON)})
+	for _, file := range lesson.EvidenceFiles {
+		triples = append(triples, triple{agentgraph.PredicateLessonEvidenceFiles, encodeFileRef(file)})
 	}
 	if lesson.RootCauseRole != "" {
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonRootCauseRole, lesson.RootCauseRole})
+		triples = append(triples, triple{agentgraph.PredicateLessonRootCauseRole, lesson.RootCauseRole})
 	}
 	if lesson.Positive {
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonPositive, "true"})
+		triples = append(triples, triple{agentgraph.PredicateLessonPositive, "true"})
 	}
 	if lesson.RetiredAt != nil {
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonRetiredAt, lesson.RetiredAt.Format(time.RFC3339)})
+		triples = append(triples, triple{agentgraph.PredicateLessonRetiredAt, lesson.RetiredAt.Format(time.RFC3339)})
 	}
 	if lesson.LastInjectedAt != nil {
-		triples = append(triples, struct {
-			predicate string
-			value     any
-		}{agentgraph.PredicateLessonLastInjectedAt, lesson.LastInjectedAt.Format(time.RFC3339)})
+		triples = append(triples, triple{agentgraph.PredicateLessonLastInjectedAt, lesson.LastInjectedAt.Format(time.RFC3339)})
 	}
 
 	if len(lesson.EvidenceSteps) == 0 && len(lesson.EvidenceFiles) == 0 && w.Logger != nil {
@@ -133,11 +113,63 @@ func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error
 	return nil
 }
 
+// encodeStepRef serialises a StepRef as `<loop_id>|<step_index>`.
+func encodeStepRef(s workflow.StepRef) string {
+	return s.LoopID + stepRefDelim + strconv.Itoa(s.StepIndex)
+}
+
+// decodeStepRef parses `<loop_id>|<step_index>`. Returns (zero, false) on
+// malformed input.
+func decodeStepRef(raw string) (workflow.StepRef, bool) {
+	parts := strings.SplitN(raw, stepRefDelim, 2)
+	if len(parts) != 2 || parts[0] == "" {
+		return workflow.StepRef{}, false
+	}
+	idx, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return workflow.StepRef{}, false
+	}
+	return workflow.StepRef{LoopID: parts[0], StepIndex: idx}, true
+}
+
+// encodeFileRef serialises a FileRef as
+// `<line_start>|<line_end>|<commit_sha>|<path>`. Path is last so a path
+// containing the delimiter survives SplitN(_, 4).
+func encodeFileRef(f workflow.FileRef) string {
+	return strconv.Itoa(f.LineStart) + fileRefDelim +
+		strconv.Itoa(f.LineEnd) + fileRefDelim +
+		f.CommitSHA + fileRefDelim +
+		f.Path
+}
+
+// decodeFileRef parses `<line_start>|<line_end>|<commit_sha>|<path>`.
+// Returns (zero, false) on malformed input.
+func decodeFileRef(raw string) (workflow.FileRef, bool) {
+	parts := strings.SplitN(raw, fileRefDelim, 4)
+	if len(parts) != 4 || parts[3] == "" {
+		return workflow.FileRef{}, false
+	}
+	lineStart, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return workflow.FileRef{}, false
+	}
+	lineEnd, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return workflow.FileRef{}, false
+	}
+	return workflow.FileRef{
+		LineStart: lineStart,
+		LineEnd:   lineEnd,
+		CommitSHA: parts[2],
+		Path:      parts[3],
+	}, true
+}
+
 // ListLessonsForRole reads all lesson entities from the graph via prefix scan
 // and filters by role. Results are sorted most-recent-first.
 func (w *Writer) ListLessonsForRole(ctx context.Context, role string, limit int) ([]workflow.Lesson, error) {
 	prefix := agentgraph.LessonTypePrefix()
-	entities, err := w.TW.ReadEntitiesByPrefix(ctx, prefix, 200)
+	entities, err := w.TW.ReadEntitiesByPrefixMulti(ctx, prefix, 200)
 	if err != nil {
 		return nil, fmt.Errorf("lessons: list by prefix: %w", err)
 	}
@@ -186,45 +218,101 @@ func (w *Writer) GetRoleLessonCounts(ctx context.Context, role string) (workflow
 	return counts, nil
 }
 
-// parseLessonFromTriples reconstructs a Lesson from a predicate→value map.
-// ADR-033 Phase 1+ fields are optional — missing predicates leave the
-// corresponding Lesson fields at their zero value.
-func parseLessonFromTriples(triples map[string]string) workflow.Lesson {
+// parseLessonFromTriples reconstructs a Lesson from a predicate→[]values map.
+// Single-valued predicates take the first observed value; multi-valued
+// predicates (CategoryIDs, EvidenceSteps, EvidenceFiles) take all values.
+//
+// Backwards compat: lessons recorded before the atomic-triples switch stored
+// CategoryIDs as a single JSON-array string. If we see exactly one value
+// prefixed with `[`, fall back to JSON decoding.
+func parseLessonFromTriples(triples map[string][]string) workflow.Lesson {
 	var lesson workflow.Lesson
-	lesson.ID = triples[agentgraph.PredicateLessonID]
-	lesson.Source = triples[agentgraph.PredicateLessonSource]
-	lesson.ScenarioID = triples[agentgraph.PredicateLessonScenarioID]
-	lesson.Summary = triples[agentgraph.PredicateLessonSummary]
-	lesson.Role = triples[agentgraph.PredicateLessonRole]
-	lesson.Detail = triples[agentgraph.PredicateLessonDetail]
-	lesson.InjectionForm = triples[agentgraph.PredicateLessonInjectionForm]
-	lesson.RootCauseRole = triples[agentgraph.PredicateLessonRootCauseRole]
+	lesson.ID = first(triples[agentgraph.PredicateLessonID])
+	lesson.Source = first(triples[agentgraph.PredicateLessonSource])
+	lesson.ScenarioID = first(triples[agentgraph.PredicateLessonScenarioID])
+	lesson.Summary = first(triples[agentgraph.PredicateLessonSummary])
+	lesson.Role = first(triples[agentgraph.PredicateLessonRole])
+	lesson.Detail = first(triples[agentgraph.PredicateLessonDetail])
+	lesson.InjectionForm = first(triples[agentgraph.PredicateLessonInjectionForm])
+	lesson.RootCauseRole = first(triples[agentgraph.PredicateLessonRootCauseRole])
 
-	if raw, ok := triples[agentgraph.PredicateLessonCategories]; ok {
-		_ = json.Unmarshal([]byte(raw), &lesson.CategoryIDs)
-	}
-	if raw, ok := triples[agentgraph.PredicateLessonCreatedAt]; ok {
+	lesson.CategoryIDs = decodeCategoryIDs(triples[agentgraph.PredicateLessonCategories])
+
+	if raw := first(triples[agentgraph.PredicateLessonCreatedAt]); raw != "" {
 		lesson.CreatedAt, _ = time.Parse(time.RFC3339, raw)
 	}
-	if raw, ok := triples[agentgraph.PredicateLessonEvidenceSteps]; ok {
-		_ = json.Unmarshal([]byte(raw), &lesson.EvidenceSteps)
+
+	for _, raw := range triples[agentgraph.PredicateLessonEvidenceSteps] {
+		// Backwards compat: legacy Phase 1 wrote a single JSON-array string.
+		if strings.HasPrefix(raw, "[") {
+			var legacy []workflow.StepRef
+			if err := json.Unmarshal([]byte(raw), &legacy); err == nil {
+				lesson.EvidenceSteps = append(lesson.EvidenceSteps, legacy...)
+				continue
+			}
+		}
+		if step, ok := decodeStepRef(raw); ok {
+			lesson.EvidenceSteps = append(lesson.EvidenceSteps, step)
+		}
 	}
-	if raw, ok := triples[agentgraph.PredicateLessonEvidenceFiles]; ok {
-		_ = json.Unmarshal([]byte(raw), &lesson.EvidenceFiles)
+
+	for _, raw := range triples[agentgraph.PredicateLessonEvidenceFiles] {
+		if strings.HasPrefix(raw, "[") {
+			var legacy []workflow.FileRef
+			if err := json.Unmarshal([]byte(raw), &legacy); err == nil {
+				lesson.EvidenceFiles = append(lesson.EvidenceFiles, legacy...)
+				continue
+			}
+		}
+		if file, ok := decodeFileRef(raw); ok {
+			lesson.EvidenceFiles = append(lesson.EvidenceFiles, file)
+		}
 	}
-	if raw, ok := triples[agentgraph.PredicateLessonPositive]; ok {
+
+	if raw := first(triples[agentgraph.PredicateLessonPositive]); raw != "" {
 		lesson.Positive = raw == "true"
 	}
-	if raw, ok := triples[agentgraph.PredicateLessonRetiredAt]; ok && raw != "" {
+	if raw := first(triples[agentgraph.PredicateLessonRetiredAt]); raw != "" {
 		if t, err := time.Parse(time.RFC3339, raw); err == nil {
 			lesson.RetiredAt = &t
 		}
 	}
-	if raw, ok := triples[agentgraph.PredicateLessonLastInjectedAt]; ok && raw != "" {
+	if raw := first(triples[agentgraph.PredicateLessonLastInjectedAt]); raw != "" {
 		if t, err := time.Parse(time.RFC3339, raw); err == nil {
 			lesson.LastInjectedAt = &t
 		}
 	}
 
 	return lesson
+}
+
+// decodeCategoryIDs prefers atomic-triple values (one ID per triple). For
+// legacy lessons that stored a single JSON-array string, falls back to JSON
+// decode.
+func decodeCategoryIDs(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	if len(values) == 1 && strings.HasPrefix(values[0], "[") {
+		var legacy []string
+		if err := json.Unmarshal([]byte(values[0]), &legacy); err == nil {
+			return legacy
+		}
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v == "" {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func first(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
