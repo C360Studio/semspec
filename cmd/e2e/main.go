@@ -66,7 +66,6 @@ Tier 2 — Pipeline Tests (mock LLM):
   hello-world-plan-exhaustion    - Hello-world with plan review exhaustion → escalation
   plan-phase                   - Full plan pipeline: plan → requirements → scenarios → review → approved
   execution-phase              - Full execution pipeline: plan → approve → decompose → TDD → complete
-  context-pressure             - Claims verification: context truncation, model routing, revision quality
   plan-stall-retry             - Execution stall: failed requirement → retry → re-execution succeeds
   plan-stall-complete          - Execution stall: failed requirement → force-complete
   plan-stall-reject            - Execution stall: failed requirement → reject → retry from rejected
@@ -160,7 +159,6 @@ func listCmd() *cobra.Command {
 			fmt.Println("  hello-world-plan-exhaustion    Plan review exhaustion → escalation variant")
 			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
 			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
-			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
 			fmt.Println("  plan-stall-retry             Execution stall: failed req → retry → re-execute")
 			fmt.Println("  plan-stall-complete          Execution stall: failed req → force-complete")
 			fmt.Println("  plan-stall-reject            Execution stall: failed req → reject → retry")
@@ -210,7 +208,6 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithIterationExhaustion()),
-		scenarios.NewContextPressureScenario(cfg),
 		// Tier 2: Stall recovery variants (state machine refactor)
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete),

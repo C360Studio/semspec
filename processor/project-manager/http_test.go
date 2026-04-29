@@ -596,11 +596,11 @@ func TestHandleInit_RespectsExistingFiles(t *testing.T) {
 // skips writing a pre-existing file, the in-memory store cache is refreshed
 // from disk so subsequent /status reads agree with the filesystem.
 //
-// Regression for the e2e context-pressure failure where setup-project wrote
-// standards.json directly to disk after the project-manager component had
-// already started. Init then saw the file existed and skipped writing — but
-// because the skip path didn't load the file into the cache, /status kept
-// reporting HasStandards=false even though the file was on disk.
+// Regression for the case where a config file is created on disk after the
+// component has already started (operator edit, e2e setup, scripted seeding).
+// Init sees the file exists and skips writing — but if the skip path doesn't
+// load the file into the cache, /status keeps reporting HasStandards=false
+// even though the file is on disk. Cache and filesystem must agree.
 func TestHandleInit_RefreshesCacheForSkippedFiles(t *testing.T) {
 	c, repoRoot := setupTestComponent(t)
 	srv := registerHandlers(c)

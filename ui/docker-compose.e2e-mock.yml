@@ -9,7 +9,7 @@
 # Environment variables:
 #   MOCK_SCENARIO - Which fixture scenario to use (default: hello-world)
 #                   Available: hello-world, hello-world-plan-rejection, hello-world-task-rejection,
-#                              hello-world-double-rejection, hello-world-plan-exhaustion, context-pressure
+#                              hello-world-double-rejection, hello-world-plan-exhaustion
 
 services:
   mock-llm:
