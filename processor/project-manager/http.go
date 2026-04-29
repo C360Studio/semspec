@@ -335,6 +335,13 @@ func (c *Component) ensureInitDirs(semspecDir string) error {
 // initialized workspace. To overwrite, callers use the explicit PATCH
 // endpoints (/config, /checklist, /standards).
 //
+// For skipped files the store cache is refreshed from disk so subsequent
+// status reads agree with the filesystem. Without this refresh, files
+// created on disk after Start() (e.g., e2e tests writing standards.json
+// before calling init) would be skipped at write time but never loaded
+// into the in-memory cache — leaving GET /status reporting
+// HasStandards=false despite the file being present.
+//
 // On any write error the HTTP response has already been populated and a
 // non-nil error is returned so handleInit can bail early.
 func (c *Component) persistInitConfigs(
@@ -350,8 +357,15 @@ func (c *Component) persistInitConfigs(
 
 	s := c.getStore()
 	if s != nil {
-		return c.persistViaStore(r, w, s, projectConfig, checklist, standards,
+		written, skipped, err = c.persistViaStore(r, w, s, projectConfig, checklist, standards,
 			projectExists, checklistExists, standardsExists)
+		if err == nil && len(skipped) > 0 {
+			// Refresh the cache from disk so any pre-existing files now
+			// surface in /status. Idempotent — written files are already in
+			// the cache from save*Through; this is a no-op for them.
+			s.populateFromFiles()
+		}
+		return written, skipped, err
 	}
 	// Fallback: direct file write (pre-Start).
 	if projectExists {

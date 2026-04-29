@@ -592,6 +592,103 @@ func TestHandleInit_RespectsExistingFiles(t *testing.T) {
 	}
 }
 
+// TestHandleInit_RefreshesCacheForSkippedFiles pins the rule that when init
+// skips writing a pre-existing file, the in-memory store cache is refreshed
+// from disk so subsequent /status reads agree with the filesystem.
+//
+// Regression for the e2e context-pressure failure where setup-project wrote
+// standards.json directly to disk after the project-manager component had
+// already started. Init then saw the file existed and skipped writing — but
+// because the skip path didn't load the file into the cache, /status kept
+// reporting HasStandards=false even though the file was on disk.
+func TestHandleInit_RefreshesCacheForSkippedFiles(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	semspecDir := filepath.Join(repoRoot, ".semspec")
+	if err := os.MkdirAll(semspecDir, 0755); err != nil {
+		t.Fatalf("mkdir semspec: %v", err)
+	}
+
+	// Seed a standards.json directly to disk (mimics the e2e test pattern of
+	// writing config files before invoking init).
+	preExisting := workflow.Standards{
+		Version:   "1.0.0",
+		UpdatedAt: time.Now(),
+		Items: []workflow.Standard{
+			{ID: "fixture-rule", Severity: "error", Text: "fixture-owned standards"},
+		},
+	}
+	preData, err := json.MarshalIndent(preExisting, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal preExisting: %v", err)
+	}
+	standardsPath := filepath.Join(semspecDir, workflow.StandardsFile)
+	if err := os.WriteFile(standardsPath, preData, 0644); err != nil {
+		t.Fatalf("seed standards: %v", err)
+	}
+
+	// Pre-init status should reflect the cold cache (file on disk but never
+	// loaded). This pins the precondition: init must do the cache refresh.
+	getStatus := func() workflow.InitStatus {
+		t.Helper()
+		statusResp, err := http.Get(srv.URL + "/api/project/status")
+		if err != nil {
+			t.Fatalf("GET /status: %v", err)
+		}
+		defer statusResp.Body.Close()
+		var s workflow.InitStatus
+		if err := json.NewDecoder(statusResp.Body).Decode(&s); err != nil {
+			t.Fatalf("decode status: %v", err)
+		}
+		return s
+	}
+	preStatus := getStatus()
+	if preStatus.HasStandards {
+		t.Fatalf("precondition failed: expected HasStandards=false before init (cache cold), got true")
+	}
+
+	// Run init with a *different* standards payload that should NOT overwrite.
+	req := InitRequest{
+		Project:   ProjectInitInput{Name: "cache-refresh", Languages: []string{"Go"}},
+		Checklist: []workflow.Check{},
+		Standards: StandardsInput{Version: "1.0.0", Items: []workflow.Standard{
+			{ID: "should-not-win", Severity: "warning", Text: "request payload"},
+		}},
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resp, err := http.Post(srv.URL+"/api/project/init", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST /init: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	// After init, /status must report HasStandards=true — the skipped file is
+	// now in the cache.
+	postStatus := getStatus()
+	if !postStatus.HasStandards {
+		t.Errorf("HasStandards should be true after init refreshed cache from skipped standards.json")
+	}
+	if !postStatus.Initialized {
+		t.Errorf("Initialized should be true after init populated cache from disk for all 3 files")
+	}
+
+	// And the on-disk content must be the pre-existing fixture content, not
+	// the request payload — proves the skip behavior also stayed correct.
+	var standardsOnDisk workflow.Standards
+	readJSONFile(t, standardsPath, &standardsOnDisk)
+	if len(standardsOnDisk.Items) != 1 || standardsOnDisk.Items[0].ID != "fixture-rule" {
+		t.Errorf("existing standards was overwritten: %+v", standardsOnDisk.Items)
+	}
+}
+
 // TestHandleInit_CreatesSOPDirectory verifies the sources/docs directory is created.
 func TestHandleInit_CreatesSOPDirectory(t *testing.T) {
 	c, repoRoot := setupTestComponent(t)
