@@ -36,6 +36,12 @@ services:
       # past its 60s scenario timeout. 5s is plenty — if semsource is going
       # to come up in a mock stack it's up in milliseconds.
       - SEMSOURCE_READINESS_BUDGET=5s
+      # Mock-LLM speaks OpenAI-compat /v1/* but not Ollama's /api/show.
+      # The boot probe (model.ProbeOllamaEndpoints) WARNs noisily against
+      # every mock endpoint when not suppressed — skip the probe in mock
+      # stacks since "model not pulled" is meaningless against a fixture
+      # server.
+      - SEMSPEC_SKIP_OLLAMA_PROBE=1
     depends_on:
       nats:
         condition: service_healthy
