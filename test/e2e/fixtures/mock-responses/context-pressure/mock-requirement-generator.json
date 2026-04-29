@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"requirements\": [{\"title\": \"Greeting endpoint returns JSON response\", \"description\": \"The /hello endpoint must return a JSON object with a 'message' field containing a greeting string. The response must have Content-Type application/json and return HTTP 200.\"}, {\"title\": \"Goodbye endpoint returns JSON response\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string, following the same pattern as /hello.\"}, {\"title\": \"UI displays messages from both endpoints\", \"description\": \"The JavaScript frontend must fetch from both /hello and /goodbye endpoints and display the returned messages in the HTML page.\"}]}"
+        "arguments": "{\"requirements\": [{\"title\": \"Greeting endpoint returns JSON response\", \"description\": \"The /hello endpoint must return a JSON object with a 'message' field containing a greeting string. The response must have Content-Type application/json and return HTTP 200.\", \"files_owned\": [\"api/hello.py\", \"api/test_hello.py\"]}, {\"title\": \"Goodbye endpoint returns JSON response\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string, following the same pattern as /hello.\", \"files_owned\": [\"api/goodbye.py\", \"api/test_goodbye.py\"]}, {\"title\": \"UI displays messages from both endpoints\", \"description\": \"The JavaScript frontend must fetch from both /hello and /goodbye endpoints and display the returned messages in the HTML page.\", \"files_owned\": [\"ui/app.js\", \"ui/index.html\"]}]}"
       }
     }
   ],
