@@ -292,6 +292,16 @@ Your deliverable must contain:
 func renderPlanReviewerPrompt(p *prompt.PlanReviewerPromptContext) string {
 	var sb strings.Builder
 
+	// Failure context from the prior dispatch — appears first so the model
+	// sees what to fix before it sees the plan again. Empty on the first
+	// attempt; non-empty on parse-error / structural-validation retries.
+	if p.PreviousError != "" {
+		sb.WriteString("## Previous attempt failed\n\n")
+		sb.WriteString("Your previous response could not be processed:\n\n```\n")
+		sb.WriteString(p.PreviousError)
+		sb.WriteString("\n```\n\nProduce a valid response this time. Address the failure mode above before reviewing the plan content.\n\n")
+	}
+
 	if p.HasStandards {
 		sb.WriteString("Review the following plan against the project standards and completeness criteria.\n\n")
 	} else {
@@ -328,6 +338,15 @@ func renderQAReviewerPrompt(p *prompt.QAReviewerPromptContext) string {
 	}
 	plan := p.Plan
 	var sb strings.Builder
+
+	// Failure context from the prior dispatch, if any. Renders before the
+	// release-readiness ask so the model addresses the failure mode first.
+	if p.PreviousError != "" {
+		sb.WriteString("## Previous attempt failed\n\nYour previous response could not be processed:\n\n```\n")
+		sb.WriteString(p.PreviousError)
+		sb.WriteString("\n```\n\nProduce a valid response this time. Address the failure mode above.\n\n")
+	}
+
 	fmt.Fprintf(&sb, "Render a release-readiness verdict for plan: %s\n\n", plan.Slug)
 	fmt.Fprintf(&sb, "QA level: %s\n", plan.EffectiveQALevel())
 

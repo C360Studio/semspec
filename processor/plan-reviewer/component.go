@@ -338,7 +338,11 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 }
 
 // dispatchReviewer dispatches a plan-reviewer agent loop via agentic-dispatch.
-func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent string, round reviewRound) {
+// previousError carries the parse / structural failure from a prior attempt
+// when this is a retry; empty on the first dispatch. Threading it through
+// closes the blind-retry gap (the reviewer otherwise sees the same prompt as
+// the failed attempt and produces the same malformed output).
+func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent string, round reviewRound, previousError string) {
 	c.updateLastActivity()
 
 	// Seed retry state so retryOrFail can re-dispatch with the same params.
@@ -386,10 +390,11 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 		PlanReviewerPrompt: &prompt.PlanReviewerPromptContext{
-			Slug:         slug,
-			PlanContent:  planContent,
-			HasStandards: hasStandards,
-			Round:        int(round),
+			Slug:          slug,
+			PlanContent:   planContent,
+			HasStandards:  hasStandards,
+			Round:         int(round),
+			PreviousError: previousError,
 		},
 	}
 
@@ -527,7 +532,7 @@ func (c *Component) retryOrFail(ctx context.Context, slug string, round reviewRo
 		"max", c.config.MaxReviewRetries,
 		"previous_error", errorMsg)
 
-	c.dispatchReviewer(ctx, slug, payload.planContent, payload.round)
+	c.dispatchReviewer(ctx, slug, payload.planContent, payload.round, errorMsg)
 }
 
 // loadPlanContentFromKV reads a plan from PLAN_STATES and returns its JSON

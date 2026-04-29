@@ -687,6 +687,12 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		}
 		if exec.ReviewRetryCount < maxRetries {
 			exec.ReviewRetryCount++
+			// Capture a short summary of the raw output so the next dispatch
+			// can include it in the prompt. Without this the retry sees
+			// exactly the same input as the failed attempt and reproduces
+			// the malformed output (closes the blind-retry gap for the
+			// code-reviewer parse-retry path).
+			exec.ReviewerParseError = summarizeReviewerParseFailure(event.Result)
 			c.logger.Warn("Retrying code reviewer after parse failure",
 				"slug", exec.Slug,
 				"task_id", exec.TaskID,
@@ -704,6 +710,9 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 			"attempts", exec.ReviewRetryCount,
 		)
 	}
+	// Successful parse — clear any prior parse-error so non-retry flows do
+	// not carry stale context.
+	exec.ReviewerParseError = ""
 
 	exec.Verdict = result.Verdict
 	exec.RejectionType = result.RejectionType
@@ -1483,6 +1492,13 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	// instructions. The system message fragments (software.reviewer.*) drive
 	// review behavior — the user prompt just identifies the subject.
 	var reviewSubject strings.Builder
+	if exec.ReviewerParseError != "" {
+		// Parse-retry: surface the prior failure so the model knows what
+		// shape was rejected and produces a parseable verdict this time.
+		reviewSubject.WriteString("## Previous attempt failed\n\nYour previous response could not be parsed:\n\n```\n")
+		reviewSubject.WriteString(exec.ReviewerParseError)
+		reviewSubject.WriteString("\n```\n\nProduce a valid response this time. Address the parse failure above; the review subject below has not changed.\n\n")
+	}
 	reviewSubject.WriteString("Task: ")
 	reviewSubject.WriteString(exec.Title)
 	if len(exec.FilesModified) > 0 {

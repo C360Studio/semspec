@@ -94,3 +94,20 @@ func truncateInsight(s string, maxLen int) string {
 	}
 	return string(runes[:maxLen-3]) + "..."
 }
+
+// summarizeReviewerParseFailure produces a short, prompt-safe rendering of a
+// reviewer agent's raw output when it failed parseCodeReviewResult. Used by
+// the parse-retry path to thread "this is what came back, and it didn't
+// parse" into the next dispatch's user prompt — closes the blind-retry gap
+// for code-reviewer parse failures.
+//
+// The raw output may be JSON-with-extra-text, malformed JSON, prose, or empty.
+// We don't try to be clever — just bound the size so the next prompt isn't
+// blown out. 800 runes is plenty for the model to recognize the shape its
+// previous output took.
+func summarizeReviewerParseFailure(rawResult string) string {
+	if rawResult == "" {
+		return "Reviewer agent returned an empty response. Emit a verdict object with the required fields."
+	}
+	return truncateInsight(rawResult, 800)
+}

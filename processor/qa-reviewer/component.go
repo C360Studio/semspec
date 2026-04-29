@@ -388,7 +388,7 @@ func (c *Component) processReview(ctx context.Context, plan *workflow.Plan, qaRu
 		}
 	}
 
-	c.dispatchReviewer(ctx, refreshed)
+	c.dispatchReviewer(ctx, refreshed, "")
 }
 
 // publishQAStart sends plan.mutation.qa.start to plan-manager, asking it to
@@ -431,11 +431,16 @@ func (c *Component) publishQAStart(ctx context.Context, plan *workflow.Plan, qaR
 // Test data, if any, lives on plan.QARun (populated by plan-manager before the
 // reviewing_qa transition). Synthesis-level plans have QARun == nil.
 //
+// previousError carries the parse / structural failure from a prior dispatch
+// when this is a retry; empty on the first attempt. Threading it into the
+// user prompt closes the blind-retry gap — the QA agent otherwise re-emits
+// the same malformed verdict shape across the entire retry budget.
+//
 // Caller contract: c.retry must already track plan.Slug (placed by
 // processReview's Track on initial dispatch; preserved through retryOrFail's
 // Tick on retries). dispatchReviewer records the new loop's task ID so
 // handleLoopCompletion can drop stale completions from older loops.
-func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
+func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, previousError string) {
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("qa-review-%s-%s", plan.Slug, uuid.New().String())
@@ -480,7 +485,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan) {
 		MaxTokens:        maxTokens,
 		Standards:        stdCtx,
 		QAReviewContext:  qrc,
-		QAReviewerPrompt: &prompt.QAReviewerPromptContext{Plan: plan},
+		QAReviewerPrompt: &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError},
 		Persona:          prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
 		Vocabulary:       prompt.GlobalPersonas().Vocabulary(),
 	}
@@ -730,7 +735,7 @@ func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
 		"slug", slug, "attempt", entry.Count, "max", c.config.MaxReviewRetries,
 		"previous_error", errorMsg)
 
-	c.dispatchReviewer(ctx, plan)
+	c.dispatchReviewer(ctx, plan, errorMsg)
 }
 
 // publishFailClosedVerdict publishes a rejected verdict when the LLM agent fails.

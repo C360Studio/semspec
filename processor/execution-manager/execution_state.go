@@ -34,6 +34,14 @@ type taskExecution struct {
 	ValidationResults      []payloads.CheckResult
 	ReviewerLLMRequestIDs  []string
 
+	// ReviewerParseError carries the parse failure from a prior reviewer
+	// dispatch when the next dispatch is a parse-retry. Set in the parse-
+	// failure branch before incrementing ReviewRetryCount; consumed by
+	// dispatchReviewerLocked to prepend a failure-context block to the
+	// user prompt; cleared on successful parse. Runtime-only — never
+	// persisted; the retry budget itself is on workflow.TaskExecution.
+	ReviewerParseError string
+
 	// Timeout management.
 	timeoutTimer *timeoutHandle
 }

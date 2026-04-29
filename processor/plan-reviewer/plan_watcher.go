@@ -88,7 +88,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 				c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
 				continue
 			}
-			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundDraftReview)
+			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundDraftReview, "")
 
 		case workflow.StatusScenariosGenerated:
 			if len(plan.Requirements) == 0 {
@@ -104,7 +104,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 				c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
 				continue
 			}
-			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundScenariosReview)
+			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundScenariosReview, "")
 		}
 	}
 }
