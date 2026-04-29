@@ -184,19 +184,21 @@ func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []s
 //
 // Best-effort — a publish failure logs but does not block the rejection flow.
 // The decomposer is non-load-bearing on the hot path.
-func (c *Component) publishLessonDecomposeRequest(ctx context.Context, exec *taskExecution, verdict, feedback string) {
+func (c *Component) publishLessonDecomposeRequest(ctx context.Context, exec *taskExecution, verdict, feedback, reviewerLoopID string) {
 	if c.natsClient == nil {
 		return
 	}
 	req := &payloads.LessonDecomposeRequested{
-		Slug:          exec.Slug,
-		TaskID:        exec.TaskID,
-		RequirementID: exec.RequirementID,
-		ScenarioID:    exec.TaskID,
-		LoopID:        exec.LoopID,
-		Verdict:       verdict,
-		Feedback:      feedback,
-		Source:        "execution-manager",
+		Slug:            exec.Slug,
+		TaskID:          exec.TaskID,
+		RequirementID:   exec.RequirementID,
+		ScenarioID:      exec.TaskID,
+		LoopID:          exec.LoopID,
+		DeveloperLoopID: exec.DeveloperLoopID,
+		ReviewerLoopID:  reviewerLoopID,
+		Verdict:         verdict,
+		Feedback:        feedback,
+		Source:          "execution-manager",
 	}
 	if err := req.Validate(); err != nil {
 		c.logger.Warn("Skipping lesson decompose publish — invalid payload",

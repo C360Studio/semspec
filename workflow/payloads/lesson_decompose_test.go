@@ -26,9 +26,27 @@ func TestLessonDecomposeRequested_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "missing loop_id",
+			name:    "no loop ids at all",
 			payload: LessonDecomposeRequested{Slug: "p", Verdict: "rejected", Source: "x"},
 			wantErr: true,
+		},
+		{
+			name: "developer_loop_id alone is enough",
+			payload: LessonDecomposeRequested{
+				Slug:            "p",
+				DeveloperLoopID: "dev-loop",
+				Verdict:         "rejected",
+				Source:          "x",
+			},
+		},
+		{
+			name: "reviewer_loop_id alone is enough",
+			payload: LessonDecomposeRequested{
+				Slug:           "p",
+				ReviewerLoopID: "rev-loop",
+				Verdict:        "rejected",
+				Source:         "x",
+			},
 		},
 		{
 			name:    "missing verdict",
@@ -56,14 +74,16 @@ func TestLessonDecomposeRequested_Validate(t *testing.T) {
 
 func TestLessonDecomposeRequested_RoundTripJSON(t *testing.T) {
 	in := LessonDecomposeRequested{
-		Slug:          "plan-abc",
-		TaskID:        "task-1",
-		RequirementID: "req-1",
-		ScenarioID:    "scn-1",
-		LoopID:        "loop-xyz",
-		Verdict:       "rejected",
-		Feedback:      "missing test for nil case",
-		Source:        "execution-manager",
+		Slug:            "plan-abc",
+		TaskID:          "task-1",
+		RequirementID:   "req-1",
+		ScenarioID:      "scn-1",
+		LoopID:          "loop-xyz",
+		DeveloperLoopID: "dev-loop-abc",
+		ReviewerLoopID:  "rev-loop-def",
+		Verdict:         "rejected",
+		Feedback:        "missing test for nil case",
+		Source:          "execution-manager",
 	}
 	data, err := json.Marshal(&in)
 	if err != nil {

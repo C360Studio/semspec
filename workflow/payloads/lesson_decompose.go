@@ -39,10 +39,24 @@ type LessonDecomposeRequested struct {
 	// ScenarioID identifies the scenario whose AC the rejection failed against.
 	ScenarioID string `json:"scenario_id,omitempty"`
 
-	// LoopID is the agentic-loop ID for the FAILED dispatch (developer or
-	// reviewer, depending on Source). Used to fetch the trajectory via
-	// agentic.query.trajectory NATS request/reply.
+	// LoopID is the agentic-loop ID stamped on the task at trigger time —
+	// usually the requirement-executor's loop that dispatched the task.
+	// Carried for back-compat and trace-deep-link routing; the decomposer
+	// prefers DeveloperLoopID + ReviewerLoopID for trajectory evidence.
 	LoopID string `json:"loop_id"`
+
+	// DeveloperLoopID is the agentic-loop ID for the most recent developer
+	// dispatch that produced the code under review. Required for the
+	// decomposer's trajectory fetch — this is the loop where the failure
+	// actually manifests in tool calls and model output. Empty when no
+	// developer dispatch has completed yet (cannot happen at code-review
+	// rejection time; included as a safety net).
+	DeveloperLoopID string `json:"developer_loop_id,omitempty"`
+
+	// ReviewerLoopID is the agentic-loop ID for the reviewer that emitted
+	// this verdict. Useful for the decomposer to read the reviewer's chain
+	// of reasoning when classifying the failure.
+	ReviewerLoopID string `json:"reviewer_loop_id,omitempty"`
 
 	// Verdict is the reviewer verdict that triggered this request.
 	// Always "rejected" in Phase 2 (smallest blast radius); approval-on-first-try
@@ -69,8 +83,8 @@ func (r *LessonDecomposeRequested) Validate() error {
 	if r.Slug == "" {
 		return fmt.Errorf("slug is required")
 	}
-	if r.LoopID == "" {
-		return fmt.Errorf("loop_id is required (decomposer cannot fetch trajectory without it)")
+	if r.LoopID == "" && r.DeveloperLoopID == "" && r.ReviewerLoopID == "" {
+		return fmt.Errorf("at least one of loop_id, developer_loop_id, or reviewer_loop_id is required (decomposer cannot fetch trajectory without it)")
 	}
 	if r.Verdict == "" {
 		return fmt.Errorf("verdict is required")

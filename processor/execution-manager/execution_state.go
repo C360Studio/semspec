@@ -42,6 +42,15 @@ type taskExecution struct {
 	// persisted; the retry budget itself is on workflow.TaskExecution.
 	ReviewerParseError string
 
+	// DeveloperLoopID is the agentic-loop ID of the most recent developer
+	// dispatch that completed for this task. Captured in
+	// handleDeveloperCompleteLocked from event.LoopID before any branch.
+	// Required by the lesson-decomposer (ADR-033 Phase 2b) so it can fetch
+	// the trajectory of the loop that produced the rejected code, not the
+	// reviewer's loop. Runtime-only — Lessons retire on a sweep cadence,
+	// so we don't need to survive a process restart here.
+	DeveloperLoopID string
+
 	// Timeout management.
 	timeoutTimer *timeoutHandle
 }

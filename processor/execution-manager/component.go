@@ -616,6 +616,14 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	c.resetTimeoutLocked(exec)
 	c.taskRouting.Delete(exec.DeveloperTaskID)
 
+	// Capture the developer's loop ID for the lesson-decomposer (ADR-033
+	// Phase 2b). Set on every developer-complete — overwriting on retries
+	// is correct, since only the last developer attempt is the one whose
+	// trajectory the decomposer needs to analyse.
+	if event.LoopID != "" {
+		exec.DeveloperLoopID = event.LoopID
+	}
+
 	if event.Outcome != agentic.OutcomeSuccess {
 		reason := fmt.Sprintf("developer loop failed: outcome=%s", event.Outcome)
 		c.routeFixableRejection(ctx, exec, reason)
@@ -746,7 +754,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	// ADR-033 Phase 2a: signal the decomposer alongside the existing keyword
 	// classifier. Phase 2b enriches the consumer side; Phase 3 swaps the keyword
 	// classifier out. Best-effort — never blocks the rejection flow.
-	c.publishLessonDecomposeRequest(ctx, exec, result.Verdict, result.Feedback)
+	c.publishLessonDecomposeRequest(ctx, exec, result.Verdict, result.Feedback, event.LoopID)
 
 	c.handleRejectionLocked(ctx, exec, result)
 }
