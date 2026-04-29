@@ -9,13 +9,29 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/payloadbuiltins"
+	"github.com/c360studio/semstreams/payloadregistry"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-func init() {
-	// Register payload types so BaseMessage.UnmarshalJSON can deserialize them.
-	payloads.RegisterPayloads()
+// testPayloadRegistry builds a registry with first-party builtins plus the
+// product payload registrations exercised by this suite. Beta.18 retired the
+// package-level singleton — every test that decodes BaseMessage envelopes
+// must construct its own registry.
+func testPayloadRegistry(tb testing.TB) *payloadregistry.Registry {
+	tb.Helper()
+	reg := payloadregistry.New()
+	if err := payloadbuiltins.Register(reg); err != nil {
+		tb.Fatalf("register builtin payloads: %v", err)
+	}
+	if err := workflow.RegisterPayloads(reg); err != nil {
+		tb.Fatalf("register workflow payloads: %v", err)
+	}
+	if err := payloads.RegisterPayloads(reg); err != nil {
+		tb.Fatalf("register workflow/payloads: %v", err)
+	}
+	return reg
 }
 
 // makeTriggerBaseMessage wraps a ScenarioOrchestrationTrigger in a BaseMessage envelope.
@@ -711,7 +727,7 @@ func newTestComponent(t *testing.T) *Component {
 		t.Fatalf("marshal default config: %v", err)
 	}
 
-	deps := component.Dependencies{}
+	deps := component.Dependencies{PayloadRegistry: testPayloadRegistry(t)}
 	comp, err := NewComponent(rawCfg, deps)
 	if err != nil {
 		t.Fatalf("NewComponent() error: %v", err)

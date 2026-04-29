@@ -124,9 +124,11 @@ func (e *ValidationError) Error() string {
 	return e.Field + ": " + e.Message
 }
 
-func init() {
-	// Register the workflow task payload type
-	_ = payloadregistry.Register(&payloadregistry.Registration{
+// registerTaskPayload registers the workflow task payload type. Called by
+// workflow.RegisterPayloads (defined in entity.go) which aggregates every
+// payload owned by the workflow package.
+func registerTaskPayload(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "task",
 		Version:     "v1",

@@ -52,14 +52,14 @@ func (p *webEntityPayload) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// RegisterPayloads registers httptool payload types with the supplied registry.
+// Called from cmd/semspec/main.go bootstrap after payloadbuiltins.Register.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "web",
 		Category:    "entity",
 		Version:     "v1",
 		Description: "Web source entity payload for graph ingestion",
 		Factory:     func() any { return &webEntityPayload{} },
-	}); err != nil {
-		panic("failed to register webEntityPayload: " + err.Error())
-	}
+	})
 }

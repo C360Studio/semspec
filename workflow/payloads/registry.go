@@ -1,39 +1,40 @@
 package payloads
 
 import (
+	"errors"
+
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-// RegisterPayloads registers all payload types from this package with the
-// semstreams component registry. Call this once during startup.
-//
-// NOTE: During the reactive→orchestrator migration, the reactive package's
-// init() still registers these same types. Call RegisterPayloads() AFTER
-// removing the reactive package's registrations to avoid duplicate panics.
-// This will happen in Phase 1 when the first orchestrator component is created.
-func RegisterPayloads() {
-	registerTriggerPayload()
-	registerRequestPayloads()
+// RegisterPayloads registers all payload types owned by the workflow/payloads
+// package with the supplied registry. Called from cmd/semspec/main.go
+// bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return errors.Join(
+		registerTriggerPayload(reg),
+		registerRequestPayloads(reg),
+		registerValidationResult(reg),
+	)
 }
 
-func registerTriggerPayload() {
-	// The reactive engine receives triggers on workflow.trigger.* subjects.
-	// These messages use workflow.trigger.v1 type and need to be registered
-	// for BaseMessage.UnmarshalJSON to deserialize them correctly.
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// registerTriggerPayload registers the workflow trigger payload.
+//
+// The reactive engine receives triggers on workflow.trigger.* subjects.
+// These messages use workflow.trigger.v1 type and need to be registered
+// for BaseMessage decoding to deserialize them correctly.
+func registerTriggerPayload(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      workflow.WorkflowTriggerType.Domain,
 		Category:    workflow.WorkflowTriggerType.Category,
 		Version:     workflow.WorkflowTriggerType.Version,
 		Description: "Workflow trigger payload for reactive engine",
 		Factory:     func() any { return &workflow.TriggerPayload{} },
-	}); err != nil {
-		panic("failed to register trigger payload: " + err.Error())
-	}
+	})
 }
 
-func registerRequestPayloads() {
+func registerRequestPayloads(reg *payloadregistry.Registry) error {
 	payloads := []struct {
 		msgType message.Type
 		desc    string
@@ -74,15 +75,15 @@ func registerRequestPayloads() {
 		{QACompletedType, "QA execution result event published by sandbox or qa-runner", func() any { return &QACompletedPayload{} }},
 	}
 
+	var errs []error
 	for _, p := range payloads {
-		if err := payloadregistry.Register(&payloadregistry.Registration{
+		errs = append(errs, reg.Register(&payloadregistry.Registration{
 			Domain:      p.msgType.Domain,
 			Category:    p.msgType.Category,
 			Version:     p.msgType.Version,
 			Description: p.desc,
 			Factory:     p.factory,
-		}); err != nil {
-			panic("failed to register reactive payload " + p.msgType.Category + ": " + err.Error())
-		}
+		}))
 	}
+	return errors.Join(errs...)
 }

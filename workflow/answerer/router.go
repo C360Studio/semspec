@@ -3,6 +3,7 @@ package answerer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -14,15 +15,19 @@ import (
 	"github.com/google/uuid"
 )
 
-func init() {
-	// Register QuestionAnswerTask for BaseMessage deserialization.
-	_ = payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "question",
-		Category:    "answer-task",
-		Version:     "v1",
-		Description: "Question answer task payload",
-		Factory:     func() any { return &QuestionAnswerTask{} },
-	})
+// RegisterPayloads registers every payload type owned by the answerer package.
+// Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return errors.Join(
+		registerNotification(reg),
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "question",
+			Category:    "answer-task",
+			Version:     "v1",
+			Description: "Question answer task payload",
+			Factory:     func() any { return &QuestionAnswerTask{} },
+		}),
+	)
 }
 
 // Router handles question routing based on topic patterns.

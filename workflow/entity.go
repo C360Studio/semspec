@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -232,10 +233,14 @@ var workflowEntityTypes = []struct {
 	{"dag-node", "DAG execution node entity payload for graph ingestion", DAGNodeEntityType},
 }
 
-func init() {
+// RegisterPayloads registers every payload type owned by the workflow package
+// (entity payloads here, plus the task and answer payloads defined alongside
+// in task.go and question.go). Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	var errs []error
 	for _, et := range workflowEntityTypes {
 		msgType := et.msgType
-		_ = payloadregistry.Register(&payloadregistry.Registration{
+		errs = append(errs, reg.Register(&payloadregistry.Registration{
 			Domain:      et.domain,
 			Category:    "entity",
 			Version:     "v1",
@@ -245,6 +250,8 @@ func init() {
 				p.msgType = msgType
 				return p
 			},
-		})
+		}))
 	}
+	errs = append(errs, registerTaskPayload(reg), registerAnswerPayload(reg))
+	return errors.Join(errs...)
 }

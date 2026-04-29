@@ -10,16 +10,16 @@ import (
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// RegisterPayloads registers requirement-executor payload types with the
+// supplied registry. Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "requirement-execution",
 		Version:     "v1",
 		Description: "Requirement execution entity payload for graph ingestion",
 		Factory:     func() any { return &RequirementExecutionPayload{} },
-	}); err != nil {
-		panic("failed to register RequirementExecutionPayload: " + err.Error())
-	}
+	})
 }
 
 // RequirementExecutionPayloadType is the message type for requirement execution entity payloads.

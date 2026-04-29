@@ -10,16 +10,16 @@ import (
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// RegisterPayloads registers plan-decision-handler payload types with the
+// supplied registry. Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "cascade-execution",
 		Version:     "v1",
 		Description: "Cascade execution entity payload for graph ingestion",
 		Factory:     func() any { return &CascadePayload{} },
-	}); err != nil {
-		panic("failed to register CascadePayload: " + err.Error())
-	}
+	})
 }
 
 // CascadePayloadType is the message type for cascade entity payloads.

@@ -38,6 +38,7 @@ type Component struct {
 	config     Config
 	natsClient *natsclient.Client
 	logger     *slog.Logger
+	decoder    *message.Decoder
 
 	// repoRoot is resolved once at construction from SEMSPEC_REPO_PATH or cwd.
 	// It is used to load requirement and scenario data fresh from disk each dispatch cycle.
@@ -106,6 +107,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:     config,
 		natsClient: deps.NATSClient,
 		logger:     deps.GetLogger(),
+		decoder:    message.NewDecoder(deps.PayloadRegistry),
 		repoRoot:   repoRoot,
 	}, nil
 }
@@ -225,8 +227,8 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &base); err != nil {
+	base, err := c.decoder.Decode(msg.Data())
+	if err != nil {
 		c.logger.Error("failed to parse orchestration trigger envelope", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("failed to NAK message", "error", err)

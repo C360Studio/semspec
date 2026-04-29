@@ -2,8 +2,10 @@ package requirementgenerator
 
 import "github.com/c360studio/semstreams/payloadregistry"
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// RegisterPayloads registers requirement-generator payload types with the
+// supplied registry. Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "requirement-generator-result",
 		Version:     "v1",
@@ -11,7 +13,5 @@ func init() {
 		Factory: func() any {
 			return &Result{}
 		},
-	}); err != nil {
-		panic("failed to register requirement-generator result payload: " + err.Error())
-	}
+	})
 }

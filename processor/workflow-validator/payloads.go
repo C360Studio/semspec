@@ -2,8 +2,8 @@ package workflowvalidator
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"log"
 
 	"github.com/c360studio/semspec/workflow/validation"
 	"github.com/c360studio/semstreams/message"
@@ -127,26 +127,23 @@ var ValidateResponseType = message.Type{
 	Version:  "v1",
 }
 
-func init() {
-	// Register the validation request payload type
-	if err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "workflow",
-		Category:    "validate.request",
-		Version:     "v1",
-		Description: "Workflow document validation request",
-		Factory:     func() any { return &ValidateRequest{} },
-	}); err != nil {
-		log.Printf("ERROR: failed to register ValidateRequest: %v", err)
-	}
-
-	// Register the validation response payload type
-	if err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "workflow",
-		Category:    "validate.response",
-		Version:     "v1",
-		Description: "Workflow document validation response",
-		Factory:     func() any { return &ValidateResponse{} },
-	}); err != nil {
-		log.Printf("ERROR: failed to register ValidateResponse: %v", err)
-	}
+// RegisterPayloads registers workflow-validator payload types with the
+// supplied registry. Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return errors.Join(
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "workflow",
+			Category:    "validate.request",
+			Version:     "v1",
+			Description: "Workflow document validation request",
+			Factory:     func() any { return &ValidateRequest{} },
+		}),
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "workflow",
+			Category:    "validate.response",
+			Version:     "v1",
+			Description: "Workflow document validation response",
+			Factory:     func() any { return &ValidateResponse{} },
+		}),
+	)
 }

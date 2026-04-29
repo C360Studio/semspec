@@ -10,7 +10,6 @@ package semsource
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/c360studio/semstreams/graph"
@@ -24,58 +23,49 @@ var (
 	_ message.Payload = (*EntityPayload)(nil)
 )
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "semsource",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Entity streamed from a semsource ingestion instance",
-		Factory: func() any {
-			return &EntityPayload{}
-		},
-		Example: map[string]any{
-			"id":         "org.platform.domain.system.type.instance",
-			"triples":    []any{},
-			"updated_at": time.Now().UTC().Format(time.RFC3339),
-		},
-	}); err != nil {
-		panic(fmt.Sprintf("semsource: failed to register entity payload: %v", err))
-	}
-
-	// Register semsource status heartbeat so message-logger can parse it.
-	if err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "semsource",
-		Category:    "status",
-		Version:     "v1",
-		Description: "Semsource instance status heartbeat",
-		Factory: func() any {
-			return &StatusPayload{}
-		},
-	}); err != nil {
-		panic(fmt.Sprintf("semsource: failed to register status payload: %v", err))
-	}
-
-	// Register semsource manifest — published at startup listing configured sources.
-	if err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "semsource",
-		Category:    "manifest",
-		Version:     "v1",
-		Description: "Source manifest listing all configured ingestion sources",
-		Factory:     func() any { return &ManifestPayload{} },
-	}); err != nil {
-		panic(fmt.Sprintf("semsource: failed to register manifest payload: %v", err))
-	}
-
-	// Register semsource predicates — predicate schema per source type.
-	if err := payloadregistry.Register(&payloadregistry.Registration{
-		Domain:      "semsource",
-		Category:    "predicates",
-		Version:     "v1",
-		Description: "Predicate schema advertising predicates emitted per source type",
-		Factory:     func() any { return &PredicateSchemaPayload{} },
-	}); err != nil {
-		panic(fmt.Sprintf("semsource: failed to register predicates payload: %v", err))
-	}
+// RegisterPayloads registers every semsource payload type with the supplied
+// registry. Called from cmd/semspec/main.go bootstrap so semspec can
+// deserialize messages published by a headless semsource instance.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return errors.Join(
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "semsource",
+			Category:    "entity",
+			Version:     "v1",
+			Description: "Entity streamed from a semsource ingestion instance",
+			Factory: func() any {
+				return &EntityPayload{}
+			},
+			Example: map[string]any{
+				"id":         "org.platform.domain.system.type.instance",
+				"triples":    []any{},
+				"updated_at": time.Now().UTC().Format(time.RFC3339),
+			},
+		}),
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "semsource",
+			Category:    "status",
+			Version:     "v1",
+			Description: "Semsource instance status heartbeat",
+			Factory: func() any {
+				return &StatusPayload{}
+			},
+		}),
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "semsource",
+			Category:    "manifest",
+			Version:     "v1",
+			Description: "Source manifest listing all configured ingestion sources",
+			Factory:     func() any { return &ManifestPayload{} },
+		}),
+		reg.Register(&payloadregistry.Registration{
+			Domain:      "semsource",
+			Category:    "predicates",
+			Version:     "v1",
+			Description: "Predicate schema advertising predicates emitted per source type",
+			Factory:     func() any { return &PredicateSchemaPayload{} },
+		}),
+	)
 }
 
 // EntityPayload carries a graph entity received from semsource.

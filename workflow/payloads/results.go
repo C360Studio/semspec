@@ -213,16 +213,16 @@ func (r *ValidationResult) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// registerValidationResult registers the ValidationResult payload. Called by
+// RegisterPayloads in registry.go.
+func registerValidationResult(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "structural-validation-result",
 		Version:     "v1",
 		Description: "Structural validation result — checklist execution summary",
 		Factory:     func() any { return &ValidationResult{} },
-	}); err != nil {
-		panic("failed to register ValidationResult: " + err.Error())
-	}
+	})
 }
 
 // ---------------------------------------------------------------------------

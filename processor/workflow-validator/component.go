@@ -26,6 +26,7 @@ type Component struct {
 	config     Config
 	natsClient *natsclient.Client
 	logger     *slog.Logger
+	decoder    *message.Decoder
 
 	validator *validation.Validator
 	baseDir   string
@@ -92,6 +93,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:         config,
 		natsClient:     deps.NATSClient,
 		logger:         deps.GetLogger(),
+		decoder:        message.NewDecoder(deps.PayloadRegistry),
 		validator:      validation.NewValidator(),
 		baseDir:        baseDir,
 		requestSubject: requestSubject,
@@ -172,8 +174,8 @@ func (c *Component) handleRequest(ctx context.Context, data []byte) ([]byte, err
 		c.logger.Debug("Parsed as raw ValidateRequest", "document", req.Document, "has_content", req.Content != "")
 	} else {
 		// Try to parse as BaseMessage-wrapped request
-		var baseMsg message.BaseMessage
-		if err := json.Unmarshal(data, &baseMsg); err != nil {
+		baseMsg, err := c.decoder.Decode(data)
+		if err != nil {
 			return c.errorResponse("failed to parse request: " + err.Error())
 		}
 

@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,9 +22,6 @@ import (
 
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
-
-	// Register semsource payload types so graph-ingest can deserialize entities
-	_ "github.com/c360studio/semspec/semsource"
 
 	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/model"
@@ -46,14 +44,19 @@ import (
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semspec/prompt"
+	"github.com/c360studio/semspec/semsource"
+	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
+	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
 	"github.com/c360studio/semstreams/config"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semstreams/payloadbuiltins"
+	"github.com/c360studio/semstreams/payloadregistry"
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
@@ -281,10 +284,45 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 	}
 	// Register review aggregator with semstreams aggregation system.
 	reviewaggregation.Register()
-	// Register payload types (previously handled by workflow/reactive init()).
-	payloads.RegisterPayloads()
 
 	return nil
+}
+
+// buildPayloadRegistry constructs the payload registry plumbed through
+// service.Dependencies.PayloadRegistry to every component. Beta.18 retired
+// the package-level singleton (mirrors beta.16's tool-registry retirement);
+// every payload registration is now explicit and constructor-injected.
+//
+// Order: first-party semstreams builtins, then every product package that
+// owns payloads. Errors aggregate via errors.Join so a duplicate-registration
+// boot failure surfaces every collision in one shot.
+func buildPayloadRegistry() (*payloadregistry.Registry, error) {
+	reg := payloadregistry.New()
+	productRegistrations := []func(*payloadregistry.Registry) error{
+		payloadbuiltins.Register,
+		workflow.RegisterPayloads,
+		payloads.RegisterPayloads,
+		answerer.RegisterPayloads,
+		semsource.RegisterPayloads,
+		httptool.RegisterPayloads,
+		planner.RegisterPayloads,
+		planreviewer.RegisterPayloads,
+		scenariogenerator.RegisterPayloads,
+		requirementgenerator.RegisterPayloads,
+		workflowvalidator.RegisterPayloads,
+		executionmanager.RegisterPayloads,
+		requirementexecutor.RegisterPayloads,
+		changeproposalhandler.RegisterPayloads,
+	}
+	var errs []error
+	for _, register := range productRegistrations {
+		errs = append(errs, register(reg))
+	}
+	if err := errors.Join(errs...); err != nil {
+		return nil, fmt.Errorf("register payloads: %w", err)
+	}
+	slog.Info("Payload registry initialized", "registrations", len(reg.List()))
+	return reg, nil
 }
 
 // setupServiceManager creates the service registry, manager, and configures all services.
@@ -292,6 +330,7 @@ func setupServiceManager(
 	cfg *config.Config,
 	natsClient *natsclient.Client,
 	toolRegistry *agentictools.ExecutorRegistry,
+	payloadReg *payloadregistry.Registry,
 	metricsRegistry *metric.MetricsRegistry,
 	logger *slog.Logger,
 	platform types.PlatformMeta,
@@ -313,6 +352,7 @@ func setupServiceManager(
 		Manager:           configManager,
 		ComponentRegistry: componentRegistry,
 		ToolRegistry:      toolRegistry,
+		PayloadRegistry:   payloadReg,
 	}
 	if err := configureAndCreateServices(cfg, manager, svcDeps); err != nil {
 		return nil, err
@@ -347,6 +387,15 @@ func setupInfrastructure(
 		return nil, nil, nil, fmt.Errorf("register agentic tools: %w", err)
 	}
 
+	// Build the shared payload registry up front so it can be plumbed through
+	// service.Dependencies.PayloadRegistry into every component. beta.18
+	// retired the package-level payload singleton — same DI pattern.
+	payloadReg, err := buildPayloadRegistry()
+	if err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, err
+	}
+
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
 	metricsRegistry := metric.NewMetricsRegistry()
@@ -378,7 +427,7 @@ func setupInfrastructure(
 	factories := componentRegistry.ListFactories()
 	slog.Info("Component factories registered", "count", len(factories))
 
-	manager, err := setupServiceManager(cfg, natsClient, toolRegistry, metricsRegistry, logger, platform, configManager, componentRegistry)
+	manager, err := setupServiceManager(cfg, natsClient, toolRegistry, payloadReg, metricsRegistry, logger, platform, configManager, componentRegistry)
 	if err != nil {
 		configManager.Stop(5 * time.Second)
 		natsClient.Close(ctx)

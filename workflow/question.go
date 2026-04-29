@@ -14,9 +14,10 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-func init() {
-	// Register AnswerPayload type for message deserialization
-	_ = payloadregistry.Register(&payloadregistry.Registration{
+// registerAnswerPayload registers the question answer payload. Called by
+// workflow.RegisterPayloads (entity.go).
+func registerAnswerPayload(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "question",
 		Category:    "answer",
 		Version:     "v1",

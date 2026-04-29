@@ -106,6 +106,7 @@ type Component struct {
 	config       Config
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
+	decoder      *message.Decoder
 	platform     component.PlatformMeta
 	toolRegistry component.ToolRegistryReader
 	tripleWriter *graphutil.TripleWriter
@@ -195,6 +196,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        cfg,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
+		decoder:       message.NewDecoder(deps.PayloadRegistry),
 		platform:      deps.Platform,
 		toolRegistry:  deps.ToolRegistry,
 		modelRegistry: deps.ModelRegistry,
@@ -1427,8 +1429,8 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 			)
 
 			// Deserialize via registered BaseMessage payload.
-			var base message.BaseMessage
-			if err := json.Unmarshal(msg.Data(), &base); err != nil {
+			base, err := c.decoder.Decode(msg.Data())
+			if err != nil {
 				return payloads.ValidationResult{}, fmt.Errorf("unmarshal validation result BaseMessage: %w", err)
 			}
 			vr, ok := base.Payload().(*payloads.ValidationResult)

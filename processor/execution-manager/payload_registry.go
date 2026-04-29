@@ -10,16 +10,16 @@ import (
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-func init() {
-	if err := payloadregistry.Register(&payloadregistry.Registration{
+// RegisterPayloads registers execution-manager payload types with the supplied
+// registry. Called from cmd/semspec/main.go bootstrap.
+func RegisterPayloads(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "workflow",
 		Category:    "task-execution",
 		Version:     "v1",
 		Description: "Task execution entity payload for graph ingestion",
 		Factory:     func() any { return &TaskExecutionPayload{} },
-	}); err != nil {
-		panic("failed to register TaskExecutionPayload: " + err.Error())
-	}
+	})
 }
 
 // TaskExecutionPayloadType is the message type for task execution entity payloads.

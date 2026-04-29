@@ -14,9 +14,10 @@ import (
 	"github.com/c360studio/semstreams/payloadregistry"
 )
 
-func init() {
-	// Register Notification type for message deserialization
-	_ = payloadregistry.Register(&payloadregistry.Registration{
+// registerNotification registers the Notification payload. Called by
+// answerer.RegisterPayloads (defined in router.go).
+func registerNotification(reg *payloadregistry.Registry) error {
+	return reg.Register(&payloadregistry.Registration{
 		Domain:      "notification",
 		Category:    "question",
 		Version:     "v1",
