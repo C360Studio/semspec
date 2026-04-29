@@ -1335,6 +1335,8 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		exec.Stage = phaseValidationFailed
 		c.syncToStore(ctx, exec)
 
+		c.extractStructuralLessons(ctx, exec, exec.ValidationResults)
+
 		if exec.TDDCycle+1 < exec.MaxTDDCycles {
 			feedback, _ := json.Marshal(exec.ValidationResults)
 			msg := "Structural validation failed. Fix the following issues:\n" + string(feedback)

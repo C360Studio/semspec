@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/google/uuid"
 )
 
@@ -51,6 +52,93 @@ func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, fee
 		}
 	}
 
+}
+
+// extractStructuralLessons creates one developer-scoped Lesson per failed
+// required CheckResult from a structural validation pass. The substrate
+// (toolchain stderr/stdout + check name) is deterministic — exit codes and
+// real `pytest`/`go build` output — so the keyword classifier here is
+// Goodhart-safe in a way reviewer-feedback classification is not. Source is
+// "structural-validation" to distinguish from "reviewer-feedback".
+//
+// Phase 0.4 of ADR-033's lessons chain: bridges the gap between today's
+// in-loop validator feedback (re-dispatched developer message) and tomorrow's
+// trajectory-decomposed lessons (Phase 1+).
+func (c *Component) extractStructuralLessons(ctx context.Context, exec *taskExecution, checks []payloads.CheckResult) {
+	if c.lessonWriter == nil {
+		return
+	}
+
+	role := "developer"
+	lessons := buildStructuralLessons(exec.TaskID, checks, c.errorCategories)
+	if len(lessons) == 0 {
+		return
+	}
+
+	allCategoryIDs := map[string]struct{}{}
+	for _, lesson := range lessons {
+		if err := c.lessonWriter.RecordLesson(ctx, lesson); err != nil {
+			c.logger.Warn("Failed to record structural lesson", "role", role, "error", err)
+			continue
+		}
+		for _, id := range lesson.CategoryIDs {
+			allCategoryIDs[id] = struct{}{}
+		}
+	}
+
+	if len(allCategoryIDs) > 0 {
+		ids := make([]string, 0, len(allCategoryIDs))
+		for id := range allCategoryIDs {
+			ids = append(ids, id)
+		}
+		if err := c.lessonWriter.IncrementRoleLessonCounts(ctx, role, ids); err != nil {
+			c.logger.Warn("Failed to increment lesson counts", "role", role, "error", err)
+		}
+		c.checkLessonThreshold(ctx, role, ids)
+	}
+}
+
+// buildStructuralLessons is the pure builder for structural-validation
+// lessons. One lesson per failed required check. Match substrate is
+// `Name + Stderr + Stdout` truncated to 800 runes (enough for pytest/go-test
+// failure summaries without inflating the graph) and the stored Summary is
+// truncated to 200 runes. Returns nil for empty input or all-passing/
+// non-required failures.
+func buildStructuralLessons(taskID string, checks []payloads.CheckResult, registry *workflow.ErrorCategoryRegistry) []workflow.Lesson {
+	var lessons []workflow.Lesson
+	now := time.Now()
+	for _, ck := range checks {
+		if ck.Passed || !ck.Required {
+			continue
+		}
+		matchText := ck.Name + "\n" + ck.Stderr + "\n" + ck.Stdout
+		matchText = truncateInsight(matchText, 800)
+
+		var categoryIDs []string
+		if registry != nil {
+			for _, m := range registry.MatchSignals(matchText) {
+				categoryIDs = append(categoryIDs, m.Category.ID)
+			}
+		}
+
+		summarySrc := ck.Name
+		if ck.Stderr != "" {
+			summarySrc += ": " + ck.Stderr
+		} else if ck.Stdout != "" {
+			summarySrc += ": " + ck.Stdout
+		}
+
+		lessons = append(lessons, workflow.Lesson{
+			ID:          uuid.New().String(),
+			Source:      "structural-validation",
+			ScenarioID:  taskID,
+			Summary:     truncateInsight(summarySrc, 200),
+			CategoryIDs: categoryIDs,
+			Role:        "developer",
+			CreatedAt:   now,
+		})
+	}
+	return lessons
 }
 
 // checkLessonThreshold checks whether any error category for the given role
