@@ -649,9 +649,19 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 
 // extractPlanLessons creates lessons from error-severity findings in a plan review rejection.
 // Each finding is tagged with the role responsible for the phase that produced it.
+//
+// ADR-033 Phase 3: every emitted lesson now carries an EvidenceFiles citation
+// to the plan artifact (`.semspec/plans/<slug>/plan.json`), satisfying the
+// writer's evidence requirement. Findings already have structured per-phase
+// information so we self-populate evidence rather than routing through the
+// decomposer LLM (which would lose the structured findings shape).
 func (c *Component) extractPlanLessons(ctx context.Context, slug string, result *workflow.PlanReviewResult) {
 	if c.lessonWriter == nil {
 		return
+	}
+
+	planFileRef := workflow.FileRef{
+		Path: ".semspec/plans/" + slug + "/plan.json",
 	}
 
 	for _, finding := range result.ErrorFindings() {
@@ -661,10 +671,11 @@ func (c *Component) extractPlanLessons(ctx context.Context, slug string, result 
 
 		role := phaseToRole(finding.Phase)
 		lesson := workflow.Lesson{
-			Source:     "plan-review",
-			ScenarioID: slug,
-			Summary:    finding.Issue,
-			Role:       role,
+			Source:        "plan-review",
+			ScenarioID:    slug,
+			Summary:       finding.Issue,
+			Role:          role,
+			EvidenceFiles: []workflow.FileRef{planFileRef},
 		}
 
 		if c.errorCategories != nil {

@@ -682,19 +682,54 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 // recordQARejectionLesson persists a role-scoped lesson when the verdict
 // is needs_changes, so future qa-reviewer prompts learn from the rejection.
 // No-op when lesson writing is disabled or the verdict is approval.
+//
+// ADR-033 Phase 3: each lesson now carries EvidenceFiles citations. Prefer
+// the agent's plan_decisions[].artifact_refs[].path entries when present
+// (those are the actual logs/screenshots/traces the agent surfaced as
+// evidence); otherwise fall back to a stable citation pointing at the plan
+// artifact (`.semspec/plans/<slug>/plan.json`) so the writer's evidence
+// requirement is satisfied.
 func (c *Component) recordQARejectionLesson(ctx context.Context, slug string, result *qaReviewOutput) {
 	if workflow.QAVerdict(result.Verdict) != workflow.QAVerdictNeedsChanges || c.lessonWriter == nil {
 		return
 	}
+	evidenceFiles := qaEvidenceFiles(slug, result)
 	lesson := workflow.Lesson{
-		Source:     "qa-review",
-		ScenarioID: slug,
-		Summary:    fmt.Sprintf("QA rejection: %s", result.Summary),
-		Role:       string(prompt.RolePlanQAReviewer),
+		Source:        "qa-review",
+		ScenarioID:    slug,
+		Summary:       fmt.Sprintf("QA rejection: %s", result.Summary),
+		Role:          string(prompt.RolePlanQAReviewer),
+		EvidenceFiles: evidenceFiles,
 	}
 	if err := c.lessonWriter.RecordLesson(context.WithoutCancel(ctx), lesson); err != nil {
 		c.logger.Warn("Failed to record qa-reviewer lesson", "slug", slug, "error", err)
 	}
+}
+
+// qaEvidenceFiles selects FileRef citations for a QA-rejection lesson.
+// Pulls workspace-relative paths from plan_decisions.artifact_refs first
+// (deduped), then falls back to the plan artifact when none are present —
+// the latter is a stable citation regardless of artifact availability.
+func qaEvidenceFiles(slug string, result *qaReviewOutput) []workflow.FileRef {
+	planRef := workflow.FileRef{Path: ".semspec/plans/" + slug + "/plan.json"}
+	if result == nil {
+		return []workflow.FileRef{planRef}
+	}
+	seen := map[string]bool{}
+	var out []workflow.FileRef
+	for _, pd := range result.PlanDecisions {
+		for _, ar := range pd.ArtifactRefs {
+			if ar.Path == "" || seen[ar.Path] {
+				continue
+			}
+			seen[ar.Path] = true
+			out = append(out, workflow.FileRef{Path: ar.Path})
+		}
+	}
+	if len(out) == 0 {
+		return []workflow.FileRef{planRef}
+	}
+	return out
 }
 
 // retryOrFail attempts to re-dispatch the QA review. When MaxReviewRetries is

@@ -98,9 +98,17 @@ func (c *Component) extractStructuralLessons(ctx context.Context, exec *taskExec
 // failure summaries without inflating the graph) and the stored Summary is
 // truncated to 200 runes. Returns nil for empty input or all-passing/
 // non-required failures.
+//
+// ADR-033 Phase 3: each lesson cites `.semspec/checklist.json` in
+// EvidenceFiles. The check name is the natural retirement signal — when the
+// project retires or renames a check, the cited definition disappears and
+// the retirement sweep can expire the lesson. The line range is
+// intentionally empty (whole-file citation) because checklist.json is a
+// flat list and per-check line numbers shift with edits.
 func buildStructuralLessons(taskID string, checks []payloads.CheckResult, registry *workflow.ErrorCategoryRegistry) []workflow.Lesson {
 	var lessons []workflow.Lesson
 	now := time.Now()
+	checklistRef := workflow.FileRef{Path: ".semspec/checklist.json"}
 	for _, ck := range checks {
 		if ck.Passed || !ck.Required {
 			continue
@@ -123,13 +131,14 @@ func buildStructuralLessons(taskID string, checks []payloads.CheckResult, regist
 		}
 
 		lessons = append(lessons, workflow.Lesson{
-			ID:          uuid.New().String(),
-			Source:      "structural-validation",
-			ScenarioID:  taskID,
-			Summary:     truncateInsight(summarySrc, 200),
-			CategoryIDs: categoryIDs,
-			Role:        "developer",
-			CreatedAt:   now,
+			ID:            uuid.New().String(),
+			Source:        "structural-validation",
+			ScenarioID:    taskID,
+			Summary:       truncateInsight(summarySrc, 200),
+			CategoryIDs:   categoryIDs,
+			Role:          "developer",
+			CreatedAt:     now,
+			EvidenceFiles: []workflow.FileRef{checklistRef},
 		})
 	}
 	return lessons

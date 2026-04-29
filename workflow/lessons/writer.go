@@ -7,6 +7,7 @@ package lessons
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -26,6 +27,27 @@ type Writer struct {
 	Logger *slog.Logger
 }
 
+// ErrLessonWithoutEvidence is returned by RecordLesson when the supplied
+// Lesson has neither EvidenceSteps nor EvidenceFiles populated. ADR-033
+// Phase 3 makes evidence mandatory so the retirement sweep (Phase 5) has
+// something to verify against; producers that cannot supply evidence must
+// publish a `lesson.decompose.requested` event and let the decomposer
+// produce the lesson with its evidence-citing prompt.
+var ErrLessonWithoutEvidence = errors.New("lessons: lesson must cite at least one EvidenceSteps or EvidenceFiles entry (ADR-033 Phase 3)")
+
+// firstRunes returns the first n runes of s, used for prompt-safe log
+// snippets when the full summary may exceed slog field limits.
+func firstRunes(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // stepRefDelim separates fields inside a StepRef triple value.
 // StepRef.LoopID is a UUID and never contains "|".
 const stepRefDelim = "|"
@@ -36,15 +58,25 @@ const fileRefDelim = "|"
 
 // RecordLesson writes a lesson entity to the graph as triples.
 //
-// ADR-033 Phase 1: writer accepts lessons with or without evidence pointers.
-// When evidence is missing, a Debug log is emitted (warn-only-but-quiet
-// during the migration window — most legacy lessons lack evidence and would
-// flood the warn channel). Phase 3 will flip this to a hard reject.
+// ADR-033 Phase 3: every lesson MUST cite at least one trajectory step
+// (EvidenceSteps) or file region (EvidenceFiles). The writer rejects
+// evidence-less lessons with ErrLessonWithoutEvidence so producers cannot
+// silently ship lessons that the retirement sweep (Phase 5) cannot
+// validate. All in-tree producers (execution-manager structural,
+// plan-reviewer, qa-reviewer, lesson-decomposer) populate evidence; only
+// callers that bypass these paths trip this guard.
 //
 // Multi-valued fields (CategoryIDs, EvidenceSteps, EvidenceFiles) are
 // written as one triple per element to keep triples atomic per
 // feedback_no_json_in_triples — never json.Marshal into a triple object.
 func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error {
+	if len(lesson.EvidenceSteps) == 0 && len(lesson.EvidenceFiles) == 0 {
+		if w.Logger != nil {
+			w.Logger.Warn("Rejected lesson with no evidence (ADR-033 Phase 3)",
+				"source", lesson.Source, "role", lesson.Role, "summary_prefix", firstRunes(lesson.Summary, 80))
+		}
+		return ErrLessonWithoutEvidence
+	}
 	if lesson.ID == "" {
 		lesson.ID = uuid.New().String()
 	}
@@ -97,11 +129,6 @@ func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error
 	}
 	if lesson.LastInjectedAt != nil {
 		triples = append(triples, triple{agentgraph.PredicateLessonLastInjectedAt, lesson.LastInjectedAt.Format(time.RFC3339)})
-	}
-
-	if len(lesson.EvidenceSteps) == 0 && len(lesson.EvidenceFiles) == 0 && w.Logger != nil {
-		w.Logger.Debug("Lesson recorded without evidence pointers (Phase 1 warn-only)",
-			"lesson_id", lesson.ID, "source", lesson.Source, "role", lesson.Role)
 	}
 
 	for _, t := range triples {

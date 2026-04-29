@@ -2,6 +2,7 @@ package lessons
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -136,9 +137,10 @@ func TestRecordLesson_GeneratesIDAndTimestamp(t *testing.T) {
 	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
 
 	lesson := workflow.Lesson{
-		Source:  "reviewer-feedback",
-		Summary: "test lesson",
-		Role:    "developer",
+		Source:        "reviewer-feedback",
+		Summary:       "test lesson",
+		Role:          "developer",
+		EvidenceFiles: []workflow.FileRef{{Path: "main.go"}},
 	}
 
 	if err := w.RecordLesson(context.Background(), lesson); err != nil {
@@ -401,15 +403,22 @@ func TestRecordLesson_AcceptsLessonWithEvidence(t *testing.T) {
 	}
 }
 
-func TestRecordLesson_AcceptsLegacyLessonWithoutEvidence(t *testing.T) {
+func TestRecordLesson_RejectsLessonWithoutEvidence(t *testing.T) {
+	// ADR-033 Phase 3: writer rejects evidence-less lessons. The error
+	// surfaces as ErrLessonWithoutEvidence so producers can branch on it
+	// instead of swallowing the error and silently dropping the lesson.
 	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
 	lesson := workflow.Lesson{
 		Source:  "reviewer-feedback",
 		Summary: "legacy",
 		Role:    "developer",
 	}
-	if err := w.RecordLesson(context.Background(), lesson); err != nil {
-		t.Fatalf("RecordLesson without evidence should still succeed in Phase 1, got %v", err)
+	err := w.RecordLesson(context.Background(), lesson)
+	if err == nil {
+		t.Fatal("Phase 3 must reject lessons without evidence, got nil")
+	}
+	if !errors.Is(err, ErrLessonWithoutEvidence) {
+		t.Errorf("expected ErrLessonWithoutEvidence, got %v", err)
 	}
 }
 
