@@ -88,6 +88,7 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+	decoder       *message.Decoder
 
 	// inFlight maps a dispatched TaskID → the originating
 	// LessonDecomposeRequested. Populated when handleMessage publishes
@@ -163,6 +164,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		decoder:       message.NewDecoder(deps.PayloadRegistry),
 		inFlight:      make(map[string]*payloads.LessonDecomposeRequested),
 	}, nil
 }
@@ -367,12 +369,21 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // parseRequest unwraps the BaseMessage envelope and returns the typed
 // payload. Any failure increments parseErrors, acks the message (so it
-// isn't redelivered forever), and returns ok=false.
+// isn't redelivered forever), and returns ok=false. Uses message.Decoder
+// so the payload registry resolves *LessonDecomposeRequested from the
+// envelope's type fields — raw json.Unmarshal cannot do this without the
+// registry hook.
 func (c *Component) parseRequest(msg jetstream.Msg) (*payloads.LessonDecomposeRequested, bool) {
-	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &base); err != nil {
+	if c.decoder == nil {
 		c.parseErrors.Add(1)
-		c.logger.Error("Failed to unmarshal BaseMessage envelope", "error", err)
+		c.logger.Error("Decoder not initialised — payload registry missing")
+		c.ackOrWarn(msg, "no decoder")
+		return nil, false
+	}
+	base, err := c.decoder.Decode(msg.Data())
+	if err != nil {
+		c.parseErrors.Add(1)
+		c.logger.Error("Failed to decode BaseMessage envelope", "error", err)
 		c.ackOrWarn(msg, "malformed envelope")
 		return nil, false
 	}

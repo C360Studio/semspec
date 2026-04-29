@@ -110,6 +110,17 @@
           "qwen3",
           "qwen"
         ]
+      },
+      "lesson_decomposition": {
+        "description": "Audited lesson extraction from a developer trajectory plus a reviewer rejection (ADR-033). Rare; benefits from a smart model regardless of the executing role.",
+        "preferred": [
+          "claude-opus",
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
       }
     },
     "endpoints": {

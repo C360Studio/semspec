@@ -1,0 +1,14 @@
+{
+  "content": "Decomposed the rejection into a single audited lesson.",
+  "tool_calls": [
+    {
+      "id": "call_lesson_decompose_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Run the full test suite before submit_work to catch broken consumers.\",\"detail\":\"The developer's submit_work claimed completion before running the project's full test suite. The reviewer flagged tests that didn't cover the rejected scenario. The trajectory shows per-package compilation but no full-test invocation between the last edit and submit_work.\",\"injection_form\":\"Always run the project's full test command (e.g. go test ./...) before calling submit_work. Per-package builds miss broken consumers.\",\"category_ids\":[\"incomplete_verification\"],\"root_cause_role\":\"developer\",\"evidence_steps\":[{\"loop_id\":\"mock-developer-loop\",\"step_index\":3}],\"evidence_files\":[{\"path\":\"api/app.py\",\"line_start\":1,\"line_end\":20,\"commit_sha\":\"mockcommit\"}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

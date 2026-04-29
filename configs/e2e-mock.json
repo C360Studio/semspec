@@ -105,6 +105,15 @@
         "fallback": [
           "mock-reviewer"
         ]
+      },
+      "lesson_decomposition": {
+        "description": "Lesson decomposer (mock: returns canned audited lesson)",
+        "preferred": [
+          "mock-lesson-decomposer"
+        ],
+        "fallback": [
+          "mock-reviewer"
+        ]
       }
     },
     "endpoints": {
@@ -182,6 +191,14 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-qa-reviewer",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
+      },
+      "mock-lesson-decomposer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-lesson-decomposer",
         "max_tokens": 32768,
         "supports_tools": true,
         "tool_format": "openai"
@@ -609,6 +626,17 @@
       "enabled": true,
       "config": {
         "default_capability": "qa"
+      }
+    },
+    "lesson-decomposer": {
+      "name": "lesson-decomposer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "stream_name": "WORKFLOW",
+        "consumer_name": "lesson-decomposer",
+        "filter_subject": "workflow.events.lesson.decompose.requested.>"
       }
     }
   },
