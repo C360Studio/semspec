@@ -174,17 +174,19 @@ func (s *PlanWorkflowScenario) stagePlanUpdateScope(ctx context.Context, result 
 	return nil
 }
 
-// stageWaitForDrafted waits for the planner to finish drafting the plan.
-// The planner KV watcher picks up new plans and runs the LLM pipeline.
-// With auto-approve enabled, the plan may pass through drafted → reviewed → approved
-// before we check, so we wait for a non-empty Goal (set by the planner) rather than
-// an exact status match.
+// stageWaitForDrafted waits until the plan is approve-eligible: status has
+// advanced past "drafting" (so the planner has finished writing goal/context/
+// scope and the plan is ready for review/approval). Goal-non-empty is a
+// necessary but insufficient signal — the planner sets Goal mid-write while
+// status is still drafting, and PromotePlan rejects with HTTP 409 against
+// drafting status. We poll until status leaves drafting OR until the goal
+// is set AND status is drafted/later.
 func (s *PlanWorkflowScenario) stageWaitForDrafted(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	plan, err := s.http.WaitForPlanGoal(ctx, expectedSlug)
+	plan, err := s.http.WaitForPlanApproveEligible(ctx, expectedSlug)
 	if err != nil {
-		return fmt.Errorf("wait for plan goal: %w", err)
+		return fmt.Errorf("wait for plan to become approve-eligible: %w", err)
 	}
 
 	result.SetDetail("drafted_goal", plan.Goal)

@@ -2464,6 +2464,44 @@ func (c *HTTPClient) WaitForPlanGoal(ctx context.Context, slug string) (*Plan, e
 	}
 }
 
+// WaitForPlanApproveEligible polls GetPlan until the plan is in a status that
+// PromotePlan accepts. The approve-state-machine only allows promote against
+// StatusReviewed (or, idempotent, against an already-approved plan).
+//
+// Goal-non-empty alone is insufficient — the planner sets Goal during drafting
+// while status is still "drafting", and "drafted" / "reviewing_draft" both
+// reject promote with HTTP 409. We poll until status is reviewed (the legitimate
+// promote target) or any later stage (treat as "already approved past where
+// promote would reject").
+func (c *HTTPClient) WaitForPlanApproveEligible(ctx context.Context, slug string) (*Plan, error) {
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for plan %q to become approve-eligible: %w", slug, ctx.Err())
+		case <-ticker.C:
+			plan, err := c.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+			if plan.Goal == "" {
+				continue
+			}
+			// Statuses that fail the promote gate. Anything else (reviewed,
+			// approved, generating_requirements, ...) is fair game — promote
+			// either succeeds or is idempotent against an already-approved
+			// plan.
+			switch plan.Status {
+			case "", "created", "drafting", "drafted", "reviewing_draft":
+				continue
+			}
+			return plan, nil
+		}
+	}
+}
+
 // WaitForPlanStatus polls GetPlan until the plan reaches the given status.
 func (c *HTTPClient) WaitForPlanStatus(ctx context.Context, slug, status string) (*Plan, error) {
 	ticker := time.NewTicker(200 * time.Millisecond)
