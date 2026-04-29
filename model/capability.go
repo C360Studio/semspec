@@ -37,6 +37,13 @@ const (
 
 	// CapabilityFast is for quick responses, simple tasks.
 	CapabilityFast Capability = "fast"
+
+	// CapabilityLessonDecomposition is for the rare reflection step that
+	// reads a developer trajectory and reviewer verdict and produces an
+	// audited lesson (ADR-033 Phase 2+). Benefits from a smarter model
+	// than the executing role; deployments typically point this at the
+	// same endpoint as CapabilityReviewing.
+	CapabilityLessonDecomposition Capability = "lesson_decomposition"
 )
 
 // RoleCapabilities maps workflow roles to their default capability.
@@ -55,6 +62,7 @@ var RoleCapabilities = map[string]Capability{
 	"qa":                    CapabilityQA,
 	"coordinator":           CapabilityPlanning,
 	"writer":                CapabilityWriting,
+	"lesson-decomposer":     CapabilityLessonDecomposition,
 }
 
 // CapabilityForRole returns the default capability for a given role.
@@ -71,7 +79,8 @@ func (c Capability) IsValid() bool {
 	switch c {
 	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing,
 		CapabilityPlanReview, CapabilityArchitecture, CapabilityRequirementGeneration,
-		CapabilityScenarioGeneration, CapabilityQA, CapabilityFast:
+		CapabilityScenarioGeneration, CapabilityQA, CapabilityFast,
+		CapabilityLessonDecomposition:
 		return true
 	}
 	return false
