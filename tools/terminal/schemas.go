@@ -106,7 +106,7 @@ func requirementsSchema() map[string]any {
 		"properties": map[string]any{
 			"requirements": map[string]any{
 				"type":        "array",
-				"description": "List of testable requirements",
+				"description": "List of testable requirements. Each requirement runs in a parallel git worktree at execution time; files_owned and depends_on are how the planner tells the executor whether two requirements can run concurrently or must serialize. Without these, the validator rejects.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -118,8 +118,18 @@ func requirementsSchema() map[string]any {
 							"type":        "string",
 							"description": "Detailed requirement description",
 						},
+						"files_owned": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "MANDATORY when there's more than one requirement. Workspace-relative paths this requirement is allowed to modify, drawn from plan.scope.include. Required by the partition validator: the executor uses this to decide whether two requirements can run in parallel branches or must serialize. Empty arrays are rejected.",
+						},
+						"depends_on": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Optional list of prerequisite requirement titles. Use when one requirement must finish before another, or when two requirements legitimately need to write to the same file (impl + its test, define + use). The executor sequences depends_on chains so the dependent rebases on the prerequisite's merge commit.",
+						},
 					},
-					"required": []string{"title", "description"},
+					"required": []string{"title", "description", "files_owned"},
 				},
 			},
 		},
