@@ -1,10 +1,84 @@
 package workflow
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
+
+// TestValidatorSentinelContract pins the wire contract between the workflow
+// validators and downstream callers (notably requirement-generator's
+// handlePublishError, which routes validator-rejection errors back to the
+// agent for retry instead of failing the plan terminally). Two guarantees:
+//
+//  1. Each validator wraps its sentinel via fmt.Errorf("%w: ...", sentinel)
+//     so errors.Is works for in-process callers (the planner-side HTTP
+//     handler that returns 422).
+//  2. The sentinel text appears in err.Error() so cross-process callers
+//     that only see the string (the requirement-generator goes through
+//     plan-manager's MutationResponse.Error JSON field) can still match.
+//
+// If you change a sentinel, update both the constant AND any string-based
+// matchers that depend on it.
+func TestValidatorSentinelContract(t *testing.T) {
+	t.Run("file ownership empty wraps ErrInvalidFileOwnership", func(t *testing.T) {
+		err := ValidateFileOwnershipPartition([]Requirement{
+			{ID: "a", FilesOwned: nil},
+			{ID: "b", FilesOwned: []string{"main.go"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for empty FilesOwned")
+		}
+		if !errors.Is(err, ErrInvalidFileOwnership) {
+			t.Errorf("expected errors.Is(ErrInvalidFileOwnership), got %v", err)
+		}
+		if !strings.Contains(err.Error(), ErrInvalidFileOwnership.Error()) {
+			t.Errorf("err.Error() %q must contain sentinel text %q", err.Error(), ErrInvalidFileOwnership.Error())
+		}
+	})
+
+	t.Run("file ownership overlap wraps ErrInvalidFileOwnership", func(t *testing.T) {
+		err := ValidateFileOwnershipPartition([]Requirement{
+			{ID: "a", FilesOwned: []string{"main.go"}},
+			{ID: "b", FilesOwned: []string{"main.go"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for overlapping FilesOwned")
+		}
+		if !errors.Is(err, ErrInvalidFileOwnership) {
+			t.Errorf("expected errors.Is(ErrInvalidFileOwnership), got %v", err)
+		}
+	})
+
+	t.Run("DAG self-reference wraps ErrInvalidRequirementDAG", func(t *testing.T) {
+		err := ValidateRequirementDAG([]Requirement{
+			{ID: "a", DependsOn: []string{"a"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for self-reference")
+		}
+		if !errors.Is(err, ErrInvalidRequirementDAG) {
+			t.Errorf("expected errors.Is(ErrInvalidRequirementDAG), got %v", err)
+		}
+		if !strings.Contains(err.Error(), ErrInvalidRequirementDAG.Error()) {
+			t.Errorf("err.Error() %q must contain sentinel text", err.Error())
+		}
+	})
+
+	t.Run("DAG cycle wraps ErrInvalidRequirementDAG", func(t *testing.T) {
+		err := ValidateRequirementDAG([]Requirement{
+			{ID: "a", DependsOn: []string{"b"}},
+			{ID: "b", DependsOn: []string{"a"}},
+		})
+		if err == nil {
+			t.Fatal("expected error for cycle")
+		}
+		if !errors.Is(err, ErrInvalidRequirementDAG) {
+			t.Errorf("expected errors.Is(ErrInvalidRequirementDAG), got %v", err)
+		}
+	})
+}
 
 func TestValidateFileOwnershipPartition(t *testing.T) {
 	req := func(id string, deps []string, files []string) Requirement {
@@ -33,18 +107,35 @@ func TestValidateFileOwnershipPartition(t *testing.T) {
 			},
 		},
 		{
-			name: "no files_owned anywhere passes (back-compat)",
+			// Was previously back-compat amnesty; flipped 2026-04-29 after
+			// Gemini @easy stalled at reviewing_qa because the validator
+			// silently accepted requirements with files_owned=null. Empty
+			// files_owned is now rejected when there's >1 requirement so
+			// the prompt-side promise of enforcement is real.
+			name: "no files_owned anywhere rejects",
 			reqs: []Requirement{
 				req("a", nil, nil),
 				req("b", nil, nil),
 			},
+			wantErr:     true,
+			errContains: "empty files_owned",
 		},
 		{
-			name: "one side missing files_owned passes",
+			// Same flip — partial coverage is a worse failure mode (the
+			// declared req appears partitioned but the silent one could
+			// touch anything), so any empty in a multi-req plan rejects.
+			name: "one side missing files_owned rejects",
 			reqs: []Requirement{
 				req("a", nil, []string{"main.go"}),
 				req("b", nil, nil),
 			},
+			wantErr:     true,
+			errContains: "empty files_owned",
+		},
+		{
+			// Single-req plans skip the whole check — no possible overlap.
+			name: "single requirement with empty files_owned passes",
+			reqs: []Requirement{req("solo", nil, nil)},
 		},
 		{
 			// The exact bug from 2026-04-28 Gemini @easy: two parallel reqs

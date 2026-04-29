@@ -668,15 +668,19 @@ CRITICAL — Partition files across requirements (parallel execution rule):
 Requirements run in parallel git worktrees. If two requirements both write to the same file with no dependency between them, the integration merge fails and the entire plan stalls.
 
 For EVERY requirement, set files_owned to the workspace-relative paths that requirement is allowed to modify (drawn from the plan's scope.include). The set across all requirements must satisfy:
-- Disjoint by default — if two requirements need the same path, one must list the other in depends_on (by title) so the executor sequences them.
 - Cover the work — every path that needs editing must appear in some requirement's files_owned.
 - Stay in scope — only list paths that appear in the plan's scope.include and not in scope.protected.
+- Resolve overlap explicitly — when two requirements legitimately need the same file (impl + its test, define + use, refactor + feature), list both in files_owned AND add depends_on so the executor sequences them. The later requirement rebases on the earlier one's merge commit, so they don't collide.
 
-When the goal touches both implementation and tests for the same surface, prefer ONE requirement that owns BOTH files (impl + its test) rather than splitting. Splitting tests away from the impl that defines them is the most common cause of merge deadlock.
+DO NOT lie about files_owned to dodge the overlap rule. If your reqs honestly touch the same file, that's expected — say so and add depends_on. Inventing fake file splits to make the partition look clean produces broken work at execution time.
 
-Use depends_on (referenced by requirement title) when one requirement must finish before another begins.
+When the goal touches both implementation and tests for the same surface, prefer ONE requirement that owns BOTH files (impl + its test) over splitting them — but if you do split, the split MUST have a depends_on edge.
 
-Skipping files_owned or producing overlapping requirements without depends_on edges will be rejected by the validator and you will be asked to regenerate.`,
+Validator enforcement (this is real, not advice):
+- Empty files_owned in any requirement of a multi-requirement plan: REJECTED. Regenerate with files_owned set on every requirement.
+- Two requirements claim the same file with no depends_on edge: REJECTED. Either consolidate them into one requirement or add a depends_on edge.
+
+A rejected plan costs you the iteration. Get files_owned and depends_on right the first time.`,
 		},
 		{
 			// User-message renderer — replaces the legacy

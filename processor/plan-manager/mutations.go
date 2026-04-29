@@ -184,11 +184,16 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 		return MutationResponse{Success: false, Error: "slug and requirements required"}
 	}
 
+	// Validators already wrap workflow.ErrInvalidRequirementDAG /
+	// workflow.ErrInvalidFileOwnership with %w, so the sentinel text is in
+	// err.Error() and the requirement-generator can match on it. Don't
+	// double-prefix — that produced "invalid requirement DAG: invalid
+	// requirement DAG: ..." in the response and broke the contract.
 	if err := workflow.ValidateRequirementDAG(req.Requirements); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid requirement DAG: %v", err)}
+		return MutationResponse{Success: false, Error: err.Error()}
 	}
 	if err := workflow.ValidateFileOwnershipPartition(req.Requirements); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid requirement file ownership: %v", err)}
+		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
 	c.mu.RLock()

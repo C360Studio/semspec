@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -9,6 +10,18 @@ import (
 
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow/graphutil"
+)
+
+// ErrInvalidRequirementDAG and ErrInvalidFileOwnership are sentinel errors
+// returned by the requirement validators. Callers wrap them with %w so
+// downstream code can route on errors.Is — used by requirement-generator
+// to feed validator rejections back to the agent for regeneration instead
+// of failing the plan terminally. The string contracts the requirement-
+// generator previously matched on were silently coupled to a Sprintf
+// format in plan-manager; sentinel errors make the contract structural.
+var (
+	ErrInvalidRequirementDAG = errors.New("invalid requirement DAG")
+	ErrInvalidFileOwnership  = errors.New("invalid requirement file ownership")
 )
 
 // RequirementsJSONFile is the filename for machine-readable requirement storage (JSON format).
@@ -34,10 +47,10 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 	for _, r := range requirements {
 		for _, dep := range r.DependsOn {
 			if dep == r.ID {
-				return fmt.Errorf("requirement %q depends on itself", r.ID)
+				return fmt.Errorf("%w: requirement %q depends on itself", ErrInvalidRequirementDAG, r.ID)
 			}
 			if _, exists := idIndex[dep]; !exists {
-				return fmt.Errorf("requirement %q depends on unknown requirement %q", r.ID, dep)
+				return fmt.Errorf("%w: requirement %q depends on unknown requirement %q", ErrInvalidRequirementDAG, r.ID, dep)
 			}
 		}
 	}
@@ -63,7 +76,7 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 		for _, dep := range adj[id] {
 			switch color[dep] {
 			case gray:
-				return fmt.Errorf("cycle detected: requirement %q and requirement %q are in a cycle", id, dep)
+				return fmt.Errorf("%w: cycle detected — requirement %q and requirement %q are in a cycle", ErrInvalidRequirementDAG, id, dep)
 			case white:
 				if err := visit(dep); err != nil {
 					return err
@@ -86,50 +99,59 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 	return nil
 }
 
-// ValidateFileOwnershipPartition rejects requirement sets where two requirements
-// claim the same path in FilesOwned with no dependency edge between them. The
-// plan-level merge of independent worktrees can't reconcile two parallel rewrites
-// of the same file — catching the conflict here saves the executor from running
-// the whole TDD loop and stalling at reviewing_qa.
+// ValidateFileOwnershipPartition rejects requirement sets that would deadlock
+// at plan-level merge. Two failure modes are caught here:
 //
-// Two requirements may share a path if one transitively depends on the other
-// (the executor sequences them, so the second one rebases on the first's
-// changes instead of branching from the same base).
+//  1. Missing files_owned. When >1 requirement exists, every requirement must
+//     declare files_owned. Without it the executor can't reason about
+//     parallelism vs serialization, and the prompt-side promise of "the
+//     validator will reject" is meaningless. Empty arrays are not acceptable.
 //
-// Requirements with empty FilesOwned are not subject to this check — older
-// generators may not emit it, and we shouldn't break those plans.
+//  2. Overlap without dependency. Two requirements may share a file in
+//     files_owned, but only when one transitively depends on the other —
+//     the executor then sequences them so the later requirement rebases on
+//     the earlier one's merge commit. Without that depends_on edge, parallel
+//     branches both rewrite the same file and the plan-level merge stalls.
+//
+// Single-requirement plans skip the whole check (no possible overlap).
+//
+// Background: 2026-04-29 Gemini @easy run found the previous lenient version
+// (skip-if-empty) silently accepted requirements with files_owned=null and
+// stalled at reviewing_qa with a merge conflict. See
+// project_gemini_easy_2026_04_29 memory.
 func ValidateFileOwnershipPartition(requirements []Requirement) error {
 	if len(requirements) < 2 {
 		return nil
 	}
-	ancestors := transitiveAncestors(requirements)
-	idx := make(map[string]*Requirement, len(requirements))
+	// Mode 1: every requirement must declare files_owned when there's more
+	// than one in play. Catches generators that ignore the prompt.
 	for i := range requirements {
-		idx[requirements[i].ID] = &requirements[i]
+		if len(requirements[i].FilesOwned) == 0 {
+			return fmt.Errorf(
+				"%w: requirement %q has empty files_owned — every requirement in a multi-requirement plan must declare the workspace-relative paths it modifies, so the validator can detect overlap and force depends_on. Regenerate with files_owned set",
+				ErrInvalidFileOwnership, requirements[i].ID,
+			)
+		}
 	}
+	ancestors := transitiveAncestors(requirements)
 	for i := range requirements {
 		ri := &requirements[i]
-		if len(ri.FilesOwned) == 0 {
-			continue
-		}
 		for j := i + 1; j < len(requirements); j++ {
 			rj := &requirements[j]
-			if len(rj.FilesOwned) == 0 {
-				continue
-			}
 			conflict := intersectFiles(ri.FilesOwned, rj.FilesOwned)
 			if len(conflict) == 0 {
 				continue
 			}
-			// Allow the overlap when one requirement depends on the other,
-			// transitively. The executor will sequence them, so the later
-			// requirement rebases on the earlier one's merge commit.
+			// Mode 2: overlap is allowed when there's a dependency edge.
+			// Required for the layered case (impl + test for same surface,
+			// define + use, etc.) where two reqs legitimately touch the
+			// same file. The executor sequences them via depends_on.
 			if ancestors[ri.ID][rj.ID] || ancestors[rj.ID][ri.ID] {
 				continue
 			}
 			return fmt.Errorf(
-				"requirements %q and %q both claim files_owned %v with no dependency edge between them: parallel writes to the same file deadlock the plan-level merge — either consolidate the requirements or add a depends_on edge",
-				ri.ID, rj.ID, conflict,
+				"%w: requirements %q and %q both claim files_owned %v with no dependency edge between them — parallel writes to the same file deadlock the plan-level merge; consolidate the requirements or add a depends_on edge",
+				ErrInvalidFileOwnership, ri.ID, rj.ID, conflict,
 			)
 		}
 	}

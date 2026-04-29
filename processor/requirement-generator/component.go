@@ -594,22 +594,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	requirements := buildRequirementsFromItems(slug, trigger, items)
 
 	if err := c.publishResults(ctx, trigger, requirements); err != nil {
-		// If the plan advanced past generating_requirements, this is NOT a generation
-		// failure — our result is simply stale. Discard without rejecting.
-		if strings.Contains(err.Error(), "invalid transition") {
-			c.logger.Warn("Requirements mutation rejected (plan advanced), discarding stale result",
-				"slug", slug,
-				"error", err,
-				"loop_id", loop.ID)
-			c.retry.Clear(slug)
-			return
-		}
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to publish requirements from loop completion, rejecting plan",
-			"slug", slug,
-			"loop_id", loop.ID,
-			"error", err)
-		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("requirements mutation publish failed: %v", err))
+		c.handlePublishError(ctx, slug, loop, err, retryOrFail)
 		return
 	}
 
@@ -618,6 +603,49 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"slug", slug,
 		"loop_id", loop.ID,
 		"requirement_count", len(requirements))
+}
+
+// handlePublishError routes a publishResults failure to the right next step.
+// Stale-result errors (plan advanced past generating_requirements) are
+// discarded silently. Validator-rejection errors are fed back to the agent
+// as previousError via retryOrFail so the "validator will reject and ask you
+// to regenerate" promise in the persona is real — see
+// project_gemini_easy_2026_04_29 for the run that proved the prior wiring
+// silently failed plans on validator rejection. Anything else is treated as
+// terminal infrastructure failure.
+func (c *Component) handlePublishError(
+	ctx context.Context,
+	slug string,
+	loop *agentic.LoopEntity,
+	err error,
+	retryOrFail func(string),
+) {
+	errStr := err.Error()
+	if strings.Contains(errStr, "invalid transition") {
+		c.logger.Warn("Requirements mutation rejected (plan advanced), discarding stale result",
+			"slug", slug, "error", err, "loop_id", loop.ID)
+		c.retry.Clear(slug)
+		return
+	}
+	// Match against the workflow-package sentinel strings instead of hardcoded
+	// literals. The validators wrap these sentinels with %w, plan-manager
+	// surfaces err.Error() verbatim, so the prefix is stable as long as the
+	// sentinel constant is. TestPublishErrorContract pins the round-trip.
+	//
+	// FOLLOW-UP: validator-rejection retries currently share MaxGenerationRetries
+	// with parse-error retries. A stubborn LLM that emits files_owned=null
+	// three times in a row burns the whole budget on the same mistake. Worth
+	// a separate small counter once we have a real-LLM repro confirming the
+	// pattern.
+	if strings.Contains(errStr, workflow.ErrInvalidRequirementDAG.Error()) ||
+		strings.Contains(errStr, workflow.ErrInvalidFileOwnership.Error()) {
+		retryOrFail(errStr)
+		return
+	}
+	c.generationsFailed.Add(1)
+	c.logger.Error("Failed to publish requirements from loop completion, rejecting plan",
+		"slug", slug, "loop_id", loop.ID, "error", err)
+	c.sendGenerationFailed(ctx, slug, fmt.Sprintf("requirements mutation publish failed: %v", err))
 }
 
 // buildRequirementsFromItems converts agent-emitted items into workflow.Requirement
