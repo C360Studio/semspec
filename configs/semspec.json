@@ -564,6 +564,17 @@
         }
       }
     },
+    "lesson-decomposer": {
+      "name": "lesson-decomposer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "stream_name": "WORKFLOW",
+        "consumer_name": "lesson-decomposer",
+        "filter_subject": "workflow.events.lesson.decompose.requested.>"
+      }
+    },
     "graph-ingest": {
       "name": "graph-ingest",
       "type": "processor",

@@ -2,10 +2,12 @@ package executionmanager
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
 )
 
@@ -171,6 +173,47 @@ func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []s
 			"label", label,
 			"threshold", threshold,
 		)
+	}
+}
+
+// publishLessonDecomposeRequest signals the lesson-decomposer that a reviewer
+// rejection happened. ADR-033 Phase 2a: this fires alongside extractLessons
+// (the keyword classifier still runs); Phase 2b's decomposer LLM produces an
+// evidence-cited lesson via lessons.Writer when it consumes this. Phase 3 swaps
+// extractLessons for the decomposer entirely.
+//
+// Best-effort — a publish failure logs but does not block the rejection flow.
+// The decomposer is non-load-bearing on the hot path.
+func (c *Component) publishLessonDecomposeRequest(ctx context.Context, exec *taskExecution, verdict, feedback string) {
+	if c.natsClient == nil {
+		return
+	}
+	req := &payloads.LessonDecomposeRequested{
+		Slug:          exec.Slug,
+		TaskID:        exec.TaskID,
+		RequirementID: exec.RequirementID,
+		ScenarioID:    exec.TaskID,
+		LoopID:        exec.LoopID,
+		Verdict:       verdict,
+		Feedback:      feedback,
+		Source:        "execution-manager",
+	}
+	if err := req.Validate(); err != nil {
+		c.logger.Warn("Skipping lesson decompose publish — invalid payload",
+			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
+		return
+	}
+	envelope := message.NewBaseMessage(req.Schema(), req, "execution-manager")
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		c.logger.Warn("Failed to marshal lesson decompose request",
+			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
+		return
+	}
+	subject := payloads.LessonDecomposeRequestedSubject(exec.Slug)
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Warn("Failed to publish lesson decompose request",
+			"slug", exec.Slug, "task_id", exec.TaskID, "subject", subject, "error", err)
 	}
 }
 

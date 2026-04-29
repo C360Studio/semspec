@@ -21,6 +21,7 @@ import (
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
+	lessondecomposer "github.com/c360studio/semspec/processor/lesson-decomposer"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
@@ -72,6 +73,11 @@ var componentRegistry = map[string]struct {
 	"requirement-executor": {
 		ConfigType:  reflect.TypeOf(requirementexecutor.Config{}),
 		Description: "Requirement-level execution: DAG decomposition, serial node dispatch, requirement review",
+		Domain:      "semspec",
+	},
+	"lesson-decomposer": {
+		ConfigType:  reflect.TypeOf(lessondecomposer.Config{}),
+		Description: "ADR-033 Phase 2+: produces evidence-cited lessons from reviewer-rejection trajectories",
 		Domain:      "semspec",
 	},
 }

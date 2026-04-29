@@ -743,6 +743,11 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		return
 	}
 
+	// ADR-033 Phase 2a: signal the decomposer alongside the existing keyword
+	// classifier. Phase 2b enriches the consumer side; Phase 3 swaps the keyword
+	// classifier out. Best-effort — never blocks the rejection flow.
+	c.publishLessonDecomposeRequest(ctx, exec, result.Verdict, result.Feedback)
+
 	c.handleRejectionLocked(ctx, exec, result)
 }
 
