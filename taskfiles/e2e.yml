@@ -598,7 +598,19 @@ tasks:
         echo "[WATCH:LLM] Watch sidecar PID $(cat {{.OUT_DIR}}/watch.pid) → {{.OUT_DIR}}/watch.log"
       - defer: |
           if [ -f {{.OUT_DIR}}/watch.pid ]; then
-            kill $(cat {{.OUT_DIR}}/watch.pid) 2>/dev/null || true
+            PID=$(cat {{.OUT_DIR}}/watch.pid)
+            kill "$PID" 2>/dev/null || true
+            # Wait up to 3s for graceful shutdown. The sidecar may be
+            # mid-HTTP-call against a stack the cleanup defer is also
+            # tearing down — Go's HTTP client doesn't always return
+            # immediately on ctx cancel when the server has gone
+            # missing. SIGKILL after 3s prevents an orphaned process
+            # that keeps writing zombie snapshots to the OUT_DIR.
+            for i in 1 2 3; do
+              if ! kill -0 "$PID" 2>/dev/null; then break; fi
+              sleep 1
+            done
+            kill -9 "$PID" 2>/dev/null || true
             rm -f {{.OUT_DIR}}/watch.pid
           fi
       - echo "[WATCH:LLM] Running @{{.TIER}} Playwright tests..."

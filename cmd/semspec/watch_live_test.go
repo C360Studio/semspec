@@ -329,6 +329,65 @@ func TestNewErrorSources_DeterministicAndDedupes(t *testing.T) {
 	}
 }
 
+func TestRunWatchLive_SkipsTriviallyEmptySnapshot(t *testing.T) {
+	// Stack tear-down case: every source returns 5xx / network refused.
+	// The snapshot ticker still fires but writeLiveSnapshot must skip
+	// writing — a sub-1KB tar.gz with all-zero counts pollutes the
+	// OUT_DIR and breaks the `ls | tail -1` convention. Real run on
+	// 2026-04-30 produced two such pollution snapshots after Playwright
+	// cleanup — surfaced this gap.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/message-logger/entries" {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:          srv.URL,
+		Interval:         200 * time.Millisecond,
+		SnapshotInterval: 30 * time.Millisecond,
+		OutDir:           dir,
+		SkipOllama:       true,
+		MaxDuration:      150 * time.Millisecond,
+		Out:              &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "snapshot-*.tar.gz"))
+	if len(matches) != 0 {
+		t.Errorf("trivially empty bundles should not produce snapshot files; got %v\noutput:\n%s", matches, out.String())
+	}
+	if !strings.Contains(out.String(), "snapshot: skipped") {
+		t.Errorf("expected `snapshot: skipped` line in output:\n%s", out.String())
+	}
+}
+
+func TestIsTriviallyEmptyBundle(t *testing.T) {
+	cases := []struct {
+		name string
+		b    *health.Bundle
+		want bool
+	}{
+		{"nil", nil, true},
+		{"all empty", &health.Bundle{}, true},
+		{"with plan", &health.Bundle{Plans: []health.KVEntry{{Key: "x"}}}, false},
+		{"with loop", &health.Bundle{Loops: []health.KVEntry{{Key: "x"}}}, false},
+		{"with message", &health.Bundle{Messages: []health.Message{{Sequence: 1}}}, false},
+		{"with trajectory ref", &health.Bundle{TrajectoryRefs: []health.TrajectoryRef{{LoopID: "x"}}}, false},
+	}
+	for _, tc := range cases {
+		if got := isTriviallyEmptyBundle(tc.b); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 func TestSeverityRank_OrderingPinnedForBailOn(t *testing.T) {
 	// --bail-on uses severityRank to compare observed vs threshold.
 	// If the ranking changes silently, a "warning" threshold could

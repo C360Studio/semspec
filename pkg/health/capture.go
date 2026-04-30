@@ -42,10 +42,16 @@ type CaptureConfig struct {
 
 // Capture-time defaults.
 const (
-	// DefaultMessageLimit is the message-logger entry cap if unset. Tuned
-	// for "enough context to diagnose recent activity" without ballooning
-	// bundle size. Adopters with extreme runs can override.
-	DefaultMessageLimit = 500
+	// DefaultMessageLimit is the message-logger entry cap if unset. The
+	// semstreams MessageLogger applies the limit BEFORE the subject
+	// filter, so for niche subjects (agent.*, tool.*) on a graph-busy
+	// run we need a generous window to ensure the filter has matches
+	// to return. 5000 covers a healthy 5-min run; semstreams caps
+	// MaxEntries at 100000 so the request stays well within bounds.
+	// Caught 2026-04-30 round 2: a 500-msg window with ~84% graph.*
+	// noise still produced bursts of msgs=0 from the filter even
+	// though agent.responses were happening.
+	DefaultMessageLimit = 5000
 
 	// MaxResponseBytes caps the size of a single source's HTTP body
 	// before parsing. The bundle's whole point is bounded artefact size;

@@ -79,8 +79,8 @@ func TestFetchMessages_DefaultLimit(t *testing.T) {
 	if _, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 0, ""); err != nil {
 		t.Fatalf("FetchMessages: %v", err)
 	}
-	if !strings.Contains(got, "limit=500") {
-		t.Errorf("expected DefaultMessageLimit (500); got %q", got)
+	if !strings.Contains(got, "limit=5000") {
+		t.Errorf("expected DefaultMessageLimit (5000); got %q", got)
 	}
 }
 

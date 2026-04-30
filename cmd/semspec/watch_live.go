@@ -298,6 +298,18 @@ func writeLiveSnapshot(ctx context.Context, cfg liveConfig, httpClient *http.Cli
 		return fmt.Errorf("capture: %w", err)
 	}
 
+	// Skip writing if the bundle has no useful state. The snapshot
+	// ticker keeps firing for a moment after the docker stack tears
+	// down (HTTP/NATS connections fail their own timeouts before
+	// ctx.Done() reaches the loop), and those terminal ticks would
+	// otherwise pollute the snapshot directory with sub-1KB empty
+	// archives that `ls | tail -1` could pick over the real data.
+	// Caught 2026-04-30 round 2.
+	if isTriviallyEmptyBundle(result.Bundle) {
+		fmt.Fprintln(cfg.Out, "snapshot: skipped (no plans/loops/messages — likely stack tear-down)")
+		return nil
+	}
+
 	// File name is sortable so `ls snapshot-*.tar.gz | tail -1` always
 	// returns the newest. Fixed-width seconds resolution is enough; the
 	// snapshot interval is bounded below at 10s in practice.
@@ -318,6 +330,19 @@ func writeLiveSnapshot(ctx context.Context, cfg liveConfig, httpClient *http.Cli
 		len(result.Bundle.TrajectoryRefs),
 	)
 	return nil
+}
+
+// isTriviallyEmptyBundle reports whether bundle has no observable
+// state worth preserving. Used by writeLiveSnapshot to skip ticks
+// that fired while the underlying stack was tearing down.
+func isTriviallyEmptyBundle(b *health.Bundle) bool {
+	if b == nil {
+		return true
+	}
+	return len(b.Plans) == 0 &&
+		len(b.Loops) == 0 &&
+		len(b.Messages) == 0 &&
+		len(b.TrajectoryRefs) == 0
 }
 
 // snapshotSuffix renders the snapshot-interval flag in the startup
