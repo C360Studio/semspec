@@ -565,3 +565,12 @@ semstreams_router_tasks_submitted_total 0
 semstreams_service_status{service="component-manager"} 2
 semstreams_service_status{service="message-logger"} 2
 semstreams_service_status{service="metrics"} 2
+
+# Synthetic line appended for test coverage. The real run did not produce
+# a status="timeout" sample (timeouts are rare on healthy Gemini @easy);
+# without this row, TestParseMetrics_RealFixture has no way to exercise
+# the timeout classification branch and a future regression there would
+# slip past silently. Marker line so a fixture refresh can preserve it.
+# COVERAGE_AUGMENT begin
+semstreams_agentic_model_requests_total{model="synthetic-timeout-coverage",status="timeout"} 1
+# COVERAGE_AUGMENT end

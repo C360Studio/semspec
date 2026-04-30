@@ -76,23 +76,39 @@ func TestParseMetrics_RealFixture(t *testing.T) {
 	}
 	got := ParseMetrics(string(data))
 
-	// At capture time the run had: 12 active loops, ctx utilization
-	// ~0.0034, multiple model_requests labels including some errors.
-	// We pin the load-bearing fields rather than every detail so a
-	// future fixture refresh doesn't have to recompute exact totals.
-	if got.LoopActiveLoops <= 0 {
-		t.Errorf("LoopActiveLoops should be > 0 from real fixture, got %d", got.LoopActiveLoops)
+	// Exact pins against the captured fixture. Drift surfaces loudly
+	// (and a fixture refresh updates these constants in the same
+	// commit) — preferred over `> 0` checks because the original
+	// silent-data-loss bug was exactly this kind of drift hiding
+	// behind tolerant assertions.
+	const (
+		wantActiveLoops   = 12
+		wantTotalRequests = 38 // 23 success + 12 success + 2 error + 1 synthetic timeout
+		wantErrors        = 2
+		wantTimeouts      = 1 // from the synthetic COVERAGE_AUGMENT line
+	)
+	if got.LoopActiveLoops != wantActiveLoops {
+		t.Errorf("LoopActiveLoops = %d, want %d", got.LoopActiveLoops, wantActiveLoops)
 	}
-	if got.LoopContextUtilization <= 0 {
-		t.Errorf("LoopContextUtilization should be > 0 from real fixture, got %v", got.LoopContextUtilization)
+	if got.LoopContextUtilization == 0 {
+		// Fixture has 0.0034422595839172492; pin "non-zero" rather
+		// than the exact float so a fresh capture with slightly
+		// different precision doesn't break the test. Errors-class
+		// fields above stay exact because integer counters are stable.
+		t.Errorf("LoopContextUtilization should be non-zero from real fixture, got %v", got.LoopContextUtilization)
 	}
-	if got.ModelRequestsTotal <= 0 {
-		t.Errorf("ModelRequestsTotal should be > 0 from real fixture, got %d", got.ModelRequestsTotal)
+	if got.ModelRequestsTotal != wantTotalRequests {
+		t.Errorf("ModelRequestsTotal = %d, want %d", got.ModelRequestsTotal, wantTotalRequests)
 	}
-	// The fixture includes status="error" entries; pin that error
-	// classification reaches the snapshot.
-	if got.ModelRequestsErrors <= 0 {
-		t.Errorf("ModelRequestsErrors should be > 0 (fixture has error rows), got %d", got.ModelRequestsErrors)
+	if got.ModelRequestsErrors != wantErrors {
+		t.Errorf("ModelRequestsErrors = %d, want %d", got.ModelRequestsErrors, wantErrors)
+	}
+	if got.ModelRequestsTimeouts != wantTimeouts {
+		// Pinned via the synthetic timeout line appended to the
+		// fixture (see COVERAGE_AUGMENT marker). Real Gemini runs
+		// rarely time out, so without this augment the timeout
+		// branch in ParseMetrics would have no fixture coverage.
+		t.Errorf("ModelRequestsTimeouts = %d, want %d", got.ModelRequestsTimeouts, wantTimeouts)
 	}
 }
 

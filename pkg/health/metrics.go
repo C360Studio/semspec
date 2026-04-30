@@ -80,6 +80,14 @@ func ParseMetrics(text string) MetricsSnapshot {
 		case "semstreams_agentic_loop_context_utilization":
 			s.LoopContextUtilization = value
 		case "semstreams_agentic_model_requests_total":
+			// Note: semstreams also exposes
+			// `semstreams_agentic_model_errors_total{error_type=...}`
+			// which tracks the same error count under a different
+			// label scheme. We source ModelRequestsErrors from the
+			// status="error" label here because it sits alongside
+			// the totals on one counter — fewer rows to walk and
+			// the two counters agree in every fixture observed
+			// to date. If they drift upstream, switch the source.
 			s.ModelRequestsTotal += int64(value)
 			switch labels["status"] {
 			case "error":
