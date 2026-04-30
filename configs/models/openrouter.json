@@ -6,7 +6,7 @@
       "openrouter-qwen3-moe": {
         "provider": "openai",
         "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3.6-35b-a3b",
+        "model": "qwen/qwen3.5-35b-a3b",
         "api_key_env": "OPENROUTER_API_KEY",
         "max_tokens": 32768,
         "supports_tools": true,
@@ -19,7 +19,7 @@
         "_comment": "Optional second endpoint pinned to whatever your account routes to as default. Useful if you want one alias for ad-hoc queries vs. one pinned to qwen3-30b-a3b for benchmarking.",
         "provider": "openai",
         "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3.6-35b-a3b",
+        "model": "qwen/qwen3.5-35b-a3b",
         "api_key_env": "OPENROUTER_API_KEY",
         "max_tokens": 32768,
         "supports_tools": true,
