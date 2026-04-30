@@ -200,6 +200,7 @@ implementation, a careful model for review.
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
 | [Project Setup](docs/project-setup.md) | Standards, quality gates |
+| [Diagnostic Bundles](docs/diagnostic-bundles.md) | `semspec watch` — live monitoring + shareable bundles for adopter handoff |
 | [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 | [Troubleshooting](docs/model-configuration.md#troubleshooting) | Common model and connection errors |
 
