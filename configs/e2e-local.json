@@ -137,6 +137,15 @@
           "qwen3-14b"
         ]
       },
+      "lesson_decomposition": {
+        "description": "ADR-033 lesson decomposer — falls back to reviewing model on local",
+        "preferred": [
+          "qwen3-14b"
+        ],
+        "fallback": [
+          "qwen3-14b"
+        ]
+      },
       "fast": {
         "description": "Quick responses, simple tasks",
         "preferred": [
@@ -565,6 +574,28 @@
             }
           ]
         }
+      }
+    },
+    "lesson-decomposer": {
+      "name": "lesson-decomposer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "stream_name": "WORKFLOW",
+        "consumer_name": "lesson-decomposer",
+        "filter_subject": "workflow.events.lesson.decompose.requested.>"
+      }
+    },
+    "lesson-curator": {
+      "name": "lesson-curator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "sweep_interval": "24h",
+        "idle_threshold": "720h",
+        "min_age_before_retire": "168h"
       }
     }
   },
