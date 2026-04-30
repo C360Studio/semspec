@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,6 +51,18 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 		defer cancel()
 	}
 
+	// Auto-disable the per-tick ollama probe if the binary isn't on
+	// PATH. Without this, every tick on a cloud-LLM run shells out
+	// to a missing `ollama --version` — wasteful, and contributes
+	// noise to the bundle's OllamaState. Operators on local Ollama
+	// stacks remain unaffected.
+	if !cfg.SkipOllama {
+		if _, err := exec.LookPath("ollama"); err != nil {
+			fmt.Fprintln(cfg.Out, "info: ollama binary not on PATH; auto-disabling per-tick probe (--skip-ollama)")
+			cfg.SkipOllama = true
+		}
+	}
+
 	nats, natsCloser := dialNATSForBundle(ctx, cfg.NATSURL)
 	if natsCloser != nil {
 		defer natsCloser()
@@ -63,6 +77,12 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 	// Track diagnoses we've already alerted on so each one fires once
 	// per session, not once per tick.
 	seen := make(map[string]struct{})
+
+	// Track CaptureError sources we've already surfaced so the
+	// heartbeat shows `[new: kv:AGENT_LOOPS]` only the first tick
+	// each new source appears. Operators reading the stream can
+	// scan `[new:` to see what failed without dumping a bundle.
+	seenErrorSources := make(map[string]struct{})
 
 	if cfg.SnapshotInterval > 0 && cfg.OutDir == "" {
 		return fmt.Errorf("--snapshot-interval requires --out-dir")
@@ -83,7 +103,7 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 
 	// Run one capture immediately so the operator sees output without
 	// waiting for the first tick — important for "did this even start?"
-	if shouldExit, err := runLiveTick(ctx, cfg, httpClient, nats, detectors, seen); err != nil {
+	if shouldExit, err := runLiveTick(ctx, cfg, httpClient, nats, detectors, seen, seenErrorSources); err != nil {
 		fmt.Fprintf(cfg.Out, "warn: tick failed (%v); continuing\n", err)
 	} else if shouldExit {
 		return nil
@@ -94,7 +114,7 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 			fmt.Fprintln(cfg.Out, "shutting down (context done)")
 			return nil
 		case <-tick.C:
-			if shouldExit, err := runLiveTick(ctx, cfg, httpClient, nats, detectors, seen); err != nil {
+			if shouldExit, err := runLiveTick(ctx, cfg, httpClient, nats, detectors, seen, seenErrorSources); err != nil {
 				fmt.Fprintf(cfg.Out, "warn: tick failed (%v); continuing\n", err)
 				continue
 			} else if shouldExit {
@@ -116,6 +136,9 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 // runLiveTick performs one capture + detector pass and renders.
 // Returns (true, nil) when the bail condition fired and the loop
 // should exit normally.
+//
+// seen and seenErrorSources are persistent across ticks so each
+// diagnosis and each error-source surfaces exactly once per session.
 func runLiveTick(
 	ctx context.Context,
 	cfg liveConfig,
@@ -123,6 +146,7 @@ func runLiveTick(
 	nats health.TrajectoryClient,
 	detectors []health.Detector,
 	seen map[string]struct{},
+	seenErrorSources map[string]struct{},
 ) (bool, error) {
 	captureCfg := health.CaptureConfig{
 		HTTPBaseURL:  cfg.HTTPURL,
@@ -140,7 +164,12 @@ func runLiveTick(
 	health.RunAll(result.Bundle, detectors)
 
 	now := time.Now().Format("15:04:05")
-	fmt.Fprintf(cfg.Out, "[%s] plans=%d loops=%d msgs=%d active_loops=%d ctx_util=%.2f errors=%d\n",
+	newSources := newErrorSources(result.Errors, seenErrorSources)
+	suffix := ""
+	if len(newSources) > 0 {
+		suffix = " [new: " + strings.Join(newSources, ",") + "]"
+	}
+	fmt.Fprintf(cfg.Out, "[%s] plans=%d loops=%d msgs=%d active_loops=%d ctx_util=%.2f errors=%d%s\n",
 		now,
 		len(result.Bundle.Plans),
 		len(result.Bundle.Loops),
@@ -148,6 +177,7 @@ func runLiveTick(
 		result.Bundle.Metrics.LoopActiveLoops,
 		result.Bundle.Metrics.LoopContextUtilization,
 		len(result.Errors),
+		suffix,
 	)
 
 	maxSeverity := health.SeverityInfo
@@ -168,6 +198,30 @@ func runLiveTick(
 		return true, nil
 	}
 	return false, nil
+}
+
+// newErrorSources returns the source names in errs that aren't yet
+// in seen, then marks them seen. Sorted for deterministic test
+// output. Each source surfaces in the heartbeat exactly once across
+// the lifetime of a --live session — operators can grep `[new:` to
+// find first appearance of each failure mode.
+func newErrorSources(errs []*health.CaptureError, seen map[string]struct{}) []string {
+	if len(errs) == 0 {
+		return nil
+	}
+	var fresh []string
+	for _, e := range errs {
+		if e == nil || e.Source == "" {
+			continue
+		}
+		if _, ok := seen[e.Source]; ok {
+			continue
+		}
+		seen[e.Source] = struct{}{}
+		fresh = append(fresh, e.Source)
+	}
+	sort.Strings(fresh)
+	return fresh
 }
 
 // liveDetectors returns the detector set used by --live. Same as the

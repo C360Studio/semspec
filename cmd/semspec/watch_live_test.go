@@ -8,10 +8,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/c360studio/semspec/pkg/health"
 )
 
 // emptyStopMessages is a JSON payload for /message-logger/entries
@@ -219,6 +223,109 @@ func TestRunWatchLive_SnapshotIntervalRequiresOutDir(t *testing.T) {
 	err := runWatchLive(context.Background(), cfg)
 	if err == nil || !strings.Contains(err.Error(), "out-dir") {
 		t.Errorf("expected --snapshot-interval requires --out-dir error; got %v", err)
+	}
+}
+
+func TestRunWatchLive_NewErrorSourcesAppearOnceInHeartbeat(t *testing.T) {
+	// 5xx on /metrics for the whole run produces a steady stream of
+	// metrics CaptureErrors. The "[new: metrics]" suffix should
+	// appear on the FIRST tick that sees it and never again.
+	// Other endpoints return well-formed empty responses so the only
+	// CaptureError source is `metrics`.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/metrics":
+			w.WriteHeader(http.StatusInternalServerError)
+		case strings.HasPrefix(r.URL.Path, "/message-logger/kv/"):
+			_, _ = w.Write([]byte(`{"bucket":"x","entries":[]}`))
+		case r.URL.Path == "/message-logger/entries":
+			_, _ = w.Write([]byte("[]"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:     srv.URL,
+		Interval:    30 * time.Millisecond,
+		SkipOllama:  true,
+		MaxDuration: 200 * time.Millisecond, // ~6 ticks
+		Out:         &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	dump := out.String()
+	if got := strings.Count(dump, "[new: metrics]"); got != 1 {
+		t.Errorf("expected `[new: metrics]` suffix exactly once across ticks, got %d:\n%s", got, dump)
+	}
+	// Heartbeat after the first should NOT carry any [new: ...]
+	// suffix when the same metrics error continues to fire.
+	heartbeats := strings.Count(dump, "errors=1")
+	if heartbeats < 2 {
+		t.Fatalf("expected multiple heartbeats with errors=1, got %d:\n%s", heartbeats, dump)
+	}
+	if got := strings.Count(dump, "[new: "); got != 1 {
+		t.Errorf("expected exactly one heartbeat to carry [new: ...] across the run, got %d:\n%s", got, dump)
+	}
+}
+
+func TestRunWatchLive_OllamaAutoDisableLogged(t *testing.T) {
+	// On a host where `ollama` isn't on PATH (which CI typically
+	// isn't), runWatchLive should auto-disable the per-tick probe
+	// and log an info line. We can't reliably mock exec.LookPath, so
+	// this test exercises the code path on hosts that don't have
+	// ollama installed; on hosts that DO, the log line is absent
+	// and the test skips.
+	if _, err := exec.LookPath("ollama"); err == nil {
+		t.Skip("ollama is on PATH; auto-disable path not exercised on this host")
+	}
+	srv := newLiveHTTPServer(`[]`)
+	defer srv.Close()
+
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:     srv.URL,
+		Interval:    30 * time.Millisecond,
+		SkipOllama:  false, // explicitly NOT pre-set; rely on auto-detect
+		MaxDuration: 60 * time.Millisecond,
+		Out:         &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	if !strings.Contains(out.String(), "auto-disabling per-tick probe") {
+		t.Errorf("expected ollama auto-disable info line; got:\n%s", out.String())
+	}
+}
+
+func TestNewErrorSources_DeterministicAndDedupes(t *testing.T) {
+	seen := make(map[string]struct{})
+	first := newErrorSources([]*health.CaptureError{
+		{Source: "kv:AGENT_LOOPS"},
+		{Source: "metrics"},
+		{Source: "kv:AGENT_LOOPS"}, // dup within tick — return once
+	}, seen)
+	want := []string{"kv:AGENT_LOOPS", "metrics"}
+	if !reflect.DeepEqual(first, want) {
+		t.Errorf("first call: got %v, want %v", first, want)
+	}
+	// Same set on next call — no new sources.
+	second := newErrorSources([]*health.CaptureError{
+		{Source: "metrics"},
+		{Source: "kv:AGENT_LOOPS"},
+	}, seen)
+	if len(second) != 0 {
+		t.Errorf("expected empty on repeat call, got %v", second)
+	}
+	// New source on third call.
+	third := newErrorSources([]*health.CaptureError{
+		{Source: "messages:agent.*"},
+	}, seen)
+	if !reflect.DeepEqual(third, []string{"messages:agent.*"}) {
+		t.Errorf("third call: got %v", third)
 	}
 }
 
