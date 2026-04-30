@@ -13,30 +13,52 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// watchCmd builds the `semspec watch` subcommand. Today only
-// `--bundle <path>` is implemented (one-shot capture to a tarball);
-// `--live` is reserved for the heartbeat TTY mode that lands later
-// in the ADR-034 cadence.
+// watchCmd builds the `semspec watch` subcommand. Two modes:
+//
+//   - --bundle <path>: one-shot capture to a tarball for offline handoff
+//   - --live: continuous polling stream with detector alerts; exits
+//     on Ctrl-C or when --bail-on severity threshold is reached
+//
+// Exactly one of --bundle / --live must be set.
 func watchCmd() *cobra.Command {
 	var (
-		bundlePath string
-		httpURL    string
-		natsURL    string
-		limit      int
-		skipOllama bool
+		bundlePath  string
+		live        bool
+		httpURL     string
+		natsURL     string
+		limit       int
+		skipOllama  bool
+		interval    time.Duration
+		bailOn      string
+		maxDuration time.Duration
 	)
 	cmd := &cobra.Command{
 		Use:   "watch",
-		Short: "Capture a diagnostic bundle from a running semspec",
-		Long: `watch captures live state from a running semspec instance into a
-tarball that can be shared for offline diagnosis.
+		Short: "Capture diagnostic state from a running semspec (bundle or live stream)",
+		Long: `watch captures live state from a running semspec instance.
 
-The default form (--bundle <path>) writes a single .tar.gz with
-bundle.json plus per-loop trajectory files. See ADR-034 for the
+Modes:
+  --bundle <path>    one-shot capture to a .tar.gz for offline handoff
+  --live             continuous polling stream with detector alerts
+
+Exactly one mode must be specified. See ADR-034 for the bundle
 schema and the detector library that consumes it.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if bundlePath == "" {
-				return errors.New("--bundle <path> is required")
+			if bundlePath == "" && !live {
+				return errors.New("one of --bundle <path> or --live is required")
+			}
+			if bundlePath != "" && live {
+				return errors.New("--bundle and --live are mutually exclusive")
+			}
+			if live {
+				return runWatchLive(cmd.Context(), liveConfig{
+					HTTPURL:     httpURL,
+					NATSURL:     natsURL,
+					Interval:    interval,
+					BailOn:      bailOn,
+					SkipOllama:  skipOllama,
+					MaxDuration: maxDuration,
+				})
 			}
 			return runWatchBundle(cmd.Context(), watchBundleConfig{
 				BundlePath: bundlePath,
@@ -47,11 +69,15 @@ schema and the detector library that consumes it.`,
 			})
 		},
 	}
-	cmd.Flags().StringVar(&bundlePath, "bundle", "", "Output path for the .tar.gz bundle (required)")
+	cmd.Flags().StringVar(&bundlePath, "bundle", "", "Output path for one-shot .tar.gz bundle")
+	cmd.Flags().BoolVar(&live, "live", false, "Stream detector alerts on a polling loop until Ctrl-C / --bail-on")
 	cmd.Flags().StringVar(&httpURL, "http", "http://localhost:8080", "Semspec HTTP gateway URL")
 	cmd.Flags().StringVar(&natsURL, "nats", "nats://localhost:4222", "NATS URL for trajectory queries (empty to skip trajectories)")
-	cmd.Flags().IntVar(&limit, "limit", 0, "Message-logger entry cap (0 = library default)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "Message-logger entry cap for --bundle (0 = library default)")
 	cmd.Flags().BoolVar(&skipOllama, "skip-ollama", false, "Skip the ollama --version / ollama ps probe")
+	cmd.Flags().DurationVar(&interval, "interval", 0, "Live mode poll cadence (default 10s)")
+	cmd.Flags().StringVar(&bailOn, "bail-on", "", "Live mode: exit when a diagnosis at this severity fires (info|warning|critical)")
+	cmd.Flags().DurationVar(&maxDuration, "max-duration", 0, "Live mode: cap total run time (0 = no cap)")
 	return cmd
 }
 
