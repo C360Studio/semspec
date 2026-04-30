@@ -5,9 +5,18 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
+
+// completeLoopMarkerPrefix is the AGENT_LOOPS key prefix used by the
+// agentic-loop component to record loop completion. Marker rows are
+// not fetchable trajectories — the trajectory responder doesn't know
+// about them and returns non-JSON. Skipping is purely cosmetic for
+// the bundle's error list; before this skip ~43% of trajectory pulls
+// failed on these markers in a healthy 5-minute run.
+const completeLoopMarkerPrefix = "COMPLETE_"
 
 // CaptureResult holds the assembled bundle plus any per-source
 // CaptureError records the orchestrator collected while assembling.
@@ -79,6 +88,16 @@ func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats Tra
 			})
 		} else {
 			for _, loop := range bundle.Loops {
+				// AGENT_LOOPS contains both `<uuid>` AND
+				// `COMPLETE_<uuid>` marker entries. The COMPLETE_
+				// rows are state markers, not fetchable trajectories
+				// — the responder returns non-JSON for them and the
+				// decoder fails. Skip up front to avoid ~43% bogus
+				// trajectory fetch failures on a healthy run. Caught
+				// 2026-04-30 by the first watch CLI exercise.
+				if strings.HasPrefix(loop.Key, completeLoopMarkerPrefix) {
+					continue
+				}
 				ref, body, err := captureTrajectory(ctx, nats, loop)
 				if err != nil {
 					collector.add(err)

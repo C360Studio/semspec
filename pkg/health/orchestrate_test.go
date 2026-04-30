@@ -174,6 +174,103 @@ func TestCapture_NilNATSSkipsTrajectories(t *testing.T) {
 	}
 }
 
+func TestCapture_SkipsCOMPLETELoopMarkers(t *testing.T) {
+	// AGENT_LOOPS contains marker rows like COMPLETE_<uuid> that
+	// aren't fetchable trajectories. The orchestrator must skip
+	// them up front; before this guard ~43% of trajectory pulls
+	// failed on these markers in a healthy run.
+	loopRow := KVEntry{Key: "real-uuid-1", Revision: 1, Value: json.RawMessage(`{}`)}
+	markerRow := KVEntry{Key: "COMPLETE_real-uuid-1", Revision: 2, Value: json.RawMessage(`{}`)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metrics":
+			_, _ = w.Write([]byte(""))
+		case "/message-logger/entries":
+			_, _ = w.Write([]byte("[]"))
+		case "/message-logger/kv/AGENT_LOOPS":
+			_ = json.NewEncoder(w).Encode(kvEntriesResponse{Bucket: "AGENT_LOOPS", Entries: []KVEntry{loopRow, markerRow}})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var requested []string
+	var requestedMu sync.Mutex
+	traj := trajRequesterFunc(func(_ context.Context, _ string, data []byte, _ time.Duration) ([]byte, error) {
+		var sent struct {
+			LoopID string `json:"loopId"`
+		}
+		_ = json.Unmarshal(data, &sent)
+		requestedMu.Lock()
+		requested = append(requested, sent.LoopID)
+		requestedMu.Unlock()
+		return []byte(`{"loop_id":"` + sent.LoopID + `","steps":[],"outcome":"success"}`), nil
+	})
+
+	cfg := CaptureConfig{HTTPBaseURL: srv.URL, SkipOllama: true}
+	res, err := Capture(context.Background(), cfg, srv.Client(), traj)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if len(requested) != 1 || requested[0] != "real-uuid-1" {
+		t.Errorf("expected exactly one trajectory request for the real loop; got %v", requested)
+	}
+	for _, e := range res.Errors {
+		if strings.HasPrefix(e.Source, "trajectory:COMPLETE_") {
+			t.Errorf("orchestrator produced an error for a COMPLETE_ marker; got %v", e)
+		}
+	}
+}
+
+func TestCaptureError_NoDoublePrefix(t *testing.T) {
+	// Regression: FetchTrajectory used to wrap its inner errors with
+	// "trajectory:%s:" while orchestrator's CaptureError.Source did
+	// the same, producing
+	// "trajectory:X: trajectory:X: decode: invalid character 'e'..."
+	// in the bundle's error list. Pin that the visible Error() form
+	// has the prefix exactly once.
+	traj := trajRequesterFunc(func(context.Context, string, []byte, time.Duration) ([]byte, error) {
+		return []byte(`not-json-body`), nil
+	})
+	loopRow := KVEntry{Key: "loop-X", Revision: 1, Value: json.RawMessage(`{}`)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/message-logger/kv/AGENT_LOOPS":
+			_ = json.NewEncoder(w).Encode(kvEntriesResponse{Bucket: "AGENT_LOOPS", Entries: []KVEntry{loopRow}})
+		case "/metrics":
+			_, _ = w.Write([]byte(""))
+		case "/message-logger/entries":
+			_, _ = w.Write([]byte("[]"))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := CaptureConfig{HTTPBaseURL: srv.URL, SkipOllama: true}
+	res, err := Capture(context.Background(), cfg, srv.Client(), traj)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	var trajErr *CaptureError
+	for _, e := range res.Errors {
+		if strings.HasPrefix(e.Source, "trajectory:") {
+			trajErr = e
+			break
+		}
+	}
+	if trajErr == nil {
+		t.Fatalf("expected a trajectory CaptureError; got %v", res.Errors)
+	}
+	full := trajErr.Error()
+	// Counting "trajectory:" prefix occurrences. The Source provides
+	// one; the inner err must not add a second.
+	if got := strings.Count(full, "trajectory:"); got != 1 {
+		t.Errorf("expected one 'trajectory:' prefix in error, got %d in %q", got, full)
+	}
+}
+
 func TestCapture_TrajectoriesSkippedWhenAgentLoopsUnavailable(t *testing.T) {
 	// When AGENT_LOOPS fetch fails, the orchestrator must record a
 	// causal "trajectories skipped" error so a reader sees the link

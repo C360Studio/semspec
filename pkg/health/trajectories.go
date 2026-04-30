@@ -52,19 +52,25 @@ type trajectoryMeta struct {
 // case so the orchestrator can record a benign skip — adopters often
 // have stale loop IDs in AGENT_LOOPS that the agentic-loop's cache
 // has already evicted.
+// Errors returned from FetchTrajectory are NOT prefixed with the
+// loop ID — the orchestrator's CaptureError.Source field carries
+// "trajectory:<loop_id>" which produces the same final string as a
+// prefix here would, so prefixing was producing
+// "trajectory:X: trajectory:X: decode: ..." in the bundle's error
+// list. Caught 2026-04-30 by the first watch CLI exercise.
 func FetchTrajectory(ctx context.Context, client TrajectoryClient, loopID string) ([]byte, TrajectoryRef, error) {
 	if client == nil {
-		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: nats client required", loopID)
+		return nil, TrajectoryRef{}, errors.New("nats client required")
 	}
 	if loopID == "" {
-		return nil, TrajectoryRef{}, errors.New("trajectory: loop id required")
+		return nil, TrajectoryRef{}, errors.New("loop id required")
 	}
 	reqBody, err := json.Marshal(struct {
 		LoopID string `json:"loopId"`
 		Limit  int    `json:"limit,omitempty"`
 	}{LoopID: loopID})
 	if err != nil {
-		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: marshal: %w", loopID, err)
+		return nil, TrajectoryRef{}, fmt.Errorf("marshal: %w", err)
 	}
 	resp, err := client.Request(ctx, trajectorySubject, reqBody, trajectoryRequestTimeout)
 	if err != nil {
@@ -74,20 +80,20 @@ func FetchTrajectory(ctx context.Context, client TrajectoryClient, loopID string
 		// a future error string that mentions "trajectory not found"
 		// inside a different failure mode.
 		if strings.HasPrefix(err.Error(), "trajectory not found") {
-			return nil, TrajectoryRef{}, fmt.Errorf("%w: %s", errTrajectoryNotFound, loopID)
+			return nil, TrajectoryRef{}, errTrajectoryNotFound
 		}
-		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: %w", loopID, err)
+		return nil, TrajectoryRef{}, err
 	}
 	var meta trajectoryMeta
 	if err := json.Unmarshal(resp, &meta); err != nil {
-		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: decode: %w", loopID, err)
+		return nil, TrajectoryRef{}, fmt.Errorf("decode: %w", err)
 	}
 	if meta.LoopID == "" {
 		// Empty loop_id with a non-error body is a buggy responder, not
 		// a benign not-found. Surface it loudly so adopters debugging a
 		// wedge see "responder returned no loop_id" in the bundle's
 		// error list rather than silently zero trajectories.
-		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: responder returned empty loop_id", loopID)
+		return nil, TrajectoryRef{}, errors.New("responder returned empty loop_id")
 	}
 	return resp, TrajectoryRef{
 		LoopID:  meta.LoopID,
