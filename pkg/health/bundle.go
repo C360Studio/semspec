@@ -34,18 +34,33 @@ const BundleFormat = "v1"
 // Bundle is the top-level diagnostic-bundle structure. The JSON
 // representation is the bundle's stable contract; its file layout
 // (`bundle.json` + `trajectories/<loop_id>.json` per ref) is the
-// tarball contract.
+// tarball contract — a tarball reader extracts both.
+//
+// An empty Diagnoses array means detectors ran cleanly and matched
+// nothing. An absent TrajectoryRefs means none were captured.
 type Bundle struct {
-	Bundle         BundleMeta        `json:"bundle"`
-	Host           HostInfo          `json:"host"`
-	Config         ConfigSnapshot    `json:"config"`
-	Plans          []json.RawMessage `json:"plans"`    // PLAN_STATES KV entries, verbatim
-	Loops          []json.RawMessage `json:"loops"`    // AGENT_LOOPS KV entries, verbatim
-	Messages       []Message         `json:"messages"` // most-recent N message-logger entries
-	Metrics        MetricsSnapshot   `json:"metrics"`  // parsed Prometheus exposition
-	Ollama         *OllamaState      `json:"ollama,omitempty"`
-	Diagnoses      []Diagnosis       `json:"diagnoses"` // detector output
-	TrajectoryRefs []TrajectoryRef   `json:"trajectory_refs,omitempty"`
+	Bundle         BundleMeta      `json:"bundle"`
+	Host           HostInfo        `json:"host"`
+	Config         ConfigSnapshot  `json:"config"`
+	Plans          []KVEntry       `json:"plans"`    // PLAN_STATES KV entries
+	Loops          []KVEntry       `json:"loops"`    // AGENT_LOOPS KV entries
+	Messages       []Message       `json:"messages"` // most-recent N message-logger entries
+	Metrics        MetricsSnapshot `json:"metrics"`  // parsed Prometheus exposition
+	Ollama         *OllamaState    `json:"ollama,omitempty"`
+	Diagnoses      []Diagnosis     `json:"diagnoses"` // detector output
+	TrajectoryRefs []TrajectoryRef `json:"trajectory_refs,omitempty"`
+}
+
+// KVEntry is one row from a NATS KV bucket. Preserves the metadata
+// detectors and bundle readers need to cite specific entries as
+// evidence (revision for ordering, key for correlation across loops
+// and plans). Value stays opaque so the bundle is resilient to
+// upstream schema evolution; detectors decode it on demand.
+type KVEntry struct {
+	Key      string          `json:"key"`
+	Revision uint64          `json:"revision"`
+	Created  time.Time       `json:"created"`
+	Value    json.RawMessage `json:"value"`
 }
 
 // BundleMeta describes the bundle itself, not the run it captured.
@@ -59,6 +74,10 @@ type BundleMeta struct {
 // HostInfo describes the machine + adjacent runtimes that produced the
 // bundle. Used for cross-host comparison ("adopter A on Linux/CUDA hits
 // the wedge that adopter B on macOS/CPU does not").
+//
+// Time fields throughout the bundle SHOULD be UTC. Capture writes
+// time.Now().UTC(); adopter tooling that compares bundles across hosts
+// expects this convention.
 type HostInfo struct {
 	OS                string          `json:"os"`                 // runtime.GOOS
 	Arch              string          `json:"arch"`               // runtime.GOARCH
@@ -67,12 +86,11 @@ type HostInfo struct {
 	Ollama            *OllamaHostInfo `json:"ollama,omitempty"`   // present only if Ollama is the LLM provider
 }
 
-// OllamaHostInfo records the Ollama daemon's reported state. Useful for
-// the Ollama-flavoured wedge-zone shapes — empty when the run targets
-// Anthropic or Google.
+// OllamaHostInfo records static-ish info about the Ollama daemon.
+// Running models are captured separately on Bundle.Ollama.Running so
+// the static and runtime views don't overlap.
 type OllamaHostInfo struct {
-	Version      string   `json:"version,omitempty"`
-	LoadedModels []string `json:"loaded_models,omitempty"` // from `ollama ps`
+	Version string `json:"version,omitempty"`
 }
 
 // ConfigSnapshot is a redaction-aware view of the running config. We
@@ -86,6 +104,10 @@ type ConfigSnapshot struct {
 // Message is the message-logger envelope as it appeared on the wire.
 // RawData is preserved as json.RawMessage so detectors can decode the
 // payload type they care about without the bundle layer pre-parsing.
+//
+// Subject is the NATS routing key (e.g. "agent.response.<id>"); detectors
+// typically match on Subject. MessageType is the payload schema (e.g.
+// "agentic.response.v1"); detectors decode RawData based on it.
 type Message struct {
 	Sequence    int64           `json:"sequence"`
 	Timestamp   time.Time       `json:"timestamp"`
@@ -100,12 +122,11 @@ type Message struct {
 // MetricsSnapshot holds parsed Prometheus metrics with the bits
 // detectors actually use. Capturing the full /metrics text would
 // inflate bundles by ~100KB each; this surface is enough for the v1
-// detector set + space to grow.
+// detector set + space to grow additively.
 type MetricsSnapshot struct {
-	// Single-valued gauges/counters
-	LoopActiveLoops               int64     `json:"loop_active_loops"`
-	LoopContextUtilization        float64   `json:"loop_context_utilization"`                   // most recent reading
-	LoopContextUtilizationHistory []float64 `json:"loop_context_utilization_history,omitempty"` // per-snapshot trend; v2 detector seed
+	// Single-valued gauges
+	LoopActiveLoops        int64   `json:"loop_active_loops"`
+	LoopContextUtilization float64 `json:"loop_context_utilization"` // most recent reading
 
 	// Per-status request counts (sum across all model labels)
 	ModelRequestsTotal    int64 `json:"model_requests_total"`
@@ -117,8 +138,7 @@ type MetricsSnapshot struct {
 	ToolResultsTruncatedTotal int64 `json:"tool_results_truncated_total"`
 	ContextCompactionsTotal   int64 `json:"context_compactions_total"`
 
-	// CapturedAt sub-segments — when the snapshot was pulled. Used for
-	// trend computation in v2 wedge-zone detector.
+	// CapturedAt — when the snapshot was pulled. UTC.
 	CapturedAt time.Time `json:"captured_at"`
 }
 

@@ -93,13 +93,47 @@ func TestRunAll_DetectorReturningNilIsValid(t *testing.T) {
 func TestSeverityValues(t *testing.T) {
 	// Pin the severity strings — they're part of the bundle contract.
 	cases := map[Severity]string{
-		SeverityInfo:     "info",
-		SeverityWarning:  "warning",
-		SeverityCritical: "critical",
+		SeverityInfo:         "info",
+		SeverityWarning:      "warning",
+		SeverityCritical:     "critical",
+		SeverityUndetermined: "undetermined",
 	}
 	for got, want := range cases {
 		if string(got) != want {
 			t.Errorf("severity %v = %q, want %q", got, string(got), want)
+		}
+	}
+}
+
+func TestSeverity_IsValid(t *testing.T) {
+	valid := []Severity{SeverityInfo, SeverityWarning, SeverityCritical, SeverityUndetermined}
+	for _, s := range valid {
+		if !s.IsValid() {
+			t.Errorf("severity %q reported invalid; want valid", s)
+		}
+	}
+	invalid := []Severity{"", "fatal", "INFO", "Warning"}
+	for _, s := range invalid {
+		if s.IsValid() {
+			t.Errorf("severity %q reported valid; want invalid", s)
+		}
+	}
+}
+
+func TestEvidenceKind_IsValid(t *testing.T) {
+	valid := []EvidenceKind{
+		EvidenceAgentResponse, EvidenceAgentRequest, EvidenceMetricSample,
+		EvidenceLoopEntry, EvidenceLogLine, EvidencePlanState,
+	}
+	for _, k := range valid {
+		if !k.IsValid() {
+			t.Errorf("evidence kind %q reported invalid; want valid", k)
+		}
+	}
+	invalid := []EvidenceKind{"", "trajectory", "AGENT_RESPONSE", "metric"}
+	for _, k := range invalid {
+		if k.IsValid() {
+			t.Errorf("evidence kind %q reported valid; want invalid", k)
 		}
 	}
 }

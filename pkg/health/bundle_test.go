@@ -2,6 +2,7 @@ package health
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,19 +21,28 @@ func TestBundle_RoundTripJSON(t *testing.T) {
 			SemspecVersion:    "v0.0.0-test",
 			SemstreamsVersion: "beta.24",
 			Ollama: &OllamaHostInfo{
-				Version:      "0.5.0",
-				LoadedModels: []string{"qwen3-14b"},
+				Version: "0.5.0",
 			},
 		},
 		Config: ConfigSnapshot{
 			ActiveCapabilities: map[string]string{"reviewing": "qwen3-14b"},
 			RedactedEndpoints:  []string{"claude-opus"},
 		},
-		Plans: []json.RawMessage{
-			json.RawMessage(`{"slug":"abc","status":"complete"}`),
+		Plans: []KVEntry{
+			{
+				Key:      "abc",
+				Revision: 7,
+				Created:  time.Date(2026, 4, 30, 13, 50, 0, 0, time.UTC),
+				Value:    json.RawMessage(`{"slug":"abc","status":"complete"}`),
+			},
 		},
-		Loops: []json.RawMessage{
-			json.RawMessage(`{"id":"loop-1","state":"complete"}`),
+		Loops: []KVEntry{
+			{
+				Key:      "loop-1",
+				Revision: 3,
+				Created:  time.Date(2026, 4, 30, 13, 51, 0, 0, time.UTC),
+				Value:    json.RawMessage(`{"id":"loop-1","state":"complete"}`),
+			},
 		},
 		Messages: []Message{
 			{
@@ -93,8 +103,11 @@ func TestBundle_RoundTripJSON(t *testing.T) {
 	if out.Config.ActiveCapabilities["reviewing"] != "qwen3-14b" {
 		t.Errorf("ConfigSnapshot map lost")
 	}
-	if len(out.Plans) != 1 || len(out.Loops) != 1 {
-		t.Errorf("Plans/Loops slices lost")
+	if len(out.Plans) != 1 || out.Plans[0].Key != "abc" || out.Plans[0].Revision != 7 {
+		t.Errorf("Plans envelope lost: %+v", out.Plans)
+	}
+	if len(out.Loops) != 1 || out.Loops[0].Key != "loop-1" || out.Loops[0].Revision != 3 {
+		t.Errorf("Loops envelope lost: %+v", out.Loops)
 	}
 	if len(out.Messages) != 1 || out.Messages[0].Sequence != 42 {
 		t.Errorf("Messages lost")
@@ -115,10 +128,10 @@ func TestBundle_OmitsOptionalFields(t *testing.T) {
 	// emit those keys — adopters running cloud LLMs shouldn't see
 	// confusing empty Ollama sections in their bundle.
 	in := Bundle{
-		Bundle:    BundleMeta{Format: BundleFormat, CapturedAt: time.Now(), CapturedBy: "test"},
+		Bundle:    BundleMeta{Format: BundleFormat, CapturedAt: time.Now().UTC(), CapturedBy: "test"},
 		Diagnoses: []Diagnosis{},
-		Plans:     []json.RawMessage{},
-		Loops:     []json.RawMessage{},
+		Plans:     []KVEntry{},
+		Loops:     []KVEntry{},
 		Messages:  []Message{},
 	}
 	data, err := json.Marshal(&in)
@@ -126,23 +139,12 @@ func TestBundle_OmitsOptionalFields(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(data)
-	if contains(s, `"ollama":`) {
+	if strings.Contains(s, `"ollama":`) {
 		t.Errorf("ollama field should be omitted when nil, got: %s", s)
 	}
-	if contains(s, `"trajectory_refs":`) {
+	if strings.Contains(s, `"trajectory_refs":`) {
 		t.Errorf("trajectory_refs should be omitted when empty/nil, got: %s", s)
 	}
-}
-
-// contains is a tiny helper to avoid importing strings in the bundle
-// test file — keeps the test surface minimal.
-func contains(haystack, needle string) bool {
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		if haystack[i:i+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
 }
 
 func TestBundleFormat_IsV1(t *testing.T) {
