@@ -107,3 +107,147 @@ func TestShouldRetire_BoundaryAtIdleThreshold(t *testing.T) {
 		t.Error("lesson just under threshold should not retire")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5b: filesystem-existence retirement tests
+// ---------------------------------------------------------------------------
+
+// fakeFS returns a fileExists stub that recognises only the named paths.
+func fakeFS(present ...string) func(string) bool {
+	set := make(map[string]bool, len(present))
+	for _, p := range present {
+		set[p] = true
+	}
+	return func(p string) bool { return set[p] }
+}
+
+func TestShouldRetire_AllEvidenceFilesMissing(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour) // recently injected — would otherwise be kept
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS(), // nothing exists
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "deleted/foo.go"},
+			{Path: "renamed/bar.go"},
+		},
+	}
+	ok, reason := rc.shouldRetire(lesson)
+	if !ok {
+		t.Error("lesson with all-missing evidence files should retire")
+	}
+	if reason != "evidence_files_missing" {
+		t.Errorf("reason = %q, want %q", reason, "evidence_files_missing")
+	}
+}
+
+func TestShouldRetire_PartialEvidenceFilesPresentKeeps(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("kept/foo.go"),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "kept/foo.go"},
+			{Path: "deleted/bar.go"},
+		},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("partial evidence (one path still exists) should keep the lesson")
+	}
+}
+
+func TestShouldRetire_NoEvidenceFilesSkipsCheck(t *testing.T) {
+	// A lesson with EvidenceSteps only (no EvidenceFiles) must NOT be
+	// retired by the missing-files criterion. Phase 5c will validate
+	// trajectory steps separately.
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS(),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceSteps:  []workflow.StepRef{{LoopID: "abc", StepIndex: 1}},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("lesson with no EvidenceFiles must skip Phase 5b check")
+	}
+}
+
+func TestShouldRetire_NilFileExistsSkipsCheck(t *testing.T) {
+	// When repoPath couldn't be resolved, fileExists is nil and the
+	// component skips the filesystem criterion entirely. Otherwise the
+	// curator would retire every cited file because every path "doesn't
+	// exist" against an empty root.
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         nil,
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles:  []workflow.FileRef{{Path: "anything.go"}},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("nil fileExists should skip the filesystem check, not retire")
+	}
+}
+
+func TestShouldRetire_EmptyPathsSkipped(t *testing.T) {
+	// EvidenceFiles entries with empty Path are skipped (defensive — a
+	// lesson shouldn't have empty paths but if it does, we treat it as
+	// no evidence rather than always-missing evidence).
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("real/foo.go"),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: ""}, // empty — skip
+			{Path: "real/foo.go"},
+		},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("empty path entries should be skipped, surviving file keeps lesson")
+	}
+}
+
+func TestShouldRetire_GraceBeatsMissingEvidence(t *testing.T) {
+	// A brand-new lesson with all-missing evidence is still in grace —
+	// the producer's bug should not bite immediately at the first sweep.
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS(),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:     now.Add(-1 * time.Hour),
+		EvidenceFiles: []workflow.FileRef{{Path: "deleted/foo.go"}},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("grace period must protect even from missing-evidence retirement")
+	}
+}

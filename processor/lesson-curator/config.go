@@ -42,6 +42,13 @@ type Config struct {
 	// just because they haven't been injected yet. A lesson must be
 	// older than this before any retirement criterion applies.
 	MinAgeBeforeRetire string `json:"min_age_before_retire" schema:"type:string,description:Lessons younger than this are never retired regardless of idle status,category:advanced,default:168h"`
+
+	// RepoPath is the repository root used to verify that an
+	// EvidenceFiles[].Path still exists on disk (Phase 5b). Empty falls
+	// back to SEMSPEC_REPO_PATH env var, then the process working
+	// directory. When neither resolves to a real directory the
+	// filesystem-existence retirement criterion is skipped.
+	RepoPath string `json:"repo_path" schema:"type:string,description:Workspace root for resolving EvidenceFiles paths; falls back to SEMSPEC_REPO_PATH and CWD,category:advanced,default:"`
 }
 
 // DefaultConfig returns sensible defaults: daily sweep, 30-day idle

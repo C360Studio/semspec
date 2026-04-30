@@ -7,18 +7,25 @@ import (
 )
 
 // retirementCriteria captures the parameters for the retirement decision.
-// Pure data — no side effects. Constructed once per sweep from Config.
+// Mostly pure data; fileExists is the one optional side-effect plug-in for
+// Phase 5b's "evidence files all missing" check. Tests pass an in-memory
+// stub; the component passes an os.Stat-backed implementation. nil means
+// the file-existence check is skipped entirely.
 type retirementCriteria struct {
 	now                time.Time
 	idleThreshold      time.Duration
 	minAgeBeforeRetire time.Duration
+	fileExists         func(path string) bool
 }
 
-// shouldRetire evaluates the Phase 5a retirement criterion against a
-// single lesson:
+// shouldRetire evaluates the retirement criteria against a single lesson:
 //
 //   - If the lesson is already retired → no.
 //   - If the lesson is younger than minAgeBeforeRetire → no (grace period).
+//   - If the lesson cites EvidenceFiles, ALL of them are missing from
+//     disk, and fileExists is wired → yes ("evidence_files_missing",
+//     Phase 5b). A lesson with at least one surviving cited path is
+//     kept — partial-evidence is still verifiable.
 //   - If LastInjectedAt is nil and the lesson is older than idleThreshold
 //     → yes (was never injected and the grace period has lapsed).
 //   - If LastInjectedAt is older than idleThreshold → yes.
@@ -35,6 +42,22 @@ func (rc retirementCriteria) shouldRetire(l workflow.Lesson) (bool, string) {
 		age := rc.now.Sub(l.CreatedAt)
 		if age < rc.minAgeBeforeRetire {
 			return false, ""
+		}
+	}
+
+	if rc.fileExists != nil && len(l.EvidenceFiles) > 0 {
+		anyExists := false
+		for _, f := range l.EvidenceFiles {
+			if f.Path == "" {
+				continue
+			}
+			if rc.fileExists(f.Path) {
+				anyExists = true
+				break
+			}
+		}
+		if !anyExists {
+			return true, "evidence_files_missing"
 		}
 	}
 

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +30,13 @@ type Component struct {
 	logger     *slog.Logger
 
 	lessonWriter *lessons.Writer
+
+	// repoPath is the resolved workspace root used to verify
+	// EvidenceFiles[].Path. Empty when neither the config field nor
+	// SEMSPEC_REPO_PATH nor the working directory resolved to a real
+	// directory — in that case the filesystem-existence retirement
+	// criterion is skipped per Phase 5b's "skip silently" contract.
+	repoPath string
 
 	running   bool
 	startTime time.Time
@@ -79,7 +88,57 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:   deps.NATSClient,
 		logger:       logger,
 		lessonWriter: &lessons.Writer{TW: tw, Logger: logger},
+		repoPath:     resolveRepoPath(cfg.RepoPath),
 	}, nil
+}
+
+// resolveRepoPath picks the workspace root: explicit config > env >
+// CWD. Returns "" when none of those resolve to a real directory; the
+// curator skips the filesystem-existence retirement criterion in that
+// case rather than producing false positives against a wrong root.
+func resolveRepoPath(configured string) string {
+	candidates := []string{configured, os.Getenv("SEMSPEC_REPO_PATH")}
+	if cwd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, cwd)
+	}
+	for _, c := range candidates {
+		if c == "" {
+			continue
+		}
+		abs, err := filepath.Abs(c)
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(abs)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		return abs
+	}
+	return ""
+}
+
+// fileExistsInRepo returns a fileExists predicate scoped to repoPath.
+// Workspace-relative paths are resolved against repoPath; absolute paths
+// are checked as-is. Empty repoPath disables the predicate so the
+// criterion is skipped (returns false → "evidence missing", which would
+// retire every cited path — wrong outcome). Caller passes nil into the
+// criteria struct in that case.
+func fileExistsInRepo(repoPath string) func(string) bool {
+	if repoPath == "" {
+		return nil
+	}
+	return func(p string) bool {
+		if p == "" {
+			return false
+		}
+		abs := p
+		if !filepath.IsAbs(p) {
+			abs = filepath.Join(repoPath, p)
+		}
+		info, err := os.Stat(abs)
+		return err == nil && (info.Mode().IsRegular() || info.IsDir())
+	}
 }
 
 // Initialize prepares the component for startup.
@@ -247,6 +306,7 @@ func (c *Component) runSweep(ctx context.Context) {
 		now:                time.Now(),
 		idleThreshold:      c.config.GetIdleThreshold(),
 		minAgeBeforeRetire: c.config.GetMinAgeBeforeRetire(),
+		fileExists:         fileExistsInRepo(c.repoPath),
 	}
 
 	var retired int
