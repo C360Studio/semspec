@@ -7,15 +7,17 @@ import (
 )
 
 // retirementCriteria captures the parameters for the retirement decision.
-// Mostly pure data; fileExists is the one optional side-effect plug-in for
-// Phase 5b's "evidence files all missing" check. Tests pass an in-memory
-// stub; the component passes an os.Stat-backed implementation. nil means
-// the file-existence check is skipped entirely.
+// Mostly pure data; fileExists and rewriteCheck are the optional
+// side-effect plug-ins for Phase 5b's "evidence files all missing" check
+// and Phase 5c's "cited region rewritten" check respectively. Tests pass
+// in-memory stubs; the component wires real os.Stat and git-blame
+// backends. nil disables the corresponding criterion.
 type retirementCriteria struct {
 	now                time.Time
 	idleThreshold      time.Duration
 	minAgeBeforeRetire time.Duration
 	fileExists         func(path string) bool
+	rewriteCheck       func(path string, lineStart, lineEnd int, commitSHA string) (rewritten bool, err error)
 }
 
 // shouldRetire evaluates the retirement criteria against a single lesson:
@@ -58,6 +60,38 @@ func (rc retirementCriteria) shouldRetire(l workflow.Lesson) (bool, string) {
 		}
 		if !anyExists {
 			return true, "evidence_files_missing"
+		}
+	}
+
+	// Phase 5c: file still exists, but the cited region may have been
+	// rewritten. We retire only when EVERY cited region with a CommitSHA
+	// + line range comes back as fully rewritten — partial survival
+	// keeps the lesson because at least one citation is still anchored
+	// to its original commit. Entries without a CommitSHA or line range
+	// are skipped (whole-file citations are too coarse for this signal).
+	if rc.rewriteCheck != nil && len(l.EvidenceFiles) > 0 {
+		var checkable, rewrittenCount int
+		for _, f := range l.EvidenceFiles {
+			if f.Path == "" || f.CommitSHA == "" {
+				continue
+			}
+			if f.LineStart <= 0 || f.LineEnd < f.LineStart {
+				continue
+			}
+			checkable++
+			rewritten, err := rc.rewriteCheck(f.Path, f.LineStart, f.LineEnd, f.CommitSHA)
+			if err != nil {
+				// Treat the entry as inconclusive — same as "still
+				// anchored" — so a transient git error never produces
+				// a retirement.
+				continue
+			}
+			if rewritten {
+				rewrittenCount++
+			}
+		}
+		if checkable > 0 && rewrittenCount == checkable {
+			return true, "evidence_regions_rewritten"
 		}
 	}
 

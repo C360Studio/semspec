@@ -2,7 +2,9 @@ package lessoncurator
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,5 +100,97 @@ func TestResolveRepoPath_AllInvalidReturnsEmpty(t *testing.T) {
 	got := resolveRepoPath("/this/does/not/exist/here")
 	if got == "" {
 		t.Error("CWD should rescue when configured + env are invalid")
+	}
+}
+
+func TestRewriteCheckInRepo_NilWhenRepoEmpty(t *testing.T) {
+	if got := rewriteCheckInRepo(""); got != nil {
+		t.Error("empty repo path should yield nil predicate")
+	}
+}
+
+func TestRewriteCheckInRepo_AnchoredAndRewritten(t *testing.T) {
+	// Integration test: build a minimal git repo, create two commits,
+	// and verify that rewriteCheckInRepo correctly distinguishes a
+	// region anchored at the first commit (rewritten=true after the
+	// second commit edits it) from one still anchored at the second.
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed; skipping integration test")
+	}
+
+	dir := t.TempDir()
+
+	gitInit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+
+	gitInit("init", "-q")
+	gitInit("config", "user.email", "test@example.com")
+	gitInit("config", "user.name", "test")
+	gitInit("config", "commit.gpgsign", "false")
+
+	mainPath := filepath.Join(dir, "main.go")
+	v1 := strings.Join([]string{
+		"package main",
+		"",
+		"func first() int { return 1 }",
+		"func second() int { return 2 }",
+		"",
+	}, "\n")
+	if err := os.WriteFile(mainPath, []byte(v1), 0o644); err != nil {
+		t.Fatalf("write v1: %v", err)
+	}
+	gitInit("add", "main.go")
+	gitInit("commit", "-q", "-m", "v1")
+
+	headOut, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("rev-parse v1: %v", err)
+	}
+	v1SHA := strings.TrimSpace(string(headOut))
+
+	// Rewrite line 4 (function `second`) — line 3 stays put.
+	v2 := strings.Join([]string{
+		"package main",
+		"",
+		"func first() int { return 1 }",
+		"func second() int { return 99 }", // changed
+		"",
+	}, "\n")
+	if err := os.WriteFile(mainPath, []byte(v2), 0o644); err != nil {
+		t.Fatalf("write v2: %v", err)
+	}
+	gitInit("commit", "-q", "-am", "v2")
+
+	pred := rewriteCheckInRepo(dir)
+	if pred == nil {
+		t.Fatal("expected non-nil predicate")
+	}
+
+	// Line 3 (first()) should still be anchored to v1SHA.
+	rewritten, err := pred("main.go", 3, 3, v1SHA)
+	if err != nil {
+		t.Fatalf("anchored check: %v", err)
+	}
+	if rewritten {
+		t.Error("line 3 should still be anchored to v1, got rewritten=true")
+	}
+
+	// Line 4 (second()) was rewritten in v2 — no v1SHA blame remains there.
+	rewritten, err = pred("main.go", 4, 4, v1SHA)
+	if err != nil {
+		t.Fatalf("rewritten check: %v", err)
+	}
+	if !rewritten {
+		t.Error("line 4 was edited in v2, should report rewritten=true vs v1")
 	}
 }

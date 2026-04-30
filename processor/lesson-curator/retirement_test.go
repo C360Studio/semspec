@@ -1,6 +1,7 @@
 package lessoncurator
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -249,5 +250,151 @@ func TestShouldRetire_GraceBeatsMissingEvidence(t *testing.T) {
 	}
 	if ok, _ := rc.shouldRetire(lesson); ok {
 		t.Error("grace period must protect even from missing-evidence retirement")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5c: rewrite-check retirement tests
+// ---------------------------------------------------------------------------
+
+// rewriteStub builds a rewriteCheck predicate that returns canned values.
+// The map key is "<path>:<lineStart>:<lineEnd>:<sha>"; missing keys
+// return false (still anchored).
+func rewriteStub(rewritten map[string]bool, errs map[string]error) func(string, int, int, string) (bool, error) {
+	return func(path string, ls, le int, sha string) (bool, error) {
+		key := fmt.Sprintf("%s:%d:%d:%s", path, ls, le, sha)
+		if e, ok := errs[key]; ok && e != nil {
+			return false, e
+		}
+		return rewritten[key], nil
+	}
+}
+
+func TestShouldRetire_AllRegionsRewritten(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("a.go", "b.go"), // files still exist
+		rewriteCheck: rewriteStub(map[string]bool{
+			"a.go:10:20:abc123": true,
+			"b.go:5:6:def456":   true,
+		}, nil),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "a.go", LineStart: 10, LineEnd: 20, CommitSHA: "abc123"},
+			{Path: "b.go", LineStart: 5, LineEnd: 6, CommitSHA: "def456"},
+		},
+	}
+	ok, reason := rc.shouldRetire(lesson)
+	if !ok {
+		t.Error("lesson with all regions rewritten should retire")
+	}
+	if reason != "evidence_regions_rewritten" {
+		t.Errorf("reason = %q, want evidence_regions_rewritten", reason)
+	}
+}
+
+func TestShouldRetire_PartialRegionsRewrittenKeeps(t *testing.T) {
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("a.go", "b.go"),
+		rewriteCheck: rewriteStub(map[string]bool{
+			"a.go:10:20:abc123": true,
+			// b.go region is still anchored (default false)
+		}, nil),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "a.go", LineStart: 10, LineEnd: 20, CommitSHA: "abc123"},
+			{Path: "b.go", LineStart: 5, LineEnd: 6, CommitSHA: "def456"},
+		},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("partial rewrite (one region anchored) should keep the lesson")
+	}
+}
+
+func TestShouldRetire_RewriteErrorIsInconclusive(t *testing.T) {
+	// A transient git error should NOT trigger retirement — treat the
+	// entry as "still anchored" so a flaky git invocation can't wipe
+	// the lessons graph on a single bad sweep.
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("a.go"),
+		rewriteCheck: rewriteStub(nil, map[string]error{
+			"a.go:10:20:abc123": fmt.Errorf("git error"),
+		}),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "a.go", LineStart: 10, LineEnd: 20, CommitSHA: "abc123"},
+		},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("transient rewrite-check error must not retire (inconclusive)")
+	}
+}
+
+func TestShouldRetire_NoCheckableEvidenceSkipsRewrite(t *testing.T) {
+	// Lessons that only cite whole-file paths (no line range) or paths
+	// without a CommitSHA must skip the rewrite check entirely. Phase 5c
+	// only fires on entries with both a line range AND a commit SHA.
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("a.go"),
+		rewriteCheck: rewriteStub(map[string]bool{
+			"a.go:10:20:abc123": true, // would retire if asked
+		}, nil),
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "a.go"}, // no line range, no SHA — skip
+		},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("whole-file citation should skip the rewrite criterion")
+	}
+}
+
+func TestShouldRetire_NilRewriteCheckSkips(t *testing.T) {
+	// Same shape as the nil-fileExists test — when repoPath couldn't be
+	// resolved we set rewriteCheck nil and the criterion is skipped.
+	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	last := now.Add(-1 * time.Hour)
+	rc := retirementCriteria{
+		now: now, idleThreshold: 30 * 24 * time.Hour,
+		minAgeBeforeRetire: 7 * 24 * time.Hour,
+		fileExists:         fakeFS("a.go"),
+		rewriteCheck:       nil,
+	}
+	lesson := workflow.Lesson{
+		CreatedAt:      now.Add(-90 * 24 * time.Hour),
+		LastInjectedAt: &last,
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "a.go", LineStart: 1, LineEnd: 5, CommitSHA: "abc"},
+		},
+	}
+	if ok, _ := rc.shouldRetire(lesson); ok {
+		t.Error("nil rewriteCheck must skip the criterion")
 	}
 }

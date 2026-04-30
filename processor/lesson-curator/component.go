@@ -1,12 +1,15 @@
 package lessoncurator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -116,6 +119,76 @@ func resolveRepoPath(configured string) string {
 		return abs
 	}
 	return ""
+}
+
+// rewriteCheckInRepo returns a rewriteCheck predicate scoped to repoPath.
+// Empty repoPath disables the predicate (returns nil) so the criterion is
+// skipped entirely — same shape as fileExistsInRepo.
+//
+// Implementation: `git blame -L<start>,<end> --porcelain` against the
+// file. Each blamed line emits a header `<sha> <orig> <final>` — if any
+// such SHA matches the cited CommitSHA prefix, the region still has at
+// least one anchored line and we report "not rewritten". Zero matches
+// → fully rewritten.
+//
+// We deliberately use a strict "any survival keeps it" threshold here.
+// A softer ratio could be tuned later; for Phase 5c the cheap signal is
+// good enough and false-negatives (kept lessons that should retire) are
+// safer than false-positives (retiring still-relevant lessons).
+func rewriteCheckInRepo(repoPath string) func(path string, lineStart, lineEnd int, commitSHA string) (bool, error) {
+	if repoPath == "" {
+		return nil
+	}
+	return func(path string, lineStart, lineEnd int, commitSHA string) (bool, error) {
+		if path == "" || commitSHA == "" || lineStart <= 0 || lineEnd < lineStart {
+			return false, fmt.Errorf("rewrite check: invalid args")
+		}
+		abs := path
+		if !filepath.IsAbs(path) {
+			abs = filepath.Join(repoPath, path)
+		}
+		// Bound the blame call so a runaway git invocation can't wedge
+		// the sweep loop.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		cmd := exec.CommandContext(ctx, "git",
+			"-C", repoPath,
+			"blame",
+			"--porcelain",
+			fmt.Sprintf("-L%d,%d", lineStart, lineEnd),
+			"--",
+			abs,
+		)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return false, fmt.Errorf("git blame: %w (%s)", err, strings.TrimSpace(stderr.String()))
+		}
+
+		prefix := commitSHA
+		if len(prefix) > 12 {
+			prefix = prefix[:12]
+		}
+		// Each non-continuation header line in --porcelain output starts
+		// with a 40-char SHA followed by a space. Look for any blame SHA
+		// whose prefix matches our cited commit; presence of even one
+		// counts as "still anchored".
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if len(line) < 41 {
+				continue
+			}
+			if line[40] != ' ' {
+				continue
+			}
+			sha := line[:40]
+			if strings.HasPrefix(sha, prefix) || strings.HasPrefix(commitSHA, sha[:min(len(sha), len(commitSHA))]) {
+				return false, nil
+			}
+		}
+		return true, nil
+	}
 }
 
 // fileExistsInRepo returns a fileExists predicate scoped to repoPath.
@@ -307,6 +380,7 @@ func (c *Component) runSweep(ctx context.Context) {
 		idleThreshold:      c.config.GetIdleThreshold(),
 		minAgeBeforeRetire: c.config.GetMinAgeBeforeRetire(),
 		fileExists:         fileExistsInRepo(c.repoPath),
+		rewriteCheck:       rewriteCheckInRepo(c.repoPath),
 	}
 
 	var retired int
