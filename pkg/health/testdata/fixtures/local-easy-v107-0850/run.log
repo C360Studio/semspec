@@ -1,0 +1,382 @@
+task: [e2e:check-ports:ui] echo "[CHECK] Verifying UI E2E ports are available..."
+STALE=false
+for port in 3000 4223 8223 11534; do
+  if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+    STALE=true
+    break
+  fi
+done
+if [ "$STALE" = "true" ]; then
+  echo "[CHECK] Stale UI containers detected — auto-cleaning..."
+  docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml down -v --timeout 5 2>/dev/null || true
+  docker ps -a --filter name=semspec-ui-e2e --format "" | xargs -r docker rm -f 2>/dev/null || true
+  sleep 2
+  for port in 3000 4223 8223 11534; do
+    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "[ERROR] Port $port still in use after cleanup."
+      exit 1
+    fi
+  done
+  echo "[OK] Stale UI containers cleaned, ports now available"
+else
+  echo "[OK] All UI E2E ports available (3000, 4223, 8223, 11534)"
+fi
+
+[CHECK] Verifying UI E2E ports are available...
+[OK] All UI E2E ports available (3000, 4223, 8223, 11534)
+task: [e2e:ui:test:llm] if [ ! -f "configs/e2e-local.json" ]; then
+  echo "[ERROR] Config not found: configs/e2e-local.json"
+  echo "Available providers:"
+  ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
+  exit 1
+fi
+
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Provider=local Tier=@easy Config=e2e-local.json Fixture=go-project Debug=${DEBUG:-off}"
+[UI:TEST:LLM] Provider=local Tier=@easy Config=e2e-local.json Fixture=go-project Debug=1
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
+[UI:TEST:LLM] Resetting fixture to initial commit...
+task: [e2e:ui:test:llm] cd test/e2e/fixtures/go-project && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
+HEAD is now at a89817a initial fixture
+Removing .semspec/plans/
+Removing .semspec/worktrees/
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Building and starting real LLM stack..."
+[UI:TEST:LLM] Building and starting real LLM stack...
+task: [e2e:ui:test:llm] docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml  down -v --timeout 10 2>/dev/null
+task: [e2e:ui:test:llm] E2E_CONFIG=e2e-local.json docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml  build
+ Image ui-ui Building 
+ Image ui-qa-runner Building 
+ Image ui-sandbox Building 
+ Image ui-semspec Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.94kB done
+#1 DONE 0.0s
+
+#2 [semspec internal] load build definition from Dockerfile
+#2 transferring dockerfile: 1.41kB done
+#2 DONE 0.0s
+
+#3 [sandbox internal] load build definition from sandbox.Dockerfile
+#3 transferring dockerfile: 3.31kB done
+#3 DONE 0.0s
+
+#4 [qa-runner internal] load build definition from qa-runner.Dockerfile
+#4 transferring dockerfile: 3.75kB done
+#4 DONE 0.0s
+
+#5 [ui internal] load build definition from Dockerfile.e2e
+#5 transferring dockerfile: 546B done
+#5 DONE 0.0s
+
+#6 [qa-runner internal] load metadata for docker.io/library/golang:1.25-alpine
+#6 DONE 0.6s
+
+#7 [qa-runner internal] load metadata for docker.io/library/ubuntu:24.04
+#7 DONE 0.5s
+
+#8 [semspec internal] load metadata for docker.io/library/alpine:3.19
+#8 DONE 0.6s
+
+#9 [ui internal] load metadata for docker.io/library/node:20-alpine
+#9 DONE 0.6s
+
+#10 [ui internal] load .dockerignore
+#10 transferring context: 130B done
+#10 DONE 0.0s
+
+#11 [sandbox internal] load .dockerignore
+#11 transferring context: 2B 0.0s done
+#11 DONE 0.0s
+
+#12 [ui 1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+#12 resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 0.0s done
+#12 DONE 0.0s
+
+#13 [semspec builder 1/6] FROM docker.io/library/golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f
+#13 resolve docker.io/library/golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f 0.0s done
+#13 DONE 0.0s
+
+#14 [semspec stage-1 1/6] FROM docker.io/library/alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
+#14 resolve docker.io/library/alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1 0.0s done
+#14 DONE 0.0s
+
+#15 [qa-runner stage-1 1/5] FROM docker.io/library/ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
+#15 resolve docker.io/library/ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b 0.0s done
+#15 DONE 0.0s
+
+#16 [ui internal] load build context
+#16 transferring context: 15.60kB 0.0s done
+#16 DONE 0.0s
+
+#17 [ui 5/7] RUN npm ci
+#17 CACHED
+
+#18 [ui 6/7] COPY . .
+#18 CACHED
+
+#19 [ui 2/7] WORKDIR /app
+#19 CACHED
+
+#20 [ui 3/7] RUN apk add --no-cache wget
+#20 CACHED
+
+#21 [ui 4/7] COPY package*.json ./
+#21 CACHED
+
+#22 [ui 7/7] RUN npm run build
+#22 CACHED
+
+#23 [ui] exporting to image
+#23 exporting layers done
+#23 exporting manifest sha256:92a6060d635f74d6b784d2bc173bd2bdc0ada4958e778e6f4fe97db6251325f5 done
+#23 exporting config sha256:337e1edb1234451bb0eaff980c987dabfa8fd0f5aabdc01d87a857c7421d74e3 done
+#23 exporting attestation manifest sha256:dd78e538d20408baf83fc10bb15e5defdabae6391c2a5b23cf47ebacb6062253
+#23 exporting attestation manifest sha256:dd78e538d20408baf83fc10bb15e5defdabae6391c2a5b23cf47ebacb6062253 0.0s done
+#23 exporting manifest list sha256:3e6f9af4c0acb2f74d9fc9b41c9e8e45fdc200f553e05cc50e1f41e5f5dc3dab done
+#23 naming to docker.io/library/ui-ui:latest done
+#23 unpacking to docker.io/library/ui-ui:latest 0.0s done
+#23 DONE 0.1s
+
+#24 [qa-runner internal] load build context
+#24 ...
+
+#25 [ui] resolving provenance for metadata file
+#25 DONE 0.0s
+
+#24 [qa-runner internal] load build context
+#24 transferring context: 3.30MB 1.2s done
+#24 DONE 1.2s
+
+#26 [semspec builder 2/6] WORKDIR /build
+#26 CACHED
+
+#27 [semspec builder 4/7] COPY go.mod go.sum ./
+#27 CACHED
+
+#28 [semspec builder 3/7] RUN apk add --no-cache git gcc musl-dev
+#28 CACHED
+
+#29 [semspec builder 5/7] RUN go mod download
+#29 CACHED
+
+#26 [sandbox builder 2/6] WORKDIR /build
+#26 CACHED
+
+#30 [sandbox builder 3/6] COPY go.mod go.sum ./
+#30 CACHED
+
+#31 [sandbox builder 4/6] RUN go mod download
+#31 CACHED
+
+#32 [sandbox builder 5/6] COPY . .
+#32 ...
+
+#33 [semspec builder 6/7] COPY . .
+#33 DONE 2.9s
+
+#32 [qa-runner builder 5/6] COPY . .
+#32 DONE 2.8s
+
+#34 [qa-runner builder 6/6] RUN CGO_ENABLED=0 go build -o /qa-runner ./cmd/qa-runner
+#34 ...
+
+#35 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#35 ...
+
+#36 [sandbox builder 6/6] RUN CGO_ENABLED=0 go build -o /sandbox ./cmd/sandbox
+#36 DONE 15.4s
+
+#35 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#35 ...
+
+#34 [qa-runner builder 6/6] RUN CGO_ENABLED=0 go build -o /qa-runner ./cmd/qa-runner
+#34 DONE 15.4s
+
+#35 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#35 ...
+
+#37 [qa-runner stage-1 2/5] RUN apt-get update && apt-get install -y --no-install-recommends     ca-certificates     curl     wget     git     unzip     && install -m 0755 -d /etc/apt/keyrings     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg         -o /etc/apt/keyrings/docker.asc     && chmod a+r /etc/apt/keyrings/docker.asc     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]         https://download.docker.com/linux/ubuntu         $(. /etc/os-release && echo "$VERSION_CODENAME") stable"         > /etc/apt/sources.list.d/docker.list     && apt-get update     && apt-get install -y --no-install-recommends docker-ce-cli     && rm -rf /var/lib/apt/lists/*
+#37 CACHED
+
+#38 [qa-runner stage-1 3/5] RUN set -eux;     case "arm64" in         amd64) ACT_ARCH="x86_64" ;;         arm64) ACT_ARCH="arm64"  ;;         *)     ACT_ARCH="x86_64" ;;     esac;     curl -fsSL         "https://github.com/nektos/act/releases/download/v0.2.70/act_Linux_${ACT_ARCH}.tar.gz"         | tar -C /usr/local/bin -xz act     && chmod +x /usr/local/bin/act     && act --version
+#38 CACHED
+
+#39 [qa-runner stage-1 4/5] COPY --from=builder /qa-runner /usr/local/bin/qa-runner
+#39 CACHED
+
+#40 [qa-runner stage-1 5/5] WORKDIR /workspace
+#40 CACHED
+
+#41 [sandbox stage-1  4/10] RUN apt-get update && apt-get install -y --no-install-recommends     openjdk-21-jdk-headless     && rm -rf /var/lib/apt/lists/*     && ln -s /usr/lib/jvm/java-21-openjdk-* /usr/lib/jvm/java-21
+#41 CACHED
+
+#42 [sandbox stage-1  7/10] RUN existing_user=$(getent passwd 1000 | cut -d: -f1)     && if [ -n "$existing_user" ] && [ "$existing_user" != "sandbox" ]; then userdel -r "$existing_user" 2>/dev/null || true; fi     && existing_group=$(getent group 1000 | cut -d: -f1)     && if [ -n "$existing_group" ] && [ "$existing_group" != "sandbox" ]; then groupdel "$existing_group" 2>/dev/null || true; fi     && groupadd -g 1000 sandbox     && useradd -m -s /bin/bash -u 1000 -g 1000 sandbox     && mkdir -p /go/pkg/mod     && chown -R sandbox:sandbox /go
+#42 CACHED
+
+#43 [sandbox stage-1  8/10] COPY --from=builder /sandbox /usr/local/bin/sandbox
+#43 CACHED
+
+#44 [sandbox stage-1  5/10] RUN curl -fsSL "https://services.gradle.org/distributions/gradle-8.12-bin.zip"     -o /tmp/gradle.zip     && unzip -q /tmp/gradle.zip -d /opt     && rm /tmp/gradle.zip     && ln -s "/opt/gradle-8.12/bin/gradle" /usr/local/bin/gradle
+#44 CACHED
+
+#45 [sandbox stage-1  2/10] RUN apt-get update && apt-get install -y --no-install-recommends     build-essential     git     curl     wget     jq     ca-certificates     unzip     python3     python3-pip     python3-venv     && rm -rf /var/lib/apt/lists/*
+#45 CACHED
+
+#46 [sandbox stage-1  9/10] RUN git config --global user.email "sandbox@semspec.dev"     && git config --global user.name "Semspec Sandbox"
+#46 CACHED
+
+#47 [sandbox stage-1  3/10] RUN curl -fsSL "https://go.dev/dl/go1.25.3.linux-arm64.tar.gz"     | tar -C /usr/local -xz
+#47 CACHED
+
+#48 [sandbox stage-1  6/10] RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash -     && apt-get install -y --no-install-recommends nodejs     && npm install -g typescript vitest     && rm -rf /var/lib/apt/lists/*
+#48 CACHED
+
+#49 [sandbox stage-1 10/10] WORKDIR /workspace
+#49 CACHED
+
+#50 [qa-runner] exporting to image
+#50 exporting layers done
+#50 exporting manifest sha256:9285f9b2116636a599e43c4d5c0382b25653817f244a1fba69c90b207bf43c4c done
+#50 exporting config sha256:31e4039f3b4fe5cfe71e182caeff4fb436d130c98202efd948bbec88b8d719d3 done
+#50 exporting attestation manifest sha256:1003b79e173ec6fe39bce99b0b080789f6a0174f5a92aaf01016870b1f42ef78 0.0s done
+#50 exporting manifest list sha256:8e5a67823ba69c40509bf40f862901aba6a446ccdbf21f8fd338a45e260e447e 0.0s done
+#50 naming to docker.io/library/ui-qa-runner:latest done
+#50 unpacking to docker.io/library/ui-qa-runner:latest
+#50 unpacking to docker.io/library/ui-qa-runner:latest 0.0s done
+#50 DONE 0.1s
+
+#51 [sandbox] exporting to image
+#51 exporting layers 0.0s done
+#51 exporting manifest sha256:c7078534d489c5eef518bf05bd8468d7471a8522c8018c1c625dc9c105b503ea done
+#51 exporting config sha256:dc16286cc3d01eaa37204a0b09a0162095ed9357f6c6dc9b5a86a259cb0011f3 done
+#51 exporting attestation manifest sha256:062b30769258741f18d3214f1e23456ac676d0c032f0b7c91bd0db1d01069e83 0.0s done
+#51 exporting manifest list sha256:2c06232633ced908d6958177892e49374934825ce2398c0a28f4ec06b036a39b done
+#51 naming to docker.io/library/ui-sandbox:latest done
+#51 unpacking to docker.io/library/ui-sandbox:latest 0.0s done
+#51 DONE 0.2s
+
+#35 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#35 ...
+
+#52 [qa-runner] resolving provenance for metadata file
+#52 DONE 0.1s
+
+#53 [sandbox] resolving provenance for metadata file
+#53 DONE 0.0s
+
+#35 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#35 DONE 17.5s
+
+#54 [semspec stage-1 2/6] WORKDIR /app
+#54 CACHED
+
+#55 [semspec stage-1 3/6] RUN apk add --no-cache ca-certificates git wget python3 py3-pip     && pip3 install --break-system-packages pytest
+#55 CACHED
+
+#56 [semspec stage-1 4/6] COPY --from=builder /semspec /usr/local/bin/semspec
+#56 CACHED
+
+#57 [semspec stage-1 5/6] COPY --from=builder /build/configs /app/configs
+#57 DONE 0.0s
+
+#58 [semspec stage-1 6/6] RUN mkdir -p /workspace
+#58 DONE 0.1s
+
+#59 [semspec] exporting to image
+#59 exporting layers 0.0s done
+#59 exporting manifest sha256:240b54dc06b3c26d92d3f350e01b023bc8ace60f008c8892e149cda1a5788634 done
+#59 exporting config sha256:97919dd539a866c6f9e796a1a88b9695db19dfe9f35cd03f29e6b9d444d5b847 done
+#59 exporting attestation manifest sha256:5ccd7aed5cffc9e02ab570ff9b3948c9adc3e7486c8b355d580744a765efe28a done
+#59 exporting manifest list sha256:c1705461a129d39af8530eb1ff80a581d2ea08af31991ed505f9fb3ab4adadcd done
+#59 naming to docker.io/library/ui-semspec:latest done
+#59 unpacking to docker.io/library/ui-semspec:latest 0.0s done
+#59 DONE 0.1s
+
+#60 [semspec] resolving provenance for metadata file
+#60 DONE 0.0s
+ Image ui-qa-runner Built 
+ Image ui-sandbox Built 
+ Image ui-semspec Built 
+ Image ui-ui Built 
+task: [e2e:ui:test:llm] E2E_CONFIG=e2e-local.json docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml  up -d --wait
+ Network semspec-ui-e2e Creating 
+ Network semspec-ui-e2e Created 
+ Volume ui_ui-nats-data Creating 
+ Volume ui_ui-nats-data Created 
+ Container ui-nats-1 Creating 
+ Container ui-sandbox-1 Creating 
+ Container ui-sandbox-1 Created 
+ Container ui-nats-1 Created 
+ Container ui-qa-runner-1 Creating 
+ Container ui-semspec-1 Creating 
+ Container ui-qa-runner-1 Created 
+ Container ui-semspec-1 Created 
+ Container ui-ui-1 Creating 
+ Container ui-semsource-1 Creating 
+ Container ui-semsource-1 Created 
+ Container ui-ui-1 Created 
+ Container ui-caddy-1 Creating 
+ Container ui-caddy-1 Created 
+ Container ui-sandbox-1 Starting 
+ Container ui-nats-1 Starting 
+ Container ui-nats-1 Started 
+ Container ui-nats-1 Waiting 
+ Container ui-sandbox-1 Started 
+ Container ui-sandbox-1 Waiting 
+ Container ui-nats-1 Waiting 
+ Container ui-nats-1 Healthy 
+ Container ui-qa-runner-1 Starting 
+ Container ui-nats-1 Healthy 
+ Container ui-sandbox-1 Healthy 
+ Container ui-semspec-1 Starting 
+ Container ui-semspec-1 Started 
+ Container ui-semspec-1 Waiting 
+ Container ui-nats-1 Waiting 
+ Container ui-semspec-1 Waiting 
+ Container ui-qa-runner-1 Started 
+ Container ui-nats-1 Healthy 
+ Container ui-semspec-1 Healthy 
+ Container ui-semspec-1 Healthy 
+ Container ui-semsource-1 Starting 
+ Container ui-ui-1 Starting 
+ Container ui-ui-1 Started 
+ Container ui-ui-1 Waiting 
+ Container ui-semspec-1 Waiting 
+ Container ui-semsource-1 Started 
+ Container ui-semspec-1 Healthy 
+ Container ui-ui-1 Healthy 
+ Container ui-caddy-1 Starting 
+ Container ui-caddy-1 Started 
+ Container ui-qa-runner-1 Waiting 
+ Container ui-nats-1 Waiting 
+ Container ui-semspec-1 Waiting 
+ Container ui-ui-1 Waiting 
+ Container ui-sandbox-1 Waiting 
+ Container ui-semsource-1 Waiting 
+ Container ui-caddy-1 Waiting 
+ Container ui-nats-1 Healthy 
+ Container ui-sandbox-1 Healthy 
+ Container ui-semspec-1 Healthy 
+ Container ui-qa-runner-1 Healthy 
+ Container ui-ui-1 Healthy 
+ Container ui-semsource-1 Healthy 
+ Container ui-caddy-1 Healthy 
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Running @easy Playwright tests..."
+[UI:TEST:LLM] Running @easy Playwright tests...
+task: [e2e:ui:test:llm] cd ui
+# Provider-specific timeouts for real LLM E2E tests.
+# Local Ollama is slower than cloud providers — bump cascade + execution.
+# Claude needs the longest — plan review rejections add full revision cycles.
+if [ "local" = "claude" ]; then
+  CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=3600000 PLAYWRIGHT_TIMEOUT=3600000 \
+    npx playwright test --grep @easy --project t2 --no-deps
+elif [ "local" = "local" ]; then
+  CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
+    npx playwright test --grep @easy --project t2 --no-deps
+else
+  PLAYWRIGHT_TIMEOUT=1200000 \
+    npx playwright test --grep @easy --project t2 --no-deps
+fi
+
+
+Running 8 tests using 1 worker
+

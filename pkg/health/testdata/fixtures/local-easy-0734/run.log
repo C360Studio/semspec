@@ -1,0 +1,497 @@
+task: [e2e:check-ports:ui] echo "[CHECK] Verifying UI E2E ports are available..."
+STALE=false
+for port in 3000 4223 8223 11534; do
+  if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+    STALE=true
+    break
+  fi
+done
+if [ "$STALE" = "true" ]; then
+  echo "[CHECK] Stale UI containers detected — auto-cleaning..."
+  docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml down -v --timeout 5 2>/dev/null || true
+  docker ps -a --filter name=semspec-ui-e2e --format "" | xargs -r docker rm -f 2>/dev/null || true
+  sleep 2
+  for port in 3000 4223 8223 11534; do
+    if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+      echo "[ERROR] Port $port still in use after cleanup."
+      exit 1
+    fi
+  done
+  echo "[OK] Stale UI containers cleaned, ports now available"
+else
+  echo "[OK] All UI E2E ports available (3000, 4223, 8223, 11534)"
+fi
+
+[CHECK] Verifying UI E2E ports are available...
+[OK] All UI E2E ports available (3000, 4223, 8223, 11534)
+task: [e2e:ui:test:llm] if [ ! -f "configs/e2e-local.json" ]; then
+  echo "[ERROR] Config not found: configs/e2e-local.json"
+  echo "Available providers:"
+  ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
+  exit 1
+fi
+
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Provider=local Tier=@easy Config=e2e-local.json Fixture=go-project Debug=${DEBUG:-off}"
+[UI:TEST:LLM] Provider=local Tier=@easy Config=e2e-local.json Fixture=go-project Debug=1
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
+[UI:TEST:LLM] Resetting fixture to initial commit...
+task: [e2e:ui:test:llm] cd test/e2e/fixtures/go-project && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
+HEAD is now at a89817a initial fixture
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Building and starting real LLM stack..."
+[UI:TEST:LLM] Building and starting real LLM stack...
+task: [e2e:ui:test:llm] docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml  down -v --timeout 10 2>/dev/null
+task: [e2e:ui:test:llm] E2E_CONFIG=e2e-local.json docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml  build
+ Image ui-semspec Building 
+ Image ui-ui Building 
+ Image ui-qa-runner Building 
+ Image ui-sandbox Building 
+#1 [internal] load local bake definitions
+#1 reading from stdin 1.94kB done
+#1 DONE 0.0s
+
+#2 [sandbox internal] load build definition from sandbox.Dockerfile
+#2 transferring dockerfile:
+#2 transferring dockerfile: 3.31kB 0.2s done
+#2 DONE 0.7s
+
+#3 [ui internal] load build definition from Dockerfile.e2e
+#3 transferring dockerfile: 546B 0.2s done
+#3 DONE 0.8s
+
+#4 [qa-runner internal] load build definition from qa-runner.Dockerfile
+#4 transferring dockerfile: 3.75kB 0.2s done
+#4 DONE 1.0s
+
+#5 [semspec internal] load build definition from Dockerfile
+#5 transferring dockerfile: 1.41kB 0.1s done
+#5 DONE 1.0s
+
+#6 [semspec internal] load metadata for docker.io/library/golang:1.25-alpine
+#6 DONE 4.0s
+
+#7 [qa-runner internal] load metadata for docker.io/library/ubuntu:24.04
+#7 DONE 4.0s
+
+#8 [semspec internal] load metadata for docker.io/library/alpine:3.19
+#8 DONE 4.0s
+
+#9 [ui internal] load metadata for docker.io/library/node:20-alpine
+#9 DONE 4.0s
+
+#10 [semspec internal] load .dockerignore
+#10 transferring context: 2B 0.0s done
+#10 transferring context: 2B 0.0s done
+#10 DONE 0.1s
+
+#11 [ui internal] load .dockerignore
+#11 transferring context: 130B 0.1s done
+#11 DONE 0.1s
+
+#12 [ui internal] load build context
+#12 DONE 0.0s
+
+#13 [sandbox internal] load build context
+#13 DONE 0.0s
+
+#14 [sandbox builder 1/6] FROM docker.io/library/golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f
+#14 resolve docker.io/library/golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f
+#14 resolve docker.io/library/golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f 0.1s done
+#14 DONE 0.1s
+
+#15 [ui 1/7] FROM docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+#15 resolve docker.io/library/node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 0.1s done
+#15 DONE 0.1s
+
+#16 [qa-runner stage-1 1/5] FROM docker.io/library/ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b
+#16 resolve docker.io/library/ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da5bc69a85730fb49b5cfca2330194ebcc41c7b 0.1s done
+#16 DONE 0.1s
+
+#17 [semspec stage-1 1/6] FROM docker.io/library/alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
+#17 resolve docker.io/library/alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1 0.1s done
+#17 DONE 0.1s
+
+#12 [ui internal] load build context
+#12 transferring context: 15.60kB 0.8s done
+#12 DONE 1.1s
+
+#18 [ui 3/7] RUN apk add --no-cache wget
+#18 CACHED
+
+#19 [ui 4/7] COPY package*.json ./
+#19 CACHED
+
+#20 [ui 5/7] RUN npm ci
+#20 CACHED
+
+#21 [ui 6/7] COPY . .
+#21 CACHED
+
+#22 [ui 2/7] WORKDIR /app
+#22 CACHED
+
+#23 [ui 7/7] RUN npm run build
+#23 CACHED
+
+#13 [semspec internal] load build context
+#13 ...
+
+#24 [ui] exporting to image
+#24 exporting layers 1.1s done
+#24 exporting manifest sha256:92a6060d635f74d6b784d2bc173bd2bdc0ada4958e778e6f4fe97db6251325f5 done
+#24 exporting config sha256:337e1edb1234451bb0eaff980c987dabfa8fd0f5aabdc01d87a857c7421d74e3 done
+#24 exporting attestation manifest sha256:998db62c1aa18e6c888ba95addf40990d234ff832286ffc0ee8af36ee646951c 0.1s done
+#24 exporting manifest list sha256:4378723050621d47b447df5552e7ea7c4c85c74cfba22dc2a09ba1604184dce4 0.0s done
+#24 naming to docker.io/library/ui-ui:latest done
+#24 unpacking to docker.io/library/ui-ui:latest 0.0s done
+#24 DONE 1.4s
+
+#13 [semspec internal] load build context
+#13 ...
+
+#25 [ui] resolving provenance for metadata file
+#25 DONE 0.0s
+
+#13 [semspec internal] load build context
+#13 transferring context: 2.16MB 6.2s
+#13 transferring context: 45.95MB 9.3s done
+#13 DONE 10.5s
+
+#26 [sandbox builder 2/6] WORKDIR /build
+#26 CACHED
+
+#27 [sandbox builder 3/6] COPY go.mod go.sum ./
+#27 CACHED
+
+#28 [sandbox builder 4/6] RUN go mod download
+#28 CACHED
+
+#27 [qa-runner builder 3/6] COPY go.mod go.sum ./
+#27 CACHED
+
+#26 [qa-runner builder 2/6] WORKDIR /build
+#26 CACHED
+
+#29 [semspec builder 4/7] COPY go.mod go.sum ./
+#29 CACHED
+
+#30 [semspec builder 3/7] RUN apk add --no-cache git gcc musl-dev
+#30 CACHED
+
+#31 [semspec builder 5/7] RUN go mod download
+#31 CACHED
+
+#32 [qa-runner builder 5/6] COPY . .
+#32 ...
+
+#33 [semspec builder 6/7] COPY . .
+#33 DONE 163.6s
+
+#32 [qa-runner builder 5/6] COPY . .
+#32 DONE 163.6s
+
+#34 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#34 ...
+
+#35 [sandbox builder 6/6] RUN CGO_ENABLED=0 go build -o /sandbox ./cmd/sandbox
+#35 ...
+
+#36 [qa-runner builder 6/6] RUN CGO_ENABLED=0 go build -o /qa-runner ./cmd/qa-runner
+#36 DONE 94.1s
+
+#34 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#34 ...
+
+#35 [sandbox builder 6/6] RUN CGO_ENABLED=0 go build -o /sandbox ./cmd/sandbox
+#35 DONE 94.1s
+
+#34 [semspec builder 7/7] RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+#34 DONE 96.2s
+
+#37 [qa-runner stage-1 2/5] RUN apt-get update && apt-get install -y --no-install-recommends     ca-certificates     curl     wget     git     unzip     && install -m 0755 -d /etc/apt/keyrings     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg         -o /etc/apt/keyrings/docker.asc     && chmod a+r /etc/apt/keyrings/docker.asc     && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc]         https://download.docker.com/linux/ubuntu         $(. /etc/os-release && echo "$VERSION_CODENAME") stable"         > /etc/apt/sources.list.d/docker.list     && apt-get update     && apt-get install -y --no-install-recommends docker-ce-cli     && rm -rf /var/lib/apt/lists/*
+#37 CACHED
+
+#38 [qa-runner stage-1 3/5] RUN set -eux;     case "arm64" in         amd64) ACT_ARCH="x86_64" ;;         arm64) ACT_ARCH="arm64"  ;;         *)     ACT_ARCH="x86_64" ;;     esac;     curl -fsSL         "https://github.com/nektos/act/releases/download/v0.2.70/act_Linux_${ACT_ARCH}.tar.gz"         | tar -C /usr/local/bin -xz act     && chmod +x /usr/local/bin/act     && act --version
+#38 CACHED
+
+#39 [qa-runner stage-1 4/5] COPY --from=builder /qa-runner /usr/local/bin/qa-runner
+#39 CACHED
+
+#40 [qa-runner stage-1 5/5] WORKDIR /workspace
+#40 CACHED
+
+#41 [sandbox stage-1  4/10] RUN apt-get update && apt-get install -y --no-install-recommends     openjdk-21-jdk-headless     && rm -rf /var/lib/apt/lists/*     && ln -s /usr/lib/jvm/java-21-openjdk-* /usr/lib/jvm/java-21
+#41 CACHED
+
+#42 [sandbox stage-1  7/10] RUN existing_user=$(getent passwd 1000 | cut -d: -f1)     && if [ -n "$existing_user" ] && [ "$existing_user" != "sandbox" ]; then userdel -r "$existing_user" 2>/dev/null || true; fi     && existing_group=$(getent group 1000 | cut -d: -f1)     && if [ -n "$existing_group" ] && [ "$existing_group" != "sandbox" ]; then groupdel "$existing_group" 2>/dev/null || true; fi     && groupadd -g 1000 sandbox     && useradd -m -s /bin/bash -u 1000 -g 1000 sandbox     && mkdir -p /go/pkg/mod     && chown -R sandbox:sandbox /go
+#42 CACHED
+
+#43 [sandbox stage-1  8/10] COPY --from=builder /sandbox /usr/local/bin/sandbox
+#43 CACHED
+
+#44 [sandbox stage-1  6/10] RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash -     && apt-get install -y --no-install-recommends nodejs     && npm install -g typescript vitest     && rm -rf /var/lib/apt/lists/*
+#44 CACHED
+
+#45 [sandbox stage-1  2/10] RUN apt-get update && apt-get install -y --no-install-recommends     build-essential     git     curl     wget     jq     ca-certificates     unzip     python3     python3-pip     python3-venv     && rm -rf /var/lib/apt/lists/*
+#45 CACHED
+
+#46 [sandbox stage-1  5/10] RUN curl -fsSL "https://services.gradle.org/distributions/gradle-8.12-bin.zip"     -o /tmp/gradle.zip     && unzip -q /tmp/gradle.zip -d /opt     && rm /tmp/gradle.zip     && ln -s "/opt/gradle-8.12/bin/gradle" /usr/local/bin/gradle
+#46 CACHED
+
+#47 [sandbox stage-1  3/10] RUN curl -fsSL "https://go.dev/dl/go1.25.3.linux-arm64.tar.gz"     | tar -C /usr/local -xz
+#47 CACHED
+
+#48 [sandbox stage-1  9/10] RUN git config --global user.email "sandbox@semspec.dev"     && git config --global user.name "Semspec Sandbox"
+#48 CACHED
+
+#49 [sandbox stage-1 10/10] WORKDIR /workspace
+#49 CACHED
+
+#50 [qa-runner] exporting to image
+#50 exporting layers done
+#50 exporting manifest sha256:9285f9b2116636a599e43c4d5c0382b25653817f244a1fba69c90b207bf43c4c done
+#50 exporting config sha256:31e4039f3b4fe5cfe71e182caeff4fb436d130c98202efd948bbec88b8d719d3 done
+#50 exporting attestation manifest sha256:0e30bc801f73d4ac4d37c81e813a4526a1c5ace3696c3a762117d6dbafafca13 0.0s done
+#50 exporting manifest list sha256:6602a3e23afef476d4e6894ab0676b85872aa830c08ad327f36dc6b291c47c76 done
+#50 naming to docker.io/library/ui-qa-runner:latest done
+#50 unpacking to docker.io/library/ui-qa-runner:latest done
+#50 DONE 0.1s
+
+#51 [sandbox] exporting to image
+#51 exporting layers done
+#51 exporting manifest sha256:c7078534d489c5eef518bf05bd8468d7471a8522c8018c1c625dc9c105b503ea done
+#51 exporting config sha256:dc16286cc3d01eaa37204a0b09a0162095ed9357f6c6dc9b5a86a259cb0011f3 done
+#51 exporting attestation manifest sha256:7fd1ff2ad997885fcde6635e0986adcfec7745842b7e79ef4fdb855c3d7b9a4f 0.0s done
+#51 exporting manifest list sha256:5a0b53fec5077318a80e986577321c8ce95e9be1e731afeddeacbdec3dc8d8f4 done
+#51 naming to docker.io/library/ui-sandbox:latest done
+#51 unpacking to docker.io/library/ui-sandbox:latest done
+#51 DONE 0.1s
+
+#52 [qa-runner] resolving provenance for metadata file
+#52 DONE 0.1s
+
+#53 [sandbox] resolving provenance for metadata file
+#53 DONE 0.1s
+
+#54 [semspec stage-1 2/6] WORKDIR /app
+#54 CACHED
+
+#55 [semspec stage-1 3/6] RUN apk add --no-cache ca-certificates git wget python3 py3-pip     && pip3 install --break-system-packages pytest
+#55 CACHED
+
+#56 [semspec stage-1 4/6] COPY --from=builder /semspec /usr/local/bin/semspec
+#56 DONE 0.1s
+
+#57 [semspec stage-1 5/6] COPY --from=builder /build/configs /app/configs
+#57 DONE 0.0s
+
+#58 [semspec stage-1 6/6] RUN mkdir -p /workspace
+#58 DONE 0.2s
+
+#59 [semspec] exporting to image
+#59 exporting layers 0.9s done
+#59 exporting manifest sha256:c3b48bee947e56cad5b819b3a45a194ab7d07cc9f79e2ecccd8b3a6c7b522eb4 done
+#59 exporting config sha256:78ace367bfa5303796eda03973ee52af1dae6abebcf92808622dd59d010bb640 done
+#59 exporting attestation manifest sha256:4e16866faa8375d9d8eb1ba72043ed90c789fa19ed5cb4eb8b849804c783b2cb done
+#59 exporting manifest list sha256:3c65fc64647a2ac305bab4d49257c0d6c89f3bd27b9de55cd55b0aeb6bd7a45b done
+#59 naming to docker.io/library/ui-semspec:latest done
+#59 unpacking to docker.io/library/ui-semspec:latest 0.1s done
+#59 DONE 1.1s
+
+#60 [semspec] resolving provenance for metadata file
+#60 DONE 0.0s
+ Image ui-qa-runner Built 
+ Image ui-sandbox Built 
+ Image ui-semspec Built 
+ Image ui-ui Built 
+task: [e2e:ui:test:llm] E2E_CONFIG=e2e-local.json docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml  up -d --wait
+ Network semspec-ui-e2e Creating 
+ Network semspec-ui-e2e Created 
+ Volume ui_ui-nats-data Creating 
+ Volume ui_ui-nats-data Created 
+ Container ui-sandbox-1 Creating 
+ Container ui-nats-1 Creating 
+ Container ui-sandbox-1 Created 
+ Container ui-nats-1 Created 
+ Container ui-semspec-1 Creating 
+ Container ui-qa-runner-1 Creating 
+ Container ui-qa-runner-1 Created 
+ Container ui-semspec-1 Created 
+ Container ui-semsource-1 Creating 
+ Container ui-ui-1 Creating 
+ Container ui-semsource-1 Created 
+ Container ui-ui-1 Created 
+ Container ui-caddy-1 Creating 
+ Container ui-caddy-1 Created 
+ Container ui-nats-1 Starting 
+ Container ui-sandbox-1 Starting 
+ Container ui-nats-1 Started 
+ Container ui-nats-1 Waiting 
+ Container ui-sandbox-1 Started 
+ Container ui-nats-1 Waiting 
+ Container ui-sandbox-1 Waiting 
+ Container ui-nats-1 Healthy 
+ Container ui-nats-1 Healthy 
+ Container ui-qa-runner-1 Starting 
+ Container ui-sandbox-1 Healthy 
+ Container ui-semspec-1 Starting 
+ Container ui-qa-runner-1 Started 
+ Container ui-semspec-1 Started 
+ Container ui-semspec-1 Waiting 
+ Container ui-nats-1 Waiting 
+ Container ui-semspec-1 Waiting 
+ Container ui-nats-1 Healthy 
+ Container ui-semspec-1 Healthy 
+ Container ui-semsource-1 Starting 
+ Container ui-semspec-1 Healthy 
+ Container ui-ui-1 Starting 
+ Container ui-ui-1 Started 
+ Container ui-semspec-1 Waiting 
+ Container ui-ui-1 Waiting 
+ Container ui-semsource-1 Started 
+ Container ui-semspec-1 Healthy 
+ Container ui-ui-1 Healthy 
+ Container ui-caddy-1 Starting 
+ Container ui-caddy-1 Started 
+ Container ui-ui-1 Waiting 
+ Container ui-caddy-1 Waiting 
+ Container ui-qa-runner-1 Waiting 
+ Container ui-nats-1 Waiting 
+ Container ui-semsource-1 Waiting 
+ Container ui-sandbox-1 Waiting 
+ Container ui-semspec-1 Waiting 
+ Container ui-ui-1 Healthy 
+ Container ui-sandbox-1 Healthy 
+ Container ui-qa-runner-1 Healthy 
+ Container ui-nats-1 Healthy 
+ Container ui-semspec-1 Healthy 
+ Container ui-semsource-1 Healthy 
+ Container ui-caddy-1 Healthy 
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Running @easy Playwright tests..."
+[UI:TEST:LLM] Running @easy Playwright tests...
+task: [e2e:ui:test:llm] cd ui
+# Provider-specific timeouts for real LLM E2E tests.
+# Local Ollama is slower than cloud providers — bump cascade + execution.
+# Claude needs the longest — plan review rejections add full revision cycles.
+if [ "local" = "claude" ]; then
+  CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=3600000 PLAYWRIGHT_TIMEOUT=3600000 \
+    npx playwright test --grep @easy --project t2 --no-deps
+elif [ "local" = "local" ]; then
+  CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
+    npx playwright test --grep @easy --project t2 --no-deps
+else
+  PLAYWRIGHT_TIMEOUT=1200000 \
+    npx playwright test --grep @easy --project t2 --no-deps
+fi
+
+
+Running 8 tests using 1 worker
+
+  ✘  1 [t2] › e2e/plan-lifecycle-llm.spec.ts:99:2 › @t2 @easy plan-lifecycle-llm › plan created with goal (0ms)
+  -  2 [t2] › e2e/plan-lifecycle-llm.spec.ts:107:2 › @t2 @easy plan-lifecycle-llm › plan reviewed and approved
+  -  3 [t2] › e2e/plan-lifecycle-llm.spec.ts:125:2 › @t2 @easy plan-lifecycle-llm › requirements generated
+  -  4 [t2] › e2e/plan-lifecycle-llm.spec.ts:144:2 › @t2 @easy plan-lifecycle-llm › architecture generated
+  -  5 [t2] › e2e/plan-lifecycle-llm.spec.ts:165:2 › @t2 @easy plan-lifecycle-llm › scenarios generated and reviewed
+  -  6 [t2] › e2e/plan-lifecycle-llm.spec.ts:181:2 › @t2 @easy plan-lifecycle-llm › execution triggered
+  -  7 [t2] › e2e/plan-lifecycle-llm.spec.ts:214:2 › @t2 @easy plan-lifecycle-llm › execution completes
+  -  8 [t2] › e2e/plan-lifecycle-llm.spec.ts:236:2 › @t2 @easy plan-lifecycle-llm › trajectories exist after execution
+
+
+  1) [t2] › e2e/plan-lifecycle-llm.spec.ts:99:2 › @t2 @easy plan-lifecycle-llm › plan created with goal 
+
+    Error: Plan d3dee2745f92 goal not ready after 1200000ms
+
+       at helpers/api.ts:93
+
+      91 | 		await new Promise((r) => setTimeout(r, 500));
+      92 | 	}
+    > 93 | 	throw new Error(`Plan ${slug} goal not ready after ${timeoutMs}ms`);
+         | 	      ^
+      94 | }
+      95 |
+      96 | export async function waitForBackendHealth(timeoutMs = 15000): Promise<void> {
+        at waitForGoal (/Users/coby/Code/c360/semspec/ui/e2e/helpers/api.ts:93:8)
+        at /Users/coby/Code/c360/semspec/ui/e2e/plan-lifecycle-llm.spec.ts:89:3
+
+  1 failed
+    [t2] › e2e/plan-lifecycle-llm.spec.ts:99:2 › @t2 @easy plan-lifecycle-llm › plan created with goal 
+  7 did not run
+task: [e2e:ui:test:llm] echo ""
+echo "[METRICS] Post-run agentic metrics:"
+curl -s http://localhost:3000/metrics 2>/dev/null | grep -E '^semstreams_agentic_(loop_request_tokens|loop_context_utilization|loop_loops_|loop_iterations_per_loop|model_length_truncations|model_tokens_total|model_requests_total|loop_tool_results_truncated)' | sort
+echo ""
+
+
+[METRICS] Post-run agentic metrics:
+
+task: [e2e:ui:test:llm] echo "[UI:TEST:LLM] Complete"
+[UI:TEST:LLM] Complete
+task: [e2e:ui:cleanup:llm] if [ -n "$DEBUG" ]; then
+  echo ""
+  echo "[DEBUG] Stack kept running. Poke around:"
+  echo "  UI:              http://localhost:3000"
+  echo "  NATS monitor:    http://localhost:8223"
+  echo "  Semspec logs:    docker logs -f ui-semspec-1"
+  echo "  Message logger:  curl -s http://localhost:3000/message-logger/entries?limit=10 | jq '.[].subject'"
+  echo "  Stop:            task e2e:ui:down"
+  echo ""
+else
+  # Tear down with the epic overlay too — harmless when it wasn't used.
+  docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml -f ui/docker-compose.e2e-epic.yml down -v --timeout 15 2>/dev/null || true
+fi
+
+
+[DEBUG] Stack kept running. Poke around:
+  UI:              http://localhost:3000
+  NATS monitor:    http://localhost:8223
+  Semspec logs:    docker logs -f ui-semspec-1
+  Message logger:  curl -s http://localhost:3000/message-logger/entries?limit=10 | jq '.[].subject'
+  Stop:            task e2e:ui:down
+
+task: [e2e:reset-fixtures] for fixture in test/e2e/fixtures/go-project test/e2e/fixtures/hello-world-py test/e2e/fixtures/osh-driver-meshtastic; do
+  if [ ! -d "$fixture/.git" ]; then
+    continue
+  fi
+  ROOT=$(git -C "$fixture" rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
+  if [ -z "$ROOT" ]; then
+    echo "[RESET-FIXTURES] $fixture has no commits — skipping"
+    continue
+  fi
+  echo "[RESET-FIXTURES] $fixture -> $ROOT"
+  # Force main to the root commit and switch to it, drop unstaged +
+  # untracked (but keep ignored), then prune every accumulated
+  # agent/* + semspec/* branch the agents created. The previous
+  # inline pattern only reset whichever branch HEAD happened to be
+  # on, leaving cross-run drift on main and other branches.
+  # `checkout -f` is required because prior runs leave the working
+  # tree dirty (modified main.go, untracked main_test.go, etc.) —
+  # without -f the switch aborts.
+  git -C "$fixture" checkout -q -f -B main "$ROOT"
+  git -C "$fixture" reset --hard -q "$ROOT"
+  # Clean untracked agent files (main_test.go, health.go, etc.) but
+  # exclude .semspec/ — that directory holds files tracked by the
+  # PARENT semspec repo (e.g. hello-world-py/.semspec/checklist.json
+  # is committed to /Users/.../semspec, not to the fixture's own
+  # nested .git). Without the exclude, `git clean -fd` from the
+  # fixture's git sees those parent-tracked files as untracked and
+  # deletes them, leaving the parent repo with a phantom `D` in
+  # `git status`. Caught 2026-04-29 — see project_reset_fixtures_amnesty.
+  # The explicit `rm -rf` below handles known runtime cruft inside
+  # .semspec/.
+  git -C "$fixture" clean -fd -q -e .semspec/
+  # Remove the .semspec/worktrees/ directory so `git worktree prune`
+  # forgets the worktrees the agents created during prior runs. Then
+  # branch -D works because no worktree pins the ref anymore.
+  # `--expire=now` is required because the default expiry is 3 hours;
+  # without it, prune leaves recent stale entries in place and the
+  # subsequent branch-delete fails with "branch in use by worktree".
+  rm -rf "$fixture/.semspec/worktrees" "$fixture/.semspec/plans" 2>/dev/null || true
+  git -C "$fixture" worktree prune --expire=now -q 2>/dev/null || true
+  git -C "$fixture" for-each-ref --format='%(refname:short)' refs/heads | grep -vE '^main$' | while read -r b; do
+    git -C "$fixture" branch -D -q "$b" 2>/dev/null || true
+  done
+done
+echo "[OK] Fixtures reset"
+
+[RESET-FIXTURES] test/e2e/fixtures/go-project -> a89817a0aade647d4224a97a7256e091ccc8c763
+[RESET-FIXTURES] test/e2e/fixtures/hello-world-py -> 5639cc953efe7a72cb01a8b8de64bbb8712b7ea2
+[OK] Fixtures reset

@@ -1,0 +1,2 @@
+NAME                                   ID              SIZE     PROCESSOR         CONTEXT    UNTIL              
+semspec/qwen3-coder-30b-128k:latest    8ce1b5914287    31 GB    8%/92% CPU/GPU    131072     3 minutes from now    

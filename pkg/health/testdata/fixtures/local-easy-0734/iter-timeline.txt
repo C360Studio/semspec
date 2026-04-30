@@ -1,0 +1,13 @@
+time=2026-04-29T12:40:25.737Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:8901376f
+time=2026-04-29T12:40:52.275Z level=DEBUG msg="Model request completed" request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:8901376f model=qwen3-coder-30b duration_seconds=26.535832096 tool_calls=4 prompt_tokens=1330 completion_tokens=125
+time=2026-04-29T12:41:07.281Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:bab063a3
+time=2026-04-29T12:41:35.929Z level=DEBUG msg="Model request completed" request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:bab063a3 model=qwen3-coder-30b duration_seconds=28.657917638 tool_calls=1 prompt_tokens=1908 completion_tokens=43
+time=2026-04-29T12:41:35.949Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:502485ca
+time=2026-04-29T12:41:46.672Z level=DEBUG msg="Model request completed" request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:502485ca model=qwen3-coder-30b duration_seconds=10.723209796999999 tool_calls=1 prompt_tokens=2537 completion_tokens=70
+time=2026-04-29T12:41:46.751Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:e3712293
+time=2026-04-29T12:43:15.706Z level=DEBUG msg="Model request completed" request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:e3712293 model=qwen3-coder-30b duration_seconds=88.937102124 tool_calls=1 prompt_tokens=11868 completion_tokens=66
+time=2026-04-29T12:43:15.806Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:e493d69c
+time=2026-04-29T12:44:42.083Z level=DEBUG msg="Model request completed" request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:e493d69c model=qwen3-coder-30b duration_seconds=86.277913247 tool_calls=1 prompt_tokens=11995 completion_tokens=65
+time=2026-04-29T12:44:42.143Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:e292e46e
+time=2026-04-29T12:48:52.936Z level=DEBUG msg="Model request completed" request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:e292e46e model=qwen3-coder-30b duration_seconds=250.854800491 tool_calls=1 prompt_tokens=14063 completion_tokens=82
+time=2026-04-29T12:48:53.068Z level=DEBUG msg="Resolved request timeout" timeout_source=endpoint timeout=15m0s request_id=fc0e35bb-1cde-4e38-8dad-eacae8a6eca7:req:c10f5527

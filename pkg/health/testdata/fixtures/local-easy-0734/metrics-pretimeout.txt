@@ -1,0 +1,495 @@
+# HELP go_gc_duration_seconds A summary of the wall-time pause (stop-the-world) duration in garbage collection cycles.
+# TYPE go_gc_duration_seconds summary
+go_gc_duration_seconds{quantile="0"} 2.7124e-05
+go_gc_duration_seconds{quantile="0.25"} 0.003299875
+go_gc_duration_seconds{quantile="0.5"} 0.009005708
+go_gc_duration_seconds{quantile="0.75"} 0.031219125
+go_gc_duration_seconds{quantile="1"} 0.372687958
+go_gc_duration_seconds_sum 6.796745421
+go_gc_duration_seconds_count 226
+# HELP go_gc_gogc_percent Heap size target percentage configured by the user, otherwise 100. This value is set by the GOGC environment variable, and the runtime/debug.SetGCPercent function. Sourced from /gc/gogc:percent.
+# TYPE go_gc_gogc_percent gauge
+go_gc_gogc_percent 100
+# HELP go_gc_gomemlimit_bytes Go runtime memory limit configured by the user, otherwise math.MaxInt64. This value is set by the GOMEMLIMIT environment variable, and the runtime/debug.SetMemoryLimit function. Sourced from /gc/gomemlimit:bytes.
+# TYPE go_gc_gomemlimit_bytes gauge
+go_gc_gomemlimit_bytes 9.223372036854776e+18
+# HELP go_goroutines Number of goroutines that currently exist.
+# TYPE go_goroutines gauge
+go_goroutines 250
+# HELP go_info Information about the Go environment.
+# TYPE go_info gauge
+go_info{version="go1.25.9"} 1
+# HELP go_memstats_alloc_bytes Number of bytes allocated in heap and currently in use. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_alloc_bytes gauge
+go_memstats_alloc_bytes 9.881536e+06
+# HELP go_memstats_alloc_bytes_total Total number of bytes allocated in heap until now, even if released already. Equals to /gc/heap/allocs:bytes.
+# TYPE go_memstats_alloc_bytes_total counter
+go_memstats_alloc_bytes_total 1.250108992e+09
+# HELP go_memstats_buck_hash_sys_bytes Number of bytes used by the profiling bucket hash table. Equals to /memory/classes/profiling/buckets:bytes.
+# TYPE go_memstats_buck_hash_sys_bytes gauge
+go_memstats_buck_hash_sys_bytes 1.447326e+06
+# HELP go_memstats_frees_total Total number of heap objects frees. Equals to /gc/heap/frees:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_frees_total counter
+go_memstats_frees_total 6.775283e+06
+# HELP go_memstats_gc_sys_bytes Number of bytes used for garbage collection system metadata. Equals to /memory/classes/metadata/other:bytes.
+# TYPE go_memstats_gc_sys_bytes gauge
+go_memstats_gc_sys_bytes 3.922192e+06
+# HELP go_memstats_heap_alloc_bytes Number of heap bytes allocated and currently in use, same as go_memstats_alloc_bytes. Equals to /memory/classes/heap/objects:bytes.
+# TYPE go_memstats_heap_alloc_bytes gauge
+go_memstats_heap_alloc_bytes 9.881536e+06
+# HELP go_memstats_heap_idle_bytes Number of heap bytes waiting to be used. Equals to /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_idle_bytes gauge
+go_memstats_heap_idle_bytes 8.093696e+06
+# HELP go_memstats_heap_inuse_bytes Number of heap bytes that are in use. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes
+# TYPE go_memstats_heap_inuse_bytes gauge
+go_memstats_heap_inuse_bytes 1.4778368e+07
+# HELP go_memstats_heap_objects Number of currently allocated objects. Equals to /gc/heap/objects:objects.
+# TYPE go_memstats_heap_objects gauge
+go_memstats_heap_objects 39847
+# HELP go_memstats_heap_released_bytes Number of heap bytes released to OS. Equals to /memory/classes/heap/released:bytes.
+# TYPE go_memstats_heap_released_bytes gauge
+go_memstats_heap_released_bytes 1.810432e+06
+# HELP go_memstats_heap_sys_bytes Number of heap bytes obtained from system. Equals to /memory/classes/heap/objects:bytes + /memory/classes/heap/unused:bytes + /memory/classes/heap/released:bytes + /memory/classes/heap/free:bytes.
+# TYPE go_memstats_heap_sys_bytes gauge
+go_memstats_heap_sys_bytes 2.2872064e+07
+# HELP go_memstats_last_gc_time_seconds Number of seconds since 1970 of last garbage collection.
+# TYPE go_memstats_last_gc_time_seconds gauge
+go_memstats_last_gc_time_seconds 1.777467408391665e+09
+# HELP go_memstats_mallocs_total Total number of heap objects allocated, both live and gc-ed. Semantically a counter version for go_memstats_heap_objects gauge. Equals to /gc/heap/allocs:objects + /gc/heap/tiny/allocs:objects.
+# TYPE go_memstats_mallocs_total counter
+go_memstats_mallocs_total 6.81513e+06
+# HELP go_memstats_mcache_inuse_bytes Number of bytes in use by mcache structures. Equals to /memory/classes/metadata/mcache/inuse:bytes.
+# TYPE go_memstats_mcache_inuse_bytes gauge
+go_memstats_mcache_inuse_bytes 14496
+# HELP go_memstats_mcache_sys_bytes Number of bytes used for mcache structures obtained from system. Equals to /memory/classes/metadata/mcache/inuse:bytes + /memory/classes/metadata/mcache/free:bytes.
+# TYPE go_memstats_mcache_sys_bytes gauge
+go_memstats_mcache_sys_bytes 15704
+# HELP go_memstats_mspan_inuse_bytes Number of bytes in use by mspan structures. Equals to /memory/classes/metadata/mspan/inuse:bytes.
+# TYPE go_memstats_mspan_inuse_bytes gauge
+go_memstats_mspan_inuse_bytes 296160
+# HELP go_memstats_mspan_sys_bytes Number of bytes used for mspan structures obtained from system. Equals to /memory/classes/metadata/mspan/inuse:bytes + /memory/classes/metadata/mspan/free:bytes.
+# TYPE go_memstats_mspan_sys_bytes gauge
+go_memstats_mspan_sys_bytes 342720
+# HELP go_memstats_next_gc_bytes Number of heap bytes when next garbage collection will take place. Equals to /gc/heap/goal:bytes.
+# TYPE go_memstats_next_gc_bytes gauge
+go_memstats_next_gc_bytes 1.8584666e+07
+# HELP go_memstats_other_sys_bytes Number of bytes used for other system allocations. Equals to /memory/classes/other:bytes.
+# TYPE go_memstats_other_sys_bytes gauge
+go_memstats_other_sys_bytes 2.48685e+06
+# HELP go_memstats_stack_inuse_bytes Number of bytes obtained from system for stack allocator in non-CGO environments. Equals to /memory/classes/heap/stacks:bytes.
+# TYPE go_memstats_stack_inuse_bytes gauge
+go_memstats_stack_inuse_bytes 2.29376e+06
+# HELP go_memstats_stack_sys_bytes Number of bytes obtained from system for stack allocator. Equals to /memory/classes/heap/stacks:bytes + /memory/classes/os-stacks:bytes.
+# TYPE go_memstats_stack_sys_bytes gauge
+go_memstats_stack_sys_bytes 2.29376e+06
+# HELP go_memstats_sys_bytes Number of bytes obtained from system. Equals to /memory/classes/total:byte.
+# TYPE go_memstats_sys_bytes gauge
+go_memstats_sys_bytes 3.3380616e+07
+# HELP go_sched_gomaxprocs_threads The current runtime.GOMAXPROCS setting, or the number of operating system threads that can execute user-level Go code simultaneously. Sourced from /sched/gomaxprocs:threads.
+# TYPE go_sched_gomaxprocs_threads gauge
+go_sched_gomaxprocs_threads 12
+# HELP go_threads Number of OS threads created.
+# TYPE go_threads gauge
+go_threads 19
+# HELP graph_index_dropped_total Total work items dropped due to full queue
+# TYPE graph_index_dropped_total counter
+graph_index_dropped_total 0
+# HELP graph_index_failed_total Total work items that failed processing
+# TYPE graph_index_failed_total counter
+graph_index_failed_total 0
+# HELP graph_index_processed_total Total work items processed
+# TYPE graph_index_processed_total counter
+graph_index_processed_total 1221
+# HELP graph_index_processing_duration_seconds Time spent processing work items
+# TYPE graph_index_processing_duration_seconds histogram
+graph_index_processing_duration_seconds_bucket{status="success",le="0.001"} 7
+graph_index_processing_duration_seconds_bucket{status="success",le="0.005"} 43
+graph_index_processing_duration_seconds_bucket{status="success",le="0.01"} 64
+graph_index_processing_duration_seconds_bucket{status="success",le="0.025"} 163
+graph_index_processing_duration_seconds_bucket{status="success",le="0.05"} 335
+graph_index_processing_duration_seconds_bucket{status="success",le="0.1"} 520
+graph_index_processing_duration_seconds_bucket{status="success",le="0.25"} 710
+graph_index_processing_duration_seconds_bucket{status="success",le="0.5"} 917
+graph_index_processing_duration_seconds_bucket{status="success",le="1"} 1072
+graph_index_processing_duration_seconds_bucket{status="success",le="+Inf"} 1221
+graph_index_processing_duration_seconds_sum{status="success"} 583.1885647470004
+graph_index_processing_duration_seconds_count{status="success"} 1221
+# HELP graph_index_queue_depth Current worker pool queue depth
+# TYPE graph_index_queue_depth gauge
+graph_index_queue_depth 6
+# HELP graph_index_submitted_total Total work items submitted
+# TYPE graph_index_submitted_total counter
+graph_index_submitted_total 1231
+# HELP graph_index_utilization Worker pool utilization (0-1)
+# TYPE graph_index_utilization gauge
+graph_index_utilization 0.007
+# HELP process_cpu_seconds_total Total user and system CPU time spent in seconds.
+# TYPE process_cpu_seconds_total counter
+process_cpu_seconds_total 148.89
+# HELP process_max_fds Maximum number of open file descriptors.
+# TYPE process_max_fds gauge
+process_max_fds 1.048576e+06
+# HELP process_network_receive_bytes_total Number of bytes received by the process over the network.
+# TYPE process_network_receive_bytes_total counter
+process_network_receive_bytes_total 2.91246971e+08
+# HELP process_network_transmit_bytes_total Number of bytes sent by the process over the network.
+# TYPE process_network_transmit_bytes_total counter
+process_network_transmit_bytes_total 1.4908919e+08
+# HELP process_open_fds Number of open file descriptors.
+# TYPE process_open_fds gauge
+process_open_fds 16
+# HELP process_resident_memory_bytes Resident memory size in bytes.
+# TYPE process_resident_memory_bytes gauge
+process_resident_memory_bytes 5.1478528e+07
+# HELP process_start_time_seconds Start time of the process since unix epoch in seconds.
+# TYPE process_start_time_seconds gauge
+process_start_time_seconds 1.77746640666e+09
+# HELP process_virtual_memory_bytes Virtual memory size in bytes.
+# TYPE process_virtual_memory_bytes gauge
+process_virtual_memory_bytes 1.290682368e+09
+# HELP process_virtual_memory_max_bytes Maximum amount of virtual memory available in bytes.
+# TYPE process_virtual_memory_max_bytes gauge
+process_virtual_memory_max_bytes 1.8446744073709552e+19
+# HELP semstreams_agentic_loop_active_loops Number of currently active agentic loops
+# TYPE semstreams_agentic_loop_active_loops gauge
+semstreams_agentic_loop_active_loops 1
+# HELP semstreams_agentic_loop_boid_entities_filtered_total Total times entities were reordered by Boid steering
+# TYPE semstreams_agentic_loop_boid_entities_filtered_total counter
+semstreams_agentic_loop_boid_entities_filtered_total 0
+# HELP semstreams_agentic_loop_boid_position_updates_total Total Boid position updates in KV store
+# TYPE semstreams_agentic_loop_boid_position_updates_total counter
+semstreams_agentic_loop_boid_position_updates_total 0
+# HELP semstreams_agentic_loop_context_compacted_region_tokens Current tokens in compacted history region
+# TYPE semstreams_agentic_loop_context_compacted_region_tokens gauge
+semstreams_agentic_loop_context_compacted_region_tokens 0
+# HELP semstreams_agentic_loop_context_compaction_tokens_saved Tokens saved per compaction (evicted minus summary)
+# TYPE semstreams_agentic_loop_context_compaction_tokens_saved histogram
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="100"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="200"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="400"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="800"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="1600"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="3200"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="6400"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="12800"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="25600"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="51200"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_bucket{le="+Inf"} 0
+semstreams_agentic_loop_context_compaction_tokens_saved_sum 0
+semstreams_agentic_loop_context_compaction_tokens_saved_count 0
+# HELP semstreams_agentic_loop_context_compactions_total Total number of context compactions performed
+# TYPE semstreams_agentic_loop_context_compactions_total counter
+semstreams_agentic_loop_context_compactions_total 0
+# HELP semstreams_agentic_loop_context_utilization Current context window utilization (0.0-1.0)
+# TYPE semstreams_agentic_loop_context_utilization gauge
+semstreams_agentic_loop_context_utilization 0.12382849203735977
+# HELP semstreams_agentic_loop_iterations_per_loop Distribution of iterations per loop
+# TYPE semstreams_agentic_loop_iterations_per_loop histogram
+semstreams_agentic_loop_iterations_per_loop_bucket{le="1"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="2"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="3"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="5"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="10"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="15"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="20"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="50"} 0
+semstreams_agentic_loop_iterations_per_loop_bucket{le="+Inf"} 0
+semstreams_agentic_loop_iterations_per_loop_sum 0
+semstreams_agentic_loop_iterations_per_loop_count 0
+# HELP semstreams_agentic_loop_iterations_total Total number of iterations across all loops
+# TYPE semstreams_agentic_loop_iterations_total counter
+semstreams_agentic_loop_iterations_total 6
+# HELP semstreams_agentic_loop_loops_completed_total Total number of agentic loops completed successfully
+# TYPE semstreams_agentic_loop_loops_completed_total counter
+semstreams_agentic_loop_loops_completed_total 0
+# HELP semstreams_agentic_loop_loops_created_total Total number of agentic loops created
+# TYPE semstreams_agentic_loop_loops_created_total counter
+semstreams_agentic_loop_loops_created_total 1
+# HELP semstreams_agentic_loop_loops_timeout_total Total number of agentic loops that timed out
+# TYPE semstreams_agentic_loop_loops_timeout_total counter
+semstreams_agentic_loop_loops_timeout_total 0
+# HELP semstreams_agentic_loop_request_tokens_in Prompt tokens per LLM request
+# TYPE semstreams_agentic_loop_request_tokens_in histogram
+semstreams_agentic_loop_request_tokens_in_bucket{le="100"} 0
+semstreams_agentic_loop_request_tokens_in_bucket{le="200"} 0
+semstreams_agentic_loop_request_tokens_in_bucket{le="400"} 0
+semstreams_agentic_loop_request_tokens_in_bucket{le="800"} 0
+semstreams_agentic_loop_request_tokens_in_bucket{le="1600"} 1
+semstreams_agentic_loop_request_tokens_in_bucket{le="3200"} 3
+semstreams_agentic_loop_request_tokens_in_bucket{le="6400"} 3
+semstreams_agentic_loop_request_tokens_in_bucket{le="12800"} 5
+semstreams_agentic_loop_request_tokens_in_bucket{le="25600"} 6
+semstreams_agentic_loop_request_tokens_in_bucket{le="51200"} 6
+semstreams_agentic_loop_request_tokens_in_bucket{le="102400"} 6
+semstreams_agentic_loop_request_tokens_in_bucket{le="204800"} 6
+semstreams_agentic_loop_request_tokens_in_bucket{le="+Inf"} 6
+semstreams_agentic_loop_request_tokens_in_sum 43701
+semstreams_agentic_loop_request_tokens_in_count 6
+# HELP semstreams_agentic_loop_request_tokens_out Completion tokens per LLM request
+# TYPE semstreams_agentic_loop_request_tokens_out histogram
+semstreams_agentic_loop_request_tokens_out_bucket{le="10"} 0
+semstreams_agentic_loop_request_tokens_out_bucket{le="20"} 0
+semstreams_agentic_loop_request_tokens_out_bucket{le="40"} 0
+semstreams_agentic_loop_request_tokens_out_bucket{le="80"} 4
+semstreams_agentic_loop_request_tokens_out_bucket{le="160"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="320"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="640"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="1280"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="2560"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="5120"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="10240"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="20480"} 6
+semstreams_agentic_loop_request_tokens_out_bucket{le="+Inf"} 6
+semstreams_agentic_loop_request_tokens_out_sum 451
+semstreams_agentic_loop_request_tokens_out_count 6
+# HELP semstreams_agentic_loop_tool_calls_dispatched_total Total tool calls dispatched by tool name
+# TYPE semstreams_agentic_loop_tool_calls_dispatched_total counter
+semstreams_agentic_loop_tool_calls_dispatched_total{tool_name="graph_query"} 5
+semstreams_agentic_loop_tool_calls_dispatched_total{tool_name="graph_search"} 3
+semstreams_agentic_loop_tool_calls_dispatched_total{tool_name="graph_summary"} 1
+# HELP semstreams_agentic_loop_tool_results_received_total Total tool results received by status
+# TYPE semstreams_agentic_loop_tool_results_received_total counter
+semstreams_agentic_loop_tool_results_received_total{status="error"} 1
+semstreams_agentic_loop_tool_results_received_total{status="success"} 8
+# HELP semstreams_agentic_loop_tool_results_truncated_total Total tool results truncated because they exceeded tool_result_max_bytes
+# TYPE semstreams_agentic_loop_tool_results_truncated_total counter
+semstreams_agentic_loop_tool_results_truncated_total 1
+# HELP semstreams_agentic_loop_trajectory_steps_total Total trajectory steps by type
+# TYPE semstreams_agentic_loop_trajectory_steps_total counter
+semstreams_agentic_loop_trajectory_steps_total{step_type="model_call"} 6
+semstreams_agentic_loop_trajectory_steps_total{step_type="tool_call"} 9
+# HELP semstreams_agentic_model_endpoint_health_state Circuit-breaker state for each endpoint (1 if endpoint is in this state, 0 otherwise). state label: closed, open, half_open.
+# TYPE semstreams_agentic_model_endpoint_health_state gauge
+semstreams_agentic_model_endpoint_health_state{endpoint="qwen3-coder-30b",state="closed"} 1
+semstreams_agentic_model_endpoint_health_state{endpoint="qwen3-coder-30b",state="half_open"} 0
+semstreams_agentic_model_endpoint_health_state{endpoint="qwen3-coder-30b",state="open"} 0
+# HELP semstreams_agentic_model_request_duration_seconds Model request latency in seconds
+# TYPE semstreams_agentic_model_request_duration_seconds histogram
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="0.1"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="0.2"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="0.4"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="0.8"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="1.6"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="3.2"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="6.4"} 0
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="12.8"} 1
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="25.6"} 1
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="51.2"} 3
+semstreams_agentic_model_request_duration_seconds_bucket{model="qwen3-coder-30b",le="+Inf"} 6
+semstreams_agentic_model_request_duration_seconds_sum{model="qwen3-coder-30b"} 491.986775393
+semstreams_agentic_model_request_duration_seconds_count{model="qwen3-coder-30b"} 6
+# HELP semstreams_agentic_model_requests_in_flight Number of model requests currently in flight
+# TYPE semstreams_agentic_model_requests_in_flight gauge
+semstreams_agentic_model_requests_in_flight{model="qwen3-coder-30b"} 1
+# HELP semstreams_agentic_model_requests_total Total model requests by model and status
+# TYPE semstreams_agentic_model_requests_total counter
+semstreams_agentic_model_requests_total{model="qwen3-coder-30b",status="success"} 6
+# HELP semstreams_agentic_model_tokens_total Total tokens used by model and type (prompt/completion)
+# TYPE semstreams_agentic_model_tokens_total counter
+semstreams_agentic_model_tokens_total{model="qwen3-coder-30b",type="completion"} 451
+semstreams_agentic_model_tokens_total{model="qwen3-coder-30b",type="prompt"} 43701
+# HELP semstreams_agentic_model_tool_calls_returned Distribution of tool calls per response
+# TYPE semstreams_agentic_model_tool_calls_returned histogram
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="0"} 0
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="1"} 5
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="2"} 5
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="3"} 5
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="5"} 6
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="10"} 6
+semstreams_agentic_model_tool_calls_returned_bucket{model="qwen3-coder-30b",le="+Inf"} 6
+semstreams_agentic_model_tool_calls_returned_sum{model="qwen3-coder-30b"} 9
+semstreams_agentic_model_tool_calls_returned_count{model="qwen3-coder-30b"} 6
+# HELP semstreams_agentic_tools_errors_total Total tool errors by tool name and error type
+# TYPE semstreams_agentic_tools_errors_total counter
+semstreams_agentic_tools_errors_total{error_type="unknown",tool_name="graph_search"} 1
+# HELP semstreams_agentic_tools_execution_duration_seconds Tool execution latency in seconds
+# TYPE semstreams_agentic_tools_execution_duration_seconds histogram
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.001"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.002"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.004"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.008"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.016"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.032"} 2
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.064"} 4
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.128"} 5
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.256"} 5
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="0.512"} 5
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="1.024"} 5
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="2.048"} 5
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_query",le="+Inf"} 5
+semstreams_agentic_tools_execution_duration_seconds_sum{tool_name="graph_query"} 0.17792129299999998
+semstreams_agentic_tools_execution_duration_seconds_count{tool_name="graph_query"} 5
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.001"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.002"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.004"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.008"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.016"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.032"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.064"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.128"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.256"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="0.512"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="1.024"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="2.048"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_search",le="+Inf"} 3
+semstreams_agentic_tools_execution_duration_seconds_sum{tool_name="graph_search"} 14.964605713999998
+semstreams_agentic_tools_execution_duration_seconds_count{tool_name="graph_search"} 3
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.001"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.002"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.004"} 0
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.008"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.016"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.032"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.064"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.128"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.256"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="0.512"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="1.024"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="2.048"} 1
+semstreams_agentic_tools_execution_duration_seconds_bucket{tool_name="graph_summary",le="+Inf"} 1
+semstreams_agentic_tools_execution_duration_seconds_sum{tool_name="graph_summary"} 0.004006792
+semstreams_agentic_tools_execution_duration_seconds_count{tool_name="graph_summary"} 1
+# HELP semstreams_agentic_tools_executions_total Total tool executions by tool name and status
+# TYPE semstreams_agentic_tools_executions_total counter
+semstreams_agentic_tools_executions_total{status="error",tool_name="graph_search"} 1
+semstreams_agentic_tools_executions_total{status="success",tool_name="graph_query"} 5
+semstreams_agentic_tools_executions_total{status="success",tool_name="graph_search"} 2
+semstreams_agentic_tools_executions_total{status="success",tool_name="graph_summary"} 1
+# HELP semstreams_agentic_tools_registered Number of registered tools
+# TYPE semstreams_agentic_tools_registered gauge
+semstreams_agentic_tools_registered 0
+# HELP semstreams_cache_deletes_total Total number of cache delete operations
+# TYPE semstreams_cache_deletes_total counter
+semstreams_cache_deletes_total{component="entity_query_cache"} 3
+semstreams_cache_deletes_total{component="suffix_resolution_cache"} 0
+# HELP semstreams_cache_evictions_total Total number of cache evictions
+# TYPE semstreams_cache_evictions_total counter
+semstreams_cache_evictions_total{component="entity_query_cache"} 64
+semstreams_cache_evictions_total{component="suffix_resolution_cache"} 0
+# HELP semstreams_cache_hits_total Total number of cache hits
+# TYPE semstreams_cache_hits_total counter
+semstreams_cache_hits_total{component="entity_query_cache"} 0
+semstreams_cache_hits_total{component="suffix_resolution_cache"} 0
+# HELP semstreams_cache_misses_total Total number of cache misses
+# TYPE semstreams_cache_misses_total counter
+semstreams_cache_misses_total{component="entity_query_cache"} 67
+semstreams_cache_misses_total{component="suffix_resolution_cache"} 0
+# HELP semstreams_cache_sets_total Total number of cache set operations
+# TYPE semstreams_cache_sets_total counter
+semstreams_cache_sets_total{component="entity_query_cache"} 67
+semstreams_cache_sets_total{component="suffix_resolution_cache"} 0
+# HELP semstreams_cache_size Current number of entries in cache
+# TYPE semstreams_cache_size gauge
+semstreams_cache_size{component="entity_query_cache"} 0
+semstreams_cache_size{component="suffix_resolution_cache"} 0
+# HELP semstreams_datamanager_entities_updated_total Total entities updated
+# TYPE semstreams_datamanager_entities_updated_total counter
+semstreams_datamanager_entities_updated_total 336
+# HELP semstreams_graph_embedding_dedup_hits_total Total embedding deduplication cache hits
+# TYPE semstreams_graph_embedding_dedup_hits_total counter
+semstreams_graph_embedding_dedup_hits_total 403
+# HELP semstreams_graph_embedding_embedder_type Embedder type: 0=disabled, 1=bm25, 2=http
+# TYPE semstreams_graph_embedding_embedder_type gauge
+semstreams_graph_embedding_embedder_type 1
+# HELP semstreams_graph_embedding_embeddings_generated_total Total embeddings generated
+# TYPE semstreams_graph_embedding_embeddings_generated_total counter
+semstreams_graph_embedding_embeddings_generated_total 424
+# HELP semstreams_graph_embedding_errors_total Total embedding generation errors
+# TYPE semstreams_graph_embedding_errors_total counter
+semstreams_graph_embedding_errors_total 0
+# HELP semstreams_graph_embedding_pending Current number of pending embeddings
+# TYPE semstreams_graph_embedding_pending gauge
+semstreams_graph_embedding_pending 0
+# HELP semstreams_graph_index_events_processed_total Total events processed by graph index
+# TYPE semstreams_graph_index_events_processed_total counter
+semstreams_graph_index_events_processed_total 1221
+# HELP semstreams_graph_index_kv_operations_total Total KV bucket operations
+# TYPE semstreams_graph_index_kv_operations_total counter
+semstreams_graph_index_kv_operations_total{kv_bucket="incoming",operation="put"} 4380
+semstreams_graph_index_kv_operations_total{kv_bucket="outgoing",operation="put"} 1219
+semstreams_graph_index_kv_operations_total{kv_bucket="predicate",operation="put"} 6659
+# HELP semstreams_graph_index_updates_total Total index update operations by index type
+# TYPE semstreams_graph_index_updates_total counter
+semstreams_graph_index_updates_total{index_type="incoming"} 4380
+semstreams_graph_index_updates_total{index_type="outgoing"} 1219
+semstreams_graph_index_updates_total{index_type="predicate"} 6659
+# HELP semstreams_graph_index_watch_events_total Total watch events received
+# TYPE semstreams_graph_index_watch_events_total counter
+semstreams_graph_index_watch_events_total{event_type="update"} 1221
+# HELP semstreams_graph_query_community_cache_hits_total Total community cache hits (entity found in cache)
+# TYPE semstreams_graph_query_community_cache_hits_total counter
+semstreams_graph_query_community_cache_hits_total 0
+# HELP semstreams_graph_query_community_cache_misses_total Total community cache misses (entity not in cache, falling back to storage)
+# TYPE semstreams_graph_query_community_cache_misses_total counter
+semstreams_graph_query_community_cache_misses_total 0
+# HELP semstreams_graph_query_community_storage_hits_total Total community storage fallback hits (entity found via NATS query)
+# TYPE semstreams_graph_query_community_storage_hits_total counter
+semstreams_graph_query_community_storage_hits_total 0
+# HELP semstreams_graph_query_community_storage_misses_total Total community storage fallback misses (entity not in any community)
+# TYPE semstreams_graph_query_community_storage_misses_total counter
+semstreams_graph_query_community_storage_misses_total 0
+# HELP semstreams_graph_query_global_search_requests_total Total GraphRAG global search requests
+# TYPE semstreams_graph_query_global_search_requests_total counter
+semstreams_graph_query_global_search_requests_total 0
+# HELP semstreams_graph_query_local_search_requests_total Total GraphRAG local search requests
+# TYPE semstreams_graph_query_local_search_requests_total counter
+semstreams_graph_query_local_search_requests_total 0
+# HELP semstreams_nats_circuit_breaker NATS circuit breaker status (0=closed, 1=open, 2=half-open)
+# TYPE semstreams_nats_circuit_breaker gauge
+semstreams_nats_circuit_breaker 0
+# HELP semstreams_nats_connected NATS connection status (0=disconnected, 1=connected)
+# TYPE semstreams_nats_connected gauge
+semstreams_nats_connected 0
+# HELP semstreams_nats_reconnects_total Total number of NATS reconnections
+# TYPE semstreams_nats_reconnects_total counter
+semstreams_nats_reconnects_total 0
+# HELP semstreams_nats_rtt_seconds NATS round-trip time in seconds
+# TYPE semstreams_nats_rtt_seconds gauge
+semstreams_nats_rtt_seconds 0
+# HELP semstreams_router_active_loops Number of currently active agentic loops
+# TYPE semstreams_router_active_loops gauge
+semstreams_router_active_loops 1
+# HELP semstreams_router_http_request_duration_seconds Duration of HTTP requests in seconds
+# TYPE semstreams_router_http_request_duration_seconds histogram
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.001"} 205
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.002"} 227
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.004"} 259
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.008"} 282
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.016"} 305
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.032"} 319
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.064"} 327
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.128"} 328
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.256"} 329
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="0.512"} 329
+semstreams_router_http_request_duration_seconds_bucket{endpoint="/loops",method="GET",le="+Inf"} 329
+semstreams_router_http_request_duration_seconds_sum{endpoint="/loops",method="GET"} 1.4957418
+semstreams_router_http_request_duration_seconds_count{endpoint="/loops",method="GET"} 329
+# HELP semstreams_router_http_requests_total Total number of HTTP requests by endpoint and status
+# TYPE semstreams_router_http_requests_total counter
+semstreams_router_http_requests_total{endpoint="/loops",method="GET",status="200"} 329
+# HELP semstreams_router_routing_duration_seconds Duration of message routing operations in seconds
+# TYPE semstreams_router_routing_duration_seconds histogram
+semstreams_router_routing_duration_seconds_bucket{le="0.001"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.002"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.004"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.008"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.016"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.032"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.064"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.128"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.256"} 0
+semstreams_router_routing_duration_seconds_bucket{le="0.512"} 0
+semstreams_router_routing_duration_seconds_bucket{le="+Inf"} 0
+semstreams_router_routing_duration_seconds_sum 0
+semstreams_router_routing_duration_seconds_count 0
+# HELP semstreams_router_sse_connections_active Number of active SSE connections
+# TYPE semstreams_router_sse_connections_active gauge
+semstreams_router_sse_connections_active 0
+# HELP semstreams_router_tasks_submitted_total Total number of tasks submitted to agentic loops
+# TYPE semstreams_router_tasks_submitted_total counter
+semstreams_router_tasks_submitted_total 0
+# HELP semstreams_service_status Service status (0=stopped, 1=starting, 2=running, 3=stopping, 4=failed)
+# TYPE semstreams_service_status gauge
+semstreams_service_status{service="component-manager"} 2
+semstreams_service_status{service="message-logger"} 2
+semstreams_service_status{service="metrics"} 2
