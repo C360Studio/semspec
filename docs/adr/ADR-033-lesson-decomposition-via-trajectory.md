@@ -251,7 +251,7 @@ Phased — no big-bang.
 5. **Phase 5 — retirement sweep.** New `processor/lesson-curator` component (no JetStream consumers; ticks on a configurable interval, reads/writes the lessons graph via TripleWriter). Marks `RetiredAt` with a short reason label that `RotateLessonsForRole` skips. Substages:
    - **Phase 5a [SHIPPED 2026-04-29 `3c766d5`].** Idle-since-last-injection criterion. Defaults: 24h sweep, 720h (~30d) idle threshold, 168h (~7d) min-age grace period.
    - **Phase 5b [SHIPPED 2026-04-29 `44b06aa`].** Filesystem-existence check on `EvidenceFiles[].Path`. Workspace root resolved via Config → `SEMSPEC_REPO_PATH` → CWD; empty root skips the criterion (rather than retiring everything as missing). Partial evidence (one of N paths still present) keeps the lesson.
-   - **Phase 5c (open).** Git-rewrite check against `EvidenceFiles[].CommitSHA`. Needs a git diff helper between the cited SHA and HEAD for the file region; substantial-rewrite threshold tunable.
+   - **Phase 5c [SHIPPED 2026-04-29 `84266e7`].** Git-rewrite check via `git blame --porcelain -L<start>,<end>` from the workspace root, 10s timeout. Strict-anchor threshold: any single line still attributed to the cited commit keeps the lesson. Whole-file citations and entries without a CommitSHA are skipped. Transient git errors are inconclusive (treat as anchored) so a flaky `git` invocation can't wipe the graph in one bad sweep.
 6. **Phase 6 — positive lessons:** Wire approval-on-first-pass + rating ≥ 4 path into the decomposer.
 
 Each phase ships independently. Rollback at any phase leaves prior phases intact.
