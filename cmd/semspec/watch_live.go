@@ -232,6 +232,7 @@ func liveDetectors() []health.Detector {
 		health.EmptyStopAfterToolCalls{},
 		health.JSONInText{},
 		health.ThinkingSpiral{},
+		health.RapidShallowToolCalls{},
 	}
 }
 

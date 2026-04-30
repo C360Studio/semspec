@@ -121,6 +121,7 @@ The v1 detector set:
 | `EmptyStopAfterToolCalls` | critical | Model returned `finish_reason=stop` with empty content + no tool calls AFTER calling tools earlier in the same loop. Loop is wedged. | Inject the prior failure context on retry — see `feedback_retries_must_inject_failure_context.md` |
 | `JSONInText` | critical | Model emitted a tool call as JSON text in `content` (`{"name": "..."}`) instead of using the function-calling channel. Tool will NOT execute. | Reinforce the function-calling channel in the system prompt or downgrade to a model with stronger native tool support |
 | `ThinkingSpiral` | warning | `finish_reason=stop`, no tool calls, `completion_tokens > 500`. Model burned generation budget on reasoning instead of acting. | Try a model with native `reasoning_content` channel support, or strengthen the persona's tool-use mandate |
+| `RapidShallowToolCalls` | warning | Loop has issued ≥ 6 tool calls without ever invoking `submit_work`. Model is exploring but not converging on a deliverable. | Common causes: cargo-cult bash arguments (entity IDs as filesystem paths), repeated graph_search without acting on results, or persona prompts that don't sufficiently emphasize the terminal `submit_work` step. Consider `--bail-on warning` so the loop dies before iteration budget exhausts. See `feedback_prompts_reasons_not_rules.md` |
 
 Detectors are pure functions over the bundle data — no I/O, no network.
 You can run them locally against a captured bundle (see "Reading a
