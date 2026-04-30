@@ -21,7 +21,7 @@
       "openrouter-qwen3-moe": {
         "provider": "openrouter",
         "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3.5-35b-a3b",
+        "model": "qwen/qwen3-coder-next",
         "api_key_env": "OPENROUTER_API_KEY",
         "max_tokens": 32768,
         "supports_tools": true,
