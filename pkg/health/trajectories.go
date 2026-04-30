@@ -68,7 +68,12 @@ func FetchTrajectory(ctx context.Context, client trajectoryRequester, loopID str
 	}
 	resp, err := client.Request(ctx, trajectorySubject, reqBody, trajectoryRequestTimeout)
 	if err != nil {
-		if strings.Contains(err.Error(), "trajectory not found") {
+		// agentic-loop emits exactly "trajectory not found: <wrapped>"
+		// from handleTrajectoryQuery (semstreams processor/agentic-loop).
+		// HasPrefix is a tighter anchor than Contains — protects against
+		// a future error string that mentions "trajectory not found"
+		// inside a different failure mode.
+		if strings.HasPrefix(err.Error(), "trajectory not found") {
 			return nil, TrajectoryRef{}, fmt.Errorf("%w: %s", errTrajectoryNotFound, loopID)
 		}
 		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: %w", loopID, err)
@@ -78,11 +83,11 @@ func FetchTrajectory(ctx context.Context, client trajectoryRequester, loopID str
 		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: decode: %w", loopID, err)
 	}
 	if meta.LoopID == "" {
-		// Empty loop_id with non-error body means an older or mocked
-		// responder returned `{}`. Treat as not-found so the orchestrator
-		// keeps moving; recording an empty trajectory in the bundle would
-		// mislead detectors.
-		return nil, TrajectoryRef{}, fmt.Errorf("%w: %s", errTrajectoryNotFound, loopID)
+		// Empty loop_id with a non-error body is a buggy responder, not
+		// a benign not-found. Surface it loudly so adopters debugging a
+		// wedge see "responder returned no loop_id" in the bundle's
+		// error list rather than silently zero trajectories.
+		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: responder returned empty loop_id", loopID)
 	}
 	return resp, TrajectoryRef{
 		LoopID:  meta.LoopID,

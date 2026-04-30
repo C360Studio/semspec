@@ -173,6 +173,48 @@ func TestCapture_NilNATSSkipsTrajectories(t *testing.T) {
 	}
 }
 
+func TestCapture_TrajectoriesSkippedWhenAgentLoopsUnavailable(t *testing.T) {
+	// When AGENT_LOOPS fetch fails, the orchestrator must record a
+	// causal "trajectories skipped" error so a reader sees the link
+	// instead of silently empty TrajectoryRefs.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metrics":
+			_, _ = w.Write([]byte("semspec_loop_active_loops 1\n"))
+		case "/message-logger/entries":
+			_, _ = w.Write([]byte("[]"))
+		case "/message-logger/kv/AGENT_LOOPS":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	traj := trajRequesterFunc(func(context.Context, string, []byte, time.Duration) ([]byte, error) {
+		t.Fatal("trajectory request should not happen when AGENT_LOOPS is unavailable")
+		return nil, nil
+	})
+	cfg := CaptureConfig{HTTPBaseURL: srv.URL, SkipOllama: true}
+	res, err := Capture(context.Background(), cfg, srv.Client(), traj)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+
+	var sawKVErr, sawTrajErr bool
+	for _, e := range res.Errors {
+		if strings.HasPrefix(e.Source, "kv:AGENT_LOOPS") {
+			sawKVErr = true
+		}
+		if e.Source == "trajectories" {
+			sawTrajErr = true
+		}
+	}
+	if !sawKVErr || !sawTrajErr {
+		t.Errorf("expected kv:AGENT_LOOPS + trajectories errors; got %v", res.Errors)
+	}
+}
+
 func TestCapture_DefaultCapturedBy(t *testing.T) {
 	srv := newOrchestrateServer(t)
 	defer srv.Close()

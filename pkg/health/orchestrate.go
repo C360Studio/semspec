@@ -2,9 +2,7 @@ package health
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -45,9 +43,11 @@ func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats tra
 		},
 		Diagnoses: []Diagnosis{},
 	}
-	host := CaptureHost(buildVersionFallback)
-	bundle.Host = host
-
+	// All bundle.Host writes happen on this orchestrator goroutine,
+	// not the fan-out below. CaptureOllama is the only second writer;
+	// keep both calls here so a future refactor that pushes Ollama
+	// into the goroutine pool would obviously violate the invariant.
+	bundle.Host = CaptureHost(buildVersionFallback)
 	if !cfg.SkipOllama {
 		hostInfo, state := CaptureOllama(ctx, cfg)
 		bundle.Host.Ollama = hostInfo
@@ -67,17 +67,28 @@ func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats tra
 	// the agentic-loop responder is single-process and we'd just queue.
 	trajResults := make(map[string][]byte)
 	if nats != nil {
-		for _, loop := range bundle.Loops {
-			ref, body, err := captureTrajectory(ctx, nats, loop)
-			if err != nil {
-				collector.add(err)
-				continue
+		if _, ok := bucketResults["AGENT_LOOPS"]; !ok {
+			// AGENT_LOOPS fetch failed (collector already has a
+			// kv:AGENT_LOOPS error) — record the causal link so a
+			// reader sees "no trajectories" with a reason rather than
+			// confusing it with "no loops were running."
+			collector.add(&CaptureError{
+				Source: "trajectories",
+				Err:    errors.New("skipped: AGENT_LOOPS bucket unavailable"),
+			})
+		} else {
+			for _, loop := range bundle.Loops {
+				ref, body, err := captureTrajectory(ctx, nats, loop)
+				if err != nil {
+					collector.add(err)
+					continue
+				}
+				if body == nil {
+					continue
+				}
+				trajResults[ref.LoopID] = body
+				bundle.TrajectoryRefs = append(bundle.TrajectoryRefs, ref)
 			}
-			if body == nil {
-				continue
-			}
-			trajResults[ref.LoopID] = body
-			bundle.TrajectoryRefs = append(bundle.TrajectoryRefs, ref)
 		}
 	}
 
@@ -89,10 +100,17 @@ func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats tra
 }
 
 // captureHTTPSources fans out the metrics, messages, and KV-bucket
-// fetchers concurrently. Each goroutine writes only its own bundle
-// field; KV buckets share a result map under a small mutex. Extracted
-// from Capture to keep that function under the package's
-// function-length budget.
+// fetchers concurrently. Extracted from Capture to keep that function
+// under the package's function-length budget.
+//
+// Concurrency invariant: each goroutine writes ONLY its dedicated
+// bundle field (Metrics, Messages) or into bucketResults under
+// bucketMu. NEVER write bundle.Plans / bundle.Loops from inside a
+// goroutine — those are assigned by the orchestrator goroutine after
+// wg.Wait so the post-wait read happens-after the goroutine's write
+// to bucketResults. Future maintainers: a "simplification" that
+// pushes Plans/Loops assignment into the goroutine breaks the memory-
+// model ordering and the race detector won't catch it on every run.
 func captureHTTPSources(
 	ctx context.Context,
 	cfg CaptureConfig,
@@ -148,7 +166,9 @@ func captureHTTPSources(
 // captureTrajectory fetches one loop's trajectory and returns the
 // TrajectoryRef + raw bytes. Returns (zero, nil, nil) for not-found —
 // not-found is benign and shouldn't pollute the error log; the loop
-// just won't appear in TrajectoryRefs.
+// just won't appear in TrajectoryRefs. FetchTrajectory has already
+// validated the body is well-formed JSON via the trajectoryMeta
+// unmarshal, so this layer is purely orchestration.
 func captureTrajectory(ctx context.Context, nats trajectoryRequester, loop KVEntry) (TrajectoryRef, []byte, *CaptureError) {
 	body, ref, err := FetchTrajectory(ctx, nats, loop.Key)
 	if errors.Is(err, errTrajectoryNotFound) {
@@ -158,13 +178,6 @@ func captureTrajectory(ctx context.Context, nats trajectoryRequester, loop KVEnt
 		return TrajectoryRef{}, nil, &CaptureError{Source: "trajectory:" + loop.Key, Err: err}
 	}
 	ref.Filename = "trajectories/" + ref.LoopID + ".json"
-	// Validate the JSON is well-formed by re-marshalling through a
-	// generic any. Cheap insurance: a malformed responder would otherwise
-	// land malformed bytes in the tarball.
-	var probe any
-	if err := json.Unmarshal(body, &probe); err != nil {
-		return TrajectoryRef{}, nil, &CaptureError{Source: "trajectory:" + loop.Key, Err: fmt.Errorf("malformed JSON: %w", err)}
-	}
 	return ref, body, nil
 }
 

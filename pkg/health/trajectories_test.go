@@ -64,14 +64,18 @@ func TestFetchTrajectory_NotFound(t *testing.T) {
 	}
 }
 
-func TestFetchTrajectory_EmptyResponseTreatedAsNotFound(t *testing.T) {
-	// A mock or older responder might return `{}`. Without LoopID we
-	// can't write a meaningful trajectory file; surfacing it as
-	// not-found keeps the bundle clean.
+func TestFetchTrajectory_EmptyResponseIsHardError(t *testing.T) {
+	// A non-error responder returning `{}` (no loop_id) is a buggy
+	// responder, not a benign not-found. Surface loudly so adopters
+	// see the responder bug in the bundle's error list rather than
+	// confusing it with "loop evicted from cache."
 	req := &stubRequester{body: []byte(`{}`)}
 	_, _, err := FetchTrajectory(context.Background(), req, "loop-y")
-	if !errors.Is(err, errTrajectoryNotFound) {
-		t.Errorf("expected errTrajectoryNotFound for empty response, got %v", err)
+	if err == nil {
+		t.Fatal("expected error for empty-response responder bug")
+	}
+	if errors.Is(err, errTrajectoryNotFound) {
+		t.Errorf("empty response should NOT be classified as not-found: %v", err)
 	}
 }
 
