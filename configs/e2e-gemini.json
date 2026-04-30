@@ -482,7 +482,8 @@
         "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
-        "indexing_budget": "60s"
+        "indexing_budget": "60s",
+        "enable_positive_lessons": true
       }
     },
     "workflow-documents": {
