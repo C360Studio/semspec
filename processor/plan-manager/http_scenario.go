@@ -29,7 +29,7 @@ type UpdateScenarioHTTPRequest struct {
 }
 
 // extractSlugScenarioAndAction extracts slug, scenarioID, and action from paths like:
-// /plan-api/plans/{slug}/scenarios/{scenarioId}
+// /plan-manager/plans/{slug}/scenarios/{scenarioId}
 func extractSlugScenarioAndAction(path string) (slug, scenarioID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {

@@ -1609,7 +1609,7 @@ func (s *HelloWorldScenario) stageVerifyEscalation(ctx context.Context, result *
 // Execution stages (new pipeline: POST /execute → scenario-orchestrator → TDD)
 // ---------------------------------------------------------------------------
 
-// stageTriggerExecution calls POST /plan-api/plans/{slug}/execute to start
+// stageTriggerExecution calls POST /plan-manager/plans/{slug}/execute to start
 // the execution pipeline. The plan must be at ready_for_execution status.
 func (s *HelloWorldScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")

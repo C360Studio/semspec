@@ -16,6 +16,12 @@
       "description": "Model endpoint for in-TDD-cycle code reviewer agent",
       "category": "advanced"
     },
+    "enable_positive_lessons": {
+      "type": "boolean",
+      "description": "Enable ADR-033 Phase 6 — emit decompose requests for approved-on-first-try reviews",
+      "default": false,
+      "category": "advanced"
+    },
     "execution_state_bucket": {
       "type": "string",
       "description": "KV bucket for execution state (observable twofer)",

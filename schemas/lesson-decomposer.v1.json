@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lesson-decomposer.v1.json",
+  "type": "object",
+  "title": "lesson-decomposer Configuration",
+  "description": "ADR-033 Phase 2+: produces evidence-cited lessons from reviewer-rejection trajectories",
+  "properties": {
+    "consumer_name": {
+      "type": "string",
+      "description": "Durable consumer name",
+      "default": "lesson-decomposer",
+      "category": "basic"
+    },
+    "filter_subject": {
+      "type": "string",
+      "description": "NATS subject pattern",
+      "default": "workflow.events.lesson.decompose.requested.\u003e",
+      "category": "basic"
+    },
+    "stream_name": {
+      "type": "string",
+      "description": "JetStream stream for decompose requests",
+      "default": "WORKFLOW",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "lesson-decomposer",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

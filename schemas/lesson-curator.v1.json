@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "lesson-curator.v1.json",
+  "type": "object",
+  "title": "lesson-curator Configuration",
+  "description": "ADR-033 Phase 5: retires stale lessons via periodic sweep over the lessons graph",
+  "properties": {
+    "idle_threshold": {
+      "type": "string",
+      "description": "Lessons not injected within this duration are retired",
+      "default": "720h",
+      "category": "advanced"
+    },
+    "min_age_before_retire": {
+      "type": "string",
+      "description": "Lessons younger than this are never retired regardless of idle status",
+      "default": "168h",
+      "category": "advanced"
+    },
+    "sweep_interval": {
+      "type": "string",
+      "description": "How often the curator scans the lessons graph",
+      "default": "24h",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "lesson-curator",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

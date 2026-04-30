@@ -179,7 +179,7 @@ func (s *QuestionsAPIScenario) stageCreateQuestion(ctx context.Context, result *
 	return nil
 }
 
-// stageListQuestions tests GET /plan-api/questions with filters.
+// stageListQuestions tests GET /plan-manager/questions with filters.
 func (s *QuestionsAPIScenario) stageListQuestions(ctx context.Context, result *Result) error {
 	// Test listing with pending status (default)
 	pendingResp, err := s.http.ListQuestions(ctx, "pending", "", 0)
@@ -226,7 +226,7 @@ func (s *QuestionsAPIScenario) stageListQuestions(ctx context.Context, result *R
 	return nil
 }
 
-// stageGetQuestion tests GET /plan-api/questions/{id}.
+// stageGetQuestion tests GET /plan-manager/questions/{id}.
 func (s *QuestionsAPIScenario) stageGetQuestion(ctx context.Context, result *Result) error {
 	noQuestions, _ := result.GetDetailBool("no_questions_available")
 	if noQuestions {
@@ -266,7 +266,7 @@ func (s *QuestionsAPIScenario) stageGetQuestion(ctx context.Context, result *Res
 	return nil
 }
 
-// stageAnswerQuestion tests POST /plan-api/questions/{id}/answer.
+// stageAnswerQuestion tests POST /plan-manager/questions/{id}/answer.
 func (s *QuestionsAPIScenario) stageAnswerQuestion(ctx context.Context, result *Result) error {
 	noQuestions, _ := result.GetDetailBool("no_questions_available")
 	if noQuestions {

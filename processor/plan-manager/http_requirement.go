@@ -29,8 +29,8 @@ type UpdateRequirementHTTPRequest struct {
 }
 
 // extractSlugRequirementAndAction extracts slug, requirementID, and action from paths like:
-// /plan-api/plans/{slug}/requirements/{reqId}
-// /plan-api/plans/{slug}/requirements/{reqId}/deprecate
+// /plan-manager/plans/{slug}/requirements/{reqId}
+// /plan-manager/plans/{slug}/requirements/{reqId}/deprecate
 func extractSlugRequirementAndAction(path string) (slug, requirementID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {

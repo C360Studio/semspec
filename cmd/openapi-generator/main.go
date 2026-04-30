@@ -56,7 +56,7 @@ var componentRegistry = map[string]struct {
 		Description: "Plan lifecycle manager: CRUD, coordination, requirements, scenarios",
 		Domain:      "semspec",
 	},
-	"project-api": {
+	"project-manager": {
 		ConfigType:  reflect.TypeOf(projectmanager.Config{}),
 		Description: "HTTP endpoints for project initialization - detection, standards, checklist",
 		Domain:      "semspec",

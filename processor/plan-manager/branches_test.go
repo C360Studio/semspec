@@ -31,7 +31,7 @@ func TestHandlePlanBranches_NoSandbox(t *testing.T) {
 	plan := &workflow.Plan{ID: workflow.PlanEntityID("x"), Slug: "x"}
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/x/branches", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/x/branches", nil)
 	w := httptest.NewRecorder()
 	c.handlePlanBranches(w, req, "x")
 
@@ -44,7 +44,7 @@ func TestHandlePlanBranches_PlanNotFound(t *testing.T) {
 	c := newBranchesTestComponent(t)
 	c.workspace = newWorkspaceProxy("http://sandbox.invalid")
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/missing/branches", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/missing/branches", nil)
 	w := httptest.NewRecorder()
 	c.handlePlanBranches(w, req, "missing")
 
@@ -96,7 +96,7 @@ func TestHandlePlanBranches_HappyPath(t *testing.T) {
 	}
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/demo/branches", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/demo/branches", nil)
 	w := httptest.NewRecorder()
 	c.handlePlanBranches(w, req, "demo")
 
@@ -134,7 +134,7 @@ func TestHandleRequirementFileDiff_MissingPath(t *testing.T) {
 	plan := &workflow.Plan{ID: workflow.PlanEntityID("p"), Slug: "p"}
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/p/requirements/R1/file-diff", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/p/requirements/R1/file-diff", nil)
 	w := httptest.NewRecorder()
 	c.handleRequirementFileDiff(w, req, "p", "R1")
 
@@ -167,7 +167,7 @@ func TestHandleRequirementFileDiff_HappyPath(t *testing.T) {
 	plan := &workflow.Plan{ID: workflow.PlanEntityID("p"), Slug: "p"}
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/p/requirements/R7/file-diff?path=src/foo.go&base=develop", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/p/requirements/R7/file-diff?path=src/foo.go&base=develop", nil)
 	w := httptest.NewRecorder()
 	c.handleRequirementFileDiff(w, req, "p", "R7")
 

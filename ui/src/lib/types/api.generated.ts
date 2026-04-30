@@ -956,7 +956,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans": {
+    "/plan-manager/plans": {
         parameters: {
             query?: never;
             header?: never;
@@ -1039,7 +1039,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}": {
+    "/plan-manager/plans/{slug}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1164,7 +1164,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/plan-api/plans/{slug}/execute": {
+    "/plan-manager/plans/{slug}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -1220,7 +1220,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/promote": {
+    "/plan-manager/plans/{slug}/promote": {
         parameters: {
             query?: never;
             header?: never;
@@ -1269,7 +1269,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/reviews": {
+    "/plan-manager/plans/{slug}/reviews": {
         parameters: {
             query?: never;
             header?: never;
@@ -1318,7 +1318,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/unarchive": {
+    "/plan-manager/plans/{slug}/unarchive": {
         parameters: {
             query?: never;
             header?: never;
@@ -2602,6 +2602,7 @@ export interface components {
             };
         };
         InitResponse: {
+            files_skipped?: string[];
             files_written: string[];
             success: boolean;
         };
@@ -2634,8 +2635,26 @@ export interface components {
             CategoryIDs: string[];
             /** Format: date-time */
             CreatedAt: string;
+            Detail: string;
+            EvidenceFiles: {
+                commit_sha?: string;
+                line_end?: number;
+                line_start?: number;
+                path: string;
+            }[];
+            EvidenceSteps: {
+                loop_id: string;
+                step_index: number;
+            }[];
             ID: string;
+            InjectionForm: string;
+            /** Format: date-time */
+            LastInjectedAt?: string | null;
+            Positive: boolean;
+            /** Format: date-time */
+            RetiredAt?: string | null;
             Role: string;
+            RootCauseRole: string;
             ScenarioID: string;
             Source: string;
             Summary: string;
@@ -2732,6 +2751,8 @@ export interface components {
                     }[];
                 } | null;
             } | null;
+            assembled_branch?: string;
+            assembled_merge_commit?: string;
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2752,6 +2773,7 @@ export interface components {
             } | null;
             goal?: string;
             id: string;
+            infra_health?: string;
             last_error?: string;
             /** Format: date-time */
             last_error_at?: string | null;
@@ -2814,6 +2836,7 @@ export interface components {
                 created_at: string;
                 depends_on?: string[];
                 description: string;
+                files_owned?: string[];
                 id: string;
                 plan_id: string;
                 status: string;
@@ -2905,6 +2928,8 @@ export interface components {
                     }[];
                 } | null;
             } | null;
+            assembled_branch?: string;
+            assembled_merge_commit?: string;
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2931,6 +2956,7 @@ export interface components {
             } | null;
             goal?: string;
             id: string;
+            infra_health?: string;
             last_error?: string;
             /** Format: date-time */
             last_error_at?: string | null;
@@ -2993,6 +3019,7 @@ export interface components {
                 created_at: string;
                 depends_on?: string[];
                 description: string;
+                files_owned?: string[];
                 id: string;
                 plan_id: string;
                 status: string;

@@ -23,42 +23,42 @@ func TestExtractSlugPlanDecisionAndAction(t *testing.T) {
 	}{
 		{
 			name:           "get proposal",
-			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1",
+			path:           "/plan-manager/plans/my-feature/plan-decisions/plan-decision.my-feature.1",
 			wantSlug:       "my-feature",
 			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "",
 		},
 		{
 			name:           "accept proposal",
-			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1/accept",
+			path:           "/plan-manager/plans/my-feature/plan-decisions/plan-decision.my-feature.1/accept",
 			wantSlug:       "my-feature",
 			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "accept",
 		},
 		{
 			name:           "reject proposal",
-			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1/reject",
+			path:           "/plan-manager/plans/my-feature/plan-decisions/plan-decision.my-feature.1/reject",
 			wantSlug:       "my-feature",
 			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "reject",
 		},
 		{
 			name:           "submit proposal",
-			path:           "/plan-api/plans/my-feature/plan-decisions/plan-decision.my-feature.1/submit",
+			path:           "/plan-manager/plans/my-feature/plan-decisions/plan-decision.my-feature.1/submit",
 			wantSlug:       "my-feature",
 			wantProposalID: "plan-decision.my-feature.1",
 			wantAction:     "submit",
 		},
 		{
 			name:           "invalid - missing segment",
-			path:           "/plan-api/plans/test-slug/other/plan-decision.test.1",
+			path:           "/plan-manager/plans/test-slug/other/plan-decision.test.1",
 			wantSlug:       "",
 			wantProposalID: "",
 			wantAction:     "",
 		},
 		{
 			name:           "invalid - insufficient parts",
-			path:           "/plan-api/plans/test-slug/plan-decisions",
+			path:           "/plan-manager/plans/test-slug/plan-decisions",
 			wantSlug:       "",
 			wantProposalID: "",
 			wantAction:     "",
@@ -100,7 +100,7 @@ func TestHandleListPlanDecisions(t *testing.T) {
 	_ = c.plans.save(context.Background(), plan)
 
 	t.Run("list all", func(t *testing.T) {
-		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/plan-decisions", nil)
+		req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/"+slug+"/plan-decisions", nil)
 		w := httptest.NewRecorder()
 
 		c.handleListPlanDecisions(w, req, slug)
@@ -120,7 +120,7 @@ func TestHandleListPlanDecisions(t *testing.T) {
 
 	t.Run("filter by status", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet,
-			"/plan-api/plans/"+slug+"/plan-decisions?status=proposed", nil)
+			"/plan-manager/plans/"+slug+"/plan-decisions?status=proposed", nil)
 		w := httptest.NewRecorder()
 
 		c.handleListPlanDecisions(w, req, slug)
@@ -159,7 +159,7 @@ func TestHandleCreatePlanDecision(t *testing.T) {
 		AffectedReqIDs: []string{"requirement.cp-create-plan.1"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -196,7 +196,7 @@ func TestHandleCreatePlanDecision_MissingTitle(t *testing.T) {
 
 	body, _ := json.Marshal(CreatePlanDecisionHTTPRequest{Rationale: "no title"})
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -222,7 +222,7 @@ func TestHandleAcceptPlanDecision(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/accept", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
 
 	c.handleAcceptPlanDecision(w, req, slug, proposalID)
@@ -259,7 +259,7 @@ func TestHandleRejectPlanDecision(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/reject", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID+"/reject", nil)
 	w := httptest.NewRecorder()
 
 	c.handleRejectPlanDecision(w, req, slug, proposalID)
@@ -298,7 +298,7 @@ func TestHandleAcceptPlanDecision_InvalidTransition(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/accept", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
 
 	c.handleAcceptPlanDecision(w, req, slug, proposalID)
@@ -323,7 +323,7 @@ func TestHandleSubmitPlanDecision(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID+"/submit", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID+"/submit", nil)
 	w := httptest.NewRecorder()
 
 	c.handleSubmitPlanDecision(w, req, slug, proposalID)
@@ -357,7 +357,7 @@ func TestHandleDeletePlanDecision_NotProposed(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeletePlanDecision(w, req, slug, proposalID)

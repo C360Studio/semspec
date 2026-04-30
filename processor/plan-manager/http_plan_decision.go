@@ -55,9 +55,9 @@ type RejectPlanDecisionHTTPRequest struct {
 }
 
 // extractSlugPlanDecisionAndAction extracts slug, proposalID, and action from paths like:
-// /plan-api/plans/{slug}/plan-decisions/{proposalId}
-// /plan-api/plans/{slug}/plan-decisions/{proposalId}/accept
-// /plan-api/plans/{slug}/plan-decisions/{proposalId}/reject
+// /plan-manager/plans/{slug}/plan-decisions/{proposalId}
+// /plan-manager/plans/{slug}/plan-decisions/{proposalId}/accept
+// /plan-manager/plans/{slug}/plan-decisions/{proposalId}/reject
 func extractSlugPlanDecisionAndAction(path string) (slug, proposalID, action string) {
 	idx := strings.Index(path, "/plans/")
 	if idx == -1 {

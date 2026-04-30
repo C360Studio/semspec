@@ -18,7 +18,7 @@ func (c *Component) OpenAPISpec() *service.OpenAPISpec {
 	return workflowAPIOpenAPISpec()
 }
 
-// workflowAPIOpenAPISpec returns the OpenAPI specification for plan-api endpoints.
+// workflowAPIOpenAPISpec returns the OpenAPI specification for plan-manager endpoints.
 func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 	slugParam := service.ParameterSpec{
 		Name:        "slug",
@@ -33,7 +33,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 			{Name: "Plans", Description: "Workflow plan management - create, retrieve, and advance development plans through their lifecycle"},
 		},
 		Paths: map[string]service.PathSpec{
-			"/plan-api/plans": {
+			"/plan-manager/plans": {
 				GET: &service.OperationSpec{
 					Summary:     "List plans",
 					Description: "Returns all development plans with their current workflow stage and active agent loops",
@@ -71,7 +71,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/plan-api/plans/{slug}": {
+			"/plan-manager/plans/{slug}": {
 				GET: &service.OperationSpec{
 					Summary:     "Get plan",
 					Description: "Returns a single plan with its current workflow stage and active agent loops",
@@ -117,7 +117,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/plan-api/plans/{slug}/promote": {
+			"/plan-manager/plans/{slug}/promote": {
 				POST: &service.OperationSpec{
 					Summary:     "Promote plan",
 					Description: "Approves a plan draft, marking it ready for task generation and execution",
@@ -134,7 +134,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 				},
 			},
 			// Task CRUD endpoints removed (tasks are now created at execution time).
-			"/plan-api/plans/{slug}/execute": {
+			"/plan-manager/plans/{slug}/execute": {
 				POST: &service.OperationSpec{
 					Summary:     "Execute plan",
 					Description: "Triggers the batch task dispatcher to execute all tasks for an approved plan",
@@ -151,7 +151,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/plan-api/plans/{slug}/unarchive": {
+			"/plan-manager/plans/{slug}/unarchive": {
 				POST: &service.OperationSpec{
 					Summary:     "Unarchive plan",
 					Description: "Restores an archived plan to complete status",
@@ -168,7 +168,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			"/plan-api/plans/{slug}/reviews": {
+			"/plan-manager/plans/{slug}/reviews": {
 				GET: &service.OperationSpec{
 					Summary:     "Get plan reviews",
 					Description: "Returns the aggregated review synthesis result for a plan, combining findings from all reviewers",

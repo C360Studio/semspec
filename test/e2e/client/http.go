@@ -993,7 +993,7 @@ type CreatePlanResponse struct {
 	Error     string `json:"error,omitempty"`
 }
 
-// CreatePlan creates a new plan via the plan-api.
+// CreatePlan creates a new plan via the plan-manager.
 // POST /plan-manager/plans {"description": "..."}
 func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*CreatePlanResponse, error) {
 	reqBody := CreatePlanRequest{Title: description}
@@ -1031,7 +1031,7 @@ func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*Creat
 	return &planResp, nil
 }
 
-// GetPlans retrieves all plans via the plan-api.
+// GetPlans retrieves all plans via the plan-manager.
 // GET /plan-manager/plans
 func (c *HTTPClient) GetPlans(ctx context.Context) ([]*Plan, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/plan-manager/plans", nil)
@@ -1131,7 +1131,7 @@ func (r *PromotePlanResponse) NeedsChanges() bool {
 	return r.ReviewVerdict == "needs_changes"
 }
 
-// PromotePlan promotes (approves) a plan via the plan-api.
+// PromotePlan promotes (approves) a plan via the plan-manager.
 // POST /plan-manager/plans/{slug}/promote
 // Returns the response for both 200 (approved) and 422 (needs_changes) — both are valid.
 func (c *HTTPClient) PromotePlan(ctx context.Context, slug string) (*PromotePlanResponse, error) {
@@ -1174,7 +1174,7 @@ type ExecutePlanResponse struct {
 	Error   string `json:"error,omitempty"`
 }
 
-// ExecutePlan executes a plan via the plan-api.
+// ExecutePlan executes a plan via the plan-manager.
 // POST /plan-manager/plans/{slug}/execute
 func (c *HTTPClient) ExecutePlan(ctx context.Context, slug string) (*ExecutePlanResponse, error) {
 	url := fmt.Sprintf("%s/plan-manager/plans/%s/execute", c.baseURL, slug)

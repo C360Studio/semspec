@@ -174,7 +174,7 @@ func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 	c := setupCascadeFixture(t, slug)
 
 	// Delete R1 — should cascade to R2 (depends on R1) and R3 (depends on R2).
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 1), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-manager/plans/"+slug+"/requirements/"+rid(slug, 1), nil)
 	w := httptest.NewRecorder()
 	c.handleDeleteRequirement(w, req, slug, rid(slug, 1))
 
@@ -208,7 +208,7 @@ func TestHandleDeleteRequirement_LeafDeleteNoCollateral(t *testing.T) {
 	c := setupCascadeFixture(t, slug)
 
 	// Delete R4 (independent leaf) — no cascade, only R4 removed.
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 4), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-manager/plans/"+slug+"/requirements/"+rid(slug, 4), nil)
 	w := httptest.NewRecorder()
 	c.handleDeleteRequirement(w, req, slug, rid(slug, 4))
 
@@ -232,7 +232,7 @@ func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 	c := setupCascadeFixture(t, slug)
 
 	// Delete R2 — should cascade to R3 (depends on R2). R1 and R4 survive.
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 2), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-manager/plans/"+slug+"/requirements/"+rid(slug, 2), nil)
 	w := httptest.NewRecorder()
 	c.handleDeleteRequirement(w, req, slug, rid(slug, 2))
 
@@ -268,7 +268,7 @@ func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 	c := setupCascadeFixture(t, slug)
 
 	// Deprecate R1 — should cascade deprecate R2 and R3.
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 1)+"/deprecate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/requirements/"+rid(slug, 1)+"/deprecate", nil)
 	w := httptest.NewRecorder()
 	c.handleDeprecateRequirement(w, req, slug, rid(slug, 1))
 
@@ -314,7 +314,7 @@ func TestHandleDeprecateRequirement_LeafNoCollateral(t *testing.T) {
 	c := setupCascadeFixture(t, slug)
 
 	// Deprecate R3 (leaf) — only R3 deprecated, R1/R2/R4 untouched.
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 3)+"/deprecate", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/requirements/"+rid(slug, 3)+"/deprecate", nil)
 	w := httptest.NewRecorder()
 	c.handleDeprecateRequirement(w, req, slug, rid(slug, 3))
 

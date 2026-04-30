@@ -499,7 +499,7 @@ func (s *PlanWorkflowScenario) stageVerifyContextEndpoint(ctx context.Context, r
 	return nil
 }
 
-// stageVerifyReviewsEndpoint tests the GET /plan-api/plans/{slug}/reviews endpoint.
+// stageVerifyReviewsEndpoint tests the GET /plan-manager/plans/{slug}/reviews endpoint.
 func (s *PlanWorkflowScenario) stageVerifyReviewsEndpoint(ctx context.Context, result *Result) error {
 	// Use the slug from the plan-create stage.
 	slug, _ := result.GetDetailString("expected_slug")

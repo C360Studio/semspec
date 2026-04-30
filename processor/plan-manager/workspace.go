@@ -79,22 +79,22 @@ func (p *workspaceProxy) proxyTo(w http.ResponseWriter, r *http.Request, path st
 	io.Copy(w, resp.Body) //nolint:errcheck
 }
 
-// handleTasks proxies GET /plan-api/workspace/tasks → sandbox GET /workspace/tasks.
+// handleTasks proxies GET /plan-manager/workspace/tasks → sandbox GET /workspace/tasks.
 func (p *workspaceProxy) handleTasks(w http.ResponseWriter, r *http.Request) {
 	p.proxyTo(w, r, "/workspace/tasks")
 }
 
-// handleTree proxies GET /plan-api/workspace/tree?task_id=X → sandbox GET /workspace/tree?task_id=X.
+// handleTree proxies GET /plan-manager/workspace/tree?task_id=X → sandbox GET /workspace/tree?task_id=X.
 func (p *workspaceProxy) handleTree(w http.ResponseWriter, r *http.Request) {
 	p.proxyTo(w, r, "/workspace/tree")
 }
 
-// handleFile proxies GET /plan-api/workspace/file?task_id=X&path=Y → sandbox GET /file?task_id=X&path=Y.
+// handleFile proxies GET /plan-manager/workspace/file?task_id=X&path=Y → sandbox GET /file?task_id=X&path=Y.
 func (p *workspaceProxy) handleFile(w http.ResponseWriter, r *http.Request) {
 	p.proxyTo(w, r, "/file")
 }
 
-// handleDownload proxies GET /plan-api/workspace/download?task_id=X → sandbox GET /workspace/download?task_id=X.
+// handleDownload proxies GET /plan-manager/workspace/download?task_id=X → sandbox GET /workspace/download?task_id=X.
 func (p *workspaceProxy) handleDownload(w http.ResponseWriter, r *http.Request) {
 	p.proxyTo(w, r, "/workspace/download")
 }

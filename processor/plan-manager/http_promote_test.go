@@ -22,7 +22,7 @@ func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
 	plan.Approved = false
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, slug)
@@ -52,7 +52,7 @@ func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
 func TestHandlePromotePlan_NotFound(t *testing.T) {
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/no-such-plan/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/no-such-plan/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, "no-such-plan")
@@ -70,7 +70,7 @@ func TestHandlePromotePlan_DraftingReturnsConflict(t *testing.T) {
 	plan.Status = workflow.StatusDrafting
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, slug)
@@ -88,7 +88,7 @@ func TestHandlePromotePlan_GeneratingRequirementsReturnsConflict(t *testing.T) {
 	plan.Status = workflow.StatusGeneratingRequirements
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, slug)
@@ -107,7 +107,7 @@ func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
 	plan.Status = workflow.StatusApproved
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
 
 	c.handlePromotePlan(w, req, slug)

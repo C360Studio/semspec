@@ -134,7 +134,7 @@ func (c *Component) handleGetPlanReviews(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Extract slug from path: /plan-api/plans/{slug}/reviews
+	// Extract slug from path: /plan-manager/plans/{slug}/reviews
 	slug, endpoint := extractSlugAndEndpoint(r.URL.Path)
 	if slug == "" {
 		http.Error(w, "Plan slug required", http.StatusBadRequest)
@@ -346,7 +346,7 @@ func (c *Component) findReviewResult(exec *WorkflowExecution) *StepResult {
 	return nil
 }
 
-// extractSlugAndEndpoint extracts slug and endpoint from path like /plan-api/plans/{slug}/reviews
+// extractSlugAndEndpoint extracts slug and endpoint from path like /plan-manager/plans/{slug}/reviews
 func extractSlugAndEndpoint(path string) (slug, endpoint string) {
 	// Find /plans/ in the path
 	idx := strings.Index(path, "/plans/")
@@ -428,7 +428,7 @@ type UpdatePlanHTTPRequest struct {
 	Context *string `json:"context,omitempty"`
 }
 
-// handlePlans handles POST /plan-api/plans (create plan).
+// handlePlans handles POST /plan-manager/plans (create plan).
 func (c *Component) handlePlans(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -440,7 +440,7 @@ func (c *Component) handlePlans(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePlansWithSlug handles /plan-api/plans/{slug}/*
+// handlePlansWithSlug handles /plan-manager/plans/{slug}/*
 func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) {
 	slug, endpoint := extractSlugAndEndpoint(r.URL.Path)
 	if slug == "" {
@@ -508,6 +508,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodGet, func() { c.handlePlanBranches(w, r, slug) })
 	case "git-audit":
 		requireMethod(w, r, http.MethodGet, func() { c.handleGitAudit(w, r, slug) })
+	case "execute":
+		requireMethod(w, r, http.MethodPost, func() { c.handleExecutePlan(w, r, slug) })
 	default:
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
@@ -519,9 +521,6 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		if handled := c.handlePlanDecisionCollectionEndpoint(w, r, slug, endpoint); handled {
-			return
-		}
-		if handled := c.handleTaskCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
@@ -599,20 +598,7 @@ func (c *Component) handlePlanDecisionCollectionEndpoint(w http.ResponseWriter, 
 	return true
 }
 
-// handleTaskCollectionEndpoint routes task collection endpoints.
-// Returns true when the endpoint was recognised and handled.
-// Note: "tasks" endpoint has been removed (pre-generated Tasks no longer exist).
-func (c *Component) handleTaskCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
-	switch endpoint {
-	case "execute":
-		requireMethod(w, r, http.MethodPost, func() { c.handleExecutePlan(w, r, slug) })
-	default:
-		return false
-	}
-	return true
-}
-
-// handleCreatePlan handles POST /plan-api/plans.
+// handleCreatePlan handles POST /plan-manager/plans.
 // Creates a new plan and triggers the planner agent loop.
 func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	// Limit request body size to prevent DoS
@@ -708,7 +694,7 @@ func (c *Component) respondWithExistingPlan(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-// handleListPlans handles GET /plan-api/plans.
+// handleListPlans handles GET /plan-manager/plans.
 // Reads from the component-owned cache — never hits the graph.
 func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	ps := c.planStoreOrFail(w)
@@ -735,7 +721,7 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleGetPlan handles GET /plan-api/plans/{slug}.
+// handleGetPlan handles GET /plan-manager/plans/{slug}.
 // Reads from cache with graph fallback on cache miss.
 func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	plan, err := c.loadPlanCached(r.Context(), slug)
@@ -761,7 +747,7 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 	}
 }
 
-// handlePromotePlan handles POST /plan-api/plans/{slug}/promote.
+// handlePromotePlan handles POST /plan-manager/plans/{slug}/promote.
 // Approves the plan directly (manual approval via REST API).
 // If the plan is already approved, it returns immediately.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
@@ -827,7 +813,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
-// handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
+// handleExecutePlan handles POST /plan-manager/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	tc := natsclient.NewTraceContext()
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)

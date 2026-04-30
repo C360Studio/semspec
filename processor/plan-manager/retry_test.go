@@ -47,7 +47,7 @@ func postRetry(t *testing.T, c *Component, slug string, body any) *httptest.Resp
 			t.Fatalf("encode body: %v", err)
 		}
 	}
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/retry", &buf)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/retry", &buf)
 	w := httptest.NewRecorder()
 	c.handleRetryPlan(w, req, slug)
 	return w

@@ -29,7 +29,7 @@ func TestHandleRetryPlan_InfraCritical_Refuses409(t *testing.T) {
 		t.Fatalf("save plan: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/retry", nil)
 	w := httptest.NewRecorder()
 	c.handleRetryPlan(w, req, slug)
 
@@ -54,7 +54,7 @@ func TestHandleInfraReconcile_ClearsCritical(t *testing.T) {
 		t.Fatalf("save plan: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/infra-reconcile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/infra-reconcile", nil)
 	w := httptest.NewRecorder()
 	c.handleInfraReconcile(w, req, slug)
 
@@ -83,7 +83,7 @@ func TestHandleInfraReconcile_IdempotentWhenHealthy(t *testing.T) {
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/infra-reconcile", nil)
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/infra-reconcile", nil)
 	w := httptest.NewRecorder()
 	c.handleInfraReconcile(w, req, slug)
 

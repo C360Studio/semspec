@@ -71,19 +71,19 @@ func TestExtractSlugAndEndpoint(t *testing.T) {
 	}{
 		{
 			name:         "standard path",
-			path:         "/plan-api/plans/authentication-options/reviews",
+			path:         "/plan-manager/plans/authentication-options/reviews",
 			wantSlug:     "authentication-options",
 			wantEndpoint: "reviews",
 		},
 		{
 			name:         "with trailing slash",
-			path:         "/plan-api/plans/my-feature/reviews/",
+			path:         "/plan-manager/plans/my-feature/reviews/",
 			wantSlug:     "my-feature",
 			wantEndpoint: "reviews",
 		},
 		{
 			name:         "no endpoint",
-			path:         "/plan-api/plans/test-slug",
+			path:         "/plan-manager/plans/test-slug",
 			wantSlug:     "test-slug",
 			wantEndpoint: "",
 		},
@@ -95,13 +95,13 @@ func TestExtractSlugAndEndpoint(t *testing.T) {
 		},
 		{
 			name:         "no plans segment",
-			path:         "/plan-api/something/else",
+			path:         "/plan-manager/something/else",
 			wantSlug:     "",
 			wantEndpoint: "",
 		},
 		{
 			name:         "slug with dashes",
-			path:         "/plan-api/plans/add-user-auth-flow/reviews",
+			path:         "/plan-manager/plans/add-user-auth-flow/reviews",
 			wantSlug:     "add-user-auth-flow",
 			wantEndpoint: "reviews",
 		},

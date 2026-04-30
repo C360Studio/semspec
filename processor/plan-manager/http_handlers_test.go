@@ -24,7 +24,7 @@ func TestHandleGetPlan(t *testing.T) {
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/"+slug, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetPlan(w, req, slug)
@@ -52,7 +52,7 @@ func TestHandleGetPlan(t *testing.T) {
 func TestHandleGetPlan_NotFound(t *testing.T) {
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/nonexistent-plan", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/nonexistent-plan", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetPlan(w, req, "nonexistent-plan")
@@ -68,7 +68,7 @@ func TestHandleListPlans(t *testing.T) {
 		setupTestPlan(t, c, slug)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListPlans(w, req)
@@ -90,7 +90,7 @@ func TestHandleListPlans(t *testing.T) {
 func TestHandleListPlans_Empty(t *testing.T) {
 	c := setupTestComponent(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans", nil)
 	w := httptest.NewRecorder()
 
 	c.handleListPlans(w, req)
@@ -114,7 +114,7 @@ func TestHandleUpdatePlan_NotFound(t *testing.T) {
 
 	newTitle := "Updated Title"
 	body, _ := json.Marshal(UpdatePlanHTTPRequest{Title: &newTitle})
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/no-such-plan", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-manager/plans/no-such-plan", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -150,7 +150,7 @@ func TestHandleGetPlanDecision(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetPlanDecision(w, req, slug, proposalID)
@@ -178,7 +178,7 @@ func TestHandleGetPlanDecision_NotFound(t *testing.T) {
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/plan-decisions/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/"+slug+"/plan-decisions/nonexistent", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetPlanDecision(w, req, slug, "nonexistent")
@@ -211,7 +211,7 @@ func TestHandleUpdatePlanDecision(t *testing.T) {
 		Rationale: &newRationale,
 	})
 
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -252,7 +252,7 @@ func TestHandleUpdatePlanDecision_InvalidStatus(t *testing.T) {
 	newTitle := "Try to change accepted"
 	body, _ := json.Marshal(UpdatePlanDecisionHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -272,7 +272,7 @@ func TestHandleUpdatePlanDecision_NotFound(t *testing.T) {
 	newTitle := "Nope"
 	body, _ := json.Marshal(UpdatePlanDecisionHTTPRequest{Title: &newTitle})
 
-	req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/plan-decisions/nonexistent", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPatch, "/plan-manager/plans/"+slug+"/plan-decisions/nonexistent", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -298,7 +298,7 @@ func TestHandleDeletePlanDecision_Success(t *testing.T) {
 	plan.PlanDecisions = proposals
 	_ = c.plans.save(context.Background(), plan)
 
-	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/plan-decisions/"+proposalID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/plan-manager/plans/"+slug+"/plan-decisions/"+proposalID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleDeletePlanDecision(w, req, slug, proposalID)
@@ -330,7 +330,7 @@ func TestHandleCreatePlanDecision_InvalidRequirementID(t *testing.T) {
 		AffectedReqIDs: []string{"requirement.cp-bad-req-id.999"},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/plan-decisions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -366,7 +366,7 @@ func TestHandleGetScenario(t *testing.T) {
 	c := setupTestComponent(t)
 	setupTestPlanWith(t, c, slug, nil, scenarios)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/"+slug+"/scenarios/"+scenarioID, nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetScenario(w, req, slug, scenarioID)
@@ -391,7 +391,7 @@ func TestHandleGetScenario_NotFound(t *testing.T) {
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
 
-	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/plan-manager/plans/"+slug+"/scenarios/nonexistent", nil)
 	w := httptest.NewRecorder()
 
 	c.handleGetScenario(w, req, slug, "nonexistent")

@@ -405,7 +405,7 @@ paths:
                         application/json:
                             schema:
                                 type: object
-    /plan-api/plans:
+    /plan-manager/plans:
         get:
             summary: List plans
             description: Returns all development plans with their current workflow stage and active agent loops
@@ -447,7 +447,7 @@ paths:
                                 $ref: '#/components/schemas/CreatePlanResponse'
                 "400":
                     description: Invalid request (missing description)
-    /plan-api/plans/{slug}:
+    /plan-manager/plans/{slug}:
         get:
             summary: Get plan
             description: Returns a single plan with its current workflow stage and active agent loops
@@ -516,7 +516,7 @@ paths:
                     description: Plan deleted
                 "404":
                     description: Plan not found
-    /plan-api/plans/{slug}/execute:
+    /plan-manager/plans/{slug}/execute:
         post:
             summary: Execute plan
             description: Triggers the batch task dispatcher to execute all tasks for an approved plan
@@ -540,7 +540,7 @@ paths:
                     description: Plan must be approved before execution
                 "404":
                     description: Plan not found
-    /plan-api/plans/{slug}/promote:
+    /plan-manager/plans/{slug}/promote:
         post:
             summary: Promote plan
             description: Approves a plan draft, marking it ready for task generation and execution
@@ -562,7 +562,7 @@ paths:
                                 $ref: '#/components/schemas/PlanWithStatus'
                 "404":
                     description: Plan not found
-    /plan-api/plans/{slug}/reviews:
+    /plan-manager/plans/{slug}/reviews:
         get:
             summary: Get plan reviews
             description: Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
@@ -584,7 +584,7 @@ paths:
                                 $ref: '#/components/schemas/SynthesisResult'
                 "404":
                     description: Plan not found or no completed review available
-    /plan-api/plans/{slug}/unarchive:
+    /plan-manager/plans/{slug}/unarchive:
         post:
             summary: Unarchive plan
             description: Restores an archived plan to complete status
@@ -1845,9 +1845,52 @@ components:
                 CreatedAt:
                     format: date-time
                     type: string
+                Detail:
+                    type: string
+                EvidenceFiles:
+                    items:
+                        properties:
+                            commit_sha:
+                                type: string
+                            line_end:
+                                type: integer
+                            line_start:
+                                type: integer
+                            path:
+                                type: string
+                        required:
+                            - path
+                        type: object
+                    type: array
+                EvidenceSteps:
+                    items:
+                        properties:
+                            loop_id:
+                                type: string
+                            step_index:
+                                type: integer
+                        required:
+                            - loop_id
+                            - step_index
+                        type: object
+                    type: array
                 ID:
                     type: string
+                InjectionForm:
+                    type: string
+                LastInjectedAt:
+                    format: date-time
+                    nullable: true
+                    type: string
+                Positive:
+                    type: boolean
+                RetiredAt:
+                    format: date-time
+                    nullable: true
+                    type: string
                 Role:
+                    type: string
+                RootCauseRole:
                     type: string
                 ScenarioID:
                     type: string
@@ -1863,6 +1906,12 @@ components:
                 - CategoryIDs
                 - Role
                 - CreatedAt
+                - Detail
+                - InjectionForm
+                - EvidenceSteps
+                - EvidenceFiles
+                - RootCauseRole
+                - Positive
             type: object
         LogEntryPayload:
             properties:
