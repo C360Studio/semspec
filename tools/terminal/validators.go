@@ -38,7 +38,7 @@ func ExpectedFieldsHint(deliverableType string) string {
 	case "scenarios":
 		return `Expected JSON: {"scenarios": [{"title": "...", "given": "...", "when": "...", "then": ["..."]}]}`
 	case "architecture":
-		return `Expected JSON: {"technology_choices": [...], "component_boundaries": [...], "data_flow": "...", "decisions": [...], "actors": [...], "integrations": [...]}`
+		return `Expected JSON: {"actors": [{"name":"...","type":"human|system|scheduler|event","triggers":[...]}], "integrations": [{"name":"...","direction":"inbound|outbound|bidirectional","protocol":"..."}], "test_surface": {"integration_flows":[...], "e2e_flows":[...]}}`
 	case "review":
 		return `Expected JSON: {"verdict": "approved", "feedback": "..."}`
 	default:
@@ -195,12 +195,63 @@ func ValidateDeveloperDeliverable(d map[string]any) error {
 	return nil
 }
 
-// ValidateArchitectDeliverable validates an architecture // Expected: {"technology_choices": [...], "component_boundaries": [...], "data_flow": "...", "decisions": [...]}.
+// ValidateArchitectDeliverable validates an architecture deliverable.
+//
+// Required fields are the ones DOWNSTREAM CODE consumes:
+//
+//   - actors[]:        scenario-generator reads these to seed e2e scenarios
+//   - integrations[]:  scenario-generator reads these to seed integration scenarios
+//   - test_surface:    execution-manager + qa-reviewer use this to judge coverage
+//
+// Optional fields are documentation that humans read in plan.md but no code
+// downstream reads today: technology_choices, component_boundaries, data_flow,
+// decisions. They're shape-checked when present so a malformed entry still
+// surfaces, but their absence is not an error.
+//
+// Trimmed 2026-04-30 PM after observing small models (qwen3.5-35b-a3b on
+// OpenRouter) wedge during architecture generation. The earlier "all six
+// fields required and non-empty" rule was forcing models to invent
+// architecture detail for trivial changes; half of those fields were never
+// read by any downstream component. See feedback note on schema-vs-consumer
+// alignment.
 func ValidateArchitectDeliverable(d map[string]any) error {
-	// technology_choices
-	techChoices, ok := d["technology_choices"].([]any)
-	if !ok || len(techChoices) == 0 {
-		return fmt.Errorf("technology_choices is required — provide an array of {category, choice, rationale} objects")
+	// REQUIRED — downstream consumers depend on these.
+	if err := validateActors(d); err != nil {
+		return err
+	}
+	if err := validateIntegrations(d); err != nil {
+		return err
+	}
+	if err := validateTestSurface(d); err != nil {
+		return err
+	}
+
+	// OPTIONAL — validate shape if present, accept absence.
+	if err := validateOptionalTechChoices(d); err != nil {
+		return err
+	}
+	if err := validateOptionalComponentBoundaries(d); err != nil {
+		return err
+	}
+	if err := validateOptionalDecisions(d); err != nil {
+		return err
+	}
+	// data_flow is just a free-text string; no shape to validate. Absence is fine.
+	return nil
+}
+
+// validateOptionalTechChoices validates technology_choices entries when
+// present. The field is no longer required overall — code downstream reads
+// neither the entries nor their fields — but a malformed entry still
+// surfaces a clear error to the LLM rather than a silent shape drift.
+func validateOptionalTechChoices(d map[string]any) error {
+	raw, present := d["technology_choices"]
+	if !present {
+		return nil
+	}
+	techChoices, ok := raw.([]any)
+	if !ok {
+		return fmt.Errorf("technology_choices must be an array of {category, choice, rationale} objects when present")
 	}
 	for i, tc := range techChoices {
 		obj, ok := tc.(map[string]any)
@@ -214,11 +265,19 @@ func ValidateArchitectDeliverable(d map[string]any) error {
 			return fmt.Errorf("technology_choices[%d] requires category, choice, and rationale strings", i)
 		}
 	}
+	return nil
+}
 
-	// component_boundaries
-	components, ok := d["component_boundaries"].([]any)
-	if !ok || len(components) == 0 {
-		return fmt.Errorf("component_boundaries is required — provide an array of {name, responsibility, dependencies[]} objects")
+// validateOptionalComponentBoundaries validates component_boundaries entries
+// when present. Same trade as validateOptionalTechChoices.
+func validateOptionalComponentBoundaries(d map[string]any) error {
+	raw, present := d["component_boundaries"]
+	if !present {
+		return nil
+	}
+	components, ok := raw.([]any)
+	if !ok {
+		return fmt.Errorf("component_boundaries must be an array of {name, responsibility, dependencies[]} objects when present")
 	}
 	for i, cb := range components {
 		obj, ok := cb.(map[string]any)
@@ -234,17 +293,21 @@ func ValidateArchitectDeliverable(d map[string]any) error {
 			return fmt.Errorf("component_boundaries[%d] requires a dependencies array (may be empty)", i)
 		}
 	}
+	return nil
+}
 
-	// data_flow
-	dataFlow, _ := d["data_flow"].(string)
-	if dataFlow == "" {
-		return fmt.Errorf("data_flow is required — describe how data moves between components")
+// validateOptionalDecisions validates decisions entries when present. Same
+// trade as the other two optional validators — the field is human-readable
+// documentation only; no semspec component reads decisions[].id or .title
+// programmatically.
+func validateOptionalDecisions(d map[string]any) error {
+	raw, present := d["decisions"]
+	if !present {
+		return nil
 	}
-
-	// decisions
-	decisions, ok := d["decisions"].([]any)
-	if !ok || len(decisions) == 0 {
-		return fmt.Errorf("decisions is required — provide an array of {id, title, decision, rationale} objects")
+	decisions, ok := raw.([]any)
+	if !ok {
+		return fmt.Errorf("decisions must be an array of {id, title, decision, rationale} objects when present")
 	}
 	for i, dec := range decisions {
 		obj, ok := dec.(map[string]any)
@@ -259,11 +322,84 @@ func ValidateArchitectDeliverable(d map[string]any) error {
 			return fmt.Errorf("decisions[%d] requires id, title, decision, and rationale strings", i)
 		}
 	}
+	return nil
+}
 
-	if err := validateActors(d); err != nil {
+// validateTestSurface validates the test_surface object. Required because
+// execution-manager and qa-reviewer both read it: developer agents use the
+// integration_flows and e2e_flows to know what to test, qa-reviewer uses
+// them to judge whether actual test coverage matches the architectural
+// expectation.
+//
+// Promoted from optional to required 2026-04-30 PM. An architecture without
+// a test_surface leaves qa-reviewer with no judgment basis — it can only
+// say "tests ran" instead of "tests covered the integration_flows the
+// architect declared."
+//
+// Minimum shape: an object with at least one of integration_flows[] or
+// e2e_flows[] non-empty. Both empty would mean "this system has neither
+// external boundaries nor user-visible flows" which contradicts the
+// required actors[] + integrations[] elsewhere in the deliverable.
+func validateTestSurface(d map[string]any) error {
+	raw, ok := d["test_surface"]
+	if !ok {
+		return fmt.Errorf("test_surface is required — provide {integration_flows: [...], e2e_flows: [...]} so qa-reviewer can judge coverage. Each integration[] should map to at least one integration_flow; each human/system actor should map to at least one e2e_flow")
+	}
+	obj, ok := raw.(map[string]any)
+	if !ok {
+		return fmt.Errorf("test_surface must be an object with integration_flows and e2e_flows arrays")
+	}
+	intFlows, _ := obj["integration_flows"].([]any)
+	e2eFlows, _ := obj["e2e_flows"].([]any)
+	if len(intFlows) == 0 && len(e2eFlows) == 0 {
+		return fmt.Errorf("test_surface requires at least one entry in integration_flows or e2e_flows — derive from your integrations[] and actors[]")
+	}
+	if err := validateIntegrationFlows(intFlows); err != nil {
 		return err
 	}
-	return validateIntegrations(d)
+	return validateE2EFlows(e2eFlows)
+}
+
+// validateIntegrationFlows validates each entry in test_surface.integration_flows.
+// Empty array is valid (the deliverable may rely solely on e2e_flows).
+func validateIntegrationFlows(flows []any) error {
+	for i, f := range flows {
+		obj, ok := f.(map[string]any)
+		if !ok {
+			return fmt.Errorf("test_surface.integration_flows[%d] must be an object with name, components_involved[], description", i)
+		}
+		name, _ := obj["name"].(string)
+		desc, _ := obj["description"].(string)
+		if name == "" || desc == "" {
+			return fmt.Errorf("test_surface.integration_flows[%d] requires name and description strings", i)
+		}
+		if _, has := obj["components_involved"]; !has {
+			return fmt.Errorf("test_surface.integration_flows[%d] requires a components_involved array (may be empty)", i)
+		}
+	}
+	return nil
+}
+
+// validateE2EFlows validates each entry in test_surface.e2e_flows.
+// Empty array is valid (the deliverable may rely solely on integration_flows).
+func validateE2EFlows(flows []any) error {
+	for i, f := range flows {
+		obj, ok := f.(map[string]any)
+		if !ok {
+			return fmt.Errorf("test_surface.e2e_flows[%d] must be an object with actor, steps[], success_criteria[]", i)
+		}
+		actor, _ := obj["actor"].(string)
+		if actor == "" {
+			return fmt.Errorf("test_surface.e2e_flows[%d] requires an actor string referencing an entry in actors[]", i)
+		}
+		if _, has := obj["steps"]; !has {
+			return fmt.Errorf("test_surface.e2e_flows[%d] requires a steps array describing the actor's actions", i)
+		}
+		if _, has := obj["success_criteria"]; !has {
+			return fmt.Errorf("test_surface.e2e_flows[%d] requires a success_criteria array describing observable post-conditions", i)
+		}
+	}
+	return nil
 }
 
 func validateActors(d map[string]any) error {

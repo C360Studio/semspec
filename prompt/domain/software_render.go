@@ -267,16 +267,21 @@ Please fix the issue and ensure your deliverable matches the required structure.
 
 ## Deliverable Structure
 
-Your deliverable must contain:
-- **technology_choices**: array of {category, choice, rationale} — e.g., framework, database, messaging
-- **component_boundaries**: array of {name, responsibility, dependencies[]} — logical modules or services
-- **data_flow**: string describing how data moves between components
-- **decisions**: array of {id, title, decision, rationale} — architecture decision records (use IDs like ARCH-001)
-- **actors**: array of {name, type, triggers[], permissions[]?} — who or what initiates actions in the system (type: human | system | scheduler | event). Every trigger the system responds to must map to an actor
-- **integrations**: array of {name, direction, protocol, contract?, error_mode?} — external boundaries the system touches (direction: inbound | outbound | bidirectional; protocol: http | nats | grpc | db | filesystem). Include error_mode when failure behavior matters
-- **test_surface** (optional but strongly recommended): object with two arrays — the test coverage your architecture implies. The developer uses this to know what to test; QA uses it to judge whether coverage is adequate.
-  - **integration_flows**: array of {name, components_involved[], description, scenario_refs[]?} — each external integration[] deserves one integration flow that exercises it with a real fixture. components_involved references component_boundaries[].name entries.
-  - **e2e_flows**: array of {actor, steps[], success_criteria[]} — each actor[] of type human or system that drives a user-visible outcome deserves one end-to-end flow. Steps describe the actor's actions; success_criteria describe observable post-conditions.
+**Required fields** — downstream code depends on these:
+
+- **actors**: array of {name, type, triggers[], permissions[]?} — who or what initiates actions in the system (type: human | system | scheduler | event). Every trigger the system responds to must map to an actor. scenario-generator reads this to seed e2e scenarios.
+- **integrations**: array of {name, direction, protocol, contract?, error_mode?} — external boundaries the system touches (direction: inbound | outbound | bidirectional; protocol: http | nats | grpc | db | filesystem). Include error_mode when failure behavior matters. scenario-generator reads this to seed integration scenarios.
+- **test_surface**: object describing the test coverage your architecture implies. execution-manager uses it to guide developer agents; qa-reviewer uses it to judge whether actual coverage matches the architectural expectation.
+  - **integration_flows**: array of {name, components_involved[], description, scenario_refs[]?} — each integration[] (especially inbound/bidirectional) deserves one integration flow with a real fixture. components_involved references component_boundaries[].name when those exist.
+  - **e2e_flows**: array of {actor, steps[], success_criteria[]} — each human/system actor that drives a user-visible outcome deserves one end-to-end flow.
+  - At least one of integration_flows or e2e_flows must be non-empty.
+
+**Optional fields** — human documentation in plan.md; only include when they add real value:
+
+- **technology_choices**: array of {category, choice, rationale} — when introducing or formally endorsing a stack choice. Skip when reusing whatever the project already has.
+- **component_boundaries**: array of {name, responsibility, dependencies[]} — when the change introduces a new module or service. Skip for changes scoped to existing components.
+- **data_flow**: string — when data movement between components is non-obvious. Skip for trivial flows.
+- **decisions**: array of {id, title, decision, rationale} — architecture decision records (use IDs like ARCH-001) for trade-offs future contributors will want to understand. Skip for routine choices.
 
 **Deriving test_surface:**
 - Walk integrations[]: each entry that goes inbound or bidirectional needs at minimum one integration_flow that validates the contract and the error_mode. Outbound-only integrations (we call them, they don't call us) also need coverage when failure is consequential.

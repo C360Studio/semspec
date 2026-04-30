@@ -83,7 +83,7 @@ func TestSubmitWork_EmptyArgsIncludesHint(t *testing.T) {
 		{"review", "review", `"verdict"`},
 		{"requirements", "requirements", `"requirements"`},
 		{"scenarios", "scenarios", `"scenarios"`},
-		{"architecture", "architecture", `"technology_choices"`},
+		{"architecture", "architecture", `"actors"`},
 		{"developer", "", `"summary"`},
 	}
 
