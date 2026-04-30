@@ -4,28 +4,30 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// goldenMetrics is a minimal Prometheus exposition body shaped like
-// what semspec actually emits — gauges, per-status request counts,
-// failure-shape counters, plus comments and noise to confirm the
-// parser ignores them.
-const goldenMetrics = `# HELP semspec_loop_active_loops Active agent loops
-# TYPE semspec_loop_active_loops gauge
-semspec_loop_active_loops 7
-# HELP semspec_loop_context_utilization Most recent ctx utilization
-# TYPE semspec_loop_context_utilization gauge
-semspec_loop_context_utilization 0.42
-# HELP semspec_model_requests_total Model HTTP requests
-# TYPE semspec_model_requests_total counter
-semspec_model_requests_total{model="gemini-2.5-pro",status="success"} 25
-semspec_model_requests_total{model="gemini-2.5-pro",status="error"} 3
-semspec_model_requests_total{model="qwen3-14b",status="timeout"} 2
-semspec_length_truncations_total 4
-semspec_tool_results_truncated_total 1
-semspec_context_compactions_total 0
+// goldenMetrics is a minimal Prometheus exposition body matching the
+// real semstreams namespace. The shape mirrors what
+// pkg/health/testdata/fixtures/metrics-real-2026-04-30/metrics.txt
+// captures from a live run, condensed to just the lines the parser
+// reads plus comment/garbage lines that should be skipped.
+const goldenMetrics = `# HELP semstreams_agentic_loop_active_loops Active agent loops
+# TYPE semstreams_agentic_loop_active_loops gauge
+semstreams_agentic_loop_active_loops 7
+# HELP semstreams_agentic_loop_context_utilization Most recent ctx utilization
+# TYPE semstreams_agentic_loop_context_utilization gauge
+semstreams_agentic_loop_context_utilization 0.42
+# HELP semstreams_agentic_model_requests_total Model HTTP requests
+# TYPE semstreams_agentic_model_requests_total counter
+semstreams_agentic_model_requests_total{model="gemini-2.5-pro",status="success"} 25
+semstreams_agentic_model_requests_total{model="gemini-2.5-pro",status="error"} 3
+semstreams_agentic_model_requests_total{model="qwen3-14b",status="timeout"} 2
+semstreams_agentic_loop_tool_results_truncated_total 1
+semstreams_agentic_loop_context_compactions_total 0
 some_unrelated_metric 9999
 malformed_line_no_value
 `
@@ -48,11 +50,49 @@ func TestParseMetrics_GoldenBlob(t *testing.T) {
 	if got.ModelRequestsTimeouts != 2 {
 		t.Errorf("ModelRequestsTimeouts = %d, want 2", got.ModelRequestsTimeouts)
 	}
-	if got.LengthTruncationsTotal != 4 {
-		t.Errorf("LengthTruncationsTotal = %d, want 4", got.LengthTruncationsTotal)
+	if got.LengthTruncationsTotal != 0 {
+		// semstreams doesn't emit a length-truncation counter; field
+		// stays in schema for additive-v1 compat. Pin zero so a future
+		// upstream addition doesn't silently change behavior.
+		t.Errorf("LengthTruncationsTotal = %d, want 0 (semstreams does not emit)", got.LengthTruncationsTotal)
 	}
 	if got.ToolResultsTruncatedTotal != 1 {
 		t.Errorf("ToolResultsTruncatedTotal = %d, want 1", got.ToolResultsTruncatedTotal)
+	}
+}
+
+// TestParseMetrics_RealFixture pins the parser against the actual
+// /metrics output from a healthy Gemini @easy run on 2026-04-30. The
+// previous synthetic-only test masked a silent-data-loss bug where
+// the parser used a `semspec_*` prefix that semstreams never emits;
+// this test would have failed loudly on the wrong prefix and is the
+// canonical example of why parsers of upstream wire format need a
+// real fixture (see CLAUDE.md Testing Patterns).
+func TestParseMetrics_RealFixture(t *testing.T) {
+	path := filepath.Join("testdata", "fixtures", "metrics-real-2026-04-30", "metrics.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	got := ParseMetrics(string(data))
+
+	// At capture time the run had: 12 active loops, ctx utilization
+	// ~0.0034, multiple model_requests labels including some errors.
+	// We pin the load-bearing fields rather than every detail so a
+	// future fixture refresh doesn't have to recompute exact totals.
+	if got.LoopActiveLoops <= 0 {
+		t.Errorf("LoopActiveLoops should be > 0 from real fixture, got %d", got.LoopActiveLoops)
+	}
+	if got.LoopContextUtilization <= 0 {
+		t.Errorf("LoopContextUtilization should be > 0 from real fixture, got %v", got.LoopContextUtilization)
+	}
+	if got.ModelRequestsTotal <= 0 {
+		t.Errorf("ModelRequestsTotal should be > 0 from real fixture, got %d", got.ModelRequestsTotal)
+	}
+	// The fixture includes status="error" entries; pin that error
+	// classification reaches the snapshot.
+	if got.ModelRequestsErrors <= 0 {
+		t.Errorf("ModelRequestsErrors should be > 0 (fixture has error rows), got %d", got.ModelRequestsErrors)
 	}
 }
 
@@ -94,7 +134,7 @@ func TestParseMetrics_LabelValueWithSpace(t *testing.T) {
 	// Regression: splitMetricLine used to LastIndexByte(' ') on the
 	// full line, which split inside `model="gemini 2.5"` and silently
 	// returned ok=false (zero-snapshot). Anchor past the closing brace.
-	input := `semspec_model_requests_total{model="gemini 2.5",status="success"} 25` + "\n"
+	input := `semstreams_agentic_model_requests_total{model="gemini 2.5",status="success"} 25` + "\n"
 	got := ParseMetrics(input)
 	if got.ModelRequestsTotal != 25 {
 		t.Errorf("ModelRequestsTotal = %d, want 25 (label-value-with-space regression)", got.ModelRequestsTotal)

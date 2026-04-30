@@ -50,6 +50,17 @@ func FetchMetrics(ctx context.Context, client *http.Client, baseURL string) (Met
 // (model + status) — detectors care about totals at the bundle scope,
 // not per-model breakdowns.
 //
+// Metric names match semstreams' `semstreams_agentic_*` namespace.
+// Pinned against the real /metrics fixture under
+// pkg/health/testdata/fixtures/metrics-real-2026-04-30/. The earlier
+// `semspec_*` prefix was a guessed naming convention that produced
+// silently-zeroed snapshots on every real run; caught 2026-04-30
+// by the first end-to-end watch CLI exercise.
+//
+// LengthTruncationsTotal stays in the schema for additive-v1 compat
+// but semstreams does not currently emit a length-truncation counter
+// — the field will always be zero until upstream adds one.
+//
 // Pure: no I/O, deterministic given the input text. Safe to call
 // directly from tests with golden Prometheus blobs.
 func ParseMetrics(text string) MetricsSnapshot {
@@ -64,23 +75,21 @@ func ParseMetrics(text string) MetricsSnapshot {
 			continue
 		}
 		switch name {
-		case "semspec_loop_active_loops":
+		case "semstreams_agentic_loop_active_loops":
 			s.LoopActiveLoops = int64(value)
-		case "semspec_loop_context_utilization":
+		case "semstreams_agentic_loop_context_utilization":
 			s.LoopContextUtilization = value
-		case "semspec_model_requests_total":
+		case "semstreams_agentic_model_requests_total":
 			s.ModelRequestsTotal += int64(value)
-			if labels["status"] == "error" {
+			switch labels["status"] {
+			case "error":
 				s.ModelRequestsErrors += int64(value)
-			}
-			if labels["status"] == "timeout" {
+			case "timeout":
 				s.ModelRequestsTimeouts += int64(value)
 			}
-		case "semspec_length_truncations_total":
-			s.LengthTruncationsTotal += int64(value)
-		case "semspec_tool_results_truncated_total":
+		case "semstreams_agentic_loop_tool_results_truncated_total":
 			s.ToolResultsTruncatedTotal += int64(value)
-		case "semspec_context_compactions_total":
+		case "semstreams_agentic_loop_context_compactions_total":
 			s.ContextCompactionsTotal += int64(value)
 		}
 	}

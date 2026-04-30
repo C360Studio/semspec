@@ -35,7 +35,7 @@ func newOrchestrateServer(t *testing.T) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/metrics":
-			_, _ = w.Write([]byte("semspec_loop_active_loops 4\n"))
+			_, _ = w.Write([]byte("semstreams_agentic_loop_active_loops 4\n"))
 		case "/message-logger/entries":
 			_, _ = w.Write([]byte(`[{"sequence":1,"timestamp":"2026-04-30T13:59:00Z","subject":"agent.response.foo","message_type":"agentic.response.v1","raw_data":{"finish_reason":"stop"}}]`))
 		case "/message-logger/kv/PLAN_STATES":
@@ -180,7 +180,7 @@ func TestCapture_TrajectoriesSkippedWhenAgentLoopsUnavailable(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/metrics":
-			_, _ = w.Write([]byte("semspec_loop_active_loops 1\n"))
+			_, _ = w.Write([]byte("semstreams_agentic_loop_active_loops 1\n"))
 		case "/message-logger/entries":
 			_, _ = w.Write([]byte("[]"))
 		case "/message-logger/kv/AGENT_LOOPS":
