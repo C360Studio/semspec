@@ -22,15 +22,17 @@ import (
 // Exactly one of --bundle / --live must be set.
 func watchCmd() *cobra.Command {
 	var (
-		bundlePath  string
-		live        bool
-		httpURL     string
-		natsURL     string
-		limit       int
-		skipOllama  bool
-		interval    time.Duration
-		bailOn      string
-		maxDuration time.Duration
+		bundlePath       string
+		live             bool
+		httpURL          string
+		natsURL          string
+		limit            int
+		skipOllama       bool
+		interval         time.Duration
+		bailOn           string
+		maxDuration      time.Duration
+		snapshotInterval time.Duration
+		outDir           string
 	)
 	cmd := &cobra.Command{
 		Use:   "watch",
@@ -52,12 +54,14 @@ schema and the detector library that consumes it.`,
 			}
 			if live {
 				return runWatchLive(cmd.Context(), liveConfig{
-					HTTPURL:     httpURL,
-					NATSURL:     natsURL,
-					Interval:    interval,
-					BailOn:      bailOn,
-					SkipOllama:  skipOllama,
-					MaxDuration: maxDuration,
+					HTTPURL:          httpURL,
+					NATSURL:          natsURL,
+					Interval:         interval,
+					BailOn:           bailOn,
+					SkipOllama:       skipOllama,
+					MaxDuration:      maxDuration,
+					SnapshotInterval: snapshotInterval,
+					OutDir:           outDir,
 				})
 			}
 			return runWatchBundle(cmd.Context(), watchBundleConfig{
@@ -78,6 +82,8 @@ schema and the detector library that consumes it.`,
 	cmd.Flags().DurationVar(&interval, "interval", 0, "Live mode poll cadence (default 10s)")
 	cmd.Flags().StringVar(&bailOn, "bail-on", "", "Live mode: exit when a diagnosis at this severity fires (info|warning|critical)")
 	cmd.Flags().DurationVar(&maxDuration, "max-duration", 0, "Live mode: cap total run time (0 = no cap)")
+	cmd.Flags().DurationVar(&snapshotInterval, "snapshot-interval", 0, "Live mode: write a periodic snapshot bundle (requires --out-dir; 0 = disabled)")
+	cmd.Flags().StringVar(&outDir, "out-dir", "", "Live mode: directory for periodic snapshot bundles")
 	return cmd
 }
 

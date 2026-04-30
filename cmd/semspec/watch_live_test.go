@@ -1,10 +1,14 @@
 package main
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +149,76 @@ func TestRunWatchLive_ContextCancelExitsCleanly(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "context done") {
 		t.Errorf("expected 'context done' shutdown line:\n%s", out.String())
+	}
+}
+
+func TestRunWatchLive_SnapshotIntervalWritesBundle(t *testing.T) {
+	// Pin the P1 fix: a periodic snapshot during --live writes a
+	// real bundle to disk so the operator's most-recent snapshot
+	// survives stack teardown / test cleanup that erases live state.
+	srv := newLiveHTTPServer(emptyStopMessages)
+	defer srv.Close()
+
+	dir := t.TempDir()
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:          srv.URL,
+		Interval:         500 * time.Millisecond,
+		SnapshotInterval: 50 * time.Millisecond,
+		OutDir:           dir,
+		SkipOllama:       true,
+		MaxDuration:      200 * time.Millisecond,
+		Out:              &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "snapshot-*.tar.gz"))
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatalf("expected at least one snapshot in %s; output:\n%s", dir, out.String())
+	}
+	// Bundle should be a valid gzipped tarball with bundle.json at the
+	// top — same shape as --bundle output.
+	f, err := os.Open(matches[len(matches)-1])
+	if err != nil {
+		t.Fatalf("open snapshot: %v", err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gzip open: %v", err)
+	}
+	defer gz.Close()
+	hdr, err := tar.NewReader(gz).Next()
+	if err != nil {
+		t.Fatalf("tar next: %v", err)
+	}
+	if hdr.Name != "bundle.json" {
+		t.Errorf("first entry %q, want bundle.json", hdr.Name)
+	}
+	if !strings.Contains(out.String(), "snapshot:") {
+		t.Errorf("expected 'snapshot:' line in output:\n%s", out.String())
+	}
+}
+
+func TestRunWatchLive_SnapshotIntervalRequiresOutDir(t *testing.T) {
+	srv := newLiveHTTPServer(emptyStopMessages)
+	defer srv.Close()
+	cfg := liveConfig{
+		HTTPURL:          srv.URL,
+		Interval:         50 * time.Millisecond,
+		SnapshotInterval: 50 * time.Millisecond,
+		// OutDir intentionally unset
+		SkipOllama:  true,
+		MaxDuration: 100 * time.Millisecond,
+		Out:         &bytes.Buffer{},
+	}
+	err := runWatchLive(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "out-dir") {
+		t.Errorf("expected --snapshot-interval requires --out-dir error; got %v", err)
 	}
 }
 

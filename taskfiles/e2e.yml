@@ -582,13 +582,18 @@ tasks:
       - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} up -d --wait
       # Background the watch sidecar BEFORE the test starts, so detector
       # alerts and bail-out have a chance to fire mid-run rather than
-      # post-mortem only.
+      # post-mortem only. --snapshot-interval writes a bundle every
+      # 60s so the most-recent snapshot survives Playwright's afterAll
+      # cleanup (which deletes the plan from PLAN_STATES — caught
+      # 2026-04-30, see project_adr034_real_run_bugs P1.3).
       - |
         ./bin/semspec watch --live \
           --http http://localhost:3000 \
           --nats nats://localhost:4223 \
           --bail-on critical \
-          --max-duration 60m > {{.OUT_DIR}}/watch.log 2>&1 &
+          --max-duration 60m \
+          --snapshot-interval 60s \
+          --out-dir {{.OUT_DIR}} > {{.OUT_DIR}}/watch.log 2>&1 &
         echo $! > {{.OUT_DIR}}/watch.pid
         echo "[WATCH:LLM] Watch sidecar PID $(cat {{.OUT_DIR}}/watch.pid) → {{.OUT_DIR}}/watch.log"
       - defer: |
@@ -621,15 +626,22 @@ tasks:
       - cmd: |
           echo ""
           echo "[WATCH:LLM] Run summary:"
-          echo "  watch log:  {{.OUT_DIR}}/watch.log"
-          echo "  bundle:     {{.OUT_DIR}}/bundle.tar.gz"
+          echo "  watch log:    {{.OUT_DIR}}/watch.log"
+          echo "  final bundle: {{.OUT_DIR}}/bundle.tar.gz"
+          SNAPSHOTS=$(ls -1 {{.OUT_DIR}}/snapshot-*.tar.gz 2>/dev/null | wc -l | tr -d ' ')
+          if [ "${SNAPSHOTS}" != "0" ]; then
+            LATEST=$(ls -1 {{.OUT_DIR}}/snapshot-*.tar.gz 2>/dev/null | tail -1)
+            echo "  snapshots:    ${SNAPSHOTS} (latest: ${LATEST##*/})"
+            echo "                Note: snapshots predate Playwright's afterAll plan-delete,"
+            echo "                so the latest snapshot has the live plan; the final bundle does not."
+          fi
           ALERTS=$(grep -c '^ALERT:' {{.OUT_DIR}}/watch.log 2>/dev/null || echo 0)
-          echo "  alerts:     ${ALERTS}"
+          echo "  alerts:       ${ALERTS}"
           if grep -q '^BAIL:' {{.OUT_DIR}}/watch.log 2>/dev/null; then
-            echo "  bail:       TRIGGERED"
+            echo "  bail:         TRIGGERED"
             grep '^BAIL:' {{.OUT_DIR}}/watch.log
           else
-            echo "  bail:       not triggered"
+            echo "  bail:         not triggered"
           fi
           if [ "${ALERTS}" != "0" ]; then
             echo ""

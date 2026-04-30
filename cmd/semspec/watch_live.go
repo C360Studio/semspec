@@ -15,13 +15,15 @@ import (
 // liveDefaults captures the knobs --live exposes. Mirrors the cobra
 // flags so the runner is testable without parsing argv.
 type liveConfig struct {
-	HTTPURL     string
-	NATSURL     string
-	Interval    time.Duration
-	BailOn      string // "" / "warning" / "critical"
-	SkipOllama  bool
-	MaxDuration time.Duration // 0 = no cap
-	Out         io.Writer     // where to stream output; defaults to os.Stderr
+	HTTPURL          string
+	NATSURL          string
+	Interval         time.Duration
+	BailOn           string // "" / "warning" / "critical"
+	SkipOllama       bool
+	MaxDuration      time.Duration // 0 = no cap
+	SnapshotInterval time.Duration // 0 = no snapshots
+	OutDir           string        // where to write snapshots; required if SnapshotInterval > 0
+	Out              io.Writer     // where to stream stdout; defaults to os.Stderr
 }
 
 // runWatchLive implements `semspec watch --live`. Polls the same
@@ -62,11 +64,22 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 	// per session, not once per tick.
 	seen := make(map[string]struct{})
 
+	if cfg.SnapshotInterval > 0 && cfg.OutDir == "" {
+		return fmt.Errorf("--snapshot-interval requires --out-dir")
+	}
+
 	tick := time.NewTicker(cfg.Interval)
 	defer tick.Stop()
 
-	fmt.Fprintf(cfg.Out, "semspec watch --live · interval=%s · http=%s%s\n",
-		cfg.Interval, cfg.HTTPURL, bailSuffix(cfg.BailOn))
+	var snapshotTick <-chan time.Time
+	if cfg.SnapshotInterval > 0 {
+		snapshotTicker := time.NewTicker(cfg.SnapshotInterval)
+		defer snapshotTicker.Stop()
+		snapshotTick = snapshotTicker.C
+	}
+
+	fmt.Fprintf(cfg.Out, "semspec watch --live · interval=%s · http=%s%s%s\n",
+		cfg.Interval, cfg.HTTPURL, bailSuffix(cfg.BailOn), snapshotSuffix(cfg))
 
 	// Run one capture immediately so the operator sees output without
 	// waiting for the first tick — important for "did this even start?"
@@ -86,6 +99,15 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 				continue
 			} else if shouldExit {
 				return nil
+			}
+		case <-snapshotTick:
+			// Independent capture so a periodic snapshot survives
+			// even if the live tick that's about to fire produces a
+			// bail or partial failure. Snapshot errors are logged
+			// but never break the loop — operators want the live
+			// stream to keep running.
+			if err := writeLiveSnapshot(ctx, cfg, httpClient, nats); err != nil {
+				fmt.Fprintf(cfg.Out, "warn: snapshot failed (%v); continuing\n", err)
 			}
 		}
 	}
@@ -198,6 +220,59 @@ func bailSuffix(bailOn string) string {
 		return ""
 	}
 	return " · bail_on=" + strings.ToLower(bailOn)
+}
+
+// writeLiveSnapshot captures a one-off bundle and writes it to
+// cfg.OutDir as snapshot-<timestamp>.tar.gz. Used by --snapshot-interval
+// so the most recent pre-cleanup capture survives stack teardown —
+// adopters running `task e2e:watch:llm` saw final bundles with
+// plans=0 because Playwright's afterAll deletes the plan before the
+// task wrapper's post-run capture runs. A periodic snapshot fixes
+// that without coupling the bundle layer to the test harness.
+func writeLiveSnapshot(ctx context.Context, cfg liveConfig, httpClient *http.Client, nats health.TrajectoryClient) error {
+	captureCfg := health.CaptureConfig{
+		HTTPBaseURL:  cfg.HTTPURL,
+		MessageLimit: liveMessageLimit,
+		CapturedBy:   "semspec-watch-snapshot",
+		SkipOllama:   cfg.SkipOllama,
+	}
+	tickCtx, cancel := context.WithTimeout(ctx, watchHTTPTimeout)
+	defer cancel()
+
+	result, err := health.Capture(tickCtx, captureCfg, httpClient, nats)
+	if err != nil {
+		return fmt.Errorf("capture: %w", err)
+	}
+
+	// File name is sortable so `ls snapshot-*.tar.gz | tail -1` always
+	// returns the newest. Fixed-width seconds resolution is enough; the
+	// snapshot interval is bounded below at 10s in practice.
+	name := fmt.Sprintf("snapshot-%s.tar.gz", time.Now().UTC().Format("20060102-150405"))
+	path := cfg.OutDir + "/" + name
+	out, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("open snapshot: %w", err)
+	}
+	defer out.Close()
+	if err := health.WriteTarball(out, result); err != nil {
+		return fmt.Errorf("write tarball: %w", err)
+	}
+	fmt.Fprintf(cfg.Out, "snapshot: %s (plans=%d loops=%d trajectories=%d)\n",
+		name,
+		len(result.Bundle.Plans),
+		len(result.Bundle.Loops),
+		len(result.Bundle.TrajectoryRefs),
+	)
+	return nil
+}
+
+// snapshotSuffix renders the snapshot-interval flag in the startup
+// banner. Empty when snapshots are disabled.
+func snapshotSuffix(cfg liveConfig) string {
+	if cfg.SnapshotInterval <= 0 {
+		return ""
+	}
+	return " · snapshot=" + cfg.SnapshotInterval.String() + "→" + cfg.OutDir
 }
 
 // liveDefaultInterval is the default poll cadence. 10s is the bash-
