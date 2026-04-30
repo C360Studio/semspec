@@ -30,6 +30,7 @@ import (
 	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	githubsubmitter "github.com/c360studio/semspec/processor/github-submitter"
 	githubwatcher "github.com/c360studio/semspec/processor/github-watcher"
+	lessoncurator "github.com/c360studio/semspec/processor/lesson-curator"
 	lessondecomposer "github.com/c360studio/semspec/processor/lesson-decomposer"
 	changeproposalhandler "github.com/c360studio/semspec/processor/plan-decision-handler"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
@@ -275,6 +276,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return scenarioorchestrator.Register(componentRegistry) },
 		func() error { return changeproposalhandler.Register(componentRegistry) },
 		func() error { return lessondecomposer.Register(componentRegistry) },
+		func() error { return lessoncurator.Register(componentRegistry) },
 		// GitHub integration (ADR-031) — disabled by default, opt-in via config.
 		func() error { return githubwatcher.Register(componentRegistry) },
 		func() error { return githubsubmitter.Register(componentRegistry) },

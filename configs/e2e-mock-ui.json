@@ -638,6 +638,17 @@
         "consumer_name": "lesson-decomposer",
         "filter_subject": "workflow.events.lesson.decompose.requested.>"
       }
+    },
+    "lesson-curator": {
+      "name": "lesson-curator",
+      "type": "processor",
+      "enabled": false,
+      "config": {
+        "enabled": false,
+        "sweep_interval": "24h",
+        "idle_threshold": "720h",
+        "min_age_before_retire": "168h"
+      }
     }
   },
   "streams": {

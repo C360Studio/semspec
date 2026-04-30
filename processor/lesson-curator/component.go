@@ -1,0 +1,282 @@
+package lessoncurator
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/lessons"
+	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/natsclient"
+)
+
+// Component is the lesson-curator processor. It runs a periodic sweep
+// over the lessons graph and retires entries that meet the retirement
+// criteria (Phase 5a: idle past threshold).
+//
+// No JetStream consumer, no NATS subscriptions. The only external
+// dependency is the lessons.Writer + TripleWriter for graph reads/writes.
+type Component struct {
+	name       string
+	config     Config
+	natsClient *natsclient.Client
+	logger     *slog.Logger
+
+	lessonWriter *lessons.Writer
+
+	running   bool
+	startTime time.Time
+	mu        sync.RWMutex
+	cancel    context.CancelFunc
+
+	sweeps         atomic.Int64
+	lessonsRetired atomic.Int64
+	sweepFailures  atomic.Int64
+
+	lastActivityMu sync.RWMutex
+	lastActivity   time.Time
+}
+
+// NewComponent constructs a lesson-curator from raw JSON config and
+// semstreams dependencies.
+func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
+	var cfg Config
+	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal config: %w", err)
+	}
+
+	defaults := DefaultConfig()
+	if cfg.SweepInterval == "" {
+		cfg.SweepInterval = defaults.SweepInterval
+	}
+	if cfg.IdleThreshold == "" {
+		cfg.IdleThreshold = defaults.IdleThreshold
+	}
+	if cfg.MinAgeBeforeRetire == "" {
+		cfg.MinAgeBeforeRetire = defaults.MinAgeBeforeRetire
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid config: %w", err)
+	}
+
+	logger := deps.GetLogger()
+
+	tw := &graphutil.TripleWriter{
+		NATSClient:    deps.NATSClient,
+		Logger:        logger,
+		ComponentName: "lesson-curator",
+	}
+
+	return &Component{
+		name:         "lesson-curator",
+		config:       cfg,
+		natsClient:   deps.NATSClient,
+		logger:       logger,
+		lessonWriter: &lessons.Writer{TW: tw, Logger: logger},
+	}, nil
+}
+
+// Initialize prepares the component for startup.
+func (c *Component) Initialize() error {
+	c.logger.Debug("Initialized lesson-curator",
+		"sweep_interval", c.config.SweepInterval,
+		"idle_threshold", c.config.IdleThreshold,
+		"min_age_before_retire", c.config.MinAgeBeforeRetire,
+		"enabled", c.config.Enabled,
+	)
+	return nil
+}
+
+// Start runs the periodic sweep loop until the context is cancelled.
+func (c *Component) Start(ctx context.Context) error {
+	c.mu.Lock()
+	if c.running {
+		c.mu.Unlock()
+		return fmt.Errorf("component already running")
+	}
+	c.running = true
+	c.startTime = time.Now()
+
+	subCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.mu.Unlock()
+
+	go c.sweepLoop(subCtx)
+
+	c.logger.Info("lesson-curator started",
+		"sweep_interval", c.config.GetSweepInterval(),
+		"idle_threshold", c.config.GetIdleThreshold(),
+		"enabled", c.config.Enabled,
+	)
+	return nil
+}
+
+// Stop gracefully stops the component.
+func (c *Component) Stop(_ time.Duration) error {
+	c.mu.Lock()
+	if !c.running {
+		c.mu.Unlock()
+		return nil
+	}
+	cancel := c.cancel
+	c.running = false
+	c.cancel = nil
+	c.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	c.logger.Info("lesson-curator stopped",
+		"sweeps", c.sweeps.Load(),
+		"lessons_retired", c.lessonsRetired.Load(),
+		"sweep_failures", c.sweepFailures.Load(),
+	)
+	return nil
+}
+
+// Meta returns component metadata.
+func (c *Component) Meta() component.Metadata {
+	return component.Metadata{
+		Name:        "lesson-curator",
+		Type:        "processor",
+		Description: "ADR-033 Phase 5: periodic retirement sweep over the lessons graph",
+		Version:     "0.1.0",
+	}
+}
+
+// InputPorts returns the input port definitions. The curator has no
+// NATS inputs — it ticks on a timer and reads/writes the lessons graph
+// directly via TripleWriter.
+func (c *Component) InputPorts() []component.Port {
+	return []component.Port{}
+}
+
+// OutputPorts returns the output port definitions. The curator's only
+// output is graph writes via TripleWriter, which it shares with every
+// lesson producer; no dedicated NATS subject.
+func (c *Component) OutputPorts() []component.Port {
+	return []component.Port{}
+}
+
+// ConfigSchema returns the configuration schema.
+func (c *Component) ConfigSchema() component.ConfigSchema {
+	return curatorSchema
+}
+
+// Health reports the component's runtime state.
+func (c *Component) Health() component.HealthStatus {
+	c.mu.RLock()
+	running := c.running
+	startTime := c.startTime
+	c.mu.RUnlock()
+
+	status := "stopped"
+	if running {
+		status = "running"
+	}
+
+	return component.HealthStatus{
+		Healthy:    running,
+		LastCheck:  time.Now(),
+		ErrorCount: int(c.sweepFailures.Load()),
+		Uptime:     time.Since(startTime),
+		Status:     status,
+	}
+}
+
+// DataFlow reports how active the curator is.
+func (c *Component) DataFlow() component.FlowMetrics {
+	return component.FlowMetrics{
+		MessagesPerSecond: 0,
+		BytesPerSecond:    0,
+		ErrorRate:         0,
+		LastActivity:      c.getLastActivity(),
+	}
+}
+
+// sweepLoop runs the retirement sweep on the configured cadence. The
+// first sweep fires after one full interval — there's no benefit to a
+// startup-time sweep, and it gives any pending writes time to land.
+func (c *Component) sweepLoop(ctx context.Context) {
+	interval := c.config.GetSweepInterval()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !c.config.Enabled {
+				c.logger.Debug("Sweep skipped — curator disabled")
+				continue
+			}
+			c.runSweep(ctx)
+		}
+	}
+}
+
+// runSweep executes one full retirement pass: read every lesson, decide
+// which ones to retire, write the RetiredAt triples. Failures are
+// counted but do not abort the loop — the next tick re-attempts.
+func (c *Component) runSweep(ctx context.Context) {
+	c.sweeps.Add(1)
+	c.updateLastActivity()
+
+	if c.lessonWriter == nil {
+		c.logger.Warn("Sweep skipped — lesson writer unavailable")
+		c.sweepFailures.Add(1)
+		return
+	}
+
+	all, err := c.lessonWriter.ListLessonsForRole(ctx, "", 0)
+	if err != nil {
+		c.logger.Warn("Sweep failed to list lessons", "error", err)
+		c.sweepFailures.Add(1)
+		return
+	}
+
+	criteria := retirementCriteria{
+		now:                time.Now(),
+		idleThreshold:      c.config.GetIdleThreshold(),
+		minAgeBeforeRetire: c.config.GetMinAgeBeforeRetire(),
+	}
+
+	var retired int
+	for _, lesson := range all {
+		ok, reason := criteria.shouldRetire(lesson)
+		if !ok {
+			continue
+		}
+		if err := c.lessonWriter.RetireLesson(ctx, lesson.ID, reason); err != nil {
+			c.logger.Warn("Failed to retire lesson",
+				"lesson_id", lesson.ID, "reason", reason, "error", err)
+			c.sweepFailures.Add(1)
+			continue
+		}
+		c.lessonsRetired.Add(1)
+		retired++
+	}
+
+	c.logger.Info("Lesson retirement sweep complete",
+		"scanned", len(all), "retired", retired)
+}
+
+func (c *Component) updateLastActivity() {
+	c.lastActivityMu.Lock()
+	c.lastActivity = time.Now()
+	c.lastActivityMu.Unlock()
+}
+
+func (c *Component) getLastActivity() time.Time {
+	c.lastActivityMu.RLock()
+	defer c.lastActivityMu.RUnlock()
+	return c.lastActivity
+}

@@ -286,6 +286,33 @@ func (w *Writer) RotateLessonsForRole(ctx context.Context, role string, limit in
 	return selected, nil
 }
 
+// RetireLesson marks a lesson as no longer eligible for injection by
+// writing the lesson.retired_at predicate. ADR-033 Phase 5: the
+// lesson-curator component calls this when a lesson's evidence has
+// gone stale (cited file deleted, code substantially rewritten, or the
+// lesson hasn't been injected in N weeks).
+//
+// Retired lessons remain in the graph for audit; RotateLessonsForRole
+// skips them. Reason is included in logs for traceability and is
+// optional — pass "" when no specific reason is meaningful.
+func (w *Writer) RetireLesson(ctx context.Context, lessonID, reason string) error {
+	if lessonID == "" {
+		return fmt.Errorf("lessons: retire requires lesson ID")
+	}
+	if w.TW == nil {
+		return fmt.Errorf("lessons: retire requires TripleWriter")
+	}
+	eid := agentgraph.LessonEntityID(lessonID)
+	now := time.Now().Format(time.RFC3339)
+	if err := w.TW.WriteTriple(ctx, eid, agentgraph.PredicateLessonRetiredAt, now); err != nil {
+		return fmt.Errorf("lessons: write retired_at: %w", err)
+	}
+	if w.Logger != nil {
+		w.Logger.Info("Lesson retired", "lesson_id", lessonID, "reason", reason)
+	}
+	return nil
+}
+
 // IncrementRoleLessonCounts is a no-op retained for API compatibility.
 // Counts are now computed from the lesson list at read time via
 // GetRoleLessonCounts, eliminating the read-then-write race condition.

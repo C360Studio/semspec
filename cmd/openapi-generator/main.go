@@ -21,6 +21,7 @@ import (
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
+	lessoncurator "github.com/c360studio/semspec/processor/lesson-curator"
 	lessondecomposer "github.com/c360studio/semspec/processor/lesson-decomposer"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
@@ -78,6 +79,11 @@ var componentRegistry = map[string]struct {
 	"lesson-decomposer": {
 		ConfigType:  reflect.TypeOf(lessondecomposer.Config{}),
 		Description: "ADR-033 Phase 2+: produces evidence-cited lessons from reviewer-rejection trajectories",
+		Domain:      "semspec",
+	},
+	"lesson-curator": {
+		ConfigType:  reflect.TypeOf(lessoncurator.Config{}),
+		Description: "ADR-033 Phase 5: retires stale lessons via periodic sweep over the lessons graph",
 		Domain:      "semspec",
 	},
 }
