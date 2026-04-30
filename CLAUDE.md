@@ -182,6 +182,13 @@ All payloads must be registered with semstreams via `component.RegisterPayload` 
 - Git tests use `setupTestRepo()` helper
 - Use `context.WithTimeout` for async operations
 - Test both success and failure paths
+- **Parsers of upstream wire format need a real fixture, not a guessed one.**
+  Synthetic golden blobs make tests pass against the parser's expectations,
+  not against reality. Capture an actual upstream response (e.g. `/metrics`,
+  `/message-logger/entries`, `ollama ps`) into testdata and load it. Caught
+  2026-04-30 — the bundle's metric parser used `semspec_*` prefix while
+  semstreams emits `semstreams_agentic_*`, every metric was zero on real
+  runs and the synthetic test passed throughout.
 
 ## E2E Testing
 
@@ -204,6 +211,11 @@ task e2e:default
 task e2e:ui                           # Run all UI tests
 task e2e:ui -- --ui                   # Interactive mode
 
+# Real-LLM with diagnostic-bundle sidecar (ADR-034 watch CLI)
+task e2e:watch:llm -- gemini easy     # Streams ALERTs + dumps final bundle
+task e2e:watch:llm -- claude medium   # Same shape for any provider/tier
+task e2e:watch:llm -- local easy      # Local Ollama variant
+
 # Debugging (keeps infra running)
 task e2e:debug                        # Start infra and tail logs
 task e2e:run -- hello-world           # Run against running infra
@@ -214,6 +226,20 @@ task e2e:down                         # Stop when done
 
 **E2E tests are long-running. MUST monitor actively — never block in foreground.**
 
+**Preferred path (ADR-034):** `task e2e:watch:llm -- <provider> [tier]` runs a
+`semspec watch --live --bail-on critical` sidecar alongside the test. Stream
+output is line-oriented for grep/tail and dedupes ALERTs. Two streams to watch:
+
+1. `tail -f /tmp/semspec-watch-<provider>-<tier>-<ts>/watch.log` — primary
+   signal (heartbeat + ALERT lines + BAIL on critical).
+2. `TaskOutput` of the parent task — Playwright pass/fail (orthogonal to
+   detector signal).
+
+Fall back to `docker logs` only if `watch.log` heartbeats stop emitting (means
+the watch sidecar can't reach the stack — diagnose semspec liveness directly).
+
+**Fallback path (older bash blob, retained for non-watch scenarios):**
+
 1. Launch via `run_in_background: true`
 2. Monitor three sources every 20-30s:
    - **Test output**: `TaskOutput` (non-blocking)
@@ -222,6 +248,10 @@ task e2e:down                         # Stop when done
 3. Dump evidence to `/tmp/` for post-mortem (logs, messages, workflows, loops)
 4. **Abort early** if stuck in loops or burning tokens on retries
 5. **Report with evidence** — quote log lines, never guess at root cause
+
+**Operator hygiene:** Don't pre-source `.env` when invoking task commands —
+root `Taskfile.yml` has `dotenv: ['.env']` which loads it automatically.
+`task e2e:watch:llm -- gemini easy` is the clean repeatable form.
 
 ### Port Allocation
 
