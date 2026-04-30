@@ -4,7 +4,7 @@
   "model_registry": {
     "endpoints": {
       "openrouter-qwen3-moe": {
-        "provider": "openai",
+        "provider": "openrouter",
         "url": "https://openrouter.ai/api/v1",
         "model": "qwen/qwen3.5-35b-a3b",
         "api_key_env": "OPENROUTER_API_KEY",
@@ -17,7 +17,7 @@
       },
       "openrouter-default": {
         "_comment": "Optional second endpoint pinned to whatever your account routes to as default. Useful if you want one alias for ad-hoc queries vs. one pinned to qwen3-30b-a3b for benchmarking.",
-        "provider": "openai",
+        "provider": "openrouter",
         "url": "https://openrouter.ai/api/v1",
         "model": "qwen/qwen3.5-35b-a3b",
         "api_key_env": "OPENROUTER_API_KEY",

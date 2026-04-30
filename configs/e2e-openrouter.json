@@ -19,7 +19,7 @@
   "model_registry": {
     "endpoints": {
       "openrouter-qwen3-moe": {
-        "provider": "openai",
+        "provider": "openrouter",
         "url": "https://openrouter.ai/api/v1",
         "model": "qwen/qwen3.5-35b-a3b",
         "api_key_env": "OPENROUTER_API_KEY",
