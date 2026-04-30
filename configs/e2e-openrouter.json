@@ -1,0 +1,639 @@
+{
+  "version": "1.0.0",
+  "persona_preset": "bmad",
+  "platform": {
+    "org": "semspec",
+    "id": "semspec-e2e-openrouter",
+    "environment": "test"
+  },
+  "nats": {
+    "urls": [
+      "nats://nats:4222"
+    ],
+    "max_reconnects": -1,
+    "reconnect_wait": "2s",
+    "jetstream": {
+      "enabled": true
+    }
+  },
+  "model_registry": {
+    "endpoints": {
+      "openrouter-qwen3-moe": {
+        "provider": "openai",
+        "url": "https://openrouter.ai/api/v1",
+        "model": "qwen/qwen3-30b-a3b-instruct",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai",
+        "stream": false,
+        "max_concurrent": 4,
+        "requests_per_minute": 60
+      }
+    },
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation and architecture",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "requirement_generation": {
+        "description": "Requirement decomposition",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "scenario_generation": {
+        "description": "BDD scenario generation",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "plan_review": {
+        "description": "SOP-aware plan review",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "architecture": {
+        "description": "Architecture generation \u2014 technology choices, component boundaries, data flow",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "qa": {
+        "description": "Rollup quality review",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "lesson_decomposition": {
+        "description": "ADR-033 lesson decomposer",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      },
+      "fast": {
+        "description": "Quick responses, classification",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ]
+      }
+    },
+    "defaults": {
+      "model": "openrouter-qwen3-moe"
+    }
+  },
+  "services": {
+    "service-manager": {
+      "name": "service-manager",
+      "enabled": true,
+      "config": {
+        "http_port": 8080
+      }
+    },
+    "component-manager": {
+      "name": "component-manager",
+      "enabled": true,
+      "config": {}
+    },
+    "heartbeat": {
+      "name": "heartbeat",
+      "enabled": false,
+      "config": {}
+    },
+    "message-logger": {
+      "name": "message-logger",
+      "enabled": true,
+      "config": {
+        "buffer_size": 10000,
+        "monitor_subjects": [
+          "user.>",
+          "agent.>",
+          "tool.>",
+          "graph.>",
+          "workflow.>",
+          "source.>",
+          "context.>"
+        ]
+      }
+    }
+  },
+  "components": {
+    "agentic-dispatch": {
+      "name": "agentic-dispatch",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_role": "general",
+        "default_model": "openrouter-qwen3-moe",
+        "auto_continue": false,
+        "stream_name": "USER",
+        "permissions": {
+          "view": [
+            "*"
+          ],
+          "submit_task": [
+            "*"
+          ],
+          "cancel_own": true,
+          "cancel_any": [
+            "admin"
+          ],
+          "approve": [
+            "*"
+          ]
+        }
+      }
+    },
+    "agentic-loop": {
+      "name": "agentic-loop",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_iterations": 50,
+        "timeout": "900s",
+        "stream_name": "AGENT",
+        "loops_bucket": "AGENT_LOOPS",
+        "content_bucket": "AGENT_CONTENT"
+      }
+    },
+    "agentic-model": {
+      "name": "agentic-model",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "timeout": "900s"
+      }
+    },
+    "agentic-tools": {
+      "name": "agentic-tools",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name_suffix": "semspec-e2e"
+      }
+    },
+    "graph-ingest": {
+      "name": "graph-ingest",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "entities_in",
+              "subject": "graph.ingest.entity",
+              "type": "jetstream",
+              "stream_name": "GRAPH"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-write"
+            }
+          ]
+        },
+        "enable_hierarchy": true
+      }
+    },
+    "graph-index": {
+      "name": "graph-index",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "outgoing_index",
+              "subject": "OUTGOING_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "incoming_index",
+              "subject": "INCOMING_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "alias_index",
+              "subject": "ALIAS_INDEX",
+              "type": "kv"
+            },
+            {
+              "name": "predicate_index",
+              "subject": "PREDICATE_INDEX",
+              "type": "kv"
+            }
+          ]
+        },
+        "workers": 4,
+        "batch_size": 50,
+        "coalesce_ms": 100
+      }
+    },
+    "graph-embedding": {
+      "name": "graph-embedding",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "embeddings",
+              "subject": "EMBEDDINGS_CACHE",
+              "type": "kv"
+            }
+          ]
+        },
+        "embedder_type": "bm25",
+        "batch_size": 50,
+        "cache_ttl": "1h",
+        "coalesce_ms": 200,
+        "text_suffixes": [
+          ".content",
+          ".summary",
+          ".description",
+          ".title",
+          ".name",
+          ".goal",
+          ".context",
+          ".issue",
+          ".suggestion",
+          ".source_code",
+          ".signature",
+          ".body"
+        ]
+      }
+    },
+    "graph-query": {
+      "name": "graph-query",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "query_requests",
+              "subject": "graph.query.>",
+              "type": "nats-request"
+            }
+          ],
+          "outputs": []
+        },
+        "request_timeout": "15s",
+        "max_traversal_depth": 5,
+        "max_traversal_nodes": 100
+      }
+    },
+    "graph-gateway": {
+      "name": "graph-gateway",
+      "type": "gateway",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "http",
+              "subject": ":8082",
+              "type": "http"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "mutations",
+              "subject": "graph.mutation.*",
+              "type": "nats-request"
+            }
+          ]
+        },
+        "graphql_path": "/graphql",
+        "mcp_path": "/mcp",
+        "bind_address": ":8082",
+        "enable_playground": true
+      }
+    },
+    "planner": {
+      "name": "planner",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_generation_retries": 2
+      }
+    },
+    "requirement-generator": {
+      "name": "requirement-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_capability": "requirement_generation"
+      }
+    },
+    "scenario-generator": {
+      "name": "scenario-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_capability": "scenario_generation"
+      }
+    },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_capability": "architecture"
+      }
+    },
+    "plan-manager": {
+      "name": "plan-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "execution_bucket_name": "EXECUTION_STATES",
+        "max_concurrent_planners": 3,
+        "max_review_iterations": 3,
+        "auto_approve": false,
+        "default_capability": "planning",
+        "sandbox_url": "http://sandbox:8090"
+      }
+    },
+    "plan-reviewer": {
+      "name": "plan-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_capability": "plan_review",
+        "auto_approve": false
+      }
+    },
+    "project-manager": {
+      "name": "project-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": "/workspace",
+        "sandbox_url": "http://sandbox:8090"
+      }
+    },
+    "scenario-orchestrator": {
+      "name": "scenario-orchestrator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "scenario-orchestrator",
+        "trigger_subject": "scenario.orchestrate.*",
+        "execution_timeout": "3600s"
+      }
+    },
+    "question-manager": {
+      "name": "question-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
+    "requirement-executor": {
+      "name": "requirement-executor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout_seconds": 3600,
+        "model": "openrouter-qwen3-moe",
+        "decomposer_model": "openrouter-qwen3-moe",
+        "sandbox_url": "http://sandbox:8090",
+        "max_requirement_retries": 2,
+        "max_decomposer_retries": 2
+      }
+    },
+    "structural-validator": {
+      "name": "structural-validator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "structural-validator",
+        "repo_path": "/workspace",
+        "checklist_path": ".semspec/checklist.json",
+        "default_timeout": "900s",
+        "sandbox_url": "http://sandbox:8090"
+      }
+    },
+    "execution-manager": {
+      "name": "execution-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_tdd_cycles": 5,
+        "timeout_seconds": 3600,
+        "model": "openrouter-qwen3-moe",
+        "sandbox_url": "http://sandbox:8090",
+        "graph_gateway_url": "http://localhost:8082",
+        "indexing_budget": "60s",
+        "enable_positive_lessons": true
+      }
+    },
+    "workflow-documents": {
+      "name": "workflow-documents",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "plan_state_bucket": "PLAN_STATES"
+      }
+    },
+    "plan-decision-handler": {
+      "name": "plan-decision-handler",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "plan-decision-handler",
+        "trigger_subject": "workflow.trigger.change-proposal-cascade",
+        "accepted_subject": "workflow.events.change-proposal.accepted",
+        "timeout_seconds": 120,
+        "ports": {
+          "inputs": [
+            {
+              "name": "cascade-triggers",
+              "subject": "workflow.trigger.change-proposal-cascade",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive cascade requests when a ChangeProposal is accepted",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "accepted-events",
+              "subject": "workflow.events.change-proposal.accepted",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Publish accepted event with cascade summary"
+            },
+            {
+              "name": "cancellation-signals",
+              "subject": "agent.signal.cancel.*",
+              "type": "nats",
+              "description": "Cancel running scenario loops affected by cascade"
+            }
+          ]
+        }
+      }
+    },
+    "qa-reviewer": {
+      "name": "qa-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_capability": "qa"
+      }
+    },
+    "lesson-decomposer": {
+      "name": "lesson-decomposer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "stream_name": "WORKFLOW",
+        "consumer_name": "lesson-decomposer",
+        "filter_subject": "workflow.events.lesson.decompose.requested.>"
+      }
+    },
+    "lesson-curator": {
+      "name": "lesson-curator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "sweep_interval": "24h",
+        "idle_threshold": "720h",
+        "min_age_before_retire": "168h"
+      }
+    }
+  },
+  "streams": {
+    "USER": {
+      "subjects": [
+        "user.message.>",
+        "user.response.>",
+        "user.signal.>"
+      ],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "AGENT": {
+      "subjects": [
+        "agent.task.>",
+        "dev.task.>",
+        "agent.request.>",
+        "agent.response.>",
+        "agent.signal.>",
+        "agent.complete.>",
+        "agent.created.>",
+        "agent.failed.>",
+        "agent.context.compaction.>",
+        "context.build.>",
+        "context.built.>",
+        "tool.execute.>",
+        "tool.result.>",
+        "question.ask.>",
+        "question.answer.>",
+        "question.timeout.>",
+        "question.escalate.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "GRAPH": {
+      "subjects": [
+        "graph.ingest.entity",
+        "graph.ingest.batch",
+        "graph.ingest.manifest",
+        "graph.ingest.status",
+        "graph.ingest.predicates",
+        "graph.export.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "SOURCES": {
+      "subjects": [
+        "source.ingest.>",
+        "source.status.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "WORKFLOW": {
+      "subjects": [
+        "workflow.trigger.>",
+        "workflow.async.>",
+        "workflow.result.>",
+        "workflow.callback.>",
+        "workflow.step.complete.>",
+        "workflow.step.result.>",
+        "workflow.events.>",
+        "workflow.validate.>",
+        "workflow.task.complete",
+        "output.workflow.>",
+        "proposal.request.>",
+        "design.request.>",
+        "spec.request.>",
+        "tasks.request.>",
+        "approve.request.>",
+        "archive.request.>",
+        "github.request.>",
+        "scenario.orchestrate.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  }
+}
