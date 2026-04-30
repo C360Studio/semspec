@@ -753,10 +753,8 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		// ADR-033 Phase 6: signal the decomposer on first-try approval so
 		// it can produce a positive "best practice" lesson. Gated behind
 		// EnablePositiveLessons (default false) because every first-try
-		// success now becomes a decomposer LLM call. exec.TDDCycle is
-		// 0-based; first-try means the first dev→validate→review cycle
-		// completed without any retry.
-		if c.config.EnablePositiveLessons && exec.TDDCycle == 0 && exec.ReviewRetryCount == 0 {
+		// success now becomes a decomposer LLM call.
+		if c.shouldDispatchPositiveLesson(exec) {
 			c.publishLessonDecomposeRequest(ctx, exec, result.Verdict, result.Feedback, event.LoopID)
 		}
 		c.markApprovedLocked(ctx, exec)

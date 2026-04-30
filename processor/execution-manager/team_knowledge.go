@@ -177,6 +177,25 @@ func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []s
 	}
 }
 
+// shouldDispatchPositiveLesson returns true when ADR-033 Phase 6's
+// first-try-success path should publish a decompose request. Gates:
+//
+//   - EnablePositiveLessons must be set (default false because every
+//     first-try success becomes a decomposer LLM call).
+//   - exec.TDDCycle must be 0 — only the first dev→validate→review cycle
+//     counts as "first try".
+//   - exec.ReviewRetryCount must be 0 — a parse-retry that succeeded on
+//     attempt N is not a first-try success.
+//
+// Pulled out as a method so the boundary is testable without spying on
+// NATS publishes.
+func (c *Component) shouldDispatchPositiveLesson(exec *taskExecution) bool {
+	if exec == nil || !c.config.EnablePositiveLessons {
+		return false
+	}
+	return exec.TDDCycle == 0 && exec.ReviewRetryCount == 0
+}
+
 // publishLessonDecomposeRequest signals the lesson-decomposer that a reviewer
 // rejection happened. ADR-033 Phase 2a: this fires alongside extractLessons
 // (the keyword classifier still runs); Phase 2b's decomposer LLM produces an

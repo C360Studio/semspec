@@ -176,6 +176,51 @@ func TestExtractStructuralLessons_NilWriterIsNoOp(_ *testing.T) {
 	c.extractStructuralLessons(context.Background(), exec, checks)
 }
 
+func TestShouldDispatchPositiveLesson(t *testing.T) {
+	// ADR-033 Phase 6 gate contract:
+	//   1. EnablePositiveLessons=false → never dispatch
+	//   2. EnablePositiveLessons=true + first-try (TDDCycle=0,
+	//      ReviewRetryCount=0) → dispatch
+	//   3. EnablePositiveLessons=true + retry (TDDCycle>0) → no dispatch
+	//   4. EnablePositiveLessons=true + parse-retry (ReviewRetryCount>0)
+	//      → no dispatch
+	//   5. nil exec → no dispatch (defensive)
+	cases := []struct {
+		name             string
+		enablePositive   bool
+		tddCycle         int
+		reviewRetryCount int
+		want             bool
+	}{
+		{"flag off + first try", false, 0, 0, false},
+		{"flag on + first try", true, 0, 0, true},
+		{"flag on + tdd retry", true, 1, 0, false},
+		{"flag on + parse retry", true, 0, 1, false},
+		{"flag on + both retry", true, 2, 3, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			comp := &Component{config: Config{EnablePositiveLessons: c.enablePositive}}
+			exec := &taskExecution{
+				TaskExecution: &workflow.TaskExecution{
+					TaskID:           "t",
+					TDDCycle:         c.tddCycle,
+					ReviewRetryCount: c.reviewRetryCount,
+				},
+			}
+			if got := comp.shouldDispatchPositiveLesson(exec); got != c.want {
+				t.Errorf("got %v, want %v", got, c.want)
+			}
+		})
+	}
+
+	// Defensive: nil exec must not panic.
+	comp := &Component{config: Config{EnablePositiveLessons: true}}
+	if comp.shouldDispatchPositiveLesson(nil) {
+		t.Error("nil exec must not dispatch")
+	}
+}
+
 func TestExtractStructuralLessons_RecordsLessonsViaWriter(t *testing.T) {
 	// Real Writer with nil-NATS TripleWriter — RecordLesson succeeds (no-op),
 	// no panic. We can't verify what was written without mocks, so we just
