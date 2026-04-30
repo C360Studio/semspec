@@ -32,7 +32,7 @@ func TestFetchMessages_HappyPath(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	got, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 10)
+	got, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 10, "agent.*")
 	if err != nil {
 		t.Fatalf("FetchMessages: %v", err)
 	}
@@ -48,6 +48,24 @@ func TestFetchMessages_HappyPath(t *testing.T) {
 	if !strings.Contains(wantQuery, "limit=10") {
 		t.Errorf("query missing limit: %q", wantQuery)
 	}
+	if !strings.Contains(wantQuery, "subject=agent.") {
+		t.Errorf("query missing subject filter: %q", wantQuery)
+	}
+}
+
+func TestFetchMessages_EmptySubjectOmitsParam(t *testing.T) {
+	got := ""
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.RawQuery
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer srv.Close()
+	if _, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 5, ""); err != nil {
+		t.Fatalf("FetchMessages: %v", err)
+	}
+	if strings.Contains(got, "subject=") {
+		t.Errorf("empty subject should omit the query param; got %q", got)
+	}
 }
 
 func TestFetchMessages_DefaultLimit(t *testing.T) {
@@ -58,7 +76,7 @@ func TestFetchMessages_DefaultLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if _, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 0); err != nil {
+	if _, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 0, ""); err != nil {
 		t.Fatalf("FetchMessages: %v", err)
 	}
 	if !strings.Contains(got, "limit=500") {
@@ -72,7 +90,7 @@ func TestFetchMessages_5xxSurfaces(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 1)
+	_, err := FetchMessages(context.Background(), srv.Client(), srv.URL, 1, "")
 	if err == nil || !strings.Contains(err.Error(), "HTTP 500") {
 		t.Errorf("expected HTTP 500, got %v", err)
 	}

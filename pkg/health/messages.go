@@ -28,15 +28,22 @@ type messageEntry struct {
 }
 
 // FetchMessages pulls the most recent N message-logger entries via
-// GET /message-logger/entries?limit=N. The endpoint returns entries
-// newest-first; this function preserves that order — callers that
-// need chronological order should sort by Sequence themselves (the
-// detector library does so per-detector).
+// GET /message-logger/entries?limit=N&subject=PATTERN. The endpoint
+// returns entries newest-first; this function preserves that order —
+// callers that need chronological order should sort by Sequence
+// themselves (the detector library does so per-detector).
+//
+// subjectPattern is a glob honoured server-side: "*" or "" matches
+// any subject, "agent.*" matches by prefix, "*foo*" matches as
+// substring. The semstreams MessageLogger applies the limit BEFORE
+// the filter, so for niche subjects callers should pull a generous
+// limit. Two-subject pulls (e.g. agent.* + tool.*) are the
+// orchestrator's responsibility.
 //
 // Bundle.Messages records Subject + MessageType + RawData so detectors
 // can decode payload-shape on demand without bundling the full
 // metadata map (which can leak adopter-specific labels).
-func FetchMessages(ctx context.Context, client *http.Client, baseURL string, limit int) ([]Message, error) {
+func FetchMessages(ctx context.Context, client *http.Client, baseURL string, limit int, subjectPattern string) ([]Message, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
@@ -45,6 +52,9 @@ func FetchMessages(ctx context.Context, client *http.Client, baseURL string, lim
 	}
 	u := strings.TrimRight(baseURL, "/") + "/message-logger/entries"
 	q := url.Values{"limit": []string{strconv.Itoa(limit)}}
+	if subjectPattern != "" {
+		q.Set("subject", subjectPattern)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u+"?"+q.Encode(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("messages: build request: %w", err)

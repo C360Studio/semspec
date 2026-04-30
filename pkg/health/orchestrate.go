@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -126,10 +127,12 @@ func captureHTTPSources(
 	collector *errCollector,
 ) map[string][]KVEntry {
 	buckets := resolvedKVBuckets(cfg)
+	subjects := resolvedMessageSubjects(cfg)
 	bucketResults := make(map[string][]KVEntry, len(buckets))
-	var bucketMu sync.Mutex
+	messageResults := make(map[string][]Message, len(subjects))
+	var bucketMu, messageMu sync.Mutex
 	var wg sync.WaitGroup
-	wg.Add(2 + len(buckets))
+	wg.Add(1 + len(subjects) + len(buckets))
 
 	go func() {
 		defer wg.Done()
@@ -142,15 +145,19 @@ func captureHTTPSources(
 		bundle.Metrics = snap
 	}()
 
-	go func() {
-		defer wg.Done()
-		msgs, err := FetchMessages(ctx, httpClient, cfg.HTTPBaseURL, cfg.MessageLimit)
-		if err != nil {
-			collector.add(&CaptureError{Source: "messages", Err: err})
-			return
-		}
-		bundle.Messages = msgs
-	}()
+	for _, subject := range subjects {
+		go func(pattern string) {
+			defer wg.Done()
+			msgs, err := FetchMessages(ctx, httpClient, cfg.HTTPBaseURL, cfg.MessageLimit, pattern)
+			if err != nil {
+				collector.add(&CaptureError{Source: "messages:" + pattern, Err: err})
+				return
+			}
+			messageMu.Lock()
+			messageResults[pattern] = msgs
+			messageMu.Unlock()
+		}(subject)
+	}
 
 	for _, bucket := range buckets {
 		go func(name string) {
@@ -166,6 +173,14 @@ func captureHTTPSources(
 		}(bucket)
 	}
 	wg.Wait()
+
+	// Merge per-subject pulls into bundle.Messages, deduped by
+	// sequence (in case patterns overlap) and sorted newest-first to
+	// preserve the message-logger's wire convention. Detectors
+	// re-sort by sequence ascending for chronological order, but
+	// other readers (UIs, ad-hoc inspection) expect newest-first.
+	bundle.Messages = mergeMessages(messageResults)
+
 	return bucketResults
 }
 
@@ -198,6 +213,52 @@ func resolvedKVBuckets(cfg CaptureConfig) []string {
 	}
 	out := make([]string, len(DefaultKVBuckets))
 	copy(out, DefaultKVBuckets)
+	return out
+}
+
+// resolvedMessageSubjects returns the subject pattern list to pull:
+// cfg.MessageSubjects if set, otherwise DefaultMessageSubjects.
+// Same defensive-copy treatment as resolvedKVBuckets.
+func resolvedMessageSubjects(cfg CaptureConfig) []string {
+	if len(cfg.MessageSubjects) > 0 {
+		out := make([]string, len(cfg.MessageSubjects))
+		copy(out, cfg.MessageSubjects)
+		return out
+	}
+	out := make([]string, len(DefaultMessageSubjects))
+	copy(out, DefaultMessageSubjects)
+	return out
+}
+
+// mergeMessages flattens per-subject pull results into a single
+// slice, dedupes by Sequence (which is unique within the
+// message-logger's append-only buffer), and sorts newest-first.
+//
+// Newest-first matches the wire format and what FetchMessages returns
+// for a single pull, so a downstream detector can't tell whether the
+// bundle.Messages came from one pull or many. Detectors that need
+// chronological order re-sort by sequence ascending themselves
+// (groupResponsesByLoop in agent_response_walk.go does this).
+func mergeMessages(byPattern map[string][]Message) []Message {
+	if len(byPattern) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{})
+	var total int
+	for _, msgs := range byPattern {
+		total += len(msgs)
+	}
+	out := make([]Message, 0, total)
+	for _, msgs := range byPattern {
+		for _, m := range msgs {
+			if _, dup := seen[m.Sequence]; dup {
+				continue
+			}
+			seen[m.Sequence] = struct{}{}
+			out = append(out, m)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Sequence > out[j].Sequence })
 	return out
 }
 

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -225,5 +226,73 @@ func TestCapture_DefaultCapturedBy(t *testing.T) {
 	}
 	if res.Bundle.Bundle.CapturedBy != "semspec-dev" {
 		t.Errorf("default CapturedBy = %q, want semspec-dev", res.Bundle.Bundle.CapturedBy)
+	}
+}
+
+func TestCapture_PullsEverySubjectAndDedupes(t *testing.T) {
+	// Pin the behavior the P1 fix protects: orchestrator does one
+	// HTTP pull per cfg.MessageSubjects (default: agent.* + tool.*),
+	// and mergeMessages dedupes overlapping sequences.
+	subjects := make(map[string]int)
+	var subjectsMu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metrics":
+			_, _ = w.Write([]byte(""))
+		case "/message-logger/entries":
+			subj := r.URL.Query().Get("subject")
+			subjectsMu.Lock()
+			subjects[subj]++
+			subjectsMu.Unlock()
+			// Same payload (sequence 7) for both pulls so merge has
+			// to dedupe.
+			_, _ = w.Write([]byte(`[{"sequence":7,"timestamp":"2026-04-30T13:59:00Z","subject":"agent.response.foo","raw_data":{"finish_reason":"stop"}}]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	cfg := CaptureConfig{HTTPBaseURL: srv.URL, SkipOllama: true}
+	res, err := Capture(context.Background(), cfg, srv.Client(), nil)
+	if err != nil {
+		t.Fatalf("Capture: %v", err)
+	}
+	if subjects["agent.*"] != 1 || subjects["tool.*"] != 1 {
+		t.Errorf("expected one pull per default subject; got %v", subjects)
+	}
+	if len(res.Bundle.Messages) != 1 {
+		t.Errorf("dedupe failed: got %d messages, want 1 (same seq from two pulls)", len(res.Bundle.Messages))
+	}
+}
+
+func TestMergeMessages_NewestFirst(t *testing.T) {
+	// Bundle.Messages convention is newest-first; mergeMessages must
+	// preserve that across multi-subject merges.
+	in := map[string][]Message{
+		"agent.*": {{Sequence: 5}, {Sequence: 3}},
+		"tool.*":  {{Sequence: 4}, {Sequence: 1}},
+	}
+	got := mergeMessages(in)
+	wantSeqs := []int64{5, 4, 3, 1}
+	if len(got) != len(wantSeqs) {
+		t.Fatalf("len = %d, want %d", len(got), len(wantSeqs))
+	}
+	for i, want := range wantSeqs {
+		if got[i].Sequence != want {
+			t.Errorf("got[%d].Sequence = %d, want %d", i, got[i].Sequence, want)
+		}
+	}
+}
+
+func TestMergeMessages_DedupesAcrossPatterns(t *testing.T) {
+	// Sequence 5 appears in both pattern results — should land once.
+	in := map[string][]Message{
+		"agent.*": {{Sequence: 5, Subject: "agent.response.x"}},
+		"tool.*":  {{Sequence: 5, Subject: "agent.response.x"}, {Sequence: 4, Subject: "tool.execute.y"}},
+	}
+	got := mergeMessages(in)
+	if len(got) != 2 {
+		t.Errorf("dedupe failed: got %d, want 2", len(got))
 	}
 }

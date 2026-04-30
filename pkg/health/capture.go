@@ -13,9 +13,18 @@ type CaptureConfig struct {
 	// etc. Typically "http://localhost:8080" in dev.
 	HTTPBaseURL string
 
-	// MessageLimit caps how many message-logger entries land in the
-	// bundle. Older entries are dropped first. Zero = use Default.
+	// MessageLimit caps the per-subject message-logger pull. With the
+	// default MessageSubjects (agent.*, tool.*), the bundle can carry
+	// up to MessageLimit * len(MessageSubjects) messages, deduped by
+	// sequence. Zero = use DefaultMessageLimit.
 	MessageLimit int
+
+	// MessageSubjects lists subject glob patterns to pull from the
+	// message-logger. Empty = use DefaultMessageSubjects, which
+	// focuses on agentic conversation traffic and skips the
+	// graph.mutation flood that otherwise dominates the
+	// most-recent-N window. Pass ["*"] to capture everything.
+	MessageSubjects []string
 
 	// KVBuckets names the buckets to capture. Empty slice = use the v1
 	// default set (PLAN_STATES, AGENT_LOOPS).
@@ -50,6 +59,22 @@ const (
 // Additive only within v1 — removing a bucket name from this list is a
 // breaking schema change that ships as v2.
 var DefaultKVBuckets = []string{"PLAN_STATES", "AGENT_LOOPS"}
+
+// DefaultMessageSubjects is the v1 set of message-logger subject globs
+// the bundle pulls. Tuned for the v1 detector set:
+//
+//   - agent.* covers agent.request + agent.response (EmptyStop,
+//     JSONInText, ThinkingSpiral all read agent.response shapes)
+//   - tool.* covers tool.execute + tool.result (context for tool-call
+//     failures and future tool-error detectors)
+//
+// graph.* and other infra subjects are deliberately excluded — on a
+// healthy run they generate ~80% of message-logger traffic and would
+// drown out agentic conversation in the most-recent-N window. Caught
+// 2026-04-30 by the first end-to-end watch CLI exercise; before this
+// fix the bundle carried ~2 agent.responses per pull regardless of
+// run length.
+var DefaultMessageSubjects = []string{"agent.*", "tool.*"}
 
 // CaptureError is a non-fatal capture issue: one source failed but the
 // bundle assembly continued. Aggregated into CaptureResult.Errors so the
