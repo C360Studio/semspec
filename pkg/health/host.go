@@ -27,7 +27,7 @@ func CaptureHost(fallbackVersion string) HostInfo {
 		h.SemspecVersion = info.Main.Version
 	}
 	for _, dep := range info.Deps {
-		if isSemstreamsModule(dep.Path) {
+		if looksLikeSemstreamsModule(dep.Path) {
 			h.SemstreamsVersion = dep.Version
 			break
 		}
@@ -35,9 +35,12 @@ func CaptureHost(fallbackVersion string) HostInfo {
 	return h
 }
 
-// isSemstreamsModule matches the semstreams Go module path. Kept as a
-// helper so future module renames are a one-line change.
-func isSemstreamsModule(path string) bool {
+// looksLikeSemstreamsModule does a loose match on Go module paths
+// ending in /semstreams (or having /semstreams/ as a path segment).
+// Loose by design: a third-party fork is preferable to "" when the
+// canonical module isn't imported, because the bundle reader sees
+// SOMETHING and can correlate.
+func looksLikeSemstreamsModule(path string) bool {
 	return strings.HasSuffix(path, "/semstreams") ||
 		strings.Contains(path, "/semstreams/")
 }

@@ -30,7 +30,7 @@ func TestCaptureHost_Ollama_NotPopulatedHere(t *testing.T) {
 	}
 }
 
-func TestIsSemstreamsModule(t *testing.T) {
+func TestLooksLikeSemstreamsModule(t *testing.T) {
 	cases := map[string]bool{
 		"github.com/c360studio/semstreams":         true,
 		"github.com/c360studio/semstreams/pkg/foo": true,
@@ -39,8 +39,8 @@ func TestIsSemstreamsModule(t *testing.T) {
 		"":                                         false,
 	}
 	for path, want := range cases {
-		if got := isSemstreamsModule(path); got != want {
-			t.Errorf("isSemstreamsModule(%q) = %v, want %v", path, got, want)
+		if got := looksLikeSemstreamsModule(path); got != want {
+			t.Errorf("looksLikeSemstreamsModule(%q) = %v, want %v", path, got, want)
 		}
 	}
 }

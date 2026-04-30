@@ -82,8 +82,22 @@ func TestFetchMetrics_HappyPath(t *testing.T) {
 	if snap.LoopActiveLoops != 7 {
 		t.Errorf("LoopActiveLoops not parsed: %+v", snap)
 	}
-	if snap.CapturedAt.IsZero() {
-		t.Error("CapturedAt should be set")
+	// FetchMetrics deliberately leaves CapturedAt zero — the
+	// orchestrator stamps a single bundle-wide instant. See
+	// pkg/health/metrics.go FetchMetrics doc comment.
+	if !snap.CapturedAt.IsZero() {
+		t.Errorf("CapturedAt should be zero (orchestrator stamps it); got %v", snap.CapturedAt)
+	}
+}
+
+func TestParseMetrics_LabelValueWithSpace(t *testing.T) {
+	// Regression: splitMetricLine used to LastIndexByte(' ') on the
+	// full line, which split inside `model="gemini 2.5"` and silently
+	// returned ok=false (zero-snapshot). Anchor past the closing brace.
+	input := `semspec_model_requests_total{model="gemini 2.5",status="success"} 25` + "\n"
+	got := ParseMetrics(input)
+	if got.ModelRequestsTotal != 25 {
+		t.Errorf("ModelRequestsTotal = %d, want 25 (label-value-with-space regression)", got.ModelRequestsTotal)
 	}
 }
 

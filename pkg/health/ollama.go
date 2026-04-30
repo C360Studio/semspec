@@ -5,7 +5,14 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
+
+// ollamaShellTimeout caps how long any single ollama subprocess can
+// run. The bundle's job is to capture a stuck/wedged daemon WITHOUT
+// itself wedging — if `ollama ps` blocks beyond this window, the
+// capture treats it as a failure and moves on.
+const ollamaShellTimeout = 5 * time.Second
 
 // CaptureOllama runs `ollama --version` and `ollama ps` to populate the
 // Ollama-related bundle sections. Returns:
@@ -20,7 +27,12 @@ import (
 // The function never returns a top-level error — Ollama failures are a
 // data point, not a capture failure. Adopters running cloud LLMs will
 // see LastError="exec: ollama: not found" and that's correct.
-func CaptureOllama(ctx context.Context) (*OllamaHostInfo, *OllamaState) {
+//
+// cfg.SkipOllama is the orchestrator's responsibility — when true the
+// orchestrator must not call this function at all. Passing cfg here
+// keeps the signature symmetric with the HTTP fetchers and reserves
+// space for future per-source knobs (custom binary path, etc.).
+func CaptureOllama(ctx context.Context, _ CaptureConfig) (*OllamaHostInfo, *OllamaState) {
 	state := &OllamaState{}
 
 	hostInfo := captureOllamaVersion(ctx)
@@ -40,6 +52,8 @@ func CaptureOllama(ctx context.Context) (*OllamaHostInfo, *OllamaState) {
 // version token. Returns nil if the binary is missing or stderr is
 // non-empty.
 func captureOllamaVersion(ctx context.Context) *OllamaHostInfo {
+	ctx, cancel := context.WithTimeout(ctx, ollamaShellTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "ollama", "--version")
 	out, err := cmd.Output()
 	if err != nil {
@@ -59,6 +73,8 @@ func captureOllamaVersion(ctx context.Context) *OllamaHostInfo {
 // don't support it; the table format is stable across versions back
 // to 0.1.x.
 func captureOllamaRunning(ctx context.Context) ([]OllamaRunningModel, string) {
+	ctx, cancel := context.WithTimeout(ctx, ollamaShellTimeout)
+	defer cancel()
 	cmd := exec.CommandContext(ctx, "ollama", "ps")
 	out, err := cmd.CombinedOutput()
 	if err != nil {

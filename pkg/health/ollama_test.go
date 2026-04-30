@@ -44,6 +44,26 @@ func TestParseOllamaPs_EmptyAndHeaderOnly(t *testing.T) {
 	}
 }
 
+// TestParseOllamaPs_MissingUntil checks the column-omission shape the
+// reviewer flagged. Stopping models can print an empty UNTIL column,
+// which `strings.Fields` collapses away. The parser should still
+// return a row with Name + ID + SizeBytes; Until empty is fine.
+func TestParseOllamaPs_MissingUntil(t *testing.T) {
+	noUntil := `NAME              ID              SIZE      PROCESSOR
+qwen3-coder:14b   abc123          9.0 GB    100% GPU
+`
+	rows := parseOllamaPs(noUntil)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if rows[0].Name != "qwen3-coder:14b" {
+		t.Errorf("Name = %q", rows[0].Name)
+	}
+	if rows[0].SizeBytes == 0 {
+		t.Errorf("SizeBytes should be non-zero with size column present; got 0 (row=%+v)", rows[0])
+	}
+}
+
 func TestParseOllamaSize(t *testing.T) {
 	cases := map[string]int64{
 		"":        0,

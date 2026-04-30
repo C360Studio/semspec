@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -11,6 +12,12 @@ import (
 
 // kvEntriesResponse is the shape returned by GET /message-logger/kv/{bucket}.
 // Local to this file; bundle.KVEntry is the public type that survives.
+//
+// The producer is a semstreams-side handler that emits time.Time values
+// using stdlib JSON, i.e. RFC3339. KVEntry.Created decodes against the
+// same convention. If a future message-logger release switches to Unix
+// nanos, decode silently zeroes the field — pin a contract test there
+// (test/e2e/client/http.go owns the symmetric reader).
 type kvEntriesResponse struct {
 	Bucket  string    `json:"bucket"`
 	Entries []KVEntry `json:"entries"`
@@ -46,7 +53,7 @@ func FetchKVBucket(ctx context.Context, client *http.Client, baseURL, bucket str
 		return nil, fmt.Errorf("kv:%s: HTTP %d", bucket, resp.StatusCode)
 	}
 	var body kvEntriesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, MaxResponseBytes)).Decode(&body); err != nil {
 		return nil, fmt.Errorf("kv:%s: decode: %w", bucket, err)
 	}
 	return body.Entries, nil

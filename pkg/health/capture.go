@@ -37,6 +37,13 @@ const (
 	// for "enough context to diagnose recent activity" without ballooning
 	// bundle size. Adopters with extreme runs can override.
 	DefaultMessageLimit = 500
+
+	// MaxResponseBytes caps the size of a single source's HTTP body
+	// before parsing. The bundle's whole point is bounded artefact size;
+	// a misbehaving endpoint should not be able to make the bundle
+	// process OOM by streaming garbage. 64 MiB is generous for any
+	// real /metrics or /kv response semspec emits today.
+	MaxResponseBytes = 64 << 20
 )
 
 // DefaultKVBuckets is the v1 set of KV buckets a bundle captures.
@@ -47,13 +54,28 @@ var DefaultKVBuckets = []string{"PLAN_STATES", "AGENT_LOOPS"}
 // CaptureError is a non-fatal capture issue: one source failed but the
 // bundle assembly continued. Aggregated into CaptureResult.Errors so the
 // reader can see what's missing without losing the bundle outright.
+//
+// Err must be non-nil; constructors should use errors.New if no
+// underlying cause exists. Error() returns the source name alone if
+// somehow Err is nil rather than panicking — defensive but cheap.
 type CaptureError struct {
 	Source string // "metrics", "kv:PLAN_STATES", "ollama", etc.
 	Err    error
 }
 
 func (e *CaptureError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err == nil {
+		return e.Source
+	}
 	return e.Source + ": " + e.Err.Error()
 }
 
-func (e *CaptureError) Unwrap() error { return e.Err }
+func (e *CaptureError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
