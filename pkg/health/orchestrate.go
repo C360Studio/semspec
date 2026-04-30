@@ -92,6 +92,12 @@ func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats Tra
 		}
 	}
 
+	// v1 default redactions run unconditionally — the env-var/auth-header
+	// scrub is cheap and the failure mode (a leaked key in a shared
+	// bundle) is unrecoverable. Heavier redactions (prompt content) are
+	// deferred per ADR-034 §3 until external adopters require them.
+	Redact(bundle)
+
 	return &CaptureResult{
 		Bundle:       bundle,
 		Trajectories: trajResults,
