@@ -62,6 +62,14 @@
         reverse_proxy semspec:8080
     }
 
+    # Prometheus metrics — semspec exposes these on a separate port
+    # (9090) than its main HTTP. Routed through Caddy so host-side
+    # tooling like `semspec watch --bundle/--live` can hit a single
+    # endpoint instead of needing a second --metrics-url flag.
+    handle /metrics {
+        reverse_proxy semspec:9090
+    }
+
     # All other routes to UI Node SSR server
     handle {
         reverse_proxy ui:3000

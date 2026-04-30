@@ -541,6 +541,106 @@ tasks:
       - defer: { task: ui:cleanup:llm }
       - echo "[UI:TEST:LLM] Complete"
 
+  watch:llm:
+    desc: "Real-LLM run with semspec watch sidecar (live alerts + final bundle) — usage: task e2e:watch:llm -- <provider> [tier]"
+    deps: [check-ports:ui]
+    vars:
+      PROVIDER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'gemini'
+      TIER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
+      E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
+      FIXTURE_DIR:
+        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
+      EPIC_OVERLAY:
+        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+      RUN_TS:
+        sh: date +%Y%m%d-%H%M%S
+      OUT_DIR: "/tmp/semspec-watch-{{.PROVIDER}}-{{.TIER}}-{{.RUN_TS}}"
+    cmds:
+      - |
+        if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
+          echo "[ERROR] Config not found: configs/{{.E2E_CONFIG}}"
+          echo "Available providers:"
+          ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
+          exit 1
+        fi
+      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}}"
+      - mkdir -p {{.OUT_DIR}}
+      - echo "[WATCH:LLM] Artifacts will land in {{.OUT_DIR}}"
+      # Build the host-side semspec binary that runs the watch sidecar.
+      # The dockerized semspec is what gets observed; the host binary is
+      # the observer.
+      - task: build
+      - echo "[WATCH:LLM] Resetting fixture to initial commit..."
+      - cmd: cd test/e2e/fixtures/{{.FIXTURE_DIR}} && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
+        ignore_error: true
+      - echo "[WATCH:LLM] Building and starting real LLM stack..."
+      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} down -v --timeout 10 2>/dev/null
+        ignore_error: true
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} build
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} up -d --wait
+      # Background the watch sidecar BEFORE the test starts, so detector
+      # alerts and bail-out have a chance to fire mid-run rather than
+      # post-mortem only.
+      - |
+        ./bin/semspec watch --live \
+          --http http://localhost:3000 \
+          --nats nats://localhost:4223 \
+          --bail-on critical \
+          --max-duration 60m > {{.OUT_DIR}}/watch.log 2>&1 &
+        echo $! > {{.OUT_DIR}}/watch.pid
+        echo "[WATCH:LLM] Watch sidecar PID $(cat {{.OUT_DIR}}/watch.pid) → {{.OUT_DIR}}/watch.log"
+      - defer: |
+          if [ -f {{.OUT_DIR}}/watch.pid ]; then
+            kill $(cat {{.OUT_DIR}}/watch.pid) 2>/dev/null || true
+            rm -f {{.OUT_DIR}}/watch.pid
+          fi
+      - echo "[WATCH:LLM] Running @{{.TIER}} Playwright tests..."
+      - cmd: |
+          cd ui
+          if [ "{{.PROVIDER}}" = "claude" ]; then
+            CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=3600000 PLAYWRIGHT_TIMEOUT=3600000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.PROVIDER}}" = "local" ]; then
+            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          else
+            PLAYWRIGHT_TIMEOUT=1200000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          fi
+        ignore_error: true
+      # Capture a final bundle whether the test passed or failed — adopters
+      # need post-run state for sharing regardless of outcome.
+      - cmd: |
+          echo "[WATCH:LLM] Capturing final bundle..."
+          ./bin/semspec watch --bundle {{.OUT_DIR}}/bundle.tar.gz \
+            --http http://localhost:3000 \
+            --nats nats://localhost:4223 || echo "[WATCH:LLM] bundle capture failed (continuing)"
+        ignore_error: true
+      - cmd: |
+          echo ""
+          echo "[WATCH:LLM] Run summary:"
+          echo "  watch log:  {{.OUT_DIR}}/watch.log"
+          echo "  bundle:     {{.OUT_DIR}}/bundle.tar.gz"
+          ALERTS=$(grep -c '^ALERT:' {{.OUT_DIR}}/watch.log 2>/dev/null || echo 0)
+          echo "  alerts:     ${ALERTS}"
+          if grep -q '^BAIL:' {{.OUT_DIR}}/watch.log 2>/dev/null; then
+            echo "  bail:       TRIGGERED"
+            grep '^BAIL:' {{.OUT_DIR}}/watch.log
+          else
+            echo "  bail:       not triggered"
+          fi
+          if [ "${ALERTS}" != "0" ]; then
+            echo ""
+            echo "[WATCH:LLM] First few alerts:"
+            grep '^ALERT:' {{.OUT_DIR}}/watch.log | head -5 | sed 's/^/  /'
+          fi
+          echo ""
+        ignore_error: true
+      - defer: { task: ui:cleanup:llm }
+      - echo "[WATCH:LLM] Complete"
+
   ui:llm:up:
     desc: "Start UI E2E stack with real LLM (for interactive debugging) — usage: task e2e:ui:llm:up -- <provider>"
     deps: [check-ports:ui]
