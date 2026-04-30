@@ -9,11 +9,11 @@ import (
 	"time"
 )
 
-// trajectoryRequester is the small surface of natsclient.Client that
-// trajectory capture needs. Mirrors processor/lesson-decomposer's
-// definition so a NATS client implements both interfaces with the
-// same method set.
-type trajectoryRequester interface {
+// TrajectoryClient is the small surface of natsclient.Client that
+// trajectory capture needs. Exported so adopters embedding Capture in
+// custom tooling can name the contract; *natsclient.Client satisfies
+// it without an explicit declaration.
+type TrajectoryClient interface {
 	Request(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
 }
 
@@ -52,7 +52,7 @@ type trajectoryMeta struct {
 // case so the orchestrator can record a benign skip — adopters often
 // have stale loop IDs in AGENT_LOOPS that the agentic-loop's cache
 // has already evicted.
-func FetchTrajectory(ctx context.Context, client trajectoryRequester, loopID string) ([]byte, TrajectoryRef, error) {
+func FetchTrajectory(ctx context.Context, client TrajectoryClient, loopID string) ([]byte, TrajectoryRef, error) {
 	if client == nil {
 		return nil, TrajectoryRef{}, fmt.Errorf("trajectory:%s: nats client required", loopID)
 	}

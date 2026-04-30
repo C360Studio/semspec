@@ -130,6 +130,9 @@ All components communicate via NATS using the semstreams framework.`,
 	// Migrate command
 	cmd.AddCommand(migrateCmd())
 
+	// Watch command — captures diagnostic bundles per ADR-034.
+	cmd.AddCommand(watchCmd())
+
 	return cmd
 }
 

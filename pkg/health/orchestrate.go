@@ -33,7 +33,7 @@ type CaptureResult struct {
 // failed (e.g. context cancelled before any source completed). Any
 // per-source failure becomes an entry in CaptureResult.Errors and
 // the corresponding bundle section stays at its zero value.
-func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats trajectoryRequester) (*CaptureResult, error) {
+func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats TrajectoryClient) (*CaptureResult, error) {
 	now := time.Now().UTC()
 	bundle := &Bundle{
 		Bundle: BundleMeta{
@@ -169,7 +169,7 @@ func captureHTTPSources(
 // just won't appear in TrajectoryRefs. FetchTrajectory has already
 // validated the body is well-formed JSON via the trajectoryMeta
 // unmarshal, so this layer is purely orchestration.
-func captureTrajectory(ctx context.Context, nats trajectoryRequester, loop KVEntry) (TrajectoryRef, []byte, *CaptureError) {
+func captureTrajectory(ctx context.Context, nats TrajectoryClient, loop KVEntry) (TrajectoryRef, []byte, *CaptureError) {
 	body, ref, err := FetchTrajectory(ctx, nats, loop.Key)
 	if errors.Is(err, errTrajectoryNotFound) {
 		return TrajectoryRef{}, nil, nil
