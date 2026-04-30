@@ -1065,6 +1065,11 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 			// recorded before the decomposer was wired or for direct-write
 			// producers (plan-reviewer/qa-reviewer/structural-validation)
 			// that ship a finding-shaped Summary as their "AVOID" line.
+			//
+			// ADR-033 Phase 6: positive lessons render as [BEST PRACTICE]
+			// rather than [AVOID] so future agents can tell at a glance
+			// whether the entry is a pattern to follow or a pitfall to
+			// avoid.
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				var sb strings.Builder
 				sb.WriteString("TEAM KNOWLEDGE — Lessons from previous tasks:\n\n")
@@ -1073,7 +1078,11 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 					if rendered == "" {
 						rendered = lesson.Summary
 					}
-					fmt.Fprintf(&sb, "- [AVOID][%s] %s", lesson.Role, rendered)
+					tag := "AVOID"
+					if lesson.Positive {
+						tag = "BEST PRACTICE"
+					}
+					fmt.Fprintf(&sb, "- [%s][%s] %s", tag, lesson.Role, rendered)
 					if lesson.Guidance != "" {
 						fmt.Fprintf(&sb, " GUIDANCE: %s", lesson.Guidance)
 					}

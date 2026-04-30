@@ -413,6 +413,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 					Category:      les.Source,
 					Summary:       les.Summary,
 					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
 					Role:          les.Role,
 				})
 			}

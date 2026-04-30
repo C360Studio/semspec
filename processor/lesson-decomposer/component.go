@@ -422,11 +422,18 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 	revSteps := c.fetchSteps(ctx, req.ReviewerLoopID, "reviewer")
 	existing := c.fetchExistingLessons(ctx, "developer")
 
+	// Phase 6: any verdict that isn't a rejection is treated as a
+	// positive-lesson dispatch. Today only "approved" arrives that way
+	// (gated by execution-manager's EnablePositiveLessons flag); future
+	// producers can extend the surface.
+	positive := req.Verdict == "approved"
+
 	promptCtx := &prompt.LessonDecomposerPromptContext{
 		Verdict:         req.Verdict,
 		Feedback:        req.Feedback,
 		Source:          req.Source,
 		TargetRole:      "developer",
+		Positive:        positive,
 		DeveloperLoopID: devLoopID,
 		ReviewerLoopID:  req.ReviewerLoopID,
 		DeveloperSteps:  devSteps,
@@ -727,7 +734,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	scenarioID := req.ScenarioID
-	lesson, err := buildLesson(parsed, scenarioID, "developer")
+	positive := req.Verdict == "approved"
+	lesson, err := buildLesson(parsed, scenarioID, "developer", positive)
 	if err != nil {
 		c.resultParseErrors.Add(1)
 		c.logger.Warn("Decomposer lesson invalid",

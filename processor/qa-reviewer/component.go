@@ -500,6 +500,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 					Category:      les.Source,
 					Summary:       les.Summary,
 					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
 					Role:          les.Role,
 				})
 			}

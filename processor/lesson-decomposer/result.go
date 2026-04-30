@@ -62,8 +62,10 @@ func parseDecomposerResult(raw string) (*decomposerResult, error) {
 //
 // scenarioID is the request's scenario ID, used as the lesson's
 // ScenarioID so consumers can filter by the surface that surfaced the
-// failure. role is the target role (typically "developer").
-func buildLesson(r *decomposerResult, scenarioID, role string) (workflow.Lesson, error) {
+// failure. role is the target role (typically "developer"). positive
+// marks the lesson as a "best practice" lesson (ADR-033 Phase 6) — set
+// to true when the dispatch came from an approved-on-first-try signal.
+func buildLesson(r *decomposerResult, scenarioID, role string, positive bool) (workflow.Lesson, error) {
 	if r == nil {
 		return workflow.Lesson{}, fmt.Errorf("nil decomposer result")
 	}
@@ -125,6 +127,7 @@ func buildLesson(r *decomposerResult, scenarioID, role string) (workflow.Lesson,
 		RootCauseRole: rootCause,
 		EvidenceSteps: steps,
 		EvidenceFiles: files,
+		Positive:      positive,
 	}, nil
 }
 

@@ -69,6 +69,33 @@ func TestTeamKnowledge_FallsBackToSummary(t *testing.T) {
 	}
 }
 
+func TestTeamKnowledge_RendersBestPracticeForPositive(t *testing.T) {
+	// ADR-033 Phase 6: positive lessons render with [BEST PRACTICE]
+	// instead of [AVOID]. Future agents reading the team-knowledge
+	// fragment can tell at a glance whether each entry is a pattern
+	// to follow or a pitfall to avoid.
+	frag := teamKnowledgeFragment(t)
+	ctx := &prompt.AssemblyContext{
+		LessonsLearned: &prompt.LessonsLearned{
+			Lessons: []prompt.LessonEntry{
+				{
+					Category:      "decomposer",
+					InjectionForm: "Read the existing test framework before the first test.",
+					Role:          "developer",
+					Positive:      true,
+				},
+			},
+		},
+	}
+	got := frag.ContentFunc(ctx)
+	if !strings.Contains(got, "[BEST PRACTICE][developer]") {
+		t.Errorf("expected [BEST PRACTICE] tag for positive lesson:\n%s", got)
+	}
+	if strings.Contains(got, "[AVOID]") {
+		t.Error("positive lesson should not render with [AVOID]")
+	}
+}
+
 func TestTeamKnowledge_RendersGuidanceAlongsideAdvice(t *testing.T) {
 	frag := teamKnowledgeFragment(t)
 	ctx := &prompt.AssemblyContext{

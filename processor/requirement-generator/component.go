@@ -313,6 +313,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 					Category:      les.Source,
 					Summary:       les.Summary,
 					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
 					Role:          les.Role,
 				})
 			}

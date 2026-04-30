@@ -72,6 +72,17 @@ type Config struct {
 	// The write IS the event — downstream components watch this bucket.
 	ExecutionStateBucket string `json:"execution_state_bucket,omitempty" schema:"type:string,description:KV bucket for execution state (observable twofer),category:advanced,default:EXECUTION_STATES"`
 
+	// EnablePositiveLessons gates ADR-033 Phase 6 — when true,
+	// approved-on-first-try code reviews trigger a lesson-decompose
+	// request with verdict="approved" so the decomposer can produce a
+	// "best practice" lesson. Default false because it doubles
+	// decomposer LLM calls (every first-try success now triggers, not
+	// just rejections); deployments should opt in once they have
+	// confidence in the rotation/retirement balance for negative
+	// lessons. Phase 6 also calls for a rating filter — that part stays
+	// parked until a ratings mechanism exists.
+	EnablePositiveLessons bool `json:"enable_positive_lessons,omitempty" schema:"type:bool,description:Enable ADR-033 Phase 6 — emit decompose requests for approved-on-first-try reviews,category:advanced,default:false"`
+
 	// RequireMergeObservation enables the claim/observation cross-check at
 	// the end of mergeWorktree: when the developer reports FilesModified but
 	// the sandbox returns NothingToCommit (or empty Commit), the task is

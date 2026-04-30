@@ -10,8 +10,19 @@ package prompt
 // scenario AC are usually enough to identify the failure pattern.
 type LessonDecomposerPromptContext struct {
 	// Verdict is the reviewer verdict that triggered this run.
-	// Always "rejected" in Phase 2 (positive lessons land in Phase 6).
+	// "rejected" or "needs_changes" yield a negative lesson; "approved"
+	// (Phase 6) yields a positive "best practice" lesson.
 	Verdict string
+
+	// Positive marks the run as a positive-lesson dispatch (Phase 6).
+	// When true, the renderer frames the prompt as "First-try success
+	// — what worked" rather than "Incident — what failed", and the
+	// decomposer's output is recorded with workflow.Lesson.Positive=true
+	// so the team-knowledge fragment renders [BEST PRACTICE] instead
+	// of [AVOID]. Producers normally derive this from Verdict, but the
+	// explicit field lets the dispatcher override (e.g. retroactive
+	// positive lessons from past approvals once ratings infra exists).
+	Positive bool
 
 	// Feedback is the reviewer's free-text feedback. The decomposer reads
 	// this to align its narrative with what the reviewer actually said,

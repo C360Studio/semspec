@@ -63,7 +63,7 @@ func TestBuildLesson_Success(t *testing.T) {
 		EvidenceSteps: []decomposerStepRef{{LoopID: "abc", StepIndex: 1}},
 		EvidenceFiles: []decomposerFileRef{{Path: "main.go", LineStart: 1, LineEnd: 10, CommitSHA: "xyz"}},
 	}
-	got, err := buildLesson(r, "scn-1", "developer")
+	got, err := buildLesson(r, "scn-1", "developer", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestBuildLesson_RootCauseRoleDefault(t *testing.T) {
 		InjectionForm: "z",
 		EvidenceSteps: []decomposerStepRef{{LoopID: "a", StepIndex: 0}},
 	}
-	got, err := buildLesson(r, "", "developer")
+	got, err := buildLesson(r, "", "developer", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestBuildLesson_RoleDefault(t *testing.T) {
 		Summary: "x", Detail: "y", InjectionForm: "z",
 		EvidenceFiles: []decomposerFileRef{{Path: "main.go"}},
 	}
-	got, err := buildLesson(r, "", "")
+	got, err := buildLesson(r, "", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestBuildLesson_RejectMissingRequired(t *testing.T) {
 		{Summary: " ", Detail: "y", InjectionForm: "z", EvidenceSteps: []decomposerStepRef{{LoopID: "a"}}}, // whitespace-only summary
 	}
 	for i, c := range cases {
-		_, err := buildLesson(&c, "", "developer")
+		_, err := buildLesson(&c, "", "developer", false)
 		if err == nil {
 			t.Errorf("case %d: expected error for missing required field", i)
 		}
@@ -137,7 +137,7 @@ func TestBuildLesson_RejectMissingRequired(t *testing.T) {
 
 func TestBuildLesson_RejectNoEvidence(t *testing.T) {
 	r := &decomposerResult{Summary: "x", Detail: "y", InjectionForm: "z"}
-	_, err := buildLesson(r, "", "developer")
+	_, err := buildLesson(r, "", "developer", false)
 	if err == nil {
 		t.Fatal("expected error when no evidence supplied")
 	}
@@ -155,15 +155,34 @@ func TestBuildLesson_RejectAllEmptyEvidence(t *testing.T) {
 		EvidenceSteps: []decomposerStepRef{{}},
 		EvidenceFiles: []decomposerFileRef{{Path: " "}},
 	}
-	_, err := buildLesson(r, "", "developer")
+	_, err := buildLesson(r, "", "developer", false)
 	if err == nil {
 		t.Fatal("expected error when evidence entries are all blank")
 	}
 }
 
 func TestBuildLesson_NilResult(t *testing.T) {
-	if _, err := buildLesson(nil, "", "developer"); err == nil {
+	if _, err := buildLesson(nil, "", "developer", false); err == nil {
 		t.Fatal("expected error for nil result")
+	}
+}
+
+func TestBuildLesson_PositiveFlagPropagates(t *testing.T) {
+	r := &decomposerResult{
+		Summary:       "Read the existing test framework before writing tests.",
+		Detail:        "Step [3] showed the developer reading existing patterns first.",
+		InjectionForm: "Read the existing test framework before writing the first test.",
+		EvidenceSteps: []decomposerStepRef{{LoopID: "abc", StepIndex: 3}},
+	}
+	got, err := buildLesson(r, "scn-1", "developer", true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Positive {
+		t.Error("positive=true should propagate to the recorded lesson")
+	}
+	if got.Source != "decomposer" {
+		t.Errorf("Source = %q, want decomposer", got.Source)
 	}
 }
 

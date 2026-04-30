@@ -18,6 +18,10 @@ type LessonEntry struct {
 	// over Summary by the team-knowledge prompt fragment when set
 	// (ADR-033 Phase 4).
 	InjectionForm string
+	// Positive marks "best practice" lessons emitted by Phase 6 (approved-
+	// on-first-try). When true, the team-knowledge fragment renders the
+	// entry with a [BEST PRACTICE] prefix instead of [AVOID].
+	Positive bool
 	// Role is which role this lesson applies to.
 	Role string
 	// Guidance is prescriptive remediation text from the error category definition.

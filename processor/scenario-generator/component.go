@@ -337,6 +337,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 					Category:      les.Source,
 					Summary:       les.Summary,
 					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
 					Role:          les.Role,
 				})
 			}

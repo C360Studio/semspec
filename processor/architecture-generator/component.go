@@ -369,6 +369,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 					Category:      les.Source,
 					Summary:       les.Summary,
 					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
 					Role:          les.Role,
 				})
 			}

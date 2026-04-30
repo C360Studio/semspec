@@ -397,8 +397,13 @@ func renderLessonDecomposerPrompt(p *prompt.LessonDecomposerPromptContext) strin
 		target = "developer"
 	}
 
-	fmt.Fprintf(&sb, "## Incident\n\nA %s rejection occurred during the %s pipeline. Decompose it into a single auditable lesson for the %q role.\n\n",
-		p.Verdict, source, target)
+	if p.Positive {
+		fmt.Fprintf(&sb, "## First-Try Success\n\nA %s pipeline run reached %q on the first attempt. Decompose it into a single auditable BEST PRACTICE lesson for the %q role — capture what worked so future agents can replicate the pattern.\n\n",
+			source, p.Verdict, target)
+	} else {
+		fmt.Fprintf(&sb, "## Incident\n\nA %s rejection occurred during the %s pipeline. Decompose it into a single auditable lesson for the %q role.\n\n",
+			p.Verdict, source, target)
+	}
 
 	renderDecomposerFeedback(&sb, p.Feedback)
 	renderDecomposerScenario(&sb, p.Scenario)
@@ -408,7 +413,7 @@ func renderLessonDecomposerPrompt(p *prompt.LessonDecomposerPromptContext) strin
 	renderDecomposerCatalog(&sb, p.CategoryCatalog)
 	renderDecomposerExistingLessons(&sb, target, p.ExistingLessons)
 	renderDecomposerCommitSHA(&sb, p.CommitSHA)
-	renderDecomposerTaskInstructions(&sb)
+	renderDecomposerTaskInstructionsBranched(&sb, p.Positive)
 
 	return sb.String()
 }
@@ -520,7 +525,24 @@ func renderDecomposerCommitSHA(sb *strings.Builder, sha string) {
 }
 
 func renderDecomposerTaskInstructions(sb *strings.Builder) {
+	renderDecomposerTaskInstructionsBranched(sb, false)
+}
+
+// renderDecomposerTaskInstructionsBranched is the Phase 6-aware version
+// of the task instructions block. The negative branch retains the
+// original "root cause" framing; the positive branch swaps to "what
+// worked" framing while keeping the same evidence and shape requirements.
+func renderDecomposerTaskInstructionsBranched(sb *strings.Builder, positive bool) {
 	sb.WriteString("## Your Task\n\n")
+	if positive {
+		sb.WriteString("Produce ONE BEST PRACTICE Lesson via submit_work. The lesson must:\n\n")
+		sb.WriteString("- Identify the *replicable pattern* that made this attempt succeed on the first try, not just \"the developer did the right thing\".\n")
+		sb.WriteString("- Be auditable: every claim in `detail` must trace back to a step in the developer trajectory or a region in evidence_files.\n")
+		sb.WriteString("- Be useful next time: `injection_form` will be rendered into a future agent's prompt, so it must read as concrete prescriptive advice (\"Read the existing test framework before writing the first test\"), not retrospective narration (\"The developer read the test framework\").\n")
+		sb.WriteString("- Cite at least one of `evidence_steps` (preferred) or `evidence_files`. A lesson with no evidence is rejected by the writer.\n")
+		sb.WriteString("- Set `root_cause_role` to the role whose upstream decision enabled the success — usually the same as the target role, but sometimes the planner / scenario-generator when the success was downstream of a clear plan.\n")
+		return
+	}
 	sb.WriteString("Produce ONE Lesson via submit_work. The lesson must:\n\n")
 	sb.WriteString("- Identify the *root cause* pattern, not just the surface symptom the reviewer named.\n")
 	sb.WriteString("- Be auditable: every claim in `detail` must trace back to a step in the developer trajectory or a region in evidence_files.\n")

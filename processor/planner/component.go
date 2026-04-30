@@ -508,6 +508,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 					Category:      les.Source,
 					Summary:       les.Summary,
 					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
 					Role:          les.Role,
 				})
 			}
