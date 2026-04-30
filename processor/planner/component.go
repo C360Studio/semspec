@@ -501,7 +501,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	// Wire role-scoped lessons learned.
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		if roleLessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, "planner", 10); err == nil && len(roleLessons) > 0 {
+		if roleLessons, err := c.lessonWriter.RotateLessonsForRole(graphCtx, "planner", 10); err == nil && len(roleLessons) > 0 {
 			tk := &prompt.LessonsLearned{}
 			for _, les := range roleLessons {
 				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{

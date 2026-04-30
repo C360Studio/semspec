@@ -406,7 +406,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	// prompt.
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		if roleLessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, string(prompt.RolePlanReviewer), 10); err == nil && len(roleLessons) > 0 {
+		if roleLessons, err := c.lessonWriter.RotateLessonsForRole(graphCtx, string(prompt.RolePlanReviewer), 10); err == nil && len(roleLessons) > 0 {
 			tk := &prompt.LessonsLearned{}
 			for _, les := range roleLessons {
 				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{

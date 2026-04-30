@@ -1172,7 +1172,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 	// surface developer lessons (Phase 0 bug 0.1 in ADR-033).
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		lessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, string(role), 10)
+		lessons, err := c.lessonWriter.RotateLessonsForRole(graphCtx, string(role), 10)
 		if err == nil && len(lessons) > 0 {
 			tk := &prompt.LessonsLearned{}
 			for _, les := range lessons {

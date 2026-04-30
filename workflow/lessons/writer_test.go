@@ -422,6 +422,73 @@ func TestRecordLesson_RejectsLessonWithoutEvidence(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ADR-033 Phase 4b rotation order tests (nil-LastInjectedAt first,
+// oldest-injected next, CreatedAt DESC tie-break)
+// ---------------------------------------------------------------------------
+
+func TestSortLessonsForRotation_NeverInjectedFirst(t *testing.T) {
+	t1 := time.Date(2026, 4, 28, 10, 0, 0, 0, time.UTC)
+	t2 := time.Date(2026, 4, 29, 10, 0, 0, 0, time.UTC)
+
+	lessons := []workflow.Lesson{
+		{ID: "old-injected", LastInjectedAt: &t1, CreatedAt: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "new-uninjected", CreatedAt: time.Date(2026, 4, 27, 0, 0, 0, 0, time.UTC)},
+		{ID: "recent-injected", LastInjectedAt: &t2, CreatedAt: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "old-uninjected", CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+	}
+	sortLessonsForRotation(lessons)
+
+	want := []string{"new-uninjected", "old-uninjected", "old-injected", "recent-injected"}
+	for i, l := range lessons {
+		if l.ID != want[i] {
+			t.Errorf("position %d: got %q, want %q\n  full: %v", i, l.ID, want[i],
+				lessonIDs(lessons))
+			break
+		}
+	}
+}
+
+func TestSortLessonsForRotation_TieBreakByCreatedAtDesc(t *testing.T) {
+	// Two lessons injected at the same instant — the newer-CreatedAt
+	// should sort first. This matches the nil-LastInjectedAt branch's
+	// tie-break so behaviour is consistent across the two paths.
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	lessons := []workflow.Lesson{
+		{ID: "older", LastInjectedAt: &now, CreatedAt: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "newer", LastInjectedAt: &now, CreatedAt: time.Date(2026, 4, 28, 0, 0, 0, 0, time.UTC)},
+	}
+	sortLessonsForRotation(lessons)
+	if lessons[0].ID != "newer" {
+		t.Errorf("expected newer-CreatedAt first on tie, got %v", lessonIDs(lessons))
+	}
+}
+
+func TestSortLessonsForRotation_EmptySliceNoPanic(t *testing.T) {
+	var lessons []workflow.Lesson
+	sortLessonsForRotation(lessons) // must not panic
+	if len(lessons) != 0 {
+		t.Errorf("empty slice should stay empty, got %v", lessons)
+	}
+}
+
+func lessonIDs(ls []workflow.Lesson) []string {
+	out := make([]string, len(ls))
+	for i, l := range ls {
+		out[i] = l.ID
+	}
+	return out
+}
+
+func TestRotateLessonsForRole_ErrorsWithNoNATS(t *testing.T) {
+	// Mirror the existing TestGetRoleLessonCounts_ErrorsWithNoNATS pattern.
+	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
+	_, err := w.RotateLessonsForRole(context.Background(), "developer", 5)
+	if err == nil {
+		t.Fatal("expected error with nil NATSClient, got nil")
+	}
+}
+
 // nilTripleWriter returns a TripleWriter with nil NATSClient.
 // WriteTriple returns nil (no-op), ReadEntity/ReadEntitiesByPrefix return errors.
 func nilTripleWriter() *graphutil.TripleWriter {

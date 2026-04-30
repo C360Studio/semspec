@@ -493,7 +493,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 	// Load role-scoped lessons.
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		if roleLessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, string(prompt.RolePlanQAReviewer), 10); err == nil && len(roleLessons) > 0 {
+		if roleLessons, err := c.lessonWriter.RotateLessonsForRole(graphCtx, string(prompt.RolePlanQAReviewer), 10); err == nil && len(roleLessons) > 0 {
 			ll := &prompt.LessonsLearned{}
 			for _, les := range roleLessons {
 				ll.Lessons = append(ll.Lessons, prompt.LessonEntry{

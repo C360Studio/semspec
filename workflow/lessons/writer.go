@@ -193,7 +193,10 @@ func decodeFileRef(raw string) (workflow.FileRef, bool) {
 }
 
 // ListLessonsForRole reads all lesson entities from the graph via prefix scan
-// and filters by role. Results are sorted most-recent-first.
+// and filters by role. Results are sorted most-recent-first. This is the
+// read-only path — for prompt-injection selection that ages lessons via
+// LastInjectedAt, callers should use RotateLessonsForRole instead
+// (ADR-033 Phase 4b).
 func (w *Writer) ListLessonsForRole(ctx context.Context, role string, limit int) ([]workflow.Lesson, error) {
 	prefix := agentgraph.LessonTypePrefix()
 	entities, err := w.TW.ReadEntitiesByPrefixMulti(ctx, prefix, 200)
@@ -218,6 +221,69 @@ func (w *Writer) ListLessonsForRole(ctx context.Context, role string, limit int)
 		return lessons[:limit], nil
 	}
 	return lessons, nil
+}
+
+// RotateLessonsForRole selects the next batch of lessons to inject into a
+// prompt, rotating which ones surface via LastInjectedAt (ADR-033 Phase 4b).
+// Sort order:
+//
+//  1. Lessons that have never been injected (nil LastInjectedAt) first,
+//     newest-CreatedAt-first within that group.
+//  2. Then lessons whose LastInjectedAt is oldest, with CreatedAt DESC as
+//     the tie-break.
+//
+// After selection, LastInjectedAt is bumped to time.Now() for each selected
+// lesson via a best-effort triple write — if the bump fails the rotation
+// degrades to the existing recency behavior (same lessons resurface), but
+// the caller still receives a valid selection.
+//
+// Retired lessons (RetiredAt non-nil) are skipped entirely — Phase 5's
+// retirement sweep marks lessons as retired when their evidence becomes
+// stale, and we must not inject them even if they'd otherwise sort first.
+func (w *Writer) RotateLessonsForRole(ctx context.Context, role string, limit int) ([]workflow.Lesson, error) {
+	prefix := agentgraph.LessonTypePrefix()
+	entities, err := w.TW.ReadEntitiesByPrefixMulti(ctx, prefix, 200)
+	if err != nil {
+		return nil, fmt.Errorf("lessons: rotate by prefix: %w", err)
+	}
+
+	var pool []workflow.Lesson
+	for _, triples := range entities {
+		lesson := parseLessonFromTriples(triples)
+		if role != "" && lesson.Role != role {
+			continue
+		}
+		if lesson.RetiredAt != nil {
+			continue
+		}
+		pool = append(pool, lesson)
+	}
+
+	sortLessonsForRotation(pool)
+
+	selected := pool
+	if limit > 0 && len(pool) > limit {
+		selected = pool[:limit]
+	}
+
+	now := time.Now()
+	for i := range selected {
+		eid := agentgraph.LessonEntityID(selected[i].ID)
+		if err := w.TW.WriteTriple(ctx, eid, agentgraph.PredicateLessonLastInjectedAt, now.Format(time.RFC3339)); err != nil {
+			if w.Logger != nil {
+				w.Logger.Debug("Failed to bump LastInjectedAt — rotation degrades to recency",
+					"lesson_id", selected[i].ID, "error", err)
+			}
+			continue
+		}
+		// Mirror the bump locally so the returned slice reflects what the
+		// graph now holds. Avoids the next caller seeing stale values when
+		// they read back from the graph milliseconds later.
+		t := now
+		selected[i].LastInjectedAt = &t
+	}
+
+	return selected, nil
 }
 
 // IncrementRoleLessonCounts is a no-op retained for API compatibility.
@@ -335,6 +401,34 @@ func decodeCategoryIDs(values []string) []string {
 		out = append(out, v)
 	}
 	return out
+}
+
+// sortLessonsForRotation orders a lesson slice for ADR-033 Phase 4b
+// rotation. Order:
+//
+//  1. Lessons that have never been injected (nil LastInjectedAt) come
+//     first, newest-CreatedAt-first within that group.
+//  2. Then lessons whose LastInjectedAt is oldest, with CreatedAt DESC
+//     as the tie-break.
+//
+// Extracted so the rotation order is testable without a NATS round-trip.
+func sortLessonsForRotation(lessons []workflow.Lesson) {
+	sort.Slice(lessons, func(i, j int) bool {
+		ai, aj := lessons[i].LastInjectedAt, lessons[j].LastInjectedAt
+		switch {
+		case ai == nil && aj != nil:
+			return true
+		case ai != nil && aj == nil:
+			return false
+		case ai == nil && aj == nil:
+			return lessons[i].CreatedAt.After(lessons[j].CreatedAt)
+		default:
+			if ai.Equal(*aj) {
+				return lessons[i].CreatedAt.After(lessons[j].CreatedAt)
+			}
+			return ai.Before(*aj)
+		}
+	})
 }
 
 func first(values []string) string {

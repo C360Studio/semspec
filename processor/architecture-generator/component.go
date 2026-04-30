@@ -362,7 +362,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	// Wire role-scoped lessons learned.
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		if roleLessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, "architect", 10); err == nil && len(roleLessons) > 0 {
+		if roleLessons, err := c.lessonWriter.RotateLessonsForRole(graphCtx, "architect", 10); err == nil && len(roleLessons) > 0 {
 			tk := &prompt.LessonsLearned{}
 			for _, les := range roleLessons {
 				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{
