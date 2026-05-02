@@ -736,6 +736,17 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 
 	plan.Status = targetStatus
 
+	// Rollback past the approval gate must reset Approved so the gate is
+	// re-enforced on the next pass. Without this, plan.Approved remains true
+	// from the original promotion; any client (UI auto-promote helper,
+	// downstream checks) guarding on !plan.approved short-circuits and the
+	// plan stalls at "reviewed". StatusCreated is the only round-2 reentry
+	// point that crosses back through the gate; round-1 always lands here.
+	if targetStatus == workflow.StatusCreated {
+		plan.Approved = false
+		plan.ApprovedAt = nil
+	}
+
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan (revision retry)", "slug", req.Slug, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/c360studio/semspec/workflow"
 )
@@ -64,13 +65,18 @@ func TestHandleRevisionMutation(t *testing.T) {
 		checkPlan func(t *testing.T, plan *workflow.Plan)
 	}{
 		{
-			name: "R1 retry under limit",
+			name: "R1 retry under limit resets Approved (gate must be re-crossed)",
 			setup: func(t *testing.T) (*Component, string) {
 				c := setupRevisionComponent(t, 3)
 				plan := setupTestPlan(t, c, "r1-retry")
 				plan.Status = workflow.StatusReviewingDraft
 				plan.Goal = "Add /goodbye endpoint"
 				plan.Context = "Flask API"
+				// Plan was previously approved (rollback came from a later
+				// stage). Approved is sticky in the absence of the reset.
+				plan.Approved = true
+				now := time.Now()
+				plan.ApprovedAt = &now
 				_ = c.plans.save(ctx, plan)
 				return c, "r1-retry"
 			},
@@ -101,16 +107,29 @@ func TestHandleRevisionMutation(t *testing.T) {
 				if plan.ReviewSummary != "Goal is too vague" {
 					t.Errorf("ReviewSummary = %q, want 'Goal is too vague'", plan.ReviewSummary)
 				}
+				// Rollback to StatusCreated crosses back through the approval
+				// gate; without resetting Approved, downstream consumers
+				// (UI auto-promote helper) skip re-promotion and the plan
+				// stalls at "reviewed" on the next forward pass.
+				if plan.Approved {
+					t.Errorf("Approved should be reset to false on R1 rollback to StatusCreated, got true")
+				}
+				if plan.ApprovedAt != nil {
+					t.Errorf("ApprovedAt should be nil after R1 rollback, got %v", plan.ApprovedAt)
+				}
 			},
 		},
 		{
-			name: "R2 retry under limit clears requirements and scenarios",
+			name: "R2 retry under limit clears requirements and scenarios; preserves Approved when target is StatusApproved",
 			setup: func(t *testing.T) (*Component, string) {
 				c := setupRevisionComponent(t, 3)
 				plan := setupTestPlan(t, c, "r2-retry")
 				plan.Status = workflow.StatusReviewingScenarios
 				plan.Requirements = []workflow.Requirement{{ID: "req-1", Title: "Requirement 1"}}
 				plan.Scenarios = []workflow.Scenario{{ID: "sc-1", RequirementID: "req-1"}}
+				plan.Approved = true
+				now := time.Now()
+				plan.ApprovedAt = &now
 				_ = c.plans.save(ctx, plan)
 				return c, "r2-retry"
 			},
@@ -133,6 +152,16 @@ func TestHandleRevisionMutation(t *testing.T) {
 				}
 				if len(plan.Scenarios) != 0 {
 					t.Errorf("Scenarios should be cleared on R2 retry, got %d", len(plan.Scenarios))
+				}
+				// Target is StatusApproved (no findings → fallback in
+				// determineR2ReentryPoint), which means the plan is still
+				// past the approval gate. Approved must be preserved —
+				// resetting it here would force unnecessary re-promotion.
+				if !plan.Approved {
+					t.Errorf("Approved should be preserved on R2 rollback to StatusApproved, got false")
+				}
+				if plan.ApprovedAt == nil {
+					t.Errorf("ApprovedAt should be preserved on R2 rollback to StatusApproved, got nil")
 				}
 			},
 		},

@@ -60,8 +60,12 @@ async function waitForStage(
 			return plan;
 		}
 
-		// Auto-promote at approval gates
-		if (!plan.approved && plan.stage === 'reviewed') {
+		// Auto-promote at approval gates. Don't guard on !plan.approved:
+		// the flag is sticky across rollbacks (plan-manager pre-2026-05-02
+		// would leave Approved=true after revision-to-drafting, blocking
+		// re-promotion). Server-side CanTransitionTo enforces idempotency
+		// so a redundant promote on an already-approved plan is a no-op.
+		if (plan.stage === 'reviewed') {
 			console.log(`[easy:${label}] Promoting at reviewed gate`);
 			await promotePlan(slug);
 		}
