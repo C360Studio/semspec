@@ -4,21 +4,21 @@
     {
       "pattern": "architecture.**",
       "answerer": "agent/architect",
-      "capability": "planning",
+      "capability": "question_answering",
       "sla": "1h",
       "escalate_to": "human/requester"
     },
     {
       "pattern": "api.**",
       "answerer": "agent/api-expert",
-      "capability": "coding",
+      "capability": "question_answering",
       "sla": "30m",
       "escalate_to": "human/requester"
     },
     {
       "pattern": "review.**",
       "answerer": "agent/reviewer",
-      "capability": "reviewing",
+      "capability": "question_answering",
       "sla": "1h",
       "escalate_to": "human/requester"
     },
@@ -30,14 +30,14 @@
     {
       "pattern": "security.**",
       "answerer": "agent/security-reviewer",
-      "capability": "reviewing",
+      "capability": "question_answering",
       "sla": "30m",
       "escalate_to": "human/requester"
     },
     {
       "pattern": "knowledge.**",
       "answerer": "agent/knowledge",
-      "capability": "fast",
+      "capability": "question_answering",
       "sla": "5m"
     },
     {
@@ -58,7 +58,7 @@
     {
       "pattern": "**",
       "answerer": "agent/general",
-      "capability": "planning",
+      "capability": "question_answering",
       "sla": "5m",
       "escalate_to": "human/requester"
     }

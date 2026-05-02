@@ -389,7 +389,8 @@ func setupInfrastructure(
 	// through service.Dependencies.ToolRegistry into every component. beta.16
 	// removed the package-level singleton (ADR-029 Pattern A).
 	toolRegistry := agentictools.NewExecutorRegistry()
-	if err := registerAgenticTools(ctx, toolRegistry, natsClient); err != nil {
+	answererRegistry := loadAnswererRegistry(absRepoPath)
+	if err := registerAgenticTools(ctx, toolRegistry, natsClient, answererRegistry); err != nil {
 		natsClient.Close(ctx)
 		return nil, nil, nil, fmt.Errorf("register agentic tools: %w", err)
 	}
@@ -892,11 +893,26 @@ func createServiceIfEnabled(
 // registerAgenticTools registers all agentic tools onto the shared executor
 // registry. The registry is owned by main and plumbed through
 // service.Dependencies.ToolRegistry to every component.
-func registerAgenticTools(ctx context.Context, reg *agentictools.ExecutorRegistry, natsClient *natsclient.Client) error {
+func registerAgenticTools(ctx context.Context, reg *agentictools.ExecutorRegistry, natsClient *natsclient.Client, answererReg *answerer.Registry) error {
 	return tools.RegisterAgenticToolsWithContext(ctx, reg, tools.AgenticToolDeps{
-		NATSClient: natsClient,
-		Timeouts:   parseToolTimeouts(),
+		NATSClient:       natsClient,
+		AnswererRegistry: answererReg,
+		Timeouts:         parseToolTimeouts(),
 	})
+}
+
+// loadAnswererRegistry loads the answerers.json route table from the repo
+// (or a default empty registry if the file is missing). Logs at INFO so the
+// route count surfaces at startup — silent fall-through to the default
+// "everything goes to a generic agent" path is the bug we're closing.
+func loadAnswererRegistry(repoRoot string) *answerer.Registry {
+	reg, err := answerer.LoadRegistryFromDir(repoRoot)
+	if err != nil {
+		slog.Warn("Failed to load answerer registry — using empty registry (default routes only)", "error", err)
+		return answerer.NewRegistry()
+	}
+	slog.Info("Loaded answerer registry", "routes", len(reg.Routes()))
+	return reg
 }
 
 // parseToolTimeouts reads optional timeout overrides from environment variables.

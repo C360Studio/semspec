@@ -24,6 +24,7 @@ import (
 	"github.com/c360studio/semspec/tools/websearch"
 	"github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -42,6 +43,11 @@ type AgenticToolDeps struct {
 	// DefaultModel is the fallback LLM model for agents. Currently only used
 	// by the question-answerer dispatch below.
 	DefaultModel string
+
+	// AnswererRegistry routes ask_question dispatch by topic. When nil the
+	// executor falls back to legacy generic-agent dispatch — see
+	// tools/question/executor.go:routeQuestion.
+	AnswererRegistry *answerer.Registry
 
 	// Timeouts overrides default tool execution timeouts. Zero values use builtin defaults.
 	Timeouts ToolTimeouts
@@ -117,6 +123,9 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 		questionExec := question.NewExecutor(deps.NATSClient, questionStore, nil)
 		if deps.DefaultModel != "" {
 			questionExec = questionExec.WithDefaultModel(deps.DefaultModel)
+		}
+		if deps.AnswererRegistry != nil {
+			questionExec = questionExec.WithAnswererRegistry(deps.AnswererRegistry)
 		}
 		errs = append(errs, reg.RegisterTool("ask_question", questionExec))
 
