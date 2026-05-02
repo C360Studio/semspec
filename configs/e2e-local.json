@@ -25,7 +25,8 @@
         "max_tokens": 131072,
         "supports_tools": true,
         "stream": false,
-        "request_timeout": "900s"
+        "request_timeout": "120s",
+        "idle_conn_timeout": "10s"
       },
       "qwen3-14b": {
         "provider": "ollama",
@@ -34,7 +35,8 @@
         "max_tokens": 32768,
         "supports_tools": true,
         "stream": false,
-        "request_timeout": "900s"
+        "request_timeout": "120s",
+        "idle_conn_timeout": "10s"
       },
       "qwen3-fast": {
         "provider": "ollama",
@@ -43,7 +45,8 @@
         "max_tokens": 32768,
         "supports_tools": true,
         "stream": false,
-        "request_timeout": "300s"
+        "request_timeout": "120s",
+        "idle_conn_timeout": "10s"
       },
       "qwen35-coder-35b": {
         "provider": "ollama",
@@ -52,7 +55,34 @@
         "max_tokens": 131072,
         "supports_tools": true,
         "stream": false,
-        "request_timeout": "1800s"
+        "request_timeout": "120s",
+        "idle_conn_timeout": "10s"
+      },
+      "semembed": {
+        "provider": "openai",
+        "url": "http://semembed:8081/v1",
+        "model": "Snowflake/snowflake-arctic-embed-s",
+        "max_tokens": 0
+      },
+      "seminstruct-fast": {
+        "provider": "openai",
+        "url": "http://seminstruct-fast:8083/v1",
+        "model": "qwen3-0.6b",
+        "max_tokens": 4096,
+        "max_output_tokens": 512,
+        "supports_tools": false,
+        "stream": false,
+        "request_timeout": "15s"
+      },
+      "seminstruct-summary": {
+        "provider": "openai",
+        "url": "http://seminstruct-summary:8083/v1",
+        "model": "qwen3-8b",
+        "max_tokens": 16384,
+        "max_output_tokens": 4096,
+        "supports_tools": false,
+        "stream": false,
+        "request_timeout": "45s"
       }
     },
     "capabilities": {
@@ -154,6 +184,43 @@
         "fallback": [
           "qwen3-14b"
         ]
+      },
+      "embedding": {
+        "description": "Vector embeddings for graph entities (HTTP /v1/embeddings, NOT chat)",
+        "preferred": [
+          "semembed"
+        ]
+      },
+      "query_classification": {
+        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
+        "preferred": [
+          "seminstruct-fast"
+        ],
+        "timeout": "10s"
+      },
+      "answer_synthesis": {
+        "description": "graph-query globalSearch answer composition — concurrent backend so parallel agent graph_search calls don't queue",
+        "preferred": [
+          "seminstruct-summary"
+        ],
+        "timeout": "30s"
+      },
+      "community_summary": {
+        "description": "graph-clustering community summarization — background batch, persisted into graph",
+        "preferred": [
+          "seminstruct-summary"
+        ],
+        "timeout": "120s"
+      },
+      "question_answering": {
+        "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
+        "preferred": [
+          "qwen3-coder-30b"
+        ],
+        "fallback": [
+          "qwen3-14b"
+        ],
+        "timeout": "60s"
       }
     },
     "defaults": {
@@ -344,7 +411,7 @@
             }
           ]
         },
-        "embedder_type": "bm25",
+        "embedder_type": "http",
         "batch_size": 50,
         "cache_ttl": "1h",
         "coalesce_ms": 200,
@@ -379,7 +446,7 @@
           ],
           "outputs": []
         },
-        "request_timeout": "15s",
+        "request_timeout": "60s",
         "max_traversal_depth": 5,
         "max_traversal_nodes": 100
       }
@@ -596,6 +663,66 @@
         "sweep_interval": "24h",
         "idle_threshold": "720h",
         "min_age_before_retire": "168h"
+      }
+    },
+    "graph-clustering": {
+      "name": "graph-clustering",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch",
+              "description": "Watch entity state changes for batch trigger"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "communities",
+              "subject": "COMMUNITY_INDEX",
+              "type": "kv",
+              "description": "Community detection results"
+            }
+          ]
+        },
+        "detection_interval": "30s",
+        "batch_size": 100,
+        "enable_llm": false,
+        "min_community_size": 2,
+        "max_iterations": 100,
+        "enable_structural": true,
+        "pivot_count": 16,
+        "max_hop_distance": 10,
+        "enable_anomaly_detection": true,
+        "anomaly_config": {
+          "enabled": true,
+          "max_anomalies_per_run": 100,
+          "core_anomaly": {
+            "enabled": true,
+            "min_core_level": 2
+          },
+          "semantic_gap": {
+            "enabled": true,
+            "similarity_threshold": 0.7,
+            "min_structural_distance": 3
+          },
+          "virtual_edges": {
+            "auto_apply": {
+              "enabled": true,
+              "min_confidence": 0.95,
+              "predicate_template": "inferred.semantic.{band}"
+            },
+            "review_queue": {
+              "enabled": true,
+              "min_confidence": 0.7,
+              "max_confidence": 0.95,
+              "require_llm_classification": false
+            }
+          }
+        }
       }
     }
   },

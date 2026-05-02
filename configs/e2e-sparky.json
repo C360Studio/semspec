@@ -1,9 +1,9 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.0",
   "persona_preset": "bmad",
   "platform": {
     "org": "semspec",
-    "id": "semspec-e2e-claude",
+    "id": "semspec-e2e-sparky",
     "environment": "test"
   },
   "nats": {
@@ -18,40 +18,23 @@
   },
   "model_registry": {
     "endpoints": {
-      "claude-haiku": {
-        "provider": "anthropic",
-        "url": "https://api.anthropic.com/v1",
-        "model": "claude-haiku-4-5-20251001",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "max_tokens": 200000,
+      "sparky-qwen": {
+        "provider": "openrouter",
+        "url": "http://genexergy.org:8000/v1",
+        "model": "qwen3.6-27b",
+        "api_key_env": "SPARKY_API_KEY",
+        "max_tokens": 131072,
+        "max_output_tokens": 32000,
+        "options": {
+          "enable_thinking": false
+        },
         "supports_tools": true,
-        "max_concurrent": 10,
-        "requests_per_minute": 200,
+        "tool_format": "openai",
+        "stream": false,
+        "max_concurrent": 2,
+        "requests_per_minute": 120,
+        "disable_keepalives": true,
         "request_timeout": "120s"
-      },
-      "claude-sonnet": {
-        "provider": "anthropic",
-        "url": "https://api.anthropic.com/v1",
-        "model": "claude-sonnet-4-6",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "max_tokens": 200000,
-        "supports_tools": true,
-        "reasoning_effort": "low",
-        "max_concurrent": 10,
-        "requests_per_minute": 100,
-        "request_timeout": "120s"
-      },
-      "claude-opus": {
-        "provider": "anthropic",
-        "url": "https://api.anthropic.com/v1",
-        "model": "claude-opus-4-6",
-        "api_key_env": "ANTHROPIC_API_KEY",
-        "max_tokens": 1000000,
-        "supports_tools": true,
-        "reasoning_effort": "medium",
-        "max_concurrent": 5,
-        "requests_per_minute": 50,
-        "request_timeout": "180s"
       },
       "semembed": {
         "provider": "openai",
@@ -84,74 +67,73 @@
       "planning": {
         "description": "Plan generation and architecture",
         "preferred": [
-          "claude-opus"
+          "sparky-qwen"
         ],
         "fallback": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "coding": {
         "description": "Code generation, implementation",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "plan_review": {
         "description": "SOP-aware plan review",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "architecture": {
         "description": "Architecture generation — technology choices, component boundaries, data flow",
         "preferred": [
-          "claude-opus"
+          "sparky-qwen"
         ],
         "fallback": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "qa": {
         "description": "Rollup quality review",
         "preferred": [
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "lesson_decomposition": {
-        "description": "ADR-033 lesson decomposer — rare, benefits from a smarter model",
+        "description": "ADR-033 lesson decomposer",
         "preferred": [
-          "claude-opus",
-          "claude-sonnet"
+          "sparky-qwen"
         ]
       },
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
-          "claude-haiku"
+          "sparky-qwen"
         ]
       },
       "embedding": {
@@ -182,18 +164,15 @@
         "timeout": "120s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
+        "description": "Answerer-agent backend for ask_question routes. Currently the same workflow model — replace preferred when a bigger answerer endpoint is added to sparky.",
         "preferred": [
-          "claude-opus"
-        ],
-        "fallback": [
-          "claude-sonnet"
+          "sparky-qwen"
         ],
         "timeout": "60s"
       }
     },
     "defaults": {
-      "model": "claude-sonnet"
+      "model": "sparky-qwen"
     }
   },
   "services": {
@@ -238,7 +217,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "claude-sonnet",
+        "default_model": "sparky-qwen",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
@@ -264,7 +243,7 @@
       "enabled": true,
       "config": {
         "max_iterations": 50,
-        "timeout": "3600s",
+        "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT"
@@ -276,7 +255,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "3600s"
+        "timeout": "900s"
       }
     },
     "agentic-tools": {
@@ -447,7 +426,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_generation_retries": 2
+        "max_generation_retries": 3
       }
     },
     "requirement-generator": {
@@ -455,15 +434,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "requirement_generation"
-      }
-    },
-    "architecture-generator": {
-      "name": "architecture-generator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "default_capability": "architecture"
+        "default_capability": "requirement_generation",
+        "max_generation_retries": 3
       }
     },
     "scenario-generator": {
@@ -471,7 +443,17 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "scenario_generation"
+        "default_capability": "scenario_generation",
+        "max_generation_retries": 3
+      }
+    },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_capability": "architecture",
+        "max_generation_retries": 3
       }
     },
     "plan-manager": {
@@ -528,8 +510,8 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 3600,
-        "model": "claude-sonnet",
-        "decomposer_model": "claude-sonnet",
+        "model": "sparky-qwen",
+        "decomposer_model": "sparky-qwen",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
@@ -555,10 +537,11 @@
       "config": {
         "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
-        "model": "claude-sonnet",
+        "model": "sparky-qwen",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
-        "indexing_budget": "60s"
+        "indexing_budget": "60s",
+        "enable_positive_lessons": true
       }
     },
     "workflow-documents": {

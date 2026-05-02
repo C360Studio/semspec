@@ -21,14 +21,58 @@
       "openrouter-qwen3-moe": {
         "provider": "openrouter",
         "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3-coder-next",
+        "model": "qwen/qwen3.6-27b",
         "api_key_env": "OPENROUTER_API_KEY",
         "max_tokens": 32768,
+        "max_output_tokens": 32000,
+        "reasoning_effort": "none",
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
         "max_concurrent": 4,
-        "requests_per_minute": 60
+        "requests_per_minute": 60,
+        "disable_keepalives": true,
+        "request_timeout": "90s"
+      },
+      "semembed": {
+        "provider": "openai",
+        "url": "http://semembed:8081/v1",
+        "model": "Snowflake/snowflake-arctic-embed-s",
+        "max_tokens": 0
+      },
+      "seminstruct-fast": {
+        "provider": "openai",
+        "url": "http://seminstruct-fast:8083/v1",
+        "model": "qwen3-0.6b",
+        "max_tokens": 4096,
+        "max_output_tokens": 512,
+        "supports_tools": false,
+        "stream": false,
+        "request_timeout": "15s"
+      },
+      "seminstruct-summary": {
+        "provider": "openai",
+        "url": "http://seminstruct-summary:8083/v1",
+        "model": "qwen3-8b",
+        "max_tokens": 16384,
+        "max_output_tokens": 4096,
+        "supports_tools": false,
+        "stream": false,
+        "request_timeout": "45s"
+      },
+      "qwen3-next-instruct": {
+        "provider": "openrouter",
+        "url": "https://openrouter.ai/api/v1",
+        "model": "qwen/qwen3-next-80b-a3b-instruct",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "max_tokens": 131072,
+        "max_output_tokens": 8192,
+        "supports_tools": false,
+        "stream": false,
+        "max_concurrent": 2,
+        "requests_per_minute": 30,
+        "disable_keepalives": true,
+        "request_timeout": "120s"
       }
     },
     "capabilities": {
@@ -78,7 +122,7 @@
         ]
       },
       "architecture": {
-        "description": "Architecture generation \u2014 technology choices, component boundaries, data flow",
+        "description": "Architecture generation — technology choices, component boundaries, data flow",
         "preferred": [
           "openrouter-qwen3-moe"
         ],
@@ -103,6 +147,43 @@
         "preferred": [
           "openrouter-qwen3-moe"
         ]
+      },
+      "embedding": {
+        "description": "Vector embeddings for graph entities (HTTP /v1/embeddings, NOT chat)",
+        "preferred": [
+          "semembed"
+        ]
+      },
+      "query_classification": {
+        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
+        "preferred": [
+          "seminstruct-fast"
+        ],
+        "timeout": "10s"
+      },
+      "answer_synthesis": {
+        "description": "graph-query globalSearch answer composition — concurrent backend so parallel agent graph_search calls don't queue",
+        "preferred": [
+          "seminstruct-summary"
+        ],
+        "timeout": "30s"
+      },
+      "community_summary": {
+        "description": "graph-clustering community summarization — background batch, persisted into graph",
+        "preferred": [
+          "seminstruct-summary"
+        ],
+        "timeout": "120s"
+      },
+      "question_answering": {
+        "description": "Answerer-agent backend for ask_question routes (agent/* in answerers.json). Bigger reasoning model, no tool-call required — answerer just produces text. MoE 80B/3B-active fits alongside the workflow model on a 128GB target without crowding it out.",
+        "preferred": [
+          "qwen3-next-instruct"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
+        ],
+        "timeout": "60s"
       }
     },
     "defaults": {
@@ -288,7 +369,7 @@
             }
           ]
         },
-        "embedder_type": "bm25",
+        "embedder_type": "http",
         "batch_size": 50,
         "cache_ttl": "1h",
         "coalesce_ms": 200,
@@ -323,7 +404,7 @@
           ],
           "outputs": []
         },
-        "request_timeout": "15s",
+        "request_timeout": "60s",
         "max_traversal_depth": 5,
         "max_traversal_nodes": 100
       }
@@ -360,7 +441,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_generation_retries": 2
+        "max_generation_retries": 3
       }
     },
     "requirement-generator": {
@@ -368,7 +449,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "requirement_generation"
+        "default_capability": "requirement_generation",
+        "max_generation_retries": 3
       }
     },
     "scenario-generator": {
@@ -376,7 +458,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "scenario_generation"
+        "default_capability": "scenario_generation",
+        "max_generation_retries": 3
       }
     },
     "architecture-generator": {
@@ -384,7 +467,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "architecture"
+        "default_capability": "architecture",
+        "max_generation_retries": 3
       }
     },
     "plan-manager": {
@@ -550,6 +634,66 @@
         "sweep_interval": "24h",
         "idle_threshold": "720h",
         "min_age_before_retire": "168h"
+      }
+    },
+    "graph-clustering": {
+      "name": "graph-clustering",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch",
+              "description": "Watch entity state changes for batch trigger"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "communities",
+              "subject": "COMMUNITY_INDEX",
+              "type": "kv",
+              "description": "Community detection results"
+            }
+          ]
+        },
+        "detection_interval": "30s",
+        "batch_size": 100,
+        "enable_llm": false,
+        "min_community_size": 2,
+        "max_iterations": 100,
+        "enable_structural": true,
+        "pivot_count": 16,
+        "max_hop_distance": 10,
+        "enable_anomaly_detection": true,
+        "anomaly_config": {
+          "enabled": true,
+          "max_anomalies_per_run": 100,
+          "core_anomaly": {
+            "enabled": true,
+            "min_core_level": 2
+          },
+          "semantic_gap": {
+            "enabled": true,
+            "similarity_threshold": 0.7,
+            "min_structural_distance": 3
+          },
+          "virtual_edges": {
+            "auto_apply": {
+              "enabled": true,
+              "min_confidence": 0.95,
+              "predicate_template": "inferred.semantic.{band}"
+            },
+            "review_queue": {
+              "enabled": true,
+              "min_confidence": 0.7,
+              "max_confidence": 0.95,
+              "require_llm_classification": false
+            }
+          }
+        }
       }
     }
   },

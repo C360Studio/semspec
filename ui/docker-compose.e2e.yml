@@ -36,6 +36,18 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+      # Gate on small-model graph stack so graph-embedding worker doesn't
+      # race against semembed's HTTP listener at boot. semembed's
+      # healthcheck probes /v1/embeddings (real path), so this gate is
+      # honest. seminstruct-fast/summary not strictly required by
+      # workflow path but gating prevents graph-query LLM calls from
+      # racing if their model-load is slow.
+      semembed:
+        condition: service_healthy
+      seminstruct-fast:
+        condition: service_healthy
+      seminstruct-summary:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/project-manager/health"]
       interval: 5s
@@ -79,6 +91,73 @@ services:
       timeout: 3s
       retries: 5
       start_period: 5s
+
+  # semembed serves graph-embedding's HTTP embedder (replacing BM25).
+  # Background batch — embeds entity text on every ENTITY_STATES write.
+  # Default model produces 384-dim vectors via fastembed-rs.
+  semembed:
+    image: ghcr.io/c360studio/semembed:latest
+    environment:
+      - SEMEMBED_MODEL=Snowflake/snowflake-arctic-embed-s
+      - RUST_LOG=info
+    # Probe the real embeddings endpoint, not /health.
+    # Caught 2026-05-02: /health returns 200 ~939ms before the Rust HTTP
+    # listener actually accepts POSTs, so service_healthy fired early
+    # and graph-embedding's first 5 entities got connection-refused.
+    # POST /v1/embeddings exercises the full handler chain — only passes
+    # once the listener is genuinely serving requests.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -X POST http://localhost:8081/v1/embeddings
+          -H 'Content-Type: application/json'
+          -d '{"model":"Snowflake/snowflake-arctic-embed-s","input":"x"}'
+          >/dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # seminstruct-fast serves the latency-critical graph capability:
+  # query_classification (T3 fallback). Tiny 0.6B model with thinking off
+  # so the 5-class JSON classification returns sub-second.
+  seminstruct-fast:
+    image: ghcr.io/c360studio/seminstruct:qwen3-0.6b
+    environment:
+      - MODEL_ALIAS=qwen3-0.6b
+      - MODEL_REASONING=off
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  # seminstruct-summary serves the offload-friendly graph capabilities:
+  # answer_synthesis + community_summary. 8B model with reasoning auto so
+  # community summaries persisted into the graph stay quality. Concurrent
+  # inference (-np 4 -cb baked into the image) so multiple agents'
+  # parallel graph_search calls don't queue head-of-line.
+  seminstruct-summary:
+    image: ghcr.io/c360studio/seminstruct:qwen3-8b
+    environment:
+      - MODEL_ALIAS=qwen3-8b
+      - MODEL_REASONING=auto
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          memory: 8G
 
   # qa-runner handles integration and full QA tiers via nektos/act.
   # Port offset +200 from dev (8091) → 8291 for UI-E2E isolation.

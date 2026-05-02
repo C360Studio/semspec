@@ -7,8 +7,9 @@
 # Providers:
 #   local               - Ollama running on host (no API key needed)
 #   claude              - Anthropic Claude via ANTHROPIC_API_KEY
-#   openrouter          - OpenRouter via OPENAI_API_KEY
+#   openrouter          - OpenRouter via OPENROUTER_API_KEY
 #   gemini              - Google AI Studio via GEMINI_API_KEY (mapped to OPENAI_API_KEY)
+#   sparky              - friend-hosted Qwen3.6-27B-FP8 (vLLM) via SPARKY_API_KEY
 #
 # Environment variables:
 #   E2E_CONFIG           - Config file name (default: semspec.json), e.g. e2e-local.json
@@ -30,6 +31,8 @@ services:
       - LLM_API_URL=http://host.docker.internal:11434
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - SPARKY_API_KEY=${SPARKY_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENROUTER_SITE_URL=${OPENROUTER_SITE_URL:-https://semspec.dev}
       - OPENROUTER_SITE_NAME=${OPENROUTER_SITE_NAME:-semspec}

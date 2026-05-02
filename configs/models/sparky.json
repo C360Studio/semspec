@@ -1,36 +1,23 @@
 {
-  "_comment": "OpenRouter routes to many models behind one OpenAI-compatible endpoint. provider=openai; the BaseURL swap is the only required difference. HTTP-Referer/X-Title attribution headers (recommended by OpenRouter) are not yet wired through semstreams' agentic-model adapter — they're optional, not required for auth.",
-  "_model_slugs": "Confirm the exact slug for your account's default at openrouter.ai/activity or with curl https://openrouter.ai/api/v1/models | jq. Currently pinned to qwen/qwen3.6-27b (dense, reasoning-capable). Tool-capable providers: Venice (256K), Morph (128K), Alibaba (262K). Chutes auto-skipped (no tools).",
+  "_comment": "Sparky is a friend's NVIDIA DGX Spark hosting Qwen3.6-27B-FP8 via vLLM, OpenAI-compatible API at http://genexergy.org:8000. Bearer auth via SPARKY_API_KEY env var. Dedicated single-GPU box — set max_concurrent low (2) to avoid choking on parallel agentic dispatch.",
+  "_thinking_note": "qwen3.6-27b is reasoning-by-default. vLLM ignores reasoning_effort=none — the right knob is chat_template_kwargs.enable_thinking=false, which semstreams passes via endpoint.options. Without this, every reply burns 100-500 reasoning tokens before any content. Verified 2026-05-01 with direct probe: enable_thinking:false drops a math-question reply from 162 tokens to 2 tokens.",
   "model_registry": {
     "endpoints": {
-      "openrouter-qwen3-moe": {
+      "sparky-qwen": {
         "provider": "openrouter",
-        "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3.6-27b",
-        "api_key_env": "OPENROUTER_API_KEY",
-        "max_tokens": 32768,
+        "url": "http://genexergy.org:8000/v1",
+        "model": "qwen3.6-27b",
+        "api_key_env": "SPARKY_API_KEY",
+        "max_tokens": 131072,
         "max_output_tokens": 32000,
-        "reasoning_effort": "none",
+        "options": {
+          "enable_thinking": false
+        },
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
-        "max_concurrent": 4,
-        "requests_per_minute": 60
-      },
-      "openrouter-default": {
-        "_comment": "Optional second endpoint pinned to whatever your account routes to as default. Useful if you want one alias for ad-hoc queries vs. one pinned to qwen3-30b-a3b for benchmarking.",
-        "provider": "openrouter",
-        "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen3.6-27b",
-        "api_key_env": "OPENROUTER_API_KEY",
-        "max_tokens": 32768,
-        "max_output_tokens": 32000,
-        "reasoning_effort": "none",
-        "supports_tools": true,
-        "tool_format": "openai",
-        "stream": false,
-        "max_concurrent": 4,
-        "requests_per_minute": 60
+        "max_concurrent": 2,
+        "requests_per_minute": 120
       },
       "semembed": {
         "provider": "openai",
@@ -60,47 +47,47 @@
     "capabilities": {
       "planning": {
         "description": "Plan generation and high-level reasoning",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "plan_review": {
         "description": "SOP-aware plan review",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "architecture": {
         "description": "Architecture generation",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "qa": {
         "description": "Rollup quality review",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "lesson_decomposition": {
         "description": "ADR-033 lesson decomposer",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "fast": {
         "description": "Quick responses, classification",
-        "preferred": ["openrouter-qwen3-moe"]
+        "preferred": ["sparky-qwen"]
       },
       "embedding": {
         "description": "Vector embeddings for graph entities",
@@ -123,7 +110,7 @@
       }
     },
     "defaults": {
-      "model": "openrouter-qwen3-moe"
+      "model": "sparky-qwen"
     }
   }
 }
