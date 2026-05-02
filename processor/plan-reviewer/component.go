@@ -314,27 +314,34 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	// Successful parse — clear retry state.
-	c.retry.Clear(slug)
-
 	c.logger.Info("Review agent complete",
 		"slug", slug,
 		"round", round,
 		"verdict", result.Verdict,
 		"summary", result.Summary)
 
+	// Clear retry state AFTER the mutation is dispatched, not after parse.
+	// Mutations on the verdict path don't currently surface validator
+	// rejections back here (they go via sendGenerationFailed directly), so
+	// the placement is defensive — it keeps the pattern consistent with
+	// requirement-generator/scenario-generator/architecture-generator. If
+	// a future hardening adds retry-on-mutation-failure, this placement
+	// keeps the entry alive for retryOrFail to Tick.
 	if result.IsApproved() {
 		c.reviewsApproved.Add(1)
 		if err := c.sendApprovalMutations(ctx, slug, result.Summary, round); err != nil {
 			c.logger.Error("Failed to send approval mutations, rejecting plan",
 				"slug", slug, "round", round, "error", err)
+			c.retry.Clear(slug)
 			c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("approval mutation failed: %v", err))
+			return
 		}
 	} else {
 		c.reviewsRejected.Add(1)
 		c.sendRevisionMutation(ctx, slug, round, result)
 		c.extractPlanLessons(ctx, slug, result)
 	}
+	c.retry.Clear(slug)
 }
 
 // dispatchReviewer dispatches a plan-reviewer agent loop via agentic-dispatch.

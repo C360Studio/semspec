@@ -368,6 +368,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 			"plan_slug":        req.Slug,
 			"requirement_id":   req.RequirementID,
 			"deliverable_type": "scenarios",
+			"task_id":          "main", // scenario-gen reads repo root, no isolated worktree
 		},
 	}
 

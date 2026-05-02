@@ -617,9 +617,6 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		}
 	}
 
-	// Successful parse — clear retry state.
-	c.retry.Clear(slug)
-
 	hadTestData := plan != nil && plan.QARun != nil
 	c.logger.Info("QA reviewer agent complete",
 		"slug", slug, "verdict", result.Verdict, "summary", result.Summary,
@@ -628,6 +625,12 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	verdict := buildQAVerdictEvent(slug, plan, result)
 	c.recordQARejectionLesson(ctx, slug, result)
 	c.publishQAVerdict(ctx, verdict)
+	// Clear retry state AFTER the verdict mutation is dispatched. publishQAVerdict
+	// doesn't currently surface mutation errors back here (logged + swallowed),
+	// so the placement is defensive — keeps the pattern consistent with the
+	// other generator/reviewer components and lets future retry-on-publish
+	// wiring use retryOrFail without losing context.
+	c.retry.Clear(slug)
 }
 
 // buildQAVerdictEvent assembles the QAVerdictEvent published to plan-manager.

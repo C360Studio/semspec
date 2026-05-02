@@ -625,8 +625,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	}
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		reason := fmt.Sprintf("developer loop failed: outcome=%s", event.Outcome)
-		c.routeFixableRejection(ctx, exec, reason)
+		c.routeFixableRejection(ctx, exec, buildLoopFailureFeedback(event))
 		return
 	}
 
@@ -680,8 +679,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	c.taskRouting.Delete(exec.ReviewerTaskID)
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		reason := fmt.Sprintf("reviewer loop failed: outcome=%s", event.Outcome)
-		c.routeFixableRejection(ctx, exec, reason)
+		c.routeFixableRejection(ctx, exec, buildLoopFailureFeedback(event))
 		return
 	}
 

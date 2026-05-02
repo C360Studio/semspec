@@ -347,6 +347,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Metadata: map[string]any{
 			"plan_slug":        trigger.Slug,
 			"deliverable_type": "requirements",
+			"task_id":          "main", // req-gen reads repo root, no isolated worktree
 		},
 	}
 
@@ -576,11 +577,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	// Successful parse — clear retry state for this slug.
-	c.retry.Clear(slug)
-
-	// Check if the plan has moved past generating_requirements while we were working.
-	// If so, our result is stale — discard it without rejecting the plan.
+	// Stale-result check: discard if plan advanced past generating_requirements.
+	// Clear retry state on this path — there's no point retrying a stale result.
 	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
 		status := kvPlan.EffectiveStatus()
 		if status != workflow.StatusGeneratingRequirements {
@@ -588,6 +586,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"slug", slug,
 				"current_status", status,
 				"loop_id", loop.ID)
+			c.retry.Clear(slug)
 			return
 		}
 	}
@@ -596,10 +595,17 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	requirements := buildRequirementsFromItems(slug, trigger, items)
 
 	if err := c.publishResults(ctx, trigger, requirements); err != nil {
+		// Don't Clear here — handlePublishError routes validator-rejection to
+		// retryOrFail which needs the entry intact. Stale-transition + terminal
+		// failure paths inside handlePublishError clear it themselves.
 		c.handlePublishError(ctx, slug, loop, err, retryOrFail)
 		return
 	}
 
+	// Mutation accepted — safe to clear retry state. Earlier placements (just
+	// after parse, before publishResults) wedged real-LLM runs that hit the
+	// partition validator: the entry was gone before retryOrFail could Tick it.
+	c.retry.Clear(slug)
 	c.requirementsGenerated.Add(1)
 	c.logger.Info("Requirements generated via agentic-dispatch and mutation accepted",
 		"slug", slug,
@@ -647,6 +653,7 @@ func (c *Component) handlePublishError(
 	c.generationsFailed.Add(1)
 	c.logger.Error("Failed to publish requirements from loop completion, rejecting plan",
 		"slug", slug, "loop_id", loop.ID, "error", err)
+	c.retry.Clear(slug)
 	c.sendGenerationFailed(ctx, slug, fmt.Sprintf("requirements mutation publish failed: %v", err))
 }
 

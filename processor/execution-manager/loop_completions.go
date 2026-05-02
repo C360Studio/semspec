@@ -3,6 +3,8 @@ package executionmanager
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
@@ -285,14 +287,24 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 	)
 
 	// Build LoopCompletedEvent for compatibility with existing handlers.
+	// Iterations + Error/max_iterations (via Metadata) are propagated so the
+	// failure-feedback path in handleDeveloperCompleteLocked can build a
+	// diagnostic retry prompt instead of "outcome=failed".
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       loop.ID,
 		TaskID:       loop.TaskID,
 		Outcome:      loop.Outcome,
 		Result:       loop.Result,
+		Iterations:   loop.Iterations,
 		WorkflowSlug: loop.WorkflowSlug,
 		WorkflowStep: loop.WorkflowStep,
 		CompletedAt:  loop.CompletedAt,
+	}
+	if loop.Error != "" || loop.MaxIterations > 0 {
+		event.Metadata = map[string]any{
+			"error":          loop.Error,
+			"max_iterations": loop.MaxIterations,
+		}
 	}
 	if event.CompletedAt.IsZero() {
 		event.CompletedAt = time.Now()
@@ -306,4 +318,62 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 	case stageReview:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
 	}
+}
+
+// buildLoopFailureFeedback returns retry-prompt feedback for a loop that
+// completed with outcome != success. Default phrasing was "developer loop
+// failed: outcome=failed" — no diagnostic about iteration cap or
+// submit_work, which let frontier and small models alike loop again on
+// retry. We now inspect Iterations, max_iterations, and Error (propagated
+// via Metadata in the reconstructed event) to emit actionable guidance.
+//
+// Caught 2026-05-02 hybrid @easy: gemini-flash hit iter=50 wedge three
+// times on the same /health task because each retry's prompt told it
+// "rejected, try again" with zero detail.
+func buildLoopFailureFeedback(event *agentic.LoopCompletedEvent) string {
+	errMsg := ""
+	maxIter := 0
+	if event.Metadata != nil {
+		if e, ok := event.Metadata["error"].(string); ok {
+			errMsg = e
+		}
+		if mi, ok := event.Metadata["max_iterations"].(int); ok {
+			maxIter = mi
+		}
+	}
+
+	// max_iterations exhaustion is the load-bearing case — treat it
+	// explicitly so the retry prompt names the budget and the terminal
+	// tool. Substring match against the semstreams error string
+	// ("max iterations (50) reached" / similar).
+	if strings.Contains(errMsg, "max iterations") {
+		max := maxIter
+		if max == 0 {
+			max = event.Iterations
+		}
+		return fmt.Sprintf(
+			"Your previous attempt exhausted its iteration budget "+
+				"(%d of %d iterations) without calling submit_work. "+
+				"You MUST call submit_work to terminate the loop. If your "+
+				"code in the worktree is correct, call submit_work now "+
+				"with summary, files_modified listing what you changed, "+
+				"and any output. If you are stuck or uncertain, call "+
+				"submit_work with a partial summary that explicitly "+
+				"describes the obstacle — do not keep refining.",
+			event.Iterations, max,
+		)
+	}
+
+	if errMsg != "" {
+		return "Your previous attempt failed: " + errMsg +
+			"\n\nReview the error and try a different approach. If you " +
+			"have working code in the worktree, call submit_work to terminate."
+	}
+
+	return fmt.Sprintf(
+		"Your previous attempt failed (outcome=%s). Review the prior "+
+			"output and try again — and remember to call submit_work "+
+			"to terminate the loop.",
+		event.Outcome,
+	)
 }
