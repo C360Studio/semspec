@@ -391,7 +391,17 @@ func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variab
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	// 60s caps the agent's wait for graph_search/graph_query results. The
+	// older 10s value was tuned when graph-gateway was a thin GraphQL
+	// shim; today globalSearch dispatches LLM-driven query_classification
+	// (T3 fallback) + answer_synthesis whose combined budget is in the
+	// 30–60s tier per semstreams' capability spec sheets. With those
+	// capabilities bound to a concurrent seminstruct backend the typical
+	// path is well under 30s; this ceiling exists for the worst case.
+	// TODO: lift to GraphExecutor config so per-deployment tuning doesn't
+	// require a code change. Track alongside a per-tool-timeout story
+	// (no semstreams precedent yet).
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("execute request: %w", err)

@@ -360,8 +360,13 @@ func snapshotSuffix(cfg liveConfig) string {
 // feel without spamming the message-logger.
 const liveDefaultInterval = 10 * time.Second
 
-// liveMessageLimit caps the per-tick message-logger fetch. Smaller
-// than the bundle default because live mode runs continuously and a
-// 500-entry pull every 10s is wasteful when the detector set only
-// needs the most recent activity.
-const liveMessageLimit = 100
+// liveMessageLimit caps the per-tick message-logger fetch. Matches the
+// bundle's DefaultMessageLimit because the message-logger applies its
+// limit BEFORE the subject filter — on graph-busy runs ~84% of the
+// most-recent-N window is graph.mutation noise, so a tight limit
+// strands the agent.response messages our detectors walk. With 100
+// (the previous value) RapidShallowToolCalls' per-loop threshold of 6
+// could not be met when 5+ active loops competed for the surviving
+// agent.responses. Caught 2026-05-02 hybrid run: detector silent
+// across two iter=50 wedges that met every other condition.
+const liveMessageLimit = 5000
