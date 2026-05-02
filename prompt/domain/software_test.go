@@ -248,6 +248,18 @@ func TestSoftwareRequirementGeneratorFilesOwned(t *testing.T) {
 		"Partition files across requirements",
 		"merge fails",
 		"prefer ONE requirement that owns BOTH",
+		// Fan-in guidance for shared registration files (main.go, app.tsx, etc.).
+		// Without it, qwen3-class models put main.go in every requirement's
+		// files_owned in parallel and burn the retry budget on the same mistake.
+		"Shared registration files",
+		"fan-in",
+		"final \"wire-up\" requirement",
+		// 3-req example in the output-format fragment must mention the pattern.
+		"fan-in pattern",
+		"feature requirements DO NOT list main.go",
+		// First-conflict-only caveat lets retries see the whole partition,
+		// not just the validator's first complaint.
+		"only reports the FIRST conflicting pair",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(result.SystemMessage, want) {

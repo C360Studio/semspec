@@ -705,9 +705,15 @@ DO NOT lie about files_owned to dodge the overlap rule. If your reqs honestly to
 
 When the goal touches both implementation and tests for the same surface, prefer ONE requirement that owns BOTH files (impl + its test) over splitting them — but if you do split, the split MUST have a depends_on edge.
 
+Shared registration files (fan-in pattern) — most common rejection cause:
+Files like main.go, app.tsx, router.go, server.go, cmd/main.go are typically touched by every feature that needs to register a route, command, or component. The wrong shape is to list the shared file in every feature requirement's files_owned in parallel — that's three+ requirements all claiming main.go with no depends_on between them, and the validator rejects it every time. The right shape is one of:
+- Fan-in (preferred for 3+ features): each feature requirement owns ONLY its own handler/component files; ONE final "wire-up" requirement owns the shared file and lists every feature in depends_on. The wire-up requirement merges last after all features are in place.
+- Chain (acceptable for 2 features): feature A owns its files; feature B owns its files AND the shared file, with depends_on: [feature A]. B rebases on A's merge so the shared-file edits compose.
+
 Validator enforcement (this is real, not advice):
 - Empty files_owned in any requirement of a multi-requirement plan: REJECTED. Regenerate with files_owned set on every requirement.
 - Two requirements claim the same file with no depends_on edge: REJECTED. Either consolidate them into one requirement or add a depends_on edge.
+- The validator only reports the FIRST conflicting pair it finds — if your plan has three requirements all touching main.go, fixing one pair won't fix the others. Re-check the whole partition before resubmitting.
 
 A rejected plan costs you the iteration. Get files_owned and depends_on right the first time.`,
 		},
@@ -735,6 +741,8 @@ A rejected plan costs you the iteration. Get files_owned and depends_on right th
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
 			Content: `When your requirements are ready, call the submit_work tool with these JSON fields:
 
+Example 1 — two requirements, chain pattern (one feature + its router wire-up):
+
 {
   "requirements": [
     {
@@ -750,6 +758,31 @@ A rejected plan costs you the iteration. Get files_owned and depends_on right th
     }
   ]
 }
+
+Example 2 — three requirements, fan-in pattern (multiple features sharing main.go):
+
+{
+  "requirements": [
+    {
+      "title": "Hello endpoint returns JSON",
+      "description": "GET /hello must return HTTP 200 with Content-Type application/json and a body containing a message field",
+      "files_owned": ["api/handlers/hello.go", "api/handlers/hello_test.go"]
+    },
+    {
+      "title": "Goodbye endpoint returns JSON",
+      "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field",
+      "files_owned": ["api/handlers/goodbye.go", "api/handlers/goodbye_test.go"]
+    },
+    {
+      "title": "Endpoints surfaced through router",
+      "description": "Both /hello and /goodbye must be reachable via the main HTTP router",
+      "depends_on": ["Hello endpoint returns JSON", "Goodbye endpoint returns JSON"],
+      "files_owned": ["main.go"]
+    }
+  ]
+}
+
+Note in Example 2: the feature requirements DO NOT list main.go in files_owned — only the final wire-up requirement does, and it depends_on every feature. Never list main.go (or any shared registration file) in multiple requirements' files_owned in parallel; the validator rejects every time.
 
 Required fields per requirement:
 - title (string)
