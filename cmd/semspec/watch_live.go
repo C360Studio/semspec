@@ -234,6 +234,7 @@ func liveDetectors() []health.Detector {
 		health.ThinkingSpiral{},
 		health.RapidShallowToolCalls{},
 		health.GraphToolFailure{},
+		health.RepeatToolFailure{},
 	}
 }
 
