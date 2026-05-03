@@ -32,7 +32,7 @@
         "max_concurrent": 4,
         "requests_per_minute": 60,
         "disable_keepalives": true,
-        "request_timeout": "90s"
+        "request_timeout": "180s"
       },
       "semembed": {
         "provider": "openai",
