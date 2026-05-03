@@ -123,6 +123,16 @@ func TestSoftwarePlannerAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "WRONG scope.include") {
 		t.Error("expected WRONG scope.include negative example in planner output-format fragment")
 	}
+	// scope.create field pin: planner persona must show the create field
+	// in the example so the model knows new files go there. v7 escalated
+	// because the planner kept putting main_test.go in include and the
+	// reviewer flagged it as hallucinated.
+	if !strings.Contains(result.SystemMessage, `"create":`) {
+		t.Error("expected scope.create field shown in planner output-format example")
+	}
+	if !strings.Contains(result.SystemMessage, "scope.include is for files that ALREADY EXIST") {
+		t.Error("expected explicit include-vs-create distinction rule")
+	}
 }
 
 func TestSoftwareReviewerAssembly(t *testing.T) {
@@ -181,6 +191,14 @@ func TestSoftwarePlanReviewerAssembly(t *testing.T) {
 	}
 	if !strings.Contains(result.SystemMessage, "needs_changes") {
 		t.Error("expected verdict criteria in plan reviewer prompt")
+	}
+	// scope.create awareness pin: reviewer must NOT flag scope.create
+	// entries as hallucinated paths. Caught 2026-05-03 v7 where the
+	// reviewer rejected main_test.go three times and even hallucinated
+	// a scope.create field by name in the suggestion before it was a
+	// real field.
+	if !strings.Contains(result.SystemMessage, "Files in scope.create are explicit creation-intent") {
+		t.Error("expected reviewer awareness of scope.create field")
 	}
 	// Pins the bug-#2 leverage-point fix from the 2026-05-03 openrouter @easy run:
 	// reviewer must encode plan defects as findings, not only in summary.

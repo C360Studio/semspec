@@ -95,14 +95,18 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 			},
 		},
 		{
-			Name:        "graph_query",
-			Description: "GraphQL query against the knowledge graph. Pass introspect:true to see the schema before writing queries. For general questions, use graph_search instead.",
+			Name: "graph_query",
+			Description: "GraphQL query against the knowledge graph (NOT SPARQL, NOT Cypher — GraphQL).\n" +
+				"Use {field {sub-field}} brace syntax. Example query string:\n" +
+				"  { entity(id: \"semspec.semsource.code.workspace.file.main-go\") { triples { predicate object } } }\n" +
+				"Call with introspect:true first to discover available top-level queries (entity, search, etc.) and the schema.\n" +
+				"For natural-language questions, use graph_search instead.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "GraphQL query string. Required unless introspect is true.",
+						"description": "GraphQL query string (e.g. `{ entity(id: \"...\") { triples { predicate object } } }`). Required unless introspect is true. SPARQL/Cypher syntax will fail.",
 					},
 					"introspect": map[string]any{
 						"type":        "boolean",

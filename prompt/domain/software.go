@@ -369,13 +369,24 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
   "goal": "Add /goodbye endpoint with JSON response and tests",
   "context": "Flask API with /hello endpoint. Need parallel /goodbye.",
   "scope": {
-    "include": ["api/app.py", "api/test_goodbye.py"],
+    "include": ["api/app.py"],
+    "create": ["api/test_goodbye.py"],
     "exclude": ["node_modules"],
     "do_not_touch": ["README.md"]
   }
 }
 
-Required: goal (string), context (string). Optional: scope (object with include/exclude/do_not_touch arrays).
+Required: goal (string), context (string). Optional: scope (object with include/create/exclude/do_not_touch arrays).
+
+CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
+scope.create is for files the plan intends to CREATE that don't exist yet.
+Putting a not-yet-existing file in include will be flagged as a hallucinated
+path and the plan will be rejected. Putting an existing file in create is
+benign but wrong; prefer the accurate split. Caught 2026-05-03 v2 + v7
+where main_test.go (a new file) was put in include and rejected three
+revision rounds in a row because the planner had no way to signal intent
+to create. Use create explicitly for new test files, new modules, and any
+fresh artifact the plan introduces.
 
 CRITICAL — scope paths are filesystem paths, not graph entity IDs. Each entry
 in scope.include / scope.exclude / scope.do_not_touch must be a real path on
@@ -498,10 +509,11 @@ Guidelines:
 - Provide actionable suggestions for any violations
 - Reference specific SOP requirements in your findings
 - If no project standards are provided, still review for completeness and structural quality
-- Compare scope.include file paths against the project file tree (if provided in context)
-- If scope references files that don't exist AND the plan does not intend to create them, flag as an error-severity violation (hallucinated paths)
-- Files the plan explicitly intends to create (e.g. new test files, new modules) are VALID scope entries even if they don't exist yet — do NOT flag these as violations
-- For genuinely hallucinated paths (typos, wrong directories, files with no creation intent), suggest replacing with actual project files from the file tree`,
+- Compare scope.include file paths against the project file tree (if provided in context). Files in scope.include MUST already exist in the tree.
+- Files in scope.create are explicit creation-intent declarations; do NOT flag scope.create entries as hallucinated paths even when they're not in the tree — that IS the entire point of the create field.
+- If a file appears in scope.include but is NOT in the project file tree AND is NOT in scope.create, flag as an error-severity violation (hallucinated path) and suggest moving it to scope.create.
+- For genuinely hallucinated paths (typos, wrong directories, files with no creation intent), suggest replacing with actual project files from the file tree.
+- Do NOT invent fields that don't exist in the plan schema — the valid scope keys are include / exclude / do_not_touch / create. Reviewers occasionally hallucinate suggestions like "scope.create" before that field shipped (it now exists, use it); never suggest fields the planner has no way to populate.`,
 		},
 		{
 			// User-message renderer for plan-reviewer (rounds 1 + 2). Replaces
@@ -1356,6 +1368,8 @@ Ratings 1-5: task quality, communication, autonomy. A score of 3 = meets expecta
 It's also the shared, durable memory across every agent that has worked on this codebase. Plans submitted by prior planners, decisions recorded by architects, standards flagged by reviewers — those facts live as triples here. graph_query and graph_search are how you read what the team has already established. submit_work and the mutations that follow it are how you contribute back.
 
 The graph and the filesystem are different surfaces. The graph indexes the workspace — it answers "which files implement X" or "what calls function Y" or "what was decided about Z" without grepping line by line. Bash reads actual file contents and runs commands. A graph_summary call early returns the inventory of entities the system has already indexed. graph_search handles natural-language questions ("how is auth wired up?"); graph_query handles structured lookups by entity ID or predicate.
+
+graph_query speaks GraphQL — NOT SPARQL, NOT Cypher, NOT SQL. The braces matter: a valid query string looks like { entity(id: "…") { triples { predicate object } } }. The dotted-namespace entity IDs look like RDF subjects but the query language is GraphQL. A SPARQL SELECT ?x WHERE { ?x a Type . } is the wrong syntax and the gateway will reject it as an empty-id validation error or unparseable query. Call graph_query with introspect:true to see the actual schema before writing your first query.
 
 Entity IDs are graph keys, not filesystem paths. An ID like "semspec.semsource.code.workspace.file.main-go" identifies a node in the graph; the actual file lives at a path you get from the entity's "code.artifact.path" triple (or by recognizing the ID's "...file.main-go" tail → "main.go"). Passing an entity ID to bash as a path will return "no such file or directory" — that's the cargo-cult mistake to avoid. Translate via graph_query first, or use the path you already know.
 

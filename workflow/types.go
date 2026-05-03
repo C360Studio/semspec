@@ -797,7 +797,8 @@ func (p *Plan) EffectiveStatus() Status {
 
 // Scope defines the file/directory boundaries for a plan.
 type Scope struct {
-	// Include lists files/directories in scope for this plan
+	// Include lists files/directories in scope for this plan that
+	// already exist in the project tree.
 	Include []string `json:"include,omitempty"`
 
 	// Exclude lists files/directories explicitly out of scope
@@ -805,6 +806,21 @@ type Scope struct {
 
 	// DoNotTouch lists protected files/directories that must not be modified
 	DoNotTouch []string `json:"do_not_touch,omitempty"`
+
+	// Create lists files the plan intends to CREATE — these don't exist
+	// yet in the project tree and the plan-reviewer must NOT flag them as
+	// hallucinated paths during scope validation. The planner declares
+	// creation intent here (e.g. new test files, new modules); downstream
+	// agents (architect, req-gen, developer) treat Create entries as
+	// in-scope just like Include entries.
+	//
+	// Without this field the planner had to either lie (declare new files
+	// in Include and have the reviewer reject them as nonexistent) or
+	// omit them from scope entirely (and have the developer write
+	// off-scope). Caught 2026-05-03 v2 + v7 where main_test.go was the
+	// repeatedly-flagged hallucination — the reviewer's prose suggestion
+	// even hallucinated a scope.create field by name.
+	Create []string `json:"create,omitempty"`
 }
 
 // TaskType classifies the kind of work a task represents.

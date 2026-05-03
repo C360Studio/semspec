@@ -82,6 +82,9 @@ func writePlanTriples(ctx context.Context, tw *graphutil.TripleWriter, plan *Pla
 	for _, dnt := range plan.Scope.DoNotTouch {
 		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeProtected, dnt)
 	}
+	for _, cr := range plan.Scope.Create {
+		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeCreate, cr)
+	}
 
 	// Execution trace IDs (one triple per ID — avoid JSON arrays as KV keys)
 	for _, traceID := range plan.ExecutionTraceIDs {

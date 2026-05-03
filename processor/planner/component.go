@@ -384,6 +384,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		Include:    planContent.Scope.Include,
 		Exclude:    planContent.Scope.Exclude,
 		DoNotTouch: planContent.Scope.DoNotTouch,
+		Create:     planContent.Scope.Create,
 	}
 
 	mutReq := draftedMutationRequest{
@@ -678,6 +679,7 @@ type PlanContent struct {
 		Include    []string `json:"include,omitempty"`
 		Exclude    []string `json:"exclude,omitempty"`
 		DoNotTouch []string `json:"do_not_touch,omitempty"`
+		Create     []string `json:"create,omitempty"`
 	} `json:"scope"`
 	Status string `json:"status,omitempty"`
 }

@@ -73,6 +73,10 @@ const (
 	// PlanScopeProtected lists files/directories that must not be modified.
 	PlanScopeProtected = "semspec.plan.scope_protected"
 
+	// PlanScopeCreate lists files/directories the plan intends to CREATE
+	// (do not exist yet in the project tree, but are valid scope entries).
+	PlanScopeCreate = "semspec.plan.scope_create"
+
 	// PlanApproved indicates the plan is ready for execution.
 	PlanApproved = "semspec.plan.approved"
 
@@ -1047,6 +1051,11 @@ func registerTaskPredicates() {
 		vocabulary.WithDescription("Files/directories that must not be modified"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"scopeProtected"))
+
+	vocabulary.Register(PlanScopeCreate,
+		vocabulary.WithDescription("Files/directories the plan intends to create"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scopeCreate"))
 
 	vocabulary.Register(PlanApproved,
 		vocabulary.WithDescription("Plan is ready for execution"),
