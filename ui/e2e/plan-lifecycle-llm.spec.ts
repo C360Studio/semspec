@@ -158,10 +158,27 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		expect(plan.architecture).toBeDefined();
 		expect(plan.architecture).not.toBeNull();
 
-		const techChoices = plan.architecture?.technology_choices;
-		expect(Array.isArray(techChoices)).toBe(true);
-		expect(techChoices!.length).toBeGreaterThan(0);
-		console.log(`[easy] Architecture: ${techChoices!.length} technology choices`);
+		// technology_choices is OPTIONAL by validator contract (trimmed
+		// 2026-04-30 after small models wedged trying to invent technology
+		// detail for trivial changes; see workflow/architecture.go +
+		// tools/terminal/validators.go::validateOptionalTechChoices).
+		// The required surface is actors / integrations / test_surface;
+		// assert on those instead. tech_choices is fine to populate but
+		// the test must NOT require it. Caught 2026-05-03 v9 where the
+		// architect produced a complete architecture (actors,
+		// integrations, decisions, e2e_flows, data_flow) with empty
+		// tech_choices for a /health endpoint — entirely valid output
+		// that this assertion was rejecting.
+		const arch = plan.architecture!;
+		expect(Array.isArray(arch.actors)).toBe(true);
+		expect(arch.actors.length).toBeGreaterThan(0);
+		expect(Array.isArray(arch.integrations)).toBe(true);
+		expect(arch.integrations.length).toBeGreaterThan(0);
+		expect(arch.test_surface).toBeDefined();
+		const techChoiceCount = Array.isArray(arch.technology_choices)
+			? arch.technology_choices.length
+			: 0;
+		console.log(`[easy] Architecture: ${arch.actors.length} actors, ${arch.integrations.length} integrations, ${techChoiceCount} tech choices`);
 	});
 
 	// ── Stage 5: Scenarios generated ────────────────────────────────────
