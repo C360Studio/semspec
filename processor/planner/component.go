@@ -479,11 +479,15 @@ func (c *Component) fetchProjectFileTree(ctx context.Context) string {
 	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	// "test-check" is the conventional task ID for the main /repo workspace
-	// (see project-manager/http.go:986). 5s timeout: this is supposed to be
-	// near-instant; if git takes longer than that something else is wrong
-	// and we should not block plan dispatch on it.
-	result, err := c.sandboxClient.Exec(fetchCtx, "test-check", "git ls-files | head -50", 5000)
+	// taskID="main" is the sandbox's reserved ID for the repo root workspace
+	// (cmd/sandbox/server.go:63). All other IDs route to per-task worktrees
+	// that don't exist at planner-dispatch time. Without "main", the fetch
+	// silently 404s and the renderer skips injection — caught 2026-05-03 v2
+	// regression where the prompt never gained the "## Project Files"
+	// section. 5s timeout: this is supposed to be near-instant; if git
+	// takes longer than that something else is wrong and we should not
+	// block plan dispatch on it.
+	result, err := c.sandboxClient.Exec(fetchCtx, "main", "git ls-files | head -50", 5000)
 	if err != nil {
 		c.logger.Debug("fetchProjectFileTree: sandbox exec failed, skipping injection",
 			"error", err)
