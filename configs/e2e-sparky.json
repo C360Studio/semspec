@@ -31,10 +31,10 @@
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
-        "max_concurrent": 2,
+        "max_concurrent": 1,
         "requests_per_minute": 120,
         "disable_keepalives": true,
-        "request_timeout": "120s"
+        "request_timeout": "150s"
       },
       "semembed": {
         "provider": "openai",
