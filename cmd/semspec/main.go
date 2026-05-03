@@ -498,7 +498,7 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 //
 // Configuration via environment:
 //
-//	GRAPH_GATEWAY_URL  — local graph-gateway GraphQL endpoint (default: http://localhost:8080/graph-gateway/graphql)
+//	GRAPH_GATEWAY_URL  — local graph-gateway GraphQL endpoint (default: http://localhost:8082/graphql)
 //	GRAPH_SOURCES      — JSON array of graph sources, e.g.:
 //	                     [{"name":"workspace","graphql_url":"http://semsource:8080/graph-gateway/graphql",
 //	                       "status_url":"http://semsource:8080/source-manifest/status","type":"semsource"}]
@@ -544,13 +544,23 @@ func parseGraphSourcesFromEnv() []graph.Source {
 	var sources []graph.Source
 
 	// Local graph source — always present.
+	//
+	// The default points at :8082/graphql because that's where the
+	// standalone semstreams graph-gateway component listens (see
+	// gateway/graph-gateway/README.md in semstreams: bind via
+	// ports.inputs[].subject=":8082" and graphql_path defaults to
+	// "/graphql"). Earlier defaults pointed at :8080/graph-gateway/graphql
+	// — that is correct for an embedded gateway mounted under a parent
+	// HTTP server (semsource serves it that way), but in semspec the
+	// gateway runs standalone so :8080 has no /graph-gateway/graphql
+	// route and graph_search EOFs silently. Caught 2026-05-03 v3.
 	localURL := os.Getenv("GRAPH_GATEWAY_URL")
 	if localURL == "" {
-		localURL = "http://localhost:8080/graph-gateway/graphql"
+		localURL = "http://localhost:8082/graphql"
 	}
 	// If they gave us a base URL without /graphql, append the standard path.
 	if !strings.HasSuffix(localURL, "/graphql") {
-		localURL = strings.TrimRight(localURL, "/") + "/graph-gateway/graphql"
+		localURL = strings.TrimRight(localURL, "/") + "/graphql"
 	}
 	sources = append(sources, graph.Source{
 		Name:        "local",
