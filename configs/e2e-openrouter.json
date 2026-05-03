@@ -161,7 +161,6 @@
         ],
         "timeout": "10s"
       },
-      "_answer_synthesis_disabled_2026_05_03": "Capability deliberately unbound. seminstruct-summary (qwen3-8b) was timing out at 30s × 8+ calls per graph_search round on the v3 regression run, which then fell back to TemplateAnswerSynthesizer anyway — paying the LLM cost to land on the template. The planner's downstream consumer cares about entity IDs + cluster names (which the template emits faithfully), not free-form prose synthesized on top. Re-bind only if a use case emerges that needs LLM-synthesized graph answers AND we're willing to absorb the 30-90s per-call latency. Anything below 7B is anti-recommended per semstreams docs operations/11-llm-routing-and-model-selection.md — failure mode is path/entity hallucination, the bug class we just spent commits 3796e31..27a6139 fixing on the planner.",
       "community_summary": {
         "description": "graph-clustering community summarization — background batch, persisted into graph",
         "preferred": [
