@@ -587,10 +587,19 @@ tasks:
       # cleanup (which deletes the plan from PLAN_STATES — caught
       # 2026-04-30, see project_adr034_real_run_bugs P1.3).
       - |
+        # No --bail-on here on purpose: critical alerts already print
+        # loudly to watch.log; the watcher's job is to surface signal,
+        # not control the run. There's no IPC channel from the watch
+        # sidecar to Playwright, so a bail-out just blinds the live
+        # operator during the most interesting part of the run (right
+        # when something just went sideways). Operator reads ALERT
+        # lines and decides whether to abort the docker stack manually.
+        # Caught 2026-05-03 v6 where RepeatToolFailure + GraphToolFailure
+        # both fired correctly, the sidecar exited, and we lost the rest
+        # of the live state while Playwright kept testing.
         ./bin/semspec watch --live \
           --http http://localhost:3000 \
           --nats nats://localhost:4223 \
-          --bail-on critical \
           --max-duration 60m \
           --snapshot-interval 60s \
           --out-dir {{.OUT_DIR}} > {{.OUT_DIR}}/watch.log 2>&1 &
