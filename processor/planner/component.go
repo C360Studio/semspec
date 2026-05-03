@@ -488,7 +488,17 @@ func (c *Component) fetchProjectFileTree(ctx context.Context) string {
 	// section. 5s timeout: this is supposed to be near-instant; if git
 	// takes longer than that something else is wrong and we should not
 	// block plan dispatch on it.
-	result, err := c.sandboxClient.Exec(fetchCtx, "main", "git ls-files | head -50", 5000)
+	// Filter .semspec/ and other meta-paths so the planner doesn't see its
+	// own bookkeeping artifacts in the inventory. Without this filter the
+	// 2026-05-03 v8 planner panicked under multi-round-rejection pressure
+	// and dumped every visible path (including .semspec/checklist.json,
+	// .semspec/projects/.../plan.json, etc.) into scope.include — the
+	// over-inclusion failure mode the relevance-not-inventory persona
+	// fix in 66c58e1 was supposed to prevent. The persona fix prevents
+	// well-behaved over-inclusion; this filter prevents catastrophic
+	// over-inclusion when the planner is already panicking.
+	result, err := c.sandboxClient.Exec(fetchCtx, "main",
+		"git ls-files | grep -v '^\\.semspec/' | grep -v '^\\.git/' | head -50", 5000)
 	if err != nil {
 		c.logger.Debug("fetchProjectFileTree: sandbox exec failed, skipping injection",
 			"error", err)

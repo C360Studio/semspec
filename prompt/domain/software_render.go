@@ -95,8 +95,22 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 			sb.WriteString("\n```\n\n")
 		}
 		sb.WriteString(p.RevisionPrompt)
+		// Re-anchor the revision flow against two failure modes seen on
+		// 2026-05-03 v8: (1) the planner ignoring scope.create even when
+		// the reviewer suggested it by name, (2) the planner panicking
+		// under multi-round rejection and dumping every visible path
+		// into scope.include. Repeat the schema rule here in the
+		// revision prompt so it fires fresh on every revision turn —
+		// the system-prompt fragment alone is too far away in a long
+		// conversation for example-anchoring to stick.
+		sb.WriteString("\n\n## Scope Schema Reminder (ALWAYS APPLIES)\n\n")
+		sb.WriteString("scope.include = files that ALREADY EXIST and the plan will read or modify.\n")
+		sb.WriteString("scope.create  = files the plan will CREATE that don't exist yet.\n")
+		sb.WriteString("scope.exclude / scope.do_not_touch = boundaries (rarely used).\n\n")
+		sb.WriteString("If the reviewer asks for a new file (test fixture, new module, etc.), put it in scope.create — NEVER in scope.include. Putting non-existent files in include is the most common rejection reason; this field exists exactly for that case.\n\n")
+		sb.WriteString("Do NOT enlarge scope to satisfy unrelated criticism. If a finding says 'missing test file', add ONE entry to scope.create (the test file), not the whole project tree. The Project Files block above is for path correctness, not a checklist.\n")
 		if p.PreviousError != "" {
-			sb.WriteString("\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n")
+			sb.WriteString("\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n")
 			sb.WriteString(p.PreviousError)
 			sb.WriteString("\n\nPlease try again, addressing the issue above.")
 		}

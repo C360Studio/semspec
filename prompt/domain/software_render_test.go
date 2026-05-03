@@ -116,6 +116,31 @@ func TestRenderPlannerPrompt_ProjectFileTreeInjection(t *testing.T) {
 	})
 }
 
+// TestRenderPlannerPrompt_RevisionRepeatsScopeSchema pins the v8 fix:
+// the revision-flow user prompt must repeat the scope.include vs
+// scope.create rule and explicitly warn against panic-dumping the
+// project tree into scope.include. Caught 2026-05-03 v8 where the
+// planner couldn't adopt scope.create across three revisions and
+// eventually dumped every visible path into scope.include.
+func TestRenderPlannerPrompt_RevisionRepeatsScopeSchema(t *testing.T) {
+	got := renderPlannerPrompt(&prompt.PlannerPromptContext{
+		IsRevision:       true,
+		PreviousPlanJSON: `{"goal":"X","scope":{"include":["main.go"]}}`,
+		RevisionPrompt:   "## REVISION REQUEST\n\nFindings:\n- missing test file in scope",
+	})
+	mustContain := []string{
+		"Scope Schema Reminder",
+		"scope.create",
+		"NEVER in scope.include",
+		"Do NOT enlarge scope to satisfy unrelated criticism",
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(got, s) {
+			t.Errorf("revision prompt missing %q\n--- got ---\n%s", s, got)
+		}
+	}
+}
+
 func TestRenderRequirementGeneratorPrompt_FreshGeneration(t *testing.T) {
 	got := renderRequirementGeneratorPrompt(&prompt.RequirementGeneratorContext{
 		Title:           "Add /goodbye endpoint",
