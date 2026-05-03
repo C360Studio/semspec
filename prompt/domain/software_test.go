@@ -127,6 +127,15 @@ func TestSoftwarePlanReviewerAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "needs_changes") {
 		t.Error("expected verdict criteria in plan reviewer prompt")
 	}
+	// Pins the bug-#2 leverage-point fix from the 2026-05-03 openrouter @easy run:
+	// reviewer must encode plan defects as findings, not only in summary.
+	// Drop this rule and the verdict normalization stops being self-consistent.
+	if !strings.Contains(result.SystemMessage, "findings drive the verdict") {
+		t.Error("expected explicit 'findings drive the verdict' rule in plan-reviewer output-format fragment")
+	}
+	if !strings.Contains(result.SystemMessage, `severity="error"`) {
+		t.Error("expected explicit severity=error guidance for plan defects")
+	}
 }
 
 // TestSoftwareGapDetectionRemoved verifies gap detection is NOT in prompts

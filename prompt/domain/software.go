@@ -502,6 +502,16 @@ Guidelines:
 }
 
 For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
+
+CRITICAL: findings drive the verdict, not summary. The summary is informational —
+the verdict gate is computed from findings. If you observe ANY plan defect (broken
+scope path, missing field, conflicting boundary, hallucinated file), you MUST
+encode it as a finding entry with severity="error" and status="violation". A
+critical issue described only in summary, with verdict=approved and clean
+findings, is treated as approved and the plan ships broken. Every concern in
+summary needs a matching error-severity finding. If you have nothing rising to
+error severity, the plan is approved — say so cleanly without hedging in summary.
+
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 

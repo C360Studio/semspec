@@ -48,6 +48,29 @@ func (r *PlanReviewResult) ErrorFindings() []PlanReviewFinding {
 	return errors
 }
 
+// NormalizeVerdict makes the verdict structurally consistent with findings.
+// The verdict is a function of error-severity violations:
+//   - any error finding → "needs_changes" (upgrade if reviewer was lenient)
+//   - no error findings → "approved" (downgrade if reviewer panicked)
+//
+// Two real failure modes this guards against:
+//   - Reviewer says "needs_changes" but only has compliant/warning findings — the
+//     verdict panics against its own data, so we downgrade to approved.
+//   - Reviewer says "approved" but emits error-severity findings (or, in the
+//     2026-05-03 openrouter @easy /health run, mentions a critical scope-path
+//     mismatch in `summary` while leaving findings clean and verdict=approved).
+//     The persona is required to encode plan defects as findings; when that
+//     happens the verdict must reject. We upgrade to needs_changes.
+func (r *PlanReviewResult) NormalizeVerdict() {
+	if len(r.ErrorFindings()) > 0 {
+		r.Verdict = "needs_changes"
+		return
+	}
+	if r.Verdict == "needs_changes" {
+		r.Verdict = "approved"
+	}
+}
+
 // FormatFindings formats findings for display, grouped by status.
 func (r *PlanReviewResult) FormatFindings() string {
 	if len(r.Findings) == 0 {

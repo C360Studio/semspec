@@ -573,10 +573,7 @@ func parseReviewFromResult(result string) (*workflow.PlanReviewResult, error) {
 	// Try direct JSON parse first.
 	if err := json.Unmarshal([]byte(result), &review); err == nil {
 		if review.Verdict == "approved" || review.Verdict == "needs_changes" {
-			// Correct verdict: only error-severity violations should block approval.
-			if review.Verdict == "needs_changes" && len(review.ErrorFindings()) == 0 {
-				review.Verdict = "approved"
-			}
+			review.NormalizeVerdict()
 			return &review, nil
 		}
 	}
@@ -614,9 +611,7 @@ func parseReviewFromResult(result string) (*workflow.PlanReviewResult, error) {
 		return nil, fmt.Errorf("invalid verdict: %s", review.Verdict)
 	}
 
-	if review.Verdict == "needs_changes" && len(review.ErrorFindings()) == 0 {
-		review.Verdict = "approved"
-	}
+	review.NormalizeVerdict()
 
 	return &review, nil
 }
