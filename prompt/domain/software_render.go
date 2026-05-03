@@ -85,8 +85,10 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 // Replaces processor/planner/buildPlannerUserPrompt and the legacy
 // workflow/prompts.PlannerPromptWithTitle helper.
 func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
+	var sb strings.Builder
+	writeProjectFileTree(&sb, p.ProjectFileTree)
+
 	if p.IsRevision && p.RevisionPrompt != "" {
-		var sb strings.Builder
 		if p.PreviousPlanJSON != "" {
 			sb.WriteString("## Your Previous Plan Output\n\nThis is the plan you produced that was rejected. Update it to address ALL findings below.\n\n```json\n")
 			sb.WriteString(p.PreviousPlanJSON)
@@ -105,15 +107,40 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 		// returns an empty user message so the dispatcher can short-circuit.
 		return ""
 	}
-	out := fmt.Sprintf(`Create a committed plan for implementation:
+	fmt.Fprintf(&sb, `Create a committed plan for implementation:
 
 **Title:** %s
 
 Read the codebase to understand the current state. If any critical information is missing for implementation, ask questions. Then produce the Goal/Context/Scope structure.`, p.Title)
 	if p.PreviousError != "" {
-		out += "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n" + p.PreviousError + "\n\nPlease try again, addressing the issue above."
+		sb.WriteString("\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n")
+		sb.WriteString(p.PreviousError)
+		sb.WriteString("\n\nPlease try again, addressing the issue above.")
 	}
-	return out
+	return sb.String()
+}
+
+// writeProjectFileTree renders the workspace file inventory at the top of the
+// planner's user prompt. The tree is captured at dispatch time via
+// `git ls-files` and is the authoritative grounding for any path the planner
+// puts into scope — paths NOT in this list either do not exist or have not
+// been committed, and the planner must declare them explicitly as
+// "intends-to-create" to be a valid scope entry. Bug-#7 fix from the
+// 2026-05-03 /health postmortem: prior runs hallucinated cmd/server/main.go
+// despite the actual root having main.go directly, then failed to recover
+// across three revision rounds because the planner never re-ran bash.
+func writeProjectFileTree(sb *strings.Builder, tree string) {
+	tree = strings.TrimSpace(tree)
+	if tree == "" {
+		return
+	}
+	sb.WriteString("## Project Files (ground truth — captured at dispatch via git ls-files)\n\n")
+	sb.WriteString("Any path you put into scope.include MUST appear in this list, OR be a file the plan explicitly intends to CREATE (new test files, new modules). Hallucinating directories that look idiomatic but don't exist is the most common cause of plan rejection — verify with bash if uncertain.\n\n```\n")
+	sb.WriteString(tree)
+	if !strings.HasSuffix(tree, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("```\n\n")
 }
 
 // renderScenarioGeneratorPrompt produces the scenario-generator agent's user

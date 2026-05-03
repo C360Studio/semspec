@@ -23,6 +23,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
@@ -66,6 +67,11 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+
+	// sandboxClient fetches a project file tree snapshot at dispatch time so
+	// the planner user prompt can ground the model in actual workspace
+	// layout. Nil when SandboxURL config is empty (greenfield / dev runs).
+	sandboxClient *sandbox.Client
 
 	// retry tracks per-plan attempts keyed by slug; payload is *planDispatchContext.
 	retry *dispatchretry.State
@@ -125,6 +131,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		ComponentName: "planner",
 	}
 
+	var sandboxClient *sandbox.Client
+	if config.SandboxURL != "" {
+		sandboxClient = sandbox.NewClient(config.SandboxURL)
+	}
+
 	return &Component{
 		name:          "planner",
 		config:        config,
@@ -134,6 +145,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		sandboxClient: sandboxClient,
 		retry: dispatchretry.New(dispatchretry.Config{
 			MaxRetries: config.MaxGenerationRetries,
 			BackoffMs:  config.RetryBackoffMs,
@@ -441,14 +453,46 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // prompt-package context the user-prompt fragment renders against. Replaces
 // the legacy buildPlannerUserPrompt; the actual prompt body now lives in
 // prompt/domain/software_render.go::renderPlannerPrompt.
-func buildPlannerPromptContext(title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) *prompt.PlannerPromptContext {
+func buildPlannerPromptContext(title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError, projectFileTree string) *prompt.PlannerPromptContext {
 	return &prompt.PlannerPromptContext{
 		Title:            title,
 		IsRevision:       isRevision,
 		PreviousPlanJSON: previousPlanJSON,
 		RevisionPrompt:   revisionPrompt,
 		PreviousError:    previousError,
+		ProjectFileTree:  projectFileTree,
 	}
+}
+
+// fetchProjectFileTree returns a ground-truth snapshot of the project's
+// tracked files. Runs `git ls-files | head -50` in the sandbox at dispatch
+// time so the planner user prompt can ground the model in actual workspace
+// layout. Returns "" when the sandbox is unavailable, the workspace is
+// empty (greenfield), or the call errors — all valid states the renderer
+// silently skips. Bounded at 50 entries so a 10K-file workspace doesn't
+// blow up the prompt; the planner still has graph_summary + bash for full
+// exploration.
+func (c *Component) fetchProjectFileTree(ctx context.Context) string {
+	if c.sandboxClient == nil {
+		return ""
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// "test-check" is the conventional task ID for the main /repo workspace
+	// (see project-manager/http.go:986). 5s timeout: this is supposed to be
+	// near-instant; if git takes longer than that something else is wrong
+	// and we should not block plan dispatch on it.
+	result, err := c.sandboxClient.Exec(fetchCtx, "test-check", "git ls-files | head -50", 5000)
+	if err != nil {
+		c.logger.Debug("fetchProjectFileTree: sandbox exec failed, skipping injection",
+			"error", err)
+		return ""
+	}
+	if result == nil || result.ExitCode != 0 {
+		return ""
+	}
+	return strings.TrimSpace(result.Stdout)
 }
 
 func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {
@@ -486,6 +530,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 			maxTokens = ep.MaxTokens
 		}
 	}
+	projectFileTree := c.fetchProjectFileTree(ctx)
 	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RolePlanner,
 		Provider:       provider,
@@ -495,7 +540,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		MaxTokens:      maxTokens,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
-		PlannerPrompt:  buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError),
+		PlannerPrompt:  buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError, projectFileTree),
 	}
 
 	// Wire role-scoped lessons learned.

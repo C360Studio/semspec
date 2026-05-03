@@ -7,6 +7,115 @@ import (
 	"github.com/c360studio/semspec/prompt"
 )
 
+// TestRenderPlannerPrompt_ProjectFileTreeInjection pins the bug-#7 fix from
+// the 2026-05-03 /health postmortem: when a project file tree is provided,
+// it MUST appear at the top of the user prompt with the grounding rule, on
+// both fresh and revision paths. Greenfield-safe: empty tree is silently
+// omitted.
+func TestRenderPlannerPrompt_ProjectFileTreeInjection(t *testing.T) {
+	tests := []struct {
+		name        string
+		ctx         *prompt.PlannerPromptContext
+		mustContain []string
+		mustNotHave []string
+	}{
+		{
+			name: "fresh creation with tree",
+			ctx: &prompt.PlannerPromptContext{
+				Title:           "Add /health endpoint",
+				ProjectFileTree: "main.go\ngo.mod\ninternal/auth/auth.go",
+			},
+			mustContain: []string{
+				"## Project Files",
+				"git ls-files",
+				"main.go\ngo.mod\ninternal/auth/auth.go",
+				"Hallucinating directories",
+				"**Title:** Add /health endpoint",
+			},
+		},
+		{
+			name: "revision with tree",
+			ctx: &prompt.PlannerPromptContext{
+				IsRevision:       true,
+				PreviousPlanJSON: `{"goal":"X"}`,
+				RevisionPrompt:   "## REVISION REQUEST\n\nFix scope.",
+				ProjectFileTree:  "main.go\ngo.mod",
+			},
+			mustContain: []string{
+				"## Project Files",
+				"main.go\ngo.mod",
+				"## Your Previous Plan Output",
+				"## REVISION REQUEST",
+			},
+		},
+		{
+			name: "fresh creation without tree (greenfield)",
+			ctx: &prompt.PlannerPromptContext{
+				Title:           "Bootstrap new service",
+				ProjectFileTree: "",
+			},
+			mustContain: []string{
+				"**Title:** Bootstrap new service",
+			},
+			mustNotHave: []string{
+				"## Project Files",
+				"git ls-files",
+			},
+		},
+		{
+			name: "revision without tree",
+			ctx: &prompt.PlannerPromptContext{
+				IsRevision:     true,
+				RevisionPrompt: "## REVISION REQUEST\n\nFix scope.",
+			},
+			mustContain: []string{
+				"## REVISION REQUEST",
+			},
+			mustNotHave: []string{
+				"## Project Files",
+			},
+		},
+		{
+			name: "tree appears BEFORE title (so model reads grounding first)",
+			ctx: &prompt.PlannerPromptContext{
+				Title:           "Add /health",
+				ProjectFileTree: "main.go",
+			},
+			mustContain: []string{},
+			// Order assertion below.
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := renderPlannerPrompt(tt.ctx)
+			for _, want := range tt.mustContain {
+				if !strings.Contains(got, want) {
+					t.Errorf("output missing %q\n--- got ---\n%s", want, got)
+				}
+			}
+			for _, banned := range tt.mustNotHave {
+				if strings.Contains(got, banned) {
+					t.Errorf("output should NOT contain %q\n--- got ---\n%s", banned, got)
+				}
+			}
+		})
+	}
+
+	// Order check: tree must precede the title section.
+	t.Run("tree precedes title", func(t *testing.T) {
+		got := renderPlannerPrompt(&prompt.PlannerPromptContext{
+			Title:           "Add /health",
+			ProjectFileTree: "main.go",
+		})
+		treeIdx := strings.Index(got, "## Project Files")
+		titleIdx := strings.Index(got, "**Title:**")
+		if treeIdx < 0 || titleIdx < 0 || treeIdx > titleIdx {
+			t.Errorf("tree (%d) must precede title (%d)\n--- got ---\n%s", treeIdx, titleIdx, got)
+		}
+	})
+}
+
 func TestRenderRequirementGeneratorPrompt_FreshGeneration(t *testing.T) {
 	got := renderRequirementGeneratorPrompt(&prompt.RequirementGeneratorContext{
 		Title:           "Add /goodbye endpoint",

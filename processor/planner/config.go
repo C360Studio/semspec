@@ -29,6 +29,15 @@ type Config struct {
 	// asking questions that would block without a human to answer.
 	InteractiveMode bool `json:"interactive_mode" schema:"type:bool,description:Enable ask_question tool (requires human monitoring),category:advanced,default:false"`
 
+	// SandboxURL is the URL of the sandbox container. When set, the planner
+	// fetches a `git ls-files` snapshot of the project at dispatch time and
+	// injects it into the user prompt as ground-truth file inventory. Without
+	// this the planner can confidently hallucinate Go-idiomatic structures
+	// (cmd/server/main.go) on revision rounds and fail to re-explore even
+	// after the reviewer flags the path. Greenfield-safe: empty output is
+	// skipped silently. Caught 2026-05-03 on openrouter @easy /health.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox URL for project file tree snapshot,category:advanced"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

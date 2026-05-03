@@ -426,7 +426,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_generation_retries": 3
+        "max_generation_retries": 3,
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "requirement-generator": {
