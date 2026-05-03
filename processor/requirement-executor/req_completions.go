@@ -213,10 +213,20 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 	// handleNodeCompleteLocked already parses for files_modified and
 	// changes_summary; we extend it with merge_commit so the requirement-
 	// scope claim/observation gate can verify each node's work landed.
+	//
+	// task_stage + escalation_reason are surfaced for the failure path so
+	// handleNodeCompleteLocked can distinguish phase=escalated (TDD budget
+	// exhausted by execution-manager — retry will burn another full budget
+	// for the same upstream defect) from phase=error (transient flake worth
+	// retrying). Bug-#6 fix from the 2026-05-03 /health cascade — without
+	// this, escalation triggered another 6 dev dispatches × ~568K input
+	// tokens each on the same broken scope.
 	resultPayload, _ := json.Marshal(map[string]any{
-		"files_modified":  taskExec.FilesModified,
-		"changes_summary": "",
-		"merge_commit":    taskExec.MergeCommit,
+		"files_modified":    taskExec.FilesModified,
+		"changes_summary":   "",
+		"merge_commit":      taskExec.MergeCommit,
+		"task_stage":        taskExec.Stage,
+		"escalation_reason": taskExec.EscalationReason,
 	})
 
 	event := &agentic.LoopCompletedEvent{

@@ -69,6 +69,17 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "<identity>") {
 		t.Error("expected XML formatting for Anthropic provider")
 	}
+	// Bug-#4 pin: the developer must be told scope is mandatory and that
+	// files_modified must respect scope.do_not_touch / scope.exclude.
+	// Caught 2026-05-03 on openrouter @easy /health where the dev burned
+	// ~568K tokens then submitted refresh-token code in a do-not-touch
+	// auth file no one had asked it to edit.
+	if !strings.Contains(result.SystemMessage, "Scope is mandatory") {
+		t.Error("expected 'Scope is mandatory' rule in developer workspace-contract fragment")
+	}
+	if !strings.Contains(result.SystemMessage, "scope.do_not_touch") {
+		t.Error("expected explicit reference to scope.do_not_touch in developer prompt")
+	}
 }
 
 func TestSoftwarePlannerAssembly(t *testing.T) {
@@ -91,6 +102,16 @@ func TestSoftwarePlannerAssembly(t *testing.T) {
 	if strings.Contains(result.SystemMessage, "You MUST use bash to create or modify implementation") {
 		t.Error("planner should not see builder tool directive")
 	}
+	// Bug-#1 pin: the planner must be told that scope paths are real
+	// filesystem paths, not graph entity IDs. Without this, the planner
+	// pastes graph IDs (dashed) into scope.include and every downstream
+	// agent routes to a non-existent path. Caught 2026-05-03 on openrouter
+	// @easy /health where scope listed "internal-auth/auth.go" instead of
+	// "internal/auth/auth.go" and the run burned ~570K tokens producing
+	// zero working code.
+	if !strings.Contains(result.SystemMessage, "scope paths are filesystem paths, not graph entity IDs") {
+		t.Error("expected scope-path-vs-graph-ID rule in planner output-format fragment")
+	}
 }
 
 func TestSoftwareReviewerAssembly(t *testing.T) {
@@ -108,6 +129,16 @@ func TestSoftwareReviewerAssembly(t *testing.T) {
 	}
 	if !strings.Contains(result.SystemMessage, "READ-ONLY access via bash") {
 		t.Error("expected read-only notice in reviewer prompt")
+	}
+	// Bug-#5 pin: reviewer feedback must be scope-aware when rejecting on
+	// files_modified mismatch. Bare "no files modified" feedback is
+	// non-actionable and produced four identical rejections in a row on
+	// the 2026-05-03 openrouter @easy /health run.
+	if !strings.Contains(result.SystemMessage, "Scope-Aware Feedback") {
+		t.Error("expected 'Scope-Aware Feedback' rule in reviewer role-context")
+	}
+	if !strings.Contains(result.SystemMessage, "non-actionable") {
+		t.Error("expected explicit non-actionable warning in reviewer prompt")
 	}
 }
 

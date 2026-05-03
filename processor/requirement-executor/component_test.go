@@ -1432,6 +1432,106 @@ func TestHandleNodeCompleteLocked_FailedOutcome_RetriesWhenBudgetRemains(t *test
 	}
 }
 
+// Bug-#6 pin: when execution-manager escalates due to TDD-budget exhaustion
+// (task_stage="escalated"), requirement-executor MUST NOT layer-2 retry even
+// if the requirement-level retry budget remains. Re-dispatching just spawns
+// a NEW task with cycle=0 against the same upstream defect and burns another
+// full TDD budget. Caught 2026-05-03 on openrouter @easy /health.
+func TestHandleNodeCompleteLocked_FailedOutcome_SkipsRetryOnTDDExhaustion(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-tddx",
+		Slug:              "p",
+		RequirementID:     "tdd-exhaust",
+		CurrentNodeTaskID: "node-task-tddx",
+		SortedNodeIDs:     []string{"task-a"},
+		VisitedNodes:      make(map[string]bool),
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        0, // budget remaining — would normally retry
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	resultPayload := `{"task_stage":"escalated","escalation_reason":"fixable rejections exceeded TDD cycle budget"}`
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-tddx",
+		TaskID:       "node-task-tddx",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeFailed,
+		Result:       resultPayload,
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	terminated := exec.terminated
+	retryCount := exec.RetryCount
+	exec.mu.Unlock()
+
+	if !terminated {
+		t.Error("TDD-exhausted node should terminate the requirement execution without layer-2 retry")
+	}
+	if retryCount != 0 {
+		t.Errorf("RetryCount = %d, want 0 (no layer-2 retry on TDD exhaustion)", retryCount)
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+}
+
+// Sibling pin for the non-escalated path: if task_stage is "error" (transient
+// agent flake — claim/observation mismatch, merge race), the layer-2 retry
+// MUST still fire when budget remains. Without this, the bug-#6 fix would
+// over-correct and break the validated 2026-04-29 Gemini @easy retry path.
+func TestHandleNodeCompleteLocked_FailedOutcome_RetriesOnTransientError(t *testing.T) {
+	c := newTestComponent(t)
+
+	dag := &decompose.TaskDAG{
+		Nodes: []decompose.TaskNode{
+			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
+		},
+	}
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-terr",
+		Slug:              "p",
+		RequirementID:     "transient-err",
+		Model:             "test-model",
+		CurrentNodeTaskID: "node-task-terr",
+		DAG:               dag,
+		SortedNodeIDs:     []string{"task-a"},
+		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		VisitedNodes:      make(map[string]bool),
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        0,
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-terr",
+		TaskID:       "node-task-terr",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeFailed,
+		Result:       `{"task_stage":"error","escalation_reason":"merge_failed: conflict"}`,
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	terminated := exec.terminated
+	retryCount := exec.RetryCount
+	exec.mu.Unlock()
+
+	if terminated {
+		t.Error("transient error with retry budget remaining should NOT terminate the execution")
+	}
+	if retryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1 (layer-2 retry should fire on transient error)", retryCount)
+	}
+}
+
 func TestHandleNodeCompleteLocked_FailedOutcome_ExhaustsRetryBudget(t *testing.T) {
 	c := newTestComponent(t)
 

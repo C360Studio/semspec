@@ -139,7 +139,12 @@ What you don't need to do:
 - Don't create branches or stash. The worktree IS your branch.
 - Don't worry about merging — that happens after submit_work, on a different lock.
 
-If a file write seems to have succeeded but git status shows nothing, you wrote outside the worktree. Re-read the path you used and try again from the worktree root.`,
+If a file write seems to have succeeded but git status shows nothing, you wrote outside the worktree. Re-read the path you used and try again from the worktree root.
+
+Scope is mandatory, not advisory:
+- Re-read the Project File Scope (Include / Exclude / Do not touch) in the task brief BEFORE you call submit_work.
+- files_modified MUST NOT contain any path that matches scope.exclude or scope.do_not_touch. Modifying a do-not-touch file is a hard policy break — submit will be rejected and the cycle is wasted.
+- If your changes drifted to files outside scope.include (file you "had to" edit to make tests pass, helper you started writing), STOP and re-orient: either the scope was wrong (surface a question or fail the task with a clear reason), or you wandered off-target. Do not silently broaden the change set; the planner's scope is the contract. Caught 2026-05-03 on openrouter @easy /health where a developer pattern-matched into a scope-excluded auth file and submitted refresh-token code that no one asked for.`,
 		},
 		{
 			ID:       "software.developer.test-surface",
@@ -371,6 +376,20 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 }
 
 Required: goal (string), context (string). Optional: scope (object with include/exclude/do_not_touch arrays).
+
+CRITICAL — scope paths are filesystem paths, not graph entity IDs. Each entry
+in scope.include / scope.exclude / scope.do_not_touch must be a real path on
+disk, written exactly as bash sees it (slashes between directories, file
+extension intact). If graph_summary surfaced a path with dashes where you
+expected slashes (e.g. "internal-auth/auth.go"), that is a graph entity ID;
+the real path is "internal/auth/auth.go" and you must verify it with bash ls
+before submitting. A plan whose scope lists a graph ID will route every
+downstream agent (architect, developer, reviewer) to a non-existent path,
+and the run will burn tokens producing wrong code. New files the plan
+intends to create are valid scope entries even if they don't exist yet —
+this rule is about translating already-indexed paths correctly, not about
+gating greenfield additions.
+
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 		{
@@ -622,7 +641,22 @@ Integrity Rules:
 - You CANNOT approve if any changed function/endpoint lacks a named covering test
 - You MUST provide evidence for every SOP evaluation
 - You MUST check ALL applicable SOPs, not just some
-- If confidence < 0.7, recommend human review`,
+- If confidence < 0.7, recommend human review
+
+Scope-Aware Feedback (mandatory when rejecting):
+When files_modified doesn't intersect scope.include, or contains anything in
+scope.exclude / scope.do_not_touch, the rejection feedback MUST be specific:
+- Quote the scope.include list verbatim so the developer can re-read it.
+- Name each files_modified entry that is outside scope, and say WHY (excluded,
+  do-not-touch, or simply not in include).
+- Tell the developer the EXACT files they should be working on instead.
+- If files_modified is empty, name the scope.include files the developer
+  should have created or edited; do not just say "no files modified."
+
+A bare "no files modified" feedback is non-actionable — the developer's next
+attempt sees nothing useful and produces the same wrong output. Caught
+2026-05-03 on openrouter @easy /health where four TDD cycles all got the
+same useless rejection while the dev kept editing the wrong file.`,
 		},
 		{
 			ID:       "software.reviewer.output-format",
@@ -1291,6 +1325,8 @@ It's also the shared, durable memory across every agent that has worked on this 
 The graph and the filesystem are different surfaces. The graph indexes the workspace — it answers "which files implement X" or "what calls function Y" or "what was decided about Z" without grepping line by line. Bash reads actual file contents and runs commands. A graph_summary call early returns the inventory of entities the system has already indexed. graph_search handles natural-language questions ("how is auth wired up?"); graph_query handles structured lookups by entity ID or predicate.
 
 Entity IDs are graph keys, not filesystem paths. An ID like "semspec.semsource.code.workspace.file.main-go" identifies a node in the graph; the actual file lives at a path you get from the entity's "code.artifact.path" triple (or by recognizing the ID's "...file.main-go" tail → "main.go"). Passing an entity ID to bash as a path will return "no such file or directory" — that's the cargo-cult mistake to avoid. Translate via graph_query first, or use the path you already know.
+
+The same translation applies whenever you put a path into a structured output field — scope.include, scope.exclude, scope.do_not_touch, files_owned, files_modified, depends_on artifact paths. Graph entity IDs use dashes where the workspace uses slashes ("internal-auth/auth.go" is the graph ID; the real path is "internal/auth/auth.go"). If you copy a path out of graph_summary or graph_query output, run a quick bash ls or graph_query for "code.artifact.path" to confirm the actual filesystem path before you submit. A plan whose scope.include lists a graph ID instead of a real path will steer every downstream agent to the wrong file.
 
 Use the right tool for the question: graph for indexing, relationships, and prior decisions; bash for reading specific files and running commands.`,
 		},

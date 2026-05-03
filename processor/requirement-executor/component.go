@@ -624,16 +624,27 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	if event.Outcome != agentic.OutcomeSuccess {
 		c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
 
+		// Parse the failure stage out of the synthetic event payload so we
+		// can distinguish phase=escalated (deterministic upstream defect —
+		// TDD budget exhausted) from phase=error (transient flake — bug-#9
+		// claim/observation mismatch, merge race, sandbox wedge). Stages
+		// are surfaced by req_completions.handleTaskStateChange.
+		var failurePayload struct {
+			TaskStage        string `json:"task_stage"`
+			EscalationReason string `json:"escalation_reason"`
+		}
+		if event.Result != "" {
+			_ = json.Unmarshal([]byte(event.Result), &failurePayload)
+		}
+
 		// On node failure, check if we can retry at the requirement level.
-		// This catches escalated tasks (TDD budget exhausted) and gives them
-		// one more chance with the prior workspace intact.
 		//
-		// Layer-2 retry (this branch): AGENT failures — the developer ran
-		// out of TDD cycles, the bug-#9 claim/observation guard fired
-		// because the developer reported files_modified that produced no
-		// commit, the code didn't compile, etc. Re-dispatch the developer
-		// for the SAME node with prior workspace + feedback so a NEW
-		// generation can fix what the prior one missed.
+		// Layer-2 retry (this branch): AGENT failures worth a fresh
+		// generation — the bug-#9 claim/observation guard fired because the
+		// developer reported files_modified that produced no commit, code
+		// didn't compile, merge raced, etc. Re-dispatch the developer for
+		// the SAME node with prior workspace + feedback so a NEW generation
+		// can fix what the prior one missed.
 		//
 		// Layer-1 retry lives in processor/execution-manager/component.go's
 		// mergeWorktree (see that comment for cross-reference). Layer-1
@@ -645,7 +656,21 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 		// twice on test-health-endpoint (claim/observation mismatch on
 		// attempts 1+2); third re-dispatch produced real test code and
 		// the merge succeeded.
-		if exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
+		//
+		// Skip retry on phase=escalated. TDD-budget exhaustion at the
+		// execution-manager level means the developer already burned its
+		// full max_tdd_cycles budget on the same task with no progress.
+		// Retrying spawns a NEW task with cycle=0 against the same scope,
+		// same prompt, same upstream defect — and burns another full
+		// budget. Caught 2026-05-03 on openrouter @easy /health where the
+		// retry chain produced ~570K input tokens per dev dispatch ×
+		// (max_tdd_cycles 3) × (max_requirement_retries 2 + 1 first try)
+		// = 9 dev dispatches all hallucinating against a broken scope.
+		// PlanDecision (Kind=ExecutionExhausted) is the right escalation
+		// path; markFailedLocked surfaces it.
+		tddExhausted := failurePayload.TaskStage == "escalated"
+
+		if !tddExhausted && exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
 			exec.RetryCount++
 			exec.LastReviewFeedback = fmt.Sprintf("Node %q failed (outcome=%s). Retry the implementation.", nodeID, event.Outcome)
 			exec.terminated = false
@@ -671,7 +696,16 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 			return
 		}
 
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome))
+		failureReason := fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome)
+		if tddExhausted {
+			failureReason = fmt.Sprintf("node %q TDD budget exhausted at task level: %s",
+				nodeID, failurePayload.EscalationReason)
+			c.logger.Info("Skipping requirement-level retry — TDD budget exhausted upstream",
+				"entity_id", exec.EntityID,
+				"node_id", nodeID,
+				"escalation_reason", failurePayload.EscalationReason)
+		}
+		c.markFailedLocked(ctx, exec, failureReason)
 		return
 	}
 
