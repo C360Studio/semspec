@@ -112,6 +112,17 @@ func TestSoftwarePlannerAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "scope paths are filesystem paths, not graph entity IDs") {
 		t.Error("expected scope-path-vs-graph-ID rule in planner output-format fragment")
 	}
+	// Pins the v5 regression fix: planner over-included unrelated files
+	// (internal/auth/auth_test.go) when only /health was needed, just because
+	// they appeared in the Project Files inventory. The output-format fragment
+	// must teach scope = RELEVANCE, not inventory, with both correct and
+	// wrong examples for example-anchoring small/mid models.
+	if !strings.Contains(result.SystemMessage, "scope is about RELEVANCE, not inventory") {
+		t.Error("expected RELEVANCE-not-inventory rule in planner output-format fragment")
+	}
+	if !strings.Contains(result.SystemMessage, "WRONG scope.include") {
+		t.Error("expected WRONG scope.include negative example in planner output-format fragment")
+	}
 }
 
 func TestSoftwareReviewerAssembly(t *testing.T) {

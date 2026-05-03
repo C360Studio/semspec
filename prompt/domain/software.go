@@ -390,6 +390,24 @@ intends to create are valid scope entries even if they don't exist yet —
 this rule is about translating already-indexed paths correctly, not about
 gating greenfield additions.
 
+CRITICAL — scope is about RELEVANCE, not inventory. The Project Files block at
+the top of this prompt is grounding for path-correctness, NOT a checklist to
+include in scope. scope.include lists ONLY files the plan will touch (read,
+modify, or create) to satisfy the goal. Everything else stays out — even if
+it exists in the project tree, even if it's tested by the same package, even
+if it's "related." A plan that reaches into unrelated files will be rejected
+as scope-validity violation, and revising back is hard once the broader scope
+is anchored. When in doubt: smaller scope is correct.
+
+Examples for goal="Add /health endpoint":
+  CORRECT scope.include: ["main.go", "main_test.go"]   ← only the entrypoint
+                                                         and its test, both
+                                                         needed for /health
+  WRONG scope.include:   ["main.go", "main_test.go",   ← auth files exist in
+                          "internal/auth/auth.go",       project tree but
+                          "internal/auth/auth_test.go"]  /health doesn't
+                                                         touch auth — out
+
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 		{
