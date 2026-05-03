@@ -94,6 +94,20 @@ type Config struct {
 	// gate would correctly fire but mask the more useful test signal until
 	// fixtures are overhauled).
 	RequireMergeObservation *bool `json:"require_merge_observation,omitempty" schema:"type:bool,description:Fail task on developer-claimed-but-sandbox-observed-no-commit mismatch,category:advanced,default:true"`
+
+	// RequireDeveloperDiff enables a pre-reviewer claim/observation gate at
+	// the end of the developer loop: when the developer's submit_work reports
+	// non-empty files_modified but `git status` against the worktree is
+	// empty, the task is routed back as a fixable rejection BEFORE a
+	// validator/reviewer dispatch is spent. Closes the v10 hallucination
+	// wedge from project_dev_wedge_diagnosis_2026_05_03 (5 dev+5 reviewer
+	// cycles burned on a model that ran only `cat main.go` and submitted
+	// confident prose). Sits structurally before mergeWorktree's existing
+	// guard at component.go:~1754, so the cheaper rejection trips first.
+	// Default true. Disable in mock-LLM fixtures whose canned bash commands
+	// don't actually mutate the worktree (the gate would correctly fire but
+	// mask the fixture's intended test signal).
+	RequireDeveloperDiff *bool `json:"require_developer_diff,omitempty" schema:"type:bool,description:Fail dev-loop on claim/observation mismatch (claimed files_modified but worktree clean),category:advanced,default:true"`
 }
 
 // requireMergeObservation returns true when the gate is on. Defaults to
@@ -103,6 +117,15 @@ func (c *Config) requireMergeObservation() bool {
 		return true
 	}
 	return *c.RequireMergeObservation
+}
+
+// requireDeveloperDiff returns true when the pre-reviewer claim/observation
+// gate is on. Defaults to true when unset.
+func (c *Config) requireDeveloperDiff() bool {
+	if c.RequireDeveloperDiff == nil {
+		return true
+	}
+	return *c.RequireDeveloperDiff
 }
 
 // DefaultConfig returns a Config with sensible defaults.

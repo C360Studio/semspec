@@ -48,3 +48,22 @@ func TestSandboxFieldNonNil_WhenURLConfigured(t *testing.T) {
 		t.Fatal("newWorktreeManager should return nil when URL is empty")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// requireDeveloperDiff defaults — closes a fixture-disable contract.
+// ---------------------------------------------------------------------------
+
+func TestRequireDeveloperDiff_DefaultsTrue(t *testing.T) {
+	cfg := Config{}
+	if !cfg.requireDeveloperDiff() {
+		t.Error("requireDeveloperDiff: want true when unset, got false")
+	}
+}
+
+func TestRequireDeveloperDiff_RespectsExplicitFalse(t *testing.T) {
+	disabled := false
+	cfg := Config{RequireDeveloperDiff: &disabled}
+	if cfg.requireDeveloperDiff() {
+		t.Error("requireDeveloperDiff: want false when *false, got true")
+	}
+}

@@ -80,6 +80,22 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "scope.do_not_touch") {
 		t.Error("expected explicit reference to scope.do_not_touch in developer prompt")
 	}
+	// v10 hallucination wedge pin: the developer must be told that read-only
+	// bash (cat/ls/grep/find) does not modify the worktree, and that the
+	// pre-reviewer git status check rejects claim/observation mismatches.
+	// Caught 2026-05-03 on openrouter @easy /health where the dev ran only
+	// `cat main.go` × 3 and submitted confident prose about implementing a
+	// /health endpoint, never writing anything.
+	wantHallucinationPins := []string{
+		"Reading a file is not modifying it",
+		"BEFORE the validator or reviewer runs",
+		"cat > path",
+	}
+	for _, want := range wantHallucinationPins {
+		if !strings.Contains(result.SystemMessage, want) {
+			t.Errorf("expected hallucination-wedge guidance %q in workspace-contract", want)
+		}
+	}
 }
 
 func TestSoftwarePlannerAssembly(t *testing.T) {

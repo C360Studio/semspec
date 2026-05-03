@@ -68,6 +68,12 @@
       "description": "Port configuration",
       "category": "basic"
     },
+    "require_developer_diff": {
+      "type": "boolean",
+      "description": "Fail dev-loop on claim/observation mismatch (claimed files_modified but worktree clean)",
+      "default": true,
+      "category": "advanced"
+    },
     "require_merge_observation": {
       "type": "boolean",
       "description": "Fail task on developer-claimed-but-sandbox-observed-no-commit mismatch",

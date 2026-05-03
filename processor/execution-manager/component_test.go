@@ -1184,6 +1184,104 @@ func TestHandleDeveloperComplete_EmptyFilesModified_RoutesToRetry(t *testing.T) 
 	}
 }
 
+// TestHandleDeveloperComplete_HallucinatedClaim_RoutesToRetry pins the v10
+// pre-reviewer claim/observation gate from project_dev_wedge_diagnosis_2026_05_03.
+// The developer reports files_modified but `git status` against the worktree
+// is empty — meaning the agent ran read-only commands (e.g. `cat main.go`)
+// and submitted confident prose without writing anything. The gate must
+// route this back through the fixable retry path BEFORE a validator/reviewer
+// dispatch is spent on the unchanged file.
+func TestHandleDeveloperComplete_HallucinatedClaim_RoutesToRetry(t *testing.T) {
+	c := newTestComponent(t)
+	// Sandbox with empty git status output — simulates the wedge: dev claimed
+	// files_modified=["main.go"] but the worktree has no changes.
+	c.sandbox = &stubSandbox{gitStatusOutput: ""}
+
+	exec := newTestExec("plan", "task-dev-hallucinated")
+	exec.Stage = phaseDeveloping
+	exec.DeveloperTaskID = "dev-hallucinated"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.DeveloperTaskID,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"summary": "Implemented /health endpoint that returns HTTP 200", "files_modified": ["main.go"]}`,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageDevelop,
+	}
+
+	exec.mu.Lock()
+	c.handleDeveloperCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	// Should consume a TDD cycle (so persistent hallucinators escalate) and
+	// route back to the developer with actionable feedback — NOT advance to
+	// phaseValidating.
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
+	if exec.terminated {
+		t.Error("exec.terminated should be false — retries remain")
+	}
+	if exec.Feedback == "" {
+		t.Fatal("exec.Feedback should carry actionable guidance about the claim/observation mismatch")
+	}
+	// Feedback must steer the agent toward an actual write next time —
+	// reading the file with cat is the canonical mistake here, so the
+	// guidance has to call out write commands explicitly.
+	wantSubstrs := []string{
+		"git status", // names the check the agent failed
+		"main.go",    // echoes back what was claimed
+		"cat >",      // canonical write idiom
+		"NO changes", // describes what the system observed
+	}
+	for _, want := range wantSubstrs {
+		if !strings.Contains(exec.Feedback, want) {
+			t.Errorf("Feedback missing %q; got: %s", want, exec.Feedback)
+		}
+	}
+}
+
+// TestDeveloperWorkClean covers the helper directly. The handler test above
+// exercises the empty-status path; this table covers the legitimate-work and
+// sandbox-error branches that should both bypass the gate (return false).
+func TestDeveloperWorkClean(t *testing.T) {
+	tests := []struct {
+		name       string
+		status     string
+		statusErr  error
+		nilSandbox bool
+		want       bool
+	}{
+		{name: "clean worktree (gate fires)", status: "", want: true},
+		{name: "whitespace-only status (gate fires)", status: "   \n  ", want: true},
+		{name: "porcelain modified entry (gate inert)", status: " M main.go\n", want: false},
+		{name: "porcelain new file (gate inert)", status: "?? new.go\n", want: false},
+		{name: "sandbox error (defense in depth — gate inert)", statusErr: fmt.Errorf("connection refused"), want: false},
+		{name: "no sandbox configured (gate inert)", nilSandbox: true, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestComponent(t)
+			if !tt.nilSandbox {
+				c.sandbox = &stubSandbox{gitStatusOutput: tt.status, gitStatusErr: tt.statusErr}
+			}
+			exec := newTestExec("plan", "task-clean-check")
+			got := c.developerWorkClean(testCtx(t), exec)
+			if got != tt.want {
+				t.Errorf("developerWorkClean: got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHandleDeveloperComplete_FailedOutcome_Escalates_WhenBudgetExhausted(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-dev-fail-max")

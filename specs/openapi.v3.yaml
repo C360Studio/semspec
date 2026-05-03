@@ -2441,6 +2441,10 @@ components:
                     type: array
                 scope:
                     properties:
+                        create:
+                            items:
+                                type: string
+                            type: array
                         do_not_touch:
                             items:
                                 type: string
@@ -2935,6 +2939,10 @@ components:
                     type: array
                 scope:
                     properties:
+                        create:
+                            items:
+                                type: string
+                            type: array
                         do_not_touch:
                             items:
                                 type: string
@@ -3312,6 +3320,10 @@ components:
             type: object
         Scope:
             properties:
+                create:
+                    items:
+                        type: string
+                    type: array
                 do_not_touch:
                     items:
                         type: string

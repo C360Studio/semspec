@@ -89,6 +89,7 @@ type worktreeManager interface {
 	DeleteWorktree(ctx context.Context, taskID string) error
 	MergeWorktree(ctx context.Context, taskID string, opts ...sandbox.MergeOption) (*sandbox.MergeResult, error)
 	ListWorktreeFiles(ctx context.Context, taskID string) ([]sandbox.FileEntry, error)
+	GitStatus(ctx context.Context, taskID string) (string, error)
 }
 
 // newWorktreeManager returns a worktreeManager backed by the sandbox client,
@@ -656,6 +657,31 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		return
 	}
 
+	// Pre-reviewer claim/observation gate: the developer reported FilesModified
+	// but `git status` against the worktree is empty. This is the v10
+	// hallucination wedge from project_dev_wedge_diagnosis_2026_05_03 — the
+	// model ran only `cat main.go` and submitted confident prose claiming a
+	// /health endpoint, never writing anything. Without this gate the work
+	// would dispatch a validator and then a reviewer, both of which read the
+	// unchanged file and reject — burning a full TDD cycle worth of LLM calls
+	// for every hallucinated submit. Routing back through routeFixableRejection
+	// re-prompts the developer with explicit guidance and consumes the cycle
+	// budget, so persistent hallucinators still escalate. Sits BEFORE
+	// mergeWorktree's existing guard at ~line 1754, which only fires inside
+	// markApprovedLocked (after the reviewer approves) — that path is
+	// unreachable for this failure mode because the reviewer correctly rejects.
+	if c.config.requireDeveloperDiff() && c.developerWorkClean(ctx, exec) {
+		feedback := fmt.Sprintf("Your submit_work claimed to modify %d file(s) (%s) but `git status` against your worktree shows NO changes. Reading a file with `cat` is not modifying it. You must use bash to actually write the files before calling submit_work — for example: `cat > main.go << 'EOF' ... EOF`, or `tee path < input`, or `sed -i 's/old/new/' path`. Verify with `bash('git status')` BEFORE submit_work — if the output is empty, you have not written anything yet. Re-implement the work and submit again.", len(exec.FilesModified), strings.Join(exec.FilesModified, ", "))
+		c.logger.Warn("Developer claim/observation mismatch — files_modified non-empty but worktree clean; routing to retry",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"claimed_files", exec.FilesModified,
+			"tdd_cycle", exec.TDDCycle,
+		)
+		c.routeFixableRejection(ctx, exec, feedback)
+		return
+	}
+
 	// Write developer output triples — one triple per modified file.
 	for _, f := range exec.FilesModified {
 		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FilesModified, f)
@@ -668,6 +694,26 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 
 	// Dispatch structural validator.
 	c.dispatchValidatorLocked(ctx, exec)
+}
+
+// developerWorkClean returns true when the gate should fire: the developer
+// claimed work but the worktree shows no changes. Returns false on any
+// uncertainty (sandbox unavailable, query error, non-empty status output)
+// so that legitimate work is never blocked by a transient sandbox blip.
+func (c *Component) developerWorkClean(ctx context.Context, exec *taskExecution) bool {
+	if c.sandbox == nil || exec.TaskID == "" {
+		return false
+	}
+	output, err := c.sandbox.GitStatus(ctx, exec.TaskID)
+	if err != nil {
+		c.logger.Warn("git status query failed in pre-reviewer gate; allowing dispatch (defense-in-depth)",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		return false
+	}
+	return strings.TrimSpace(output) == ""
 }
 
 // ---------------------------------------------------------------------------

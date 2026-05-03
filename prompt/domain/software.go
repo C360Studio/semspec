@@ -131,8 +131,9 @@ Your working directory is a git worktree. Every file you create, edit, or delete
 
 Honest reporting is mandatory:
 - files_modified in your submit_work call MUST list every file you actually created or changed in this worktree, and MUST NOT list files you only intended to write or wrote to /tmp.
-- The system runs ` + "`git status`" + ` and ` + "`git diff`" + ` against the worktree after your loop ends. If you claim files that don't exist on disk, or your claimed files produce zero diff, the task fails as a "claim/observation mismatch" and the requirement-executor re-dispatches a fresh agent for the same node — your work is lost.
-- If you're unsure whether a write succeeded (heredoc syntax, redirect path, sandbox quoting), run bash('git status') or bash('ls -la <path>') before submit_work to verify.
+- The system runs ` + "`git status`" + ` against the worktree the moment your loop ends, BEFORE the validator or reviewer runs. If files_modified is non-empty but git status is empty, your submit is rejected immediately as a claim/observation mismatch — no validator dispatch, no reviewer dispatch, just a rejection that consumes a TDD cycle. Caught 2026-05-03 on openrouter @easy /health where a developer ran ` + "`cat main.go`" + ` three times and submitted with files_modified=["main.go"] plus a confident multi-sentence summary about implementing a /health endpoint. Zero write commands had been issued. Reading a file is not modifying it. ` + "`cat`" + `, ` + "`ls`" + `, ` + "`grep`" + `, and ` + "`find`" + ` are read-only — they do not change the worktree.
+- The actual write commands look like: ` + "`cat > path << 'EOF' ... EOF`" + `, ` + "`tee path < input`" + `, ` + "`sed -i 's/old/new/' path`" + `, ` + "`printf '...' >> path`" + `, ` + "`mv src dst`" + `, ` + "`cp src dst`" + `. If your bash transcript for this task contains ONLY read commands and you call submit_work with non-empty files_modified, you have hallucinated the work and the system will catch it.
+- If you're unsure whether a write succeeded (heredoc syntax, redirect path, sandbox quoting), run bash('git status') BEFORE submit_work. Empty output means you have not written anything yet — go write it before submitting.
 
 What you don't need to do:
 - Don't run git add, git commit, git push, or any branch operation. The sandbox handles all of that.

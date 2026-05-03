@@ -73,6 +73,14 @@ type stubSandbox struct {
 	// empty result to simulate the silent-no-op bug). Default zero-value
 	// returns &sandbox.MergeResult{} — empty Status/Commit/FilesChanged.
 	mergeResult *sandbox.MergeResult
+	// gitStatusOutput drives the pre-reviewer claim/observation gate in
+	// handleDeveloperCompleteLocked. Default empty string (worktree clean).
+	// Set to a porcelain-format diff (e.g. " M main.go") to simulate a
+	// developer that actually wrote files.
+	gitStatusOutput string
+	// gitStatusErr lets tests assert the gate's failure-path behaviour
+	// (warn-and-proceed when the sandbox is unreachable).
+	gitStatusErr error
 }
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, _ string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
@@ -109,6 +117,13 @@ func (s *stubSandbox) capturedTrailers() map[string]string {
 }
 func (s *stubSandbox) ListWorktreeFiles(_ context.Context, _ string) ([]sandbox.FileEntry, error) {
 	return nil, nil
+}
+
+func (s *stubSandbox) GitStatus(_ context.Context, _ string) (string, error) {
+	if s.gitStatusErr != nil {
+		return "", s.gitStatusErr
+	}
+	return s.gitStatusOutput, nil
 }
 
 // ---------------------------------------------------------------------------
