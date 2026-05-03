@@ -34,6 +34,22 @@
         "disable_keepalives": true,
         "request_timeout": "180s"
       },
+      "openrouter-qwen2-5-72b-dense": {
+        "provider": "openrouter",
+        "url": "https://openrouter.ai/api/v1",
+        "model": "qwen/qwen-2.5-72b-instruct",
+        "api_key_env": "OPENROUTER_API_KEY",
+        "max_tokens": 32768,
+        "max_output_tokens": 8000,
+        "reasoning_effort": "none",
+        "supports_tools": true,
+        "tool_format": "openai",
+        "stream": false,
+        "max_concurrent": 4,
+        "requests_per_minute": 60,
+        "disable_keepalives": true,
+        "request_timeout": "180s"
+      },
       "semembed": {
         "provider": "openai",
         "url": "http://semembed:8081/v1",
@@ -89,11 +105,17 @@
         "description": "Documentation, plans, specifications",
         "preferred": [
           "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
         ]
       },
       "coding": {
         "description": "Code generation, implementation",
         "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
           "openrouter-qwen3-moe"
         ]
       },
@@ -101,11 +123,17 @@
         "description": "Code review, quality analysis",
         "preferred": [
           "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
         ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
           "openrouter-qwen3-moe"
         ]
       },
@@ -113,11 +141,17 @@
         "description": "BDD scenario generation",
         "preferred": [
           "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
         ]
       },
       "plan_review": {
         "description": "SOP-aware plan review",
         "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
           "openrouter-qwen3-moe"
         ]
       },
@@ -134,17 +168,26 @@
         "description": "Rollup quality review",
         "preferred": [
           "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
         ]
       },
       "lesson_decomposition": {
         "description": "ADR-033 lesson decomposer",
         "preferred": [
           "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
         ]
       },
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
           "openrouter-qwen3-moe"
         ]
       },

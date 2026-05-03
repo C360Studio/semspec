@@ -18,6 +18,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 |----------|---------|
 | [docs/how-it-works.md](docs/how-it-works.md) | How semspec works (start here) |
 | [docs/model-configuration.md](docs/model-configuration.md) | LLM model and capability configuration |
+| [docs/model-testing-findings.md](docs/model-testing-findings.md) | Living log of real-LLM regression findings — what works/doesn't per model |
 | [docs/project-setup.md](docs/project-setup.md) | Standards, quality gates |
 | [docs/api.md](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 
