@@ -662,17 +662,32 @@ same useless rejection while the dev kept editing the wrong file.`,
 			ID:       "software.reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleReviewer},
-			Content: `When your review is complete, call the submit_work tool with these JSON fields:
+			Content: `When your review is complete, call the submit_work tool with these JSON fields.
+
+APPROVED shape:
 
 {
   "verdict": "approved",
   "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."
 }
 
+REJECTED shape — rejection_type is REQUIRED on every rejection. Pick "fixable"
+when the developer can address the issues by editing existing code (wrong
+pattern, missing tests, SOP violation); pick "restructure" when the approach
+is fundamentally wrong (wrong abstraction, wrong boundaries, requires
+re-decomposition):
+
+{
+  "verdict": "rejected",
+  "rejection_type": "fixable",
+  "feedback": "Test coverage missing for /goodbye edge cases — add a TestGoodbyeNotFound case at handler_test.go:42."
+}
+
 REQUIRED fields:
 - verdict: MUST be exactly one of "approved", "rejected", or "needs_changes" (no other values accepted, MUST NOT be empty)
-- feedback: string describing what you found (REQUIRED)
-On rejection: add "rejection_type" (MUST be "fixable" or "restructure") and specific feedback with line numbers.
+- feedback: string describing what you found (REQUIRED on every verdict)
+- rejection_type: MUST be "fixable" or "restructure" (REQUIRED whenever verdict is "rejected" — submitting verdict=rejected without rejection_type is rejected by the validator and your turn is wasted)
+
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.
 Note: You have READ-ONLY access via bash — you cannot modify files.`,
 		},

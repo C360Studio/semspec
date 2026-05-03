@@ -117,7 +117,29 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 // ValidateReviewDeliverable validates a review deliverable from code, scenario, or plan reviewers.
 // Required: verdict (approved/rejected/needs_changes).
 // When rejected or needs_changes: feedback is required.
-// When rejected: rejection_type is also required.
+// When rejected: rejection_type must be "fixable" or "restructure" — if missing,
+// the validator MUTATES the deliverable to default rejection_type="fixable"
+// rather than rejecting the submission.
+//
+// Defense-in-depth for the bucket-#4 wedge caught 2026-05-03 on the openrouter
+// @easy v4 run: qwen3-coder-next reviewer correctly rejected the developer's
+// code, included verdict="rejected" and feedback, but consistently omitted
+// rejection_type. The agent saw the validator error 35+ times across 5
+// reviewer loops and never adapted, burning the iteration budget until 50-iter
+// cap fired and the task escalated. The persona's JSON example anchored the
+// model on a 2-key shape; rejection_type lived in prose only and got ignored.
+//
+// "fixable" is the safer default when the model omits the field entirely:
+// it routes feedback back to the developer for a retry rather than
+// terminating the requirement (which "restructure" does). A model that
+// genuinely meant to escalate to restructure would be deliberate enough
+// to set the field; the model that forgets is presumed to mean "fix it".
+//
+// This is mutate-and-pass rather than reject-with-warning so the rest of
+// the loop sees the corrected shape downstream — DispatchRetry, lesson
+// extraction, and persistence all need rejection_type populated. Logging
+// the auto-fill leaves a paper trail for operators reviewing why a
+// rejection didn't carry an explicit type.
 func ValidateReviewDeliverable(d map[string]any) error {
 	verdict, _ := d["verdict"].(string)
 	if err := phases.ValidateVerdict(verdict); err != nil {
@@ -133,7 +155,17 @@ func ValidateReviewDeliverable(d map[string]any) error {
 		rejType, _ := d["rejection_type"].(string)
 		validTypes := map[string]bool{"fixable": true, "restructure": true}
 		if !validTypes[rejType] {
-			return fmt.Errorf("rejection_type is required when verdict is rejected — must be one of: fixable, restructure")
+			if rejType != "" {
+				// Caller supplied a value but it's not in the valid set —
+				// surface the error so the agent can correct rather than
+				// silently overwriting an intent we don't understand.
+				return fmt.Errorf("rejection_type %q is invalid when verdict is rejected — must be one of: fixable, restructure", rejType)
+			}
+			// Field missing entirely — auto-fill to the safer default and
+			// let the loop continue. The rest of the pipeline reads
+			// rejection_type from this map, so mutating in place is the
+			// idiomatic path.
+			d["rejection_type"] = "fixable"
 		}
 	}
 	// Validate scenario_verdicts items when present — each must be an object

@@ -153,21 +153,48 @@ func TestSubmitWork_ReviewDeliverableValidation(t *testing.T) {
 		t.Error("expected validation error for missing verdict")
 	}
 
-	// Rejected without rejection_type
+	// Rejected without rejection_type — validator auto-fills "fixable"
+	// (defense-in-depth for the bucket-#4 wedge caught 2026-05-03 v4)
+	// rather than rejecting the submission. Loop should now stop and the
+	// submitted content should reflect the auto-fill.
+	args := map[string]any{
+		"verdict":  "rejected",
+		"feedback": "needs fixes",
+	}
 	result, _ = e.Execute(context.Background(), agentic.ToolCall{
-		ID:   "call-rev-bad2",
+		ID:        "call-rev-bad2",
+		Name:      "submit_work",
+		Arguments: args,
+		Metadata:  map[string]any{"deliverable_type": "review"},
+	})
+	if !result.StopLoop {
+		t.Error("rejected w/o rejection_type should auto-fill and stop the loop, not error")
+	}
+	if result.Error != "" {
+		t.Errorf("expected no validation error after auto-fill, got: %s", result.Error)
+	}
+	if got, _ := args["rejection_type"].(string); got != "fixable" {
+		t.Errorf("rejection_type after auto-fill = %q, want \"fixable\"", got)
+	}
+
+	// Rejected with INVALID rejection_type — still rejects (auto-fill
+	// only kicks in when the field is absent; an explicit-but-bad value
+	// is a model error to surface).
+	result, _ = e.Execute(context.Background(), agentic.ToolCall{
+		ID:   "call-rev-bad3",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"verdict":  "rejected",
-			"feedback": "needs fixes",
+			"verdict":        "rejected",
+			"feedback":       "needs fixes",
+			"rejection_type": "wrong",
 		},
 		Metadata: map[string]any{"deliverable_type": "review"},
 	})
 	if result.StopLoop {
-		t.Error("should not stop loop when rejection_type missing")
+		t.Error("should not stop loop on invalid rejection_type")
 	}
 	if result.Error == "" {
-		t.Error("expected validation error for missing rejection_type")
+		t.Error("expected validation error for invalid rejection_type")
 	}
 }
 

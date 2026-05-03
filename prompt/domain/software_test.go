@@ -140,6 +140,19 @@ func TestSoftwareReviewerAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "non-actionable") {
 		t.Error("expected explicit non-actionable warning in reviewer prompt")
 	}
+	// Bucket-#4 pin: reviewer output-format MUST show the rejected-verdict
+	// JSON shape with rejection_type as a first-class field, not just
+	// mention it in prose. Caught 2026-05-03 on openrouter @easy v4 where
+	// qwen3-coder-next anchored on the prior 2-key approved-only example
+	// and submitted verdict=rejected without rejection_type 35 times in a
+	// row, burning the 50-iter cap. The example is the load-bearing piece
+	// for example-anchoring small/mid models.
+	if !strings.Contains(result.SystemMessage, `"verdict": "rejected"`) {
+		t.Error("expected REJECTED JSON example in reviewer output-format fragment")
+	}
+	if !strings.Contains(result.SystemMessage, `"rejection_type": "fixable"`) {
+		t.Error("expected rejection_type shown as a populated field in REJECTED example")
+	}
 }
 
 func TestSoftwarePlanReviewerAssembly(t *testing.T) {

@@ -355,6 +355,95 @@ func TestValidateArchitectDeliverable(t *testing.T) {
 	}
 }
 
+// TestValidateReviewDeliverable_AutoFillsRejectionType pins the bug
+// caught 2026-05-03 on openrouter @easy v4: qwen3-coder-next correctly
+// rejected the developer's code 35+ times in a row but consistently
+// omitted rejection_type from the submit_work args. The agent saw the
+// validator error every time and never adapted (classic example-anchoring
+// bias — persona only showed the approved JSON shape). Validator now
+// mutates the deliverable to default rejection_type="fixable" rather
+// than rejecting, so the loop progresses even when the model forgets.
+//
+// "fixable" is the safer default because it retries the developer rather
+// than terminating the requirement.
+func TestValidateReviewDeliverable_AutoFillsRejectionType(t *testing.T) {
+	tests := []struct {
+		name              string
+		input             map[string]any
+		wantError         string
+		wantRejectionType string
+	}{
+		{
+			name: "rejected with rejection_type missing — auto-fills fixable",
+			input: map[string]any{
+				"verdict":  "rejected",
+				"feedback": "Tests fail at line 42",
+			},
+			wantRejectionType: "fixable",
+		},
+		{
+			name: "rejected with valid rejection_type — passes through",
+			input: map[string]any{
+				"verdict":        "rejected",
+				"feedback":       "Wrong abstraction throughout",
+				"rejection_type": "restructure",
+			},
+			wantRejectionType: "restructure",
+		},
+		{
+			name: "rejected with invalid rejection_type — still errors, field unchanged",
+			input: map[string]any{
+				"verdict":        "rejected",
+				"feedback":       "...",
+				"rejection_type": "bogus",
+			},
+			wantError:         "rejection_type \"bogus\" is invalid",
+			wantRejectionType: "bogus",
+		},
+		{
+			name: "approved with no rejection_type — no auto-fill",
+			input: map[string]any{
+				"verdict":  "approved",
+				"feedback": "All good",
+			},
+			wantRejectionType: "",
+		},
+		{
+			name: "needs_changes does NOT auto-fill rejection_type",
+			input: map[string]any{
+				"verdict":  "needs_changes",
+				"feedback": "Tweak the names",
+			},
+			wantRejectionType: "",
+		},
+		{
+			name: "rejected without feedback still errors before auto-fill kicks in",
+			input: map[string]any{
+				"verdict": "rejected",
+			},
+			wantError: "feedback is required when verdict is rejected",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateReviewDeliverable(tt.input)
+			switch {
+			case tt.wantError == "" && err != nil:
+				t.Errorf("unexpected error: %v", err)
+			case tt.wantError != "" && err == nil:
+				t.Errorf("expected error containing %q, got success", tt.wantError)
+			case tt.wantError != "" && !strings.Contains(err.Error(), tt.wantError):
+				t.Errorf("expected error containing %q, got: %v", tt.wantError, err)
+			}
+			gotRejType, _ := tt.input["rejection_type"].(string)
+			if gotRejType != tt.wantRejectionType {
+				t.Errorf("rejection_type after validation = %q, want %q", gotRejType, tt.wantRejectionType)
+			}
+		})
+	}
+}
+
 func TestExpectedFieldsHint_ArchitectureMatchesNewSchema(t *testing.T) {
 	// The hint is what an LLM sees in the empty-deliverable error message.
 	// It must reflect the trimmed required-fields contract, not the historical
