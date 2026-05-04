@@ -34,6 +34,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - NATS_URL=nats://nats:4222
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
@@ -59,6 +60,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - NATS_URL=nats://nats:4222
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
@@ -78,6 +80,7 @@ services:
       nats:
         condition: service_healthy
     environment:
+      - NATS_URL=nats://nats:4222
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
