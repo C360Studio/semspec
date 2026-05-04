@@ -52,6 +52,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
@@ -408,6 +409,15 @@ func setupInfrastructure(
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
 	metricsRegistry := metric.NewMetricsRegistry()
+
+	// Register ADR-035 named-quirks counters with the metrics registry so
+	// per-fire telemetry surfaces at /metrics. Idempotent — semstreams'
+	// MetricsRegistry returns success on duplicate registration.
+	if err := jsonutil.RegisterMetrics(metricsRegistry); err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("register jsonutil metrics: %w", err)
+	}
+
 	platform := extractPlatformMeta(cfg)
 
 	configManager, err := config.NewConfigManager(cfg, natsClient, logger)

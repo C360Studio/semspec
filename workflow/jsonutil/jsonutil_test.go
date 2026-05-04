@@ -389,7 +389,12 @@ func TestParseStrict_CountersIncrement(t *testing.T) {
 // doesn't exist."
 func TestStats_IncludesAllKnownQuirks(t *testing.T) {
 	got := Stats()
-	expected := []QuirkID{QuirkFencedJSONWrapper, QuirkJSLineComments, QuirkTrailingCommas}
+	expected := []QuirkID{
+		QuirkFencedJSONWrapper,
+		QuirkJSLineComments,
+		QuirkTrailingCommas,
+		QuirkGreedyObjectFallback,
+	}
 	for _, q := range expected {
 		if _, ok := got[q]; !ok {
 			t.Errorf("Stats() missing entry for %q", q)
@@ -397,6 +402,74 @@ func TestStats_IncludesAllKnownQuirks(t *testing.T) {
 	}
 	if len(got) != len(expected) {
 		t.Errorf("Stats() returned %d entries, want %d", len(got), len(expected))
+	}
+}
+
+// ADR-035 A.2: greedy_object_fallback fires when prose is wrapped
+// around JSON without a fence. Pure-JSON inputs (no fence, no prose)
+// must NOT fire this quirk — otherwise the signal is buried in noise
+// from clean inputs.
+func TestParseStrict_GreedyFallback_DiscriminatesProseFromClean(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantFires bool // true if QuirkGreedyObjectFallback should fire
+	}{
+		{
+			// Pure JSON, no fence: extracted match equals trimmed input
+			// → no prose-wrapping → no fire.
+			name:      "pure JSON does not fire greedy fallback",
+			input:     `{"a":1}`,
+			wantFires: false,
+		},
+		{
+			// Whitespace-only padding around the JSON: trim cancels it
+			// out → no fire.
+			name:      "whitespace-padded JSON does not fire",
+			input:     "\n  {\"a\":1}  \n",
+			wantFires: false,
+		},
+		{
+			// Prose prefix → match is strictly shorter than trimmed
+			// input → fire.
+			name:      "prose prefix fires greedy fallback",
+			input:     `Here is the JSON: {"a":1}`,
+			wantFires: true,
+		},
+		{
+			// Prose suffix → fire.
+			name:      "prose suffix fires greedy fallback",
+			input:     `{"a":1} thanks let me know`,
+			wantFires: true,
+		},
+		{
+			// Both prefix and suffix — the audit's canonical wedge
+			// shape. Fire.
+			name:      "prefix and suffix prose fires greedy fallback",
+			input:     `Sure thing: {"verdict":"approved"} hope this works`,
+			wantFires: true,
+		},
+		{
+			// Fenced input goes through the fence path, not the
+			// fallback — fenced quirk fires, fallback does not.
+			name:      "fenced input does not fire greedy fallback",
+			input:     "```json\n{\"a\":1}\n```",
+			wantFires: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := Stats()[QuirkGreedyObjectFallback]
+			ParseStrict(tt.input)
+			after := Stats()[QuirkGreedyObjectFallback]
+			delta := after - before
+			if tt.wantFires && delta != 1 {
+				t.Errorf("expected greedy_object_fallback fire delta=1, got %d", delta)
+			}
+			if !tt.wantFires && delta != 0 {
+				t.Errorf("expected greedy_object_fallback fire delta=0, got %d (input: %q)", delta, tt.input)
+			}
+		})
 	}
 }
 

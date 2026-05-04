@@ -527,24 +527,46 @@ of the audit's "every fire emits a `parse.incident` triple" requirement,
 not a corner-cut. Calling it out here so the next reader doesn't read
 the audit letter-strict and call us on a partial implementation.
 
-### Phase 1 (shipping now): counters + structured logs
+### Phase 1 (shipping now): Prometheus counters + structured logs
 
-The first four named quirks land with per-fire telemetry at the level
-the host package can emit unilaterally:
+The named quirks land with per-fire telemetry as `prometheus.CounterVec`
+exposed at `/metrics` (port 9090, registered through semstreams'
+`metric.MetricsRegistry`). Plus a per-fire structured log for
+diagnostic windows:
 
-| Quirk | Package | Telemetry on fire |
-|---|---|---|
-| `fenced_json_wrapper` | `workflow/jsonutil` | atomic counter + Debug log |
-| `js_line_comments` | `workflow/jsonutil` | atomic counter + Debug log |
-| `trailing_commas` | `workflow/jsonutil` | atomic counter + Debug log |
-| `review_missing_rejection_type` | `tools/terminal` | atomic counter + Warn log |
+| Quirk | Package | Metric | Log level |
+|---|---|---|---|
+| `fenced_json_wrapper` | `workflow/jsonutil` | `semspec_jsonutil_quirks_fired_total{quirk="fenced_json_wrapper"}` | Debug |
+| `js_line_comments` | `workflow/jsonutil` | `semspec_jsonutil_quirks_fired_total{quirk="js_line_comments"}` | Debug |
+| `trailing_commas` | `workflow/jsonutil` | `semspec_jsonutil_quirks_fired_total{quirk="trailing_commas"}` | Debug |
+| `greedy_object_fallback` | `workflow/jsonutil` | `semspec_jsonutil_quirks_fired_total{quirk="greedy_object_fallback"}` | Debug |
+| `review_missing_rejection_type` | `tools/terminal` | `semspec_review_missing_rejection_type_total` | Warn |
 
-`workflow/jsonutil` exposes `Stats() map[QuirkID]int64` so debug
-endpoints (and Health) can read aggregate fire rates. The Debug-level
-logs let operators grep per-fire detail in diagnostic windows without
-flooding production logs (parse-shape quirks fire on most LLM
-responses; Warn would be unusable). D.6's `review_missing_rejection_type`
-is rarer and content-default — it gets Warn so operators see every fire.
+`workflow/jsonutil.RegisterMetrics(reg *metric.MetricsRegistry)` and
+the equivalent `tools/terminal.RegisterMetrics` are called once during
+process startup from `cmd/semspec/main.go` after the registry is
+constructed. Without registration the counters still accumulate
+in-memory (so tests and CLI tools work without metrics infra) — they
+just don't surface at `/metrics`.
+
+`Stats() map[QuirkID]int64` reads counter values via
+`prometheus/client_golang/prometheus/testutil.ToFloat64` so debug
+endpoints, Health, and tests can observe aggregate fire rates without
+scraping `/metrics`. CounterVec children are pre-warmed at package
+init for every known quirk so reads of unfired quirks return 0
+instead of panicking.
+
+`greedy_object_fallback` (audit site A.2) is observation-only — the
+counter fires whenever the parser extracts JSON from prose-wrapped
+input (no fence, but match strictly shorter than trimmed input) so we
+can measure how often this hedge-laundering surface fires before
+deciding whether to flip strict.
+
+The Debug-level logs let operators grep per-fire detail in
+diagnostic windows without flooding production logs (parse-shape
+quirks fire on most LLM responses; Warn would be unusable). D.6's
+`review_missing_rejection_type` is rarer and content-default — it
+gets Warn so operators see every fire.
 
 ### Why no triples yet
 
