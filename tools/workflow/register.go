@@ -3,15 +3,32 @@ package workflow
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/natsclient"
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
+
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // Register registers graph tools (graph_summary, graph_search, graph_query)
 // as separate executors to avoid duplicate tool definitions with Gemini.
-func Register(reg *agentictools.ExecutorRegistry) error {
+//
+// natsClient is optional — when provided, graph_query's recovery
+// branch (ADR-035 audit D.8 follow-up) emits tool.recovery.incident
+// triples to the SKG so per-call recovery attribution is queryable.
+// When nil, recovery still injects RETRY HINTs into the agent error
+// and increments Prom counters, just without SKG triples.
+func Register(reg *agentictools.ExecutorRegistry, natsClient *natsclient.Client) error {
 	graphExec := NewGraphExecutor()
+	if natsClient != nil {
+		graphExec = graphExec.WithTripleWriter(&graphutil.TripleWriter{
+			NATSClient:    natsClient,
+			Logger:        slog.Default(),
+			ComponentName: "graph_query",
+		})
+	}
 
 	// Register each tool individually. The shared GraphExecutor handles all
 	// three, but ListTools() returns all definitions. Wrapping each

@@ -235,3 +235,145 @@ func TestQueryGraph_EmptyQuery_ReturnsExistingError(t *testing.T) {
 		t.Errorf("expected 'query argument is required' error, got: %s", result.Error)
 	}
 }
+
+// ---------------------------------------------------------------------
+// ADR-035 D.8 follow-up: graph_query recovery hints
+// ---------------------------------------------------------------------
+
+// buildRecoveryPrefix is the helper that decides which prefix to query
+// against when fuzzy-matching a failed entity ID. Pin the cap and the
+// drop-last-segment logic.
+func TestBuildRecoveryPrefix(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "6-segment ID — caps at 4, drops last",
+			in:   "semspec.semsource.code.workspace.file.main-go",
+			want: "semspec.semsource.code.workspace.",
+		},
+		{
+			name: "5-segment ID — drops last (4 left, under cap)",
+			in:   "semspec.local.source.doc.readme",
+			want: "semspec.local.source.doc.",
+		},
+		{
+			name: "4-segment ID — drops last (3 left)",
+			in:   "semspec.local.wf.plan",
+			want: "semspec.local.wf.",
+		},
+		{
+			name: "3-segment ID — drops last (2 left, still meaningful)",
+			in:   "semspec.local.wf",
+			want: "semspec.local.",
+		},
+		{
+			name: "2-segment ID — too short, returns empty",
+			in:   "semspec.bar",
+			want: "",
+		},
+		{
+			name: "1-segment ID — too short",
+			in:   "semspec",
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildRecoveryPrefix(tt.in)
+			if got != tt.want {
+				t.Errorf("buildRecoveryPrefix(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// extractEntityIDs unwraps the entitiesByPrefix response shape. Pin
+// the happy and the malformed-shape paths.
+func TestExtractEntityIDs(t *testing.T) {
+	tests := []struct {
+		name string
+		in   map[string]any
+		want []string
+	}{
+		{
+			name: "valid response with 2 entities",
+			in: map[string]any{
+				"entitiesByPrefix": []any{
+					map[string]any{"id": "semspec.local.wf.plan.plan.a"},
+					map[string]any{"id": "semspec.local.wf.plan.plan.b"},
+				},
+			},
+			want: []string{"semspec.local.wf.plan.plan.a", "semspec.local.wf.plan.plan.b"},
+		},
+		{
+			name: "missing entitiesByPrefix key",
+			in:   map[string]any{"foo": "bar"},
+			want: nil,
+		},
+		{
+			name: "wrong type for entitiesByPrefix",
+			in:   map[string]any{"entitiesByPrefix": "not an array"},
+			want: nil,
+		},
+		{
+			name: "entity without id field skipped",
+			in: map[string]any{
+				"entitiesByPrefix": []any{
+					map[string]any{"label": "no id here"},
+					map[string]any{"id": "semspec.x.y.z"},
+					map[string]any{"id": ""}, // empty id skipped
+				},
+			},
+			want: []string{"semspec.x.y.z"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractEntityIDs(tt.in)
+			if len(got) != len(tt.want) {
+				t.Errorf("len = %d, want %d (got %v)", len(got), len(tt.want), got)
+				return
+			}
+			for i, want := range tt.want {
+				if got[i] != want {
+					t.Errorf("[%d] = %q, want %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
+// stringFromMetadata helper — small but worth pinning since both
+// recovery paths use it.
+func TestStringFromMetadata(t *testing.T) {
+	tests := []struct {
+		name string
+		md   map[string]any
+		key  string
+		want string
+	}{
+		{"nil map", nil, "role", ""},
+		{"empty map", map[string]any{}, "role", ""},
+		{"string value", map[string]any{"role": "developer"}, "role", "developer"},
+		{"non-string value", map[string]any{"role": 42}, "role", ""},
+		{"missing key", map[string]any{"other": "x"}, "role", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stringFromMetadata(tt.md, tt.key)
+			if got != tt.want {
+				t.Errorf("stringFromMetadata(%v, %q) = %q, want %q", tt.md, tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// RegisterMetrics is nil-safe and idempotent.
+func TestRegisterMetrics_NilSafe(t *testing.T) {
+	if err := RegisterMetrics(nil); err != nil {
+		t.Errorf("nil registry should be no-op, got error: %v", err)
+	}
+}

@@ -14,9 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semstreams/agentic"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/c360studio/semspec/graph"
+	"github.com/c360studio/semspec/vocabulary/observability"
+	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/recoveryhint"
+	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/metric"
 )
 
 const maxGraphResponseBytes = 100 * 1024 // 100KB
@@ -36,10 +41,73 @@ var entityIDArgPattern = regexp.MustCompile(`\b(id|start)\s*:\s*"([^"]+)"`)
 // dot-separated segments. Below this is presumed truncated.
 const minEntityIDSegments = 4
 
+// recoveryPrefixCap caps the prefix length used for fuzzy-match
+// recovery on a "not found" graph_query failure. We drop the last
+// segment of the failing ID (the part the model got wrong) and cap
+// at 4 segments — the universal-stable head per the schema docs
+// (org.platform.kind.subkind covers wf/exec/source variants).
+const recoveryPrefixCap = 4
+
+// recoverySuggestionLimit caps how many candidates we surface in the
+// RETRY HINT. Five is enough to give the agent options without
+// drowning the response.
+const recoverySuggestionLimit = 5
+
+// recoveryByPrefixLimit caps the entitiesByPrefix lookup we run during
+// recovery. 20 is wide enough to find a near-match but tight enough
+// that a Levenshtein top-5 ranking stays meaningful.
+const recoveryByPrefixLimit = 20
+
+// recoveryInFlightKey is a context.Context key set on the recursive
+// entitiesByPrefix call inside the recovery branch. Prevents a
+// recovery-on-recovery cascade if the prefix lookup itself returns
+// "not found" (e.g. malformed or empty prefix). Typed empty struct
+// is the idiomatic Go pattern.
+type recoveryInFlightKey struct{}
+
+// graphRecoveryCounter tracks per-fire recovery outcomes at /metrics.
+// Labeled by outcome (suggested | not_suggested). Pre-warmed at
+// init so testutil reads return 0 for unfired children.
+var graphRecoveryCounter = prometheus.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "semspec_graph_recovery_total",
+		Help: "Total fires of graph_query recovery hints (ADR-035 audit D.8 follow-up). Labeled by outcome: suggested (we found candidates and injected directive RETRY HINTs) or not_suggested (recovery attempted but no candidates available).",
+	},
+	[]string{"outcome"},
+)
+
+func init() {
+	graphRecoveryCounter.WithLabelValues(observability.ToolRecoveryOutcomeSuggested)
+	graphRecoveryCounter.WithLabelValues(observability.ToolRecoveryOutcomeNotSuggested)
+}
+
+// RegisterMetrics registers the graph_query recovery counter with the
+// given metrics registry so per-fire telemetry surfaces at /metrics.
+// Call once during process startup. Idempotent. Nil-safe.
+func RegisterMetrics(reg *metric.MetricsRegistry) error {
+	if reg == nil {
+		return nil
+	}
+	if err := reg.RegisterCounterVec("graph_query", "recovery_total", graphRecoveryCounter); err != nil {
+		return fmt.Errorf("register graph_query recovery counter: %w", err)
+	}
+	return nil
+}
+
 // GraphExecutor implements graph query tools for workflow context.
 type GraphExecutor struct {
-	registry *graph.SourceRegistry
-	querier  graph.Querier // federated querier (nil = graph not configured)
+	registry     *graph.SourceRegistry
+	querier      graph.Querier            // federated querier (nil = graph not configured)
+	tripleWriter *graphutil.TripleWriter  // for ADR-035 tool.recovery.incident emit; nil-safe
+}
+
+// WithTripleWriter installs a triple writer so tool-recovery
+// incidents reach the SKG. When unset, recovery still injects RETRY
+// HINTs into the agent-facing error and increments Prom counters,
+// just without per-call SKG attribution.
+func (e *GraphExecutor) WithTripleWriter(tw *graphutil.TripleWriter) *GraphExecutor {
+	e.tripleWriter = tw
+	return e
 }
 
 // NewGraphExecutor creates a new graph executor.
@@ -419,9 +487,18 @@ func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (
 
 	result, err := e.executeGraphQL(ctx, query, nil)
 	if err != nil {
+		// ADR-035 D.8 follow-up: when the gateway returns "not found"
+		// for an entity lookup, augment the agent-facing error with
+		// directive candidate hints derived from a fuzzy-match against
+		// entitiesByPrefix. Symmetric to ADR-035's named-quirks list:
+		// when the system silently compensates for an agent's
+		// near-miss, be loud about the help (Prom counter + SKG
+		// triple). Best-effort — recovery itself never fails the
+		// outer call.
+		augmented := e.tryRecoverNotFound(ctx, call, query, err)
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  fmt.Sprintf("graph query failed: %v", err),
+			Error:  augmented,
 		}, nil
 	}
 
@@ -430,6 +507,177 @@ func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (
 		CallID:  call.ID,
 		Content: string(output),
 	}, nil
+}
+
+// tryRecoverNotFound augments a "not found" gateway error with
+// directive candidate hints when feasible, and emits per-fire
+// telemetry. Returns the agent-facing error string — either the
+// augmented version (with RETRY HINT) or the original wrapped error
+// when recovery isn't applicable.
+//
+// Recovery short-circuits on:
+//   - errors that don't look like "not found" (we can only help the
+//     entity-lookup case today; expand pattern when other recoverable
+//     errors emerge)
+//   - recursive call inside the recovery branch (ctx flag set)
+//   - no entity_id extractable from the query
+//   - prefix lookup itself fails
+//
+// On every reachable invocation we increment the Prom counter with
+// the appropriate outcome label so operators see fire rates even
+// when the SKG triple write fails.
+func (e *GraphExecutor) tryRecoverNotFound(ctx context.Context, call agentic.ToolCall, query string, originalErr error) string {
+	wrappedOriginal := fmt.Sprintf("graph query failed: %v", originalErr)
+
+	// Short-circuit on recursive recovery — the prefix lookup we run
+	// internally must NOT trigger another recovery cascade.
+	if v, _ := ctx.Value(recoveryInFlightKey{}).(bool); v {
+		return wrappedOriginal
+	}
+
+	// Only handle "not found" today. Other recoverable error shapes
+	// (e.g. "syntax error", "unknown field") need their own ranking
+	// strategies — extend this match when a real fixture demands it.
+	errMsg := originalErr.Error()
+	if !strings.Contains(errMsg, "not found:") {
+		return wrappedOriginal
+	}
+
+	// Extract entity_id from the original query.
+	matches := entityIDArgPattern.FindStringSubmatch(query)
+	if len(matches) < 3 {
+		return wrappedOriginal
+	}
+	originalID := matches[2]
+
+	// Build the prefix: drop the last segment (the part the model got
+	// wrong), cap at recoveryPrefixCap. Falls through to no-recovery
+	// if the prefix would be too short to be meaningful.
+	prefix := buildRecoveryPrefix(originalID)
+	if prefix == "" {
+		return e.recordNoSuggestions(ctx, call, query, wrappedOriginal)
+	}
+
+	// Recursive lookup with the ctx guard set.
+	recCtx := context.WithValue(ctx, recoveryInFlightKey{}, true)
+	prefixQuery := fmt.Sprintf(`{ entitiesByPrefix(prefix: %q, limit: %d) { id } }`, prefix, recoveryByPrefixLimit)
+	prefixResult, prefixErr := e.executeGraphQL(recCtx, prefixQuery, nil)
+	if prefixErr != nil {
+		return e.recordNoSuggestions(ctx, call, query, wrappedOriginal)
+	}
+
+	// Pull candidate IDs out of the typed response shape.
+	candidates := extractEntityIDs(prefixResult)
+	if len(candidates) == 0 {
+		return e.recordNoSuggestions(ctx, call, query, wrappedOriginal)
+	}
+
+	suggestions := recoveryhint.Suggest(originalID, candidates, recoverySuggestionLimit)
+	if len(suggestions) == 0 {
+		return e.recordNoSuggestions(ctx, call, query, wrappedOriginal)
+	}
+
+	// Build the directive hint. Match the existing
+	// validateEntityIDsInQuery error voice — the directive ending
+	// stops the "did you mean" → "let me try yet another guess"
+	// pattern observed in the v11 wedge.
+	hint := fmt.Sprintf(
+		`%s. RETRY HINT: entity not found "%s". Closest matches: %s. Try entity(id: %q) if that's the one you meant.`,
+		wrappedOriginal,
+		originalID,
+		strings.Join(suggestions, ", "),
+		suggestions[0],
+	)
+
+	graphRecoveryCounter.WithLabelValues(observability.ToolRecoveryOutcomeSuggested).Inc()
+	e.emitRecoveryIncident(ctx, call, query, observability.ToolRecoveryOutcomeSuggested, suggestions)
+	return hint
+}
+
+// recordNoSuggestions handles the not_suggested branch: bump the
+// counter, emit the incident with no candidates, return the original
+// error unchanged. Centralized so every short-circuit path produces
+// uniform telemetry.
+func (e *GraphExecutor) recordNoSuggestions(ctx context.Context, call agentic.ToolCall, query, wrappedOriginal string) string {
+	graphRecoveryCounter.WithLabelValues(observability.ToolRecoveryOutcomeNotSuggested).Inc()
+	e.emitRecoveryIncident(ctx, call, query, observability.ToolRecoveryOutcomeNotSuggested, nil)
+	return wrappedOriginal
+}
+
+// emitRecoveryIncident writes the tool.recovery.incident triple set
+// via recoveryhint.Emit. Best-effort — emit failures are logged at
+// the Prom counter level only (the counter already reflects the
+// fire); we don't propagate triple-write errors to the agent.
+func (e *GraphExecutor) emitRecoveryIncident(ctx context.Context, call agentic.ToolCall, query, outcome string, candidates []string) {
+	if e.tripleWriter == nil {
+		return
+	}
+	rc := recoveryhint.RecoveryContext{
+		CallID:   call.LoopID,
+		Role:     stringFromMetadata(call.Metadata, "role"),
+		Model:    stringFromMetadata(call.Metadata, "model"),
+		ToolName: "graph_query",
+	}
+	re := recoveryhint.RecoveryEvent{
+		Outcome:       outcome,
+		OriginalQuery: query,
+		Candidates:    candidates,
+	}
+	_, _ = recoveryhint.Emit(ctx, e.tripleWriter, rc, re)
+}
+
+// buildRecoveryPrefix returns the dot-separated prefix used to fuzzy-
+// match candidates for a failing entity ID. Drops the last segment
+// (the part the model most likely got wrong) and caps at
+// recoveryPrefixCap segments to keep the candidate set tight enough
+// for top-N ranking. Returns "" when the input doesn't have enough
+// segments to produce a meaningful prefix.
+func buildRecoveryPrefix(id string) string {
+	segs := strings.Split(id, ".")
+	if len(segs) < 3 {
+		// Need at least 3 segments to drop one and still have a
+		// non-trivial prefix. Anything shorter is malformed enough
+		// that the validateEntityIDsInQuery pre-flight should have
+		// caught it; this is a defensive guard.
+		return ""
+	}
+	prefixLen := len(segs) - 1
+	if prefixLen > recoveryPrefixCap {
+		prefixLen = recoveryPrefixCap
+	}
+	return strings.Join(segs[:prefixLen], ".") + "."
+}
+
+// extractEntityIDs pulls the `id` field from each entity in a
+// `{ entitiesByPrefix { id } }` GraphQL response. Returns nil on
+// shape mismatch — callers treat that as the not_suggested branch.
+func extractEntityIDs(data map[string]any) []string {
+	prefix, ok := data["entitiesByPrefix"].([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]string, 0, len(prefix))
+	for _, ent := range prefix {
+		obj, ok := ent.(map[string]any)
+		if !ok {
+			continue
+		}
+		if id, ok := obj["id"].(string); ok && id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// stringFromMetadata fetches a string from the tool-call metadata,
+// returning "" on absence or wrong type. Centralized so every callsite
+// handles missing metadata uniformly.
+func stringFromMetadata(md map[string]any, key string) string {
+	if md == nil {
+		return ""
+	}
+	v, _ := md[key].(string)
+	return v
 }
 
 // executeGraphQL executes a GraphQL query against the graph gateway.

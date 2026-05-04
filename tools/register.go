@@ -101,7 +101,7 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 	errs = append(errs, httptool.Register(reg, deps.NATSClient, httpOpts...))
 
 	// graph tools (graph_search, graph_query, graph_summary).
-	errs = append(errs, workflow.Register(reg))
+	errs = append(errs, workflow.Register(reg, deps.NATSClient))
 
 	// web_search — only active when BRAVE_SEARCH_API_KEY is set.
 	errs = append(errs, websearch.Register(reg))

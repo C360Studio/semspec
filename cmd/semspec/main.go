@@ -50,6 +50,7 @@ import (
 	"github.com/c360studio/semspec/semsource"
 	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/terminal"
+	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semspec/workflow/answerer"
@@ -421,6 +422,10 @@ func setupInfrastructure(
 	if err := terminal.RegisterMetrics(metricsRegistry); err != nil {
 		natsClient.Close(ctx)
 		return nil, nil, nil, fmt.Errorf("register terminal metrics: %w", err)
+	}
+	if err := workflowtools.RegisterMetrics(metricsRegistry); err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("register graph_query recovery metrics: %w", err)
 	}
 
 	platform := extractPlatformMeta(cfg)
