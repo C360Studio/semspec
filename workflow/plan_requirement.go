@@ -149,9 +149,21 @@ func ValidateFileOwnershipPartition(requirements []Requirement) error {
 			if ancestors[ri.ID][rj.ID] || ancestors[rj.ID][ri.ID] {
 				continue
 			}
+			// Hint includes the two valid resolutions concretely — the
+			// abstract "consolidate or add depends_on edge" line was
+			// observed to recur on qwen3-moe even AFTER the fan-in
+			// prompt fix shipped 2026-05-02. The worked examples
+			// below give the model a directive template to copy
+			// rather than reasoning about the right shape from
+			// scratch on every retry. Same SAP-loud-on-help
+			// discipline as graph_query D.8 ("Try entity(id: \"X\")
+			// if that's the one you meant").
 			return fmt.Errorf(
-				"%w: requirements %q and %q both claim files_owned %v with no dependency edge between them — parallel writes to the same file deadlock the plan-level merge; consolidate the requirements or add a depends_on edge",
+				"%w: requirements %q and %q both claim files_owned %v with no dependency edge between them — parallel writes to the same file deadlock the plan-level merge.\n\nFIX: choose ONE of these two resolutions.\n\n(a) Consolidate into a single requirement that owns all the conflicting files:\n  {\"title\": \"<merged title>\", \"description\": \"...\", \"files_owned\": %v}\n\n(b) Keep two requirements, add a depends_on edge so the second rebases on the first's merge:\n  {\"title\": %q, \"files_owned\": %v}\n  {\"title\": %q, \"depends_on\": [%q], \"files_owned\": %v}\n\nIf the two requirements are about the SAME surface (impl + its test, define + use), prefer (a). If they're genuinely separate features that happen to touch a shared file (router/main wire-up), use (b).",
 				ErrInvalidFileOwnership, ri.ID, rj.ID, conflict,
+				conflict, // (a) merged files_owned
+				ri.ID, ri.FilesOwned, // (b) first req keeps its files
+				rj.ID, ri.ID, rj.FilesOwned, // (b) second req gains depends_on
 			)
 		}
 	}

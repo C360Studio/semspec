@@ -795,6 +795,23 @@ DO NOT lie about files_owned to dodge the overlap rule. If your reqs honestly to
 
 When the goal touches both implementation and tests for the same surface, prefer ONE requirement that owns BOTH files (impl + its test) over splitting them — but if you do split, the split MUST have a depends_on edge.
 
+ANTI-EXAMPLE — the rejection shape you keep regenerating:
+
+Wrong (validator REJECTS this every time):
+  {"id": "req-1", "title": "Implement /health", "files_owned": ["internal/auth/health.go", "internal/auth/health_test.go"]}
+  {"id": "req-2", "title": "Test /health",      "files_owned": ["internal/auth/health.go", "internal/auth/health_test.go"]}
+
+Two requirements claiming the same files with no depends_on edge. The plan-level merge deadlocks because both branches rewrite the same files in parallel. Splitting "implement" from "test" for the same surface is the SECOND most common rejection cause (after fan-in shared-registration). Don't do it. Instead:
+
+Right — Option (a), consolidate (preferred for impl + its test of the same surface):
+  {"id": "req-1", "title": "/health endpoint with tests", "files_owned": ["internal/auth/health.go", "internal/auth/health_test.go"]}
+
+Right — Option (b), depends_on (acceptable when the work is genuinely two phases):
+  {"id": "req-1", "title": "Implement /health",  "files_owned": ["internal/auth/health.go"]}
+  {"id": "req-2", "title": "Test /health",       "depends_on": ["req-1"], "files_owned": ["internal/auth/health_test.go"]}
+
+The validator only rejects on overlap-without-depends_on. Files that don't overlap are fine in parallel; files that do overlap need either consolidation or a depends_on edge — never both reqs claiming the same files in parallel.
+
 Shared registration files (fan-in pattern) — most common rejection cause:
 Files like main.go, app.tsx, router.go, server.go, cmd/main.go are typically touched by every feature that needs to register a route, command, or component. The wrong shape is to list the shared file in every feature requirement's files_owned in parallel — that's three+ requirements all claiming main.go with no depends_on between them, and the validator rejects it every time. The right shape is one of:
 - Fan-in (preferred for 3+ features): each feature requirement owns ONLY its own handler/component files; ONE final "wire-up" requirement owns the shared file and lists every feature in depends_on. The wire-up requirement merges last after all features are in place.

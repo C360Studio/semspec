@@ -358,6 +358,14 @@ func TestSoftwareRequirementGeneratorFilesOwned(t *testing.T) {
 		// First-conflict-only caveat lets retries see the whole partition,
 		// not just the validator's first complaint.
 		"only reports the FIRST conflicting pair",
+		// 2026-05-04 anti-example for impl + test on the same surface
+		// — qwen3-moe regenerated this exact shape after the
+		// 2026-05-02 fan-in fix. Worked-example anchor stops the
+		// reasoning-from-scratch loop on every retry.
+		"ANTI-EXAMPLE",
+		"Splitting \"implement\" from \"test\"",
+		"Option (a), consolidate",
+		"Option (b), depends_on",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(result.SystemMessage, want) {

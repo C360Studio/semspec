@@ -295,6 +295,36 @@ func TestNormalizeFilePath(t *testing.T) {
 	}
 }
 
+// Pin the load-bearing pieces of the directive worked-example hint
+// added 2026-05-04. The 2026-05-02 fan-in prompt fix didn't stick on
+// qwen3-moe — the rejection text now carries copy-pasteable templates
+// for both valid resolutions so the model has a directive to follow
+// rather than abstract guidance to reason about.
+func TestValidateFileOwnershipPartition_HintIncludesWorkedExamples(t *testing.T) {
+	reqs := []Requirement{
+		{ID: "req.1", FilesOwned: []string{"internal/auth/health.go", "internal/auth/health_test.go"}},
+		{ID: "req.2", FilesOwned: []string{"internal/auth/health.go", "internal/auth/health_test.go"}},
+	}
+	err := ValidateFileOwnershipPartition(reqs)
+	if err == nil {
+		t.Fatal("expected file-ownership conflict error")
+	}
+	msg := err.Error()
+	mustContain := []string{
+		"FIX: choose ONE",            // directive framing
+		"(a) Consolidate",            // first valid resolution
+		"(b) Keep two requirements",  // second valid resolution
+		"depends_on",                 // hint pin from existing test
+		"impl + its test",            // disambiguation cue
+		"router/main wire-up",        // disambiguation cue
+	}
+	for _, s := range mustContain {
+		if !strings.Contains(msg, s) {
+			t.Errorf("rejection hint missing %q\nfull: %s", s, msg)
+		}
+	}
+}
+
 func TestValidateFileOwnershipPartition_PathNormalisation(t *testing.T) {
 	// "./main.go" and "main.go" must collide, not pass as disjoint —
 	// otherwise the partition validator's promise breaks at git-merge time
