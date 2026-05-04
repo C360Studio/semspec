@@ -444,6 +444,76 @@ func TestValidateReviewDeliverable_AutoFillsRejectionType(t *testing.T) {
 	}
 }
 
+// ADR-035 audit site D.6 — pin the named-quirk attribution.
+// ValidateReviewDeliverable's auto-fill of missing rejection_type is a
+// deliberate tolerance (the existing pre-D.6 behavior); the new
+// requirement is that every fire is observable via counter + Warn log.
+// This test asserts the counter increments only when the auto-fill
+// branch runs — not on the explicit-rejection_type or wrong-value
+// branches.
+func TestValidateReviewDeliverable_AutoFillFiresCounter(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         map[string]any
+		wantFireDelta int64
+	}{
+		{
+			name: "rejected + missing rejection_type — fires once",
+			input: map[string]any{
+				"verdict":  "rejected",
+				"feedback": "Tests fail",
+			},
+			wantFireDelta: 1,
+		},
+		{
+			name: "rejected + valid rejection_type — no fire",
+			input: map[string]any{
+				"verdict":        "rejected",
+				"feedback":       "Wrong abstraction",
+				"rejection_type": "restructure",
+			},
+			wantFireDelta: 0,
+		},
+		{
+			name: "rejected + invalid rejection_type — no fire (validator errors instead)",
+			input: map[string]any{
+				"verdict":        "rejected",
+				"feedback":       "...",
+				"rejection_type": "bogus",
+			},
+			wantFireDelta: 0,
+		},
+		{
+			name: "approved — no fire (auto-fill only applies on rejected)",
+			input: map[string]any{
+				"verdict":  "approved",
+				"feedback": "good",
+			},
+			wantFireDelta: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := QuirkStats()[QuirkReviewMissingRejectionType]
+			_ = ValidateReviewDeliverable(tt.input)
+			after := QuirkStats()[QuirkReviewMissingRejectionType]
+			delta := after - before
+			if delta != tt.wantFireDelta {
+				t.Errorf("QuirkReviewMissingRejectionType fire delta = %d, want %d", delta, tt.wantFireDelta)
+			}
+		})
+	}
+}
+
+// QuirkStats() must include the known quirk even when fire count is 0
+// — symmetric with workflow/jsonutil/Stats.
+func TestQuirkStats_IncludesKnownQuirk(t *testing.T) {
+	got := QuirkStats()
+	if _, ok := got[QuirkReviewMissingRejectionType]; !ok {
+		t.Errorf("QuirkStats() missing entry for %q", QuirkReviewMissingRejectionType)
+	}
+}
+
 func TestExpectedFieldsHint_ArchitectureMatchesNewSchema(t *testing.T) {
 	// The hint is what an LLM sees in the empty-deliverable error message.
 	// It must reflect the trimmed required-fields contract, not the historical

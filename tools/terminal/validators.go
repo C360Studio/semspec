@@ -2,9 +2,62 @@ package terminal
 
 import (
 	"fmt"
+	"log/slog"
+	"sync/atomic"
 
 	"github.com/c360studio/semspec/workflow/phases"
 )
+
+// QuirkID identifies a named, reviewed deliverable-validator transform
+// applied silently to make a structured deliverable conform to the
+// downstream contract. Adding a quirk requires a new constant here, a
+// counter, a fire site, and a test fixture. ADR-035 audit site D.6.
+//
+// This is the content-default flavor of the named-quirks list — the
+// shape-strip flavor lives in workflow/jsonutil. Both share the
+// "tolerance is named, reviewed, idempotent, and per-fire observable"
+// discipline.
+type QuirkID string
+
+const (
+	// QuirkReviewMissingRejectionType fires when ValidateReviewDeliverable
+	// auto-fills a missing rejection_type as "fixable" on a verdict=rejected
+	// deliverable. Real defect documented at validator line ~135 — qwen3
+	// reviewers omitted the field 35+ times across one run. The auto-fill
+	// is a deliberate tolerance ("fixable" is the recoverable default;
+	// "restructure" terminates the requirement) but every fire is
+	// loud-logged so operators can track per-(model, prompt_version)
+	// fire rates and characterize the quirk for prompt fixes.
+	QuirkReviewMissingRejectionType QuirkID = "review_missing_rejection_type"
+)
+
+// quirkCounters tracks per-quirk fire counts at package level. Single
+// counter today; promoted to an ordinal-indexed array if more
+// content-default quirks land in this package.
+var quirkReviewMissingRejectionTypeCount atomic.Int64
+
+// fireReviewMissingRejectionType increments the counter and emits a
+// Warn log. Warn (not Debug) because this quirk is rare relative to
+// parse-shape quirks and content-default tolerance is more
+// semantically suspect — auto-filling a missing field is "we filled
+// this in for you, audit it" rather than "we stripped boilerplate."
+func fireReviewMissingRejectionType(verdict, filledValue string) {
+	quirkReviewMissingRejectionTypeCount.Add(1)
+	slog.Default().Warn("Review deliverable quirk auto-filled",
+		"quirk", string(QuirkReviewMissingRejectionType),
+		"verdict", verdict,
+		"filled_value", filledValue,
+	)
+}
+
+// QuirkStats returns a snapshot of per-quirk fire counters in this
+// package. Operators read via debug endpoints or Health(). Counters
+// are monotonically increasing — callers compute deltas themselves.
+func QuirkStats() map[QuirkID]int64 {
+	return map[QuirkID]int64{
+		QuirkReviewMissingRejectionType: quirkReviewMissingRejectionTypeCount.Load(),
+	}
+}
 
 // DeliverableValidator validates a structured deliverable from submit_work.
 // Returns nil if valid, or an error with a specific, actionable message
@@ -164,8 +217,12 @@ func ValidateReviewDeliverable(d map[string]any) error {
 			// Field missing entirely — auto-fill to the safer default and
 			// let the loop continue. The rest of the pipeline reads
 			// rejection_type from this map, so mutating in place is the
-			// idiomatic path.
+			// idiomatic path. ADR-035 audit site D.6: this is the
+			// content-default flavor of the named-quirks list — the fire
+			// emits a Warn log + counter so per-(model, prompt_version)
+			// regression rates stay observable.
 			d["rejection_type"] = "fixable"
+			fireReviewMissingRejectionType(verdict, "fixable")
 		}
 	}
 	// Validate scenario_verdicts items when present — each must be an object
