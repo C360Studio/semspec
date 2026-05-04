@@ -13,6 +13,7 @@ import (
 	_ "github.com/c360studio/semspec/tools/decompose" // ensure decompose package is imported
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -1764,11 +1765,16 @@ func TestParseNodeResultPayload(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseNodeResultPayload(tt.input)
+			got, quirks, err := parseNodeResultPayload(tt.input)
 			if tt.wantErr {
 				if err == nil {
 					t.Errorf("expected error, got nil; parsed=%+v", got)
 				}
+				// QuirksFired may be populated even on error (e.g. fence
+				// stripped successfully, but resulting JSON still empty
+				// in content). Don't assert on it here — coverage lives
+				// in TestParseNodeResultPayload_SurfacesQuirksFired.
+				_ = quirks
 				return
 			}
 			if err != nil {
@@ -1776,6 +1782,54 @@ func TestParseNodeResultPayload(t *testing.T) {
 			}
 			if got == nil {
 				t.Error("expected non-nil parsed payload")
+			}
+		})
+	}
+}
+
+// ADR-035 CP-1 phase-2 wire (audit B.5): parseNodeResultPayload must
+// surface QuirksFired so handleNodeCompleteLocked can attribute
+// per-fire quirks to the SKG via parseincident.Emit. Pin the
+// surfacing across the realistic quirks the developer-node parse will
+// see.
+func TestParseNodeResultPayload_SurfacesQuirksFired(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantQuirks []jsonutil.QuirkID
+	}{
+		{
+			name:       "clean JSON — no quirks",
+			input:      `{"merge_commit":"abc"}`,
+			wantQuirks: nil,
+		},
+		{
+			name:       "fenced JSON — fenced_json_wrapper fires",
+			input:      "```json\n" + `{"merge_commit":"abc"}` + "\n```",
+			wantQuirks: []jsonutil.QuirkID{jsonutil.QuirkFencedJSONWrapper},
+		},
+		{
+			name:       "trailing commas — trailing_commas fires",
+			input:      `{"files_modified":["a.go"],"merge_commit":"abc",}`,
+			wantQuirks: []jsonutil.QuirkID{jsonutil.QuirkTrailingCommas},
+		},
+		{
+			name:       "no JSON found — no quirks but error returned",
+			input:      "not json",
+			wantQuirks: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, gotQuirks, _ := parseNodeResultPayload(tt.input)
+			if len(gotQuirks) != len(tt.wantQuirks) {
+				t.Errorf("QuirksFired len = %d, want %d (got %v)", len(gotQuirks), len(tt.wantQuirks), gotQuirks)
+				return
+			}
+			for i, want := range tt.wantQuirks {
+				if gotQuirks[i] != want {
+					t.Errorf("QuirksFired[%d] = %q, want %q", i, gotQuirks[i], want)
+				}
 			}
 		})
 	}

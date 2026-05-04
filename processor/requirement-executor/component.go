@@ -34,10 +34,12 @@ import (
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
+	"github.com/c360studio/semspec/vocabulary/observability"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/jsonutil"
+	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -519,22 +521,30 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 	// Parse the DAG from decomposer result.
 	// The decompose_task tool returns {"goal": "...", "dag": {"nodes": [...]}}.
 	// Small models (qwen3, etc.) may wrap output in markdown code fences.
-	dagJSON := jsonutil.ExtractJSON(event.Result)
-	if dagJSON == "" {
-		c.retryOrFailDecomposerLocked(ctx, exec, "failed to parse decomposer result: no JSON found in result")
-		return
-	}
+	parsedRaw := jsonutil.ParseStrict(event.Result)
 	var dagResponse struct {
 		Goal string            `json:"goal"`
 		DAG  decompose.TaskDAG `json:"dag"`
 	}
-	if err := json.Unmarshal([]byte(dagJSON), &dagResponse); err != nil {
-		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("failed to parse decomposer result: %v", err))
-		return
+	var dagParseErr error
+	switch {
+	case parsedRaw.JSON == "":
+		dagParseErr = fmt.Errorf("no JSON found in result")
+	default:
+		if err := json.Unmarshal([]byte(parsedRaw.JSON), &dagResponse); err != nil {
+			dagParseErr = fmt.Errorf("unmarshal: %w", err)
+		} else if err := dagResponse.DAG.Validate(); err != nil {
+			dagParseErr = fmt.Errorf("invalid DAG: %w", err)
+		}
 	}
 
-	if err := dagResponse.DAG.Validate(); err != nil {
-		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("invalid DAG from decomposer: %v", err))
+	// CP-1 incident emit (ADR-035 audit B.4) — surface per-call quirk
+	// fires and parse rejections to the SKG. Best-effort; emit failures
+	// don't fail the decomposer flow.
+	c.emitParseIncident(ctx, "decomposer", event, exec, parsedRaw.QuirksFired, dagParseErr)
+
+	if dagParseErr != nil {
+		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("failed to parse decomposer result: %v", dagParseErr))
 		return
 	}
 
@@ -620,10 +630,61 @@ type nodeResultPayload struct {
 	MergeCommit   string   `json:"merge_commit"`
 }
 
+// emitParseIncident writes ADR-035 CP-1 telemetry for a parse-checkpoint
+// outcome. Strict outcomes are no-ops; rejected or tolerated_quirk
+// outcomes write a parse.incident triple set keyed at
+// "<event.LoopID>:parse:response_parse" so retry replays of the same
+// loop are idempotent in the SKG.
+//
+// Used by both the decomposer-completion handler (audit B.4) and the
+// node-completion handler (audit B.5) — same shape, different role.
+// extraLogFields lets the caller add site-specific log context (e.g.
+// node_id) to the emit-failure Warn line.
+//
+// Best-effort: graph-write failures are logged but do NOT fail the
+// flow — telemetry is observability, not gating. Phase-2 of the
+// named-quirks list per ADR-035 §3 + the planner first-wire pattern
+// in commit 403a39d.
+func (c *Component) emitParseIncident(ctx context.Context, role string, event *agentic.LoopCompletedEvent, exec *requirementExecution, quirks []jsonutil.QuirkID, parseErr error, extraLogFields ...any) {
+	if c.tripleWriter == nil {
+		return
+	}
+	ic := parseincident.IncidentContext{
+		CallID: event.LoopID,
+		Role:   role,
+		Model:  exec.Model,
+	}
+	// TODO(ADR-035 phase 3): align Reason triple with future RETRY HINT
+	// injection at this site, mirroring the planner + exec-mgr TODOs.
+	if _, err := parseincident.EmitForResult(
+		ctx,
+		c.tripleWriter,
+		ic,
+		observability.CheckpointResponseParse,
+		jsonutil.QuirkIDsToStrings(quirks),
+		event.Result,
+		parseErr,
+	); err != nil {
+		fields := []any{
+			"entity_id", exec.EntityID,
+			"loop_id", event.LoopID,
+			"role", role,
+			"error", err,
+		}
+		fields = append(fields, extraLogFields...)
+		c.logger.Warn("CP-1 incident emit failed", fields...)
+	}
+}
+
 // parseNodeResultPayload extracts the structured node-completion fields
 // from a LoopCompletedEvent.Result string. Per ADR-035 audit site B.5,
 // the caller routes parse failures through the requirement-level retry
 // path rather than silently producing a zero-value NodeResult.
+//
+// Returns (payload, quirksFired, error). QuirksFired surfaces ParseStrict's
+// per-fire attribution so the caller can flow it into parseincident.Emit
+// for CP-1 SKG telemetry (ADR-035 audit B.5 + phase-2 wire). The slice
+// is empty when ParseStrict didn't apply any named-quirk transform.
 //
 // Two failure classes:
 //   - shape: payload is empty after JSON extraction or json.Unmarshal fails
@@ -632,20 +693,20 @@ type nodeResultPayload struct {
 //     recordable output despite outcome=success
 //
 // Both classes return errors; the caller maps them to the same retry path.
-func parseNodeResultPayload(raw string) (*nodeResultPayload, error) {
-	extracted := jsonutil.ExtractJSON(raw)
-	if extracted == "" {
-		return nil, fmt.Errorf("no JSON object found in event result")
+func parseNodeResultPayload(raw string) (*nodeResultPayload, []jsonutil.QuirkID, error) {
+	parsed := jsonutil.ParseStrict(raw)
+	if parsed.JSON == "" {
+		return nil, parsed.QuirksFired, fmt.Errorf("no JSON object found in event result")
 	}
-	var parsed nodeResultPayload
-	if err := json.Unmarshal([]byte(extracted), &parsed); err != nil {
-		return nil, fmt.Errorf("unmarshal: %w", err)
+	var result nodeResultPayload
+	if err := json.Unmarshal([]byte(parsed.JSON), &result); err != nil {
+		return nil, parsed.QuirksFired, fmt.Errorf("unmarshal: %w", err)
 	}
-	if len(parsed.FilesModified) == 0 && len(parsed.FilesCreated) == 0 &&
-		parsed.Summary == "" && parsed.MergeCommit == "" {
-		return nil, fmt.Errorf("payload has no files_modified, files_created, changes_summary, or merge_commit — node produced no recordable output")
+	if len(result.FilesModified) == 0 && len(result.FilesCreated) == 0 &&
+		result.Summary == "" && result.MergeCommit == "" {
+		return nil, parsed.QuirksFired, fmt.Errorf("payload has no files_modified, files_created, changes_summary, or merge_commit — node produced no recordable output")
 	}
-	return &parsed, nil
+	return &result, parsed.QuirksFired, nil
 }
 
 func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
@@ -759,7 +820,20 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	var parsed *nodeResultPayload
 	if event.Result != "" {
 		var parseErr error
-		parsed, parseErr = parseNodeResultPayload(event.Result)
+		var quirks []jsonutil.QuirkID
+		parsed, quirks, parseErr = parseNodeResultPayload(event.Result)
+
+		// CP-1 incident emit (ADR-035 audit B.5) — DAG nodes dispatch
+		// as developer tasks, so role=developer aggregates with B.1
+		// developer fires under per-(role, model) operator queries.
+		// B.1 dispatches one developer call per task; B.5 dispatches N
+		// per requirement (one per DAG node). Keeping the same role
+		// label means the partition stays queryable end-to-end without
+		// fragmenting on dispatch path. If dispatch-path attribution
+		// becomes load-bearing, add a separate predicate to
+		// vocabulary/observability rather than fragment the role axis.
+		c.emitParseIncident(ctx, "developer", event, exec, quirks, parseErr, "node_id", nodeID)
+
 		if parseErr != nil {
 			c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
 			feedback := fmt.Sprintf(
