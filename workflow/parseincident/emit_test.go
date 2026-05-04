@@ -3,12 +3,21 @@ package parseincident
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/c360studio/semspec/vocabulary/observability"
 )
+
+// natsKVKeyPattern matches the character set NATS JetStream KV
+// accepts in keys: [a-zA-Z0-9_-./=]. The original incident-ID format
+// shipped 2026-05-04 used `:` separators which graph-ingest CAS-write
+// rejected on first real-LLM run. Pin the format so a future
+// regression that drops back to `:` (or any other forbidden char)
+// fails loudly at unit-test time instead of silently in production.
+var natsKVKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 
 // recordedTriple captures a single WriteTriple invocation for
 // table-driven assertions on the emitted triple set.
@@ -142,7 +151,7 @@ func TestEmit_RejectedOutcome_FullTripleSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	wantID := "loop-rej:parse:response_parse"
+	wantID := "loop-rej.parse.response_parse"
 	if id != wantID {
 		t.Errorf("incident ID = %q, want %q", id, wantID)
 	}
@@ -362,6 +371,32 @@ func TestEmitForResult_NilWriter_NoOp(t *testing.T) {
 	}
 	if id != "" {
 		t.Errorf("nil writer should return empty ID, got %q", id)
+	}
+}
+
+// Pin that incident IDs use only NATS-KV-safe characters. The
+// original 2026-05-04 ship used `:` which graph-ingest rejected with
+// "nats: invalid key" — caught by active polling on first real-LLM
+// run with parse rejections. See emit.go's godoc for the full story.
+func TestEmit_IncidentID_IsNATSKVSafe(t *testing.T) {
+	rw := &recordingWriter{}
+	ic := IncidentContext{CallID: "loop-uuid-08161be1-3a1b-4318-b080-241ec2d1eb1f", Role: "planner", Model: "openrouter-qwen3-moe"}
+	ev := IncidentEvent{
+		Checkpoint:  observability.CheckpointResponseParse,
+		Outcome:     observability.OutcomeRejected,
+		Reason:      "empty result",
+		RawResponse: "raw",
+	}
+	id, err := Emit(context.Background(), rw, ic, ev)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !natsKVKeyPattern.MatchString(id) {
+		t.Errorf("incident ID %q contains characters NATS KV won't accept (allowed: [a-zA-Z0-9_./=-])", id)
+	}
+	// Belt-and-suspenders — explicitly forbid the historical `:`.
+	if strings.Contains(id, ":") {
+		t.Errorf("incident ID %q must not contain ':' (NATS KV rejects with 'invalid key')", id)
 	}
 }
 

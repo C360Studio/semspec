@@ -3,11 +3,18 @@ package recoveryhint
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/c360studio/semspec/vocabulary/observability"
 )
+
+// natsKVKeyPattern matches the character set NATS JetStream KV
+// accepts in keys: [a-zA-Z0-9_-./=]. Same constraint pin as
+// workflow/parseincident — incident IDs must be valid KV keys
+// because graph-ingest stores them via CAS write.
+var natsKVKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 
 // recordedTriple captures a single WriteTriple invocation.
 type recordedTriple struct {
@@ -167,8 +174,12 @@ func TestEmit_Suggested_FullTripleSet(t *testing.T) {
 	}
 
 	// Deterministic ID shape.
-	if !strings.HasPrefix(id, "loop-rec:tool-recovery:graph_query:") {
+	if !strings.HasPrefix(id, "loop-rec.tool-recovery.graph_query.") {
 		t.Errorf("incident ID prefix wrong: %q", id)
+	}
+	// NATS KV key safety — see natsKVKeyPattern godoc.
+	if !natsKVKeyPattern.MatchString(id) {
+		t.Errorf("incident ID %q contains chars NATS KV won't accept (allowed: [a-zA-Z0-9_./=-])", id)
 	}
 
 	// Relation written FIRST (subject is the call ID).
@@ -286,7 +297,7 @@ func TestEmit_MidAttributeWriteFails_ReturnsPartialID(t *testing.T) {
 	if id == "" {
 		t.Error("expected partial incident ID when relation already landed")
 	}
-	if !strings.HasPrefix(id, "loop-mid:tool-recovery:graph_query:") {
+	if !strings.HasPrefix(id, "loop-mid.tool-recovery.graph_query.") {
 		t.Errorf("partial ID prefix wrong: %q", id)
 	}
 	// Relation triple should still be in the writer's recorded set.

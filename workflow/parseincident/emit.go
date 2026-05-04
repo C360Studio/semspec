@@ -81,9 +81,18 @@ type tripleWriter interface {
 // deviation worth recording" framing means strict parses don't need
 // per-call telemetry beyond the existing happy-path Prom counters.
 //
-// Incident node IDs are deterministic — `<call_id>:parse:<checkpoint>`
+// Incident node IDs are deterministic — `<call_id>.parse.<checkpoint>`
 // — so retry replays of the same loop produce idempotent SKG
 // state rather than orphan-incident accumulation.
+//
+// Separator is `.` (period) because NATS KV keys allow only
+// [a-zA-Z0-9_-./=] per the JetStream KV spec. The original `:` choice
+// shipped 2026-05-04 hit the rejection path on first real-LLM run
+// and graph-ingest's CAS write failed with "invalid key" on every
+// emit. Period matches the existing entity-ID namespace convention
+// (`semspec.local.wf.plan.plan.abc123`) so a future SKG query can
+// traverse parse-incident nodes via the same path-walking machinery
+// used for everything else in the graph.
 func Emit(ctx context.Context, tw tripleWriter, ic IncidentContext, ev IncidentEvent) (string, error) {
 	if tw == nil {
 		return "", nil
@@ -98,7 +107,7 @@ func Emit(ctx context.Context, tw tripleWriter, ic IncidentContext, ev IncidentE
 		return "", fmt.Errorf("parseincident: Checkpoint required")
 	}
 
-	incidentID := fmt.Sprintf("%s:parse:%s", ic.CallID, ev.Checkpoint)
+	incidentID := fmt.Sprintf("%s.parse.%s", ic.CallID, ev.Checkpoint)
 
 	// Relation first so a partial write still leaves the incident
 	// findable from the call entity.

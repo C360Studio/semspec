@@ -53,6 +53,12 @@ type tripleWriter interface {
 // than for parse incidents because a single loop can trigger many
 // recoveries on different IDs (today's wedge: 28 occurrences in one
 // loop), so a checkpoint-style fixed suffix would collide.
+//
+// Separator is `.` (period) because NATS KV keys allow only
+// [a-zA-Z0-9_-./=]. The original `:` choice shipped alongside
+// parseincident.Emit and was caught on first real-LLM run when
+// graph-ingest CAS writes failed with "invalid key". See
+// parseincident.Emit godoc for the cross-cutting rationale.
 func Emit(ctx context.Context, tw tripleWriter, rc RecoveryContext, re RecoveryEvent) (string, error) {
 	if tw == nil {
 		return "", nil
@@ -68,7 +74,7 @@ func Emit(ctx context.Context, tw tripleWriter, rc RecoveryContext, re RecoveryE
 	}
 
 	hash := sha256.Sum256([]byte(re.OriginalQuery))
-	incidentID := fmt.Sprintf("%s:tool-recovery:%s:%s", rc.CallID, rc.ToolName, hex.EncodeToString(hash[:8]))
+	incidentID := fmt.Sprintf("%s.tool-recovery.%s.%s", rc.CallID, rc.ToolName, hex.EncodeToString(hash[:8]))
 
 	// Relation first.
 	if err := tw.WriteTriple(ctx, rc.CallID, observability.ToolRecoveryIncident, incidentID); err != nil {
