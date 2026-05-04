@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 )
 
 func TestParsePlanFromResult(t *testing.T) {
@@ -111,7 +112,7 @@ func TestParsePlanFromResult(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parsePlanFromResult(tt.input)
+			got, _, err := parsePlanFromResult(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parsePlanFromResult() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -133,6 +134,57 @@ func TestParsePlanFromResult(t *testing.T) {
 					if v != tt.wantInclude[i] {
 						t.Errorf("Scope.Include[%d] = %q, want %q", i, v, tt.wantInclude[i])
 					}
+				}
+			}
+		})
+	}
+}
+
+// ADR-035 CP-1 phase-2 wire: parsePlanFromResult must surface
+// QuirksFired so handleLoopCompletion can attribute per-fire quirks
+// to the SKG via parseincident.Emit. Pin the surfacing across the
+// three quirks the planner is realistically going to see.
+func TestParsePlanFromResult_SurfacesQuirksFired(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		wantQuirks []jsonutil.QuirkID
+	}{
+		{
+			name:       "clean direct-unmarshal — no quirks",
+			input:      `{"goal":"x","context":"y","scope":{}}`,
+			wantQuirks: nil,
+		},
+		{
+			name:       "fenced JSON — fenced_json_wrapper fires",
+			input:      "```json\n" + `{"goal":"x","context":"y","scope":{}}` + "\n```",
+			wantQuirks: []jsonutil.QuirkID{jsonutil.QuirkFencedJSONWrapper},
+		},
+		{
+			name: "trailing commas — trailing_commas fires",
+			input: `{
+				"goal":"x",
+				"context":"y",
+				"scope":{},
+			}`,
+			wantQuirks: []jsonutil.QuirkID{jsonutil.QuirkTrailingCommas},
+		},
+		{
+			name:       "no JSON found — no quirks but error returned",
+			input:      "this is not json at all",
+			wantQuirks: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, gotQuirks, _ := parsePlanFromResult(tt.input)
+			if len(gotQuirks) != len(tt.wantQuirks) {
+				t.Errorf("QuirksFired len = %d, want %d (got %v)", len(gotQuirks), len(tt.wantQuirks), gotQuirks)
+				return
+			}
+			for i, want := range tt.wantQuirks {
+				if gotQuirks[i] != want {
+					t.Errorf("QuirksFired[%d] = %q, want %q", i, gotQuirks[i], want)
 				}
 			}
 		})

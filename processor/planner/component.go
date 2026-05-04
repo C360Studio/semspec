@@ -26,11 +26,13 @@ import (
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
+	"github.com/c360studio/semspec/vocabulary/observability"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/lessons"
+	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -68,6 +70,7 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+	tripleWriter  *graphutil.TripleWriter // for ADR-035 CP-1 incident emit
 
 	// sandboxClient fetches a project file tree snapshot at dispatch time so
 	// the planner user prompt can ground the model in actual workspace
@@ -146,6 +149,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		tripleWriter:  tw,
 		sandboxClient: sandboxClient,
 		retry: dispatchretry.New(dispatchretry.Config{
 			MaxRetries: config.MaxGenerationRetries,
@@ -375,7 +379,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 	// If KV read fails, proceed with the mutation — plan-manager will validate.
 
-	planContent, err := parsePlanFromResult(loop.Result)
+	planContent, quirks, err := parsePlanFromResult(loop.Result)
+
+	// CP-1 incident emit (ADR-035 §3, Phase 2): surface per-call quirk
+	// fires and parse rejections to the SKG so operators can query
+	// incident rates by (role, model, prompt_version). Best-effort —
+	// graph-write failures are logged but do NOT fail the planner flow,
+	// because telemetry is observability, not gating.
+	c.emitParseIncident(ctx, loop, quirks, err)
+
 	if err != nil {
 		c.retryOrFail(ctx, slug, fmt.Sprintf("planner output parse failed: %v", err))
 		return
@@ -695,10 +707,77 @@ type PlanContent struct {
 	Status string `json:"status,omitempty"`
 }
 
+// emitParseIncident writes ADR-035 CP-1 telemetry for the planner's
+// most recent submit_work parse. Strict outcomes are no-ops; rejected
+// or tolerated_quirk outcomes write a parse.incident triple set
+// keyed at "<loop.ID>:parse:response_parse" so retry replays of the
+// same loop are idempotent in the SKG.
+//
+// Best-effort: a graph-write failure is logged but does NOT fail the
+// planner flow. CP-1 is observability — not gating.
+//
+// Phase 2 of the named-quirks list (per ADR-035 audit Phase-1 note).
+// PromptVersion is left empty until the prompt-pack revision is
+// surfaced at this layer; an empty value is skipped at write time so
+// no sentinel triples land in the graph.
+func (c *Component) emitParseIncident(ctx context.Context, loop *agentic.LoopEntity, quirks []jsonutil.QuirkID, parseErr error) {
+	if c.tripleWriter == nil {
+		return
+	}
+
+	ic := parseincident.IncidentContext{
+		CallID: loop.ID,
+		Role:   "planner",
+		Model:  loop.Model,
+	}
+	ev := parseincident.IncidentEvent{
+		Checkpoint:  observability.CheckpointResponseParse,
+		RawResponse: loop.Result,
+	}
+
+	switch {
+	case parseErr != nil:
+		ev.Outcome = observability.OutcomeRejected
+		// TODO(ADR-035 phase 3): when RETRY HINT injection is wired
+		// at this site, the same string should flow into both the
+		// loop feedback channel AND this Reason triple, so SKG
+		// queries on parse incidents see the exact text the model
+		// received. Today parseErr.Error() is the rejection reason
+		// (which IS the precursor to a future retry hint), so
+		// alignment is forward-compatible.
+		ev.Reason = parseErr.Error()
+	case len(quirks) > 0:
+		ev.Outcome = observability.OutcomeToleratedQuirk
+		ev.Quirks = make([]string, 0, len(quirks))
+		for _, q := range quirks {
+			ev.Quirks = append(ev.Quirks, string(q))
+		}
+	default:
+		// Strict — Emit is a no-op for this case but call it anyway
+		// for symmetry; clearer than a conditional skip here.
+		ev.Outcome = observability.OutcomeStrict
+	}
+
+	if _, err := parseincident.Emit(ctx, c.tripleWriter, ic, ev); err != nil {
+		c.logger.Warn("CP-1 incident emit failed",
+			"loop_id", loop.ID,
+			"outcome", ev.Outcome,
+			"error", err,
+		)
+	}
+}
+
 // parsePlanFromResult extracts PlanContent from an agent loop result
 // string. The result may be raw JSON or wrapped in markdown code fences,
 // contain JS-style line comments, or have trailing commas — all handled
 // by jsonutil.ParseStrict's named-quirks list per ADR-035 audit C.3.
+//
+// Returns (planContent, quirksFired, error). The QuirksFired slice is
+// empty in the direct-unmarshal happy path and populated only when
+// ParseStrict's fallback path was needed. Callers feed it into
+// parseincident.Emit alongside their per-call context to surface
+// per-call quirk-fire telemetry to the SKG (CP-1 phase-2 wiring per
+// ADR-035 §3).
 //
 // The previous local extractJSON helper did only brace-walking with no
 // fence/comment/comma handling and didn't track string-state during the
@@ -706,36 +785,36 @@ type PlanContent struct {
 // jsonutil.ParseStrict handles all of those plus reports per-fire
 // counter telemetry so quirk regressions on the planner surface stay
 // observable.
-func parsePlanFromResult(result string) (*PlanContent, error) {
+func parsePlanFromResult(result string) (*PlanContent, []jsonutil.QuirkID, error) {
 	if result == "" {
-		return nil, fmt.Errorf("empty result")
+		return nil, nil, fmt.Errorf("empty result")
 	}
 
-	// Try direct JSON parse first.
+	// Try direct JSON parse first. Happy path returns no quirks fired —
+	// the input was clean JSON and ParseStrict was never invoked.
 	var pc PlanContent
 	if err := json.Unmarshal([]byte(result), &pc); err == nil && pc.Goal != "" {
-		return &pc, nil
+		return &pc, nil, nil
 	}
 
 	// Fall through to jsonutil.ParseStrict — first caller migrated from
 	// a local extract helper to the package-level API per ADR-035 audit
-	// C.3. QuirksFired metadata is intentionally discarded here; CP-1
-	// triple emission (Phase 2) wires per-call context at a different
-	// boundary if/when this surface needs it.
+	// C.3. QuirksFired flows back to the caller for CP-1 incident
+	// emission.
 	parsed := jsonutil.ParseStrict(result)
 	if parsed.JSON == "" {
-		return nil, fmt.Errorf("no JSON found in result")
+		return nil, parsed.QuirksFired, fmt.Errorf("no JSON found in result")
 	}
 
 	if err := json.Unmarshal([]byte(parsed.JSON), &pc); err != nil {
-		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, parsed.JSON[:min(200, len(parsed.JSON))])
+		return nil, parsed.QuirksFired, fmt.Errorf("parse JSON: %w (content: %s)", err, parsed.JSON[:min(200, len(parsed.JSON))])
 	}
 
 	if pc.Goal == "" {
-		return nil, fmt.Errorf("plan missing 'goal' field")
+		return nil, parsed.QuirksFired, fmt.Errorf("plan missing 'goal' field")
 	}
 
-	return &pc, nil
+	return &pc, parsed.QuirksFired, nil
 }
 
 // retryOrFail increments the retry counter for this slug and re-dispatches

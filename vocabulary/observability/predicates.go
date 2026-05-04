@@ -40,7 +40,21 @@ const (
 	// Quirk identifies which named output-quirk allowlist entry handled
 	// this response, when Outcome="tolerated_quirk". Empty otherwise.
 	// Examples: "chain_of_thought_prefix", "fenced_json_wrapper".
+	// Multiple quirk triples may be attached to a single incident node
+	// when more than one quirk fired during the parse — one quirk per
+	// triple (RDF-correct multi-value), so detectors can slice by
+	// individual quirk ID without parsing concatenated values.
 	Quirk = "llm.parse.quirk"
+
+	// RawResponseTruncated is a boolean indicating that the raw_response
+	// triple stored on the incident node was truncated at the per-call
+	// size cap (default 4 KiB). The cap exists because wedged loops can
+	// emit 50 KiB+ chain-of-thought blocks and storing the full
+	// response in a triple is heavier than the audit value justifies.
+	// True when the original response exceeded the cap; false (or
+	// absent) otherwise. Read RawResponse alongside this predicate to
+	// know whether you're seeing the full or truncated text.
+	RawResponseTruncated = "llm.parse.raw_response_truncated"
 )
 
 // Partition keys. Aggregating incidents by (Role, Model, PromptVersion)
@@ -146,6 +160,11 @@ func registerOutcomePredicates() {
 		vocabulary.WithDescription("Named output-quirk allowlist entry that handled this response; empty unless outcome=tolerated_quirk"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"quirk"))
+
+	vocabulary.Register(RawResponseTruncated,
+		vocabulary.WithDescription("True when the raw_response triple on this incident was truncated at the per-call size cap (4 KiB)"),
+		vocabulary.WithDataType("boolean"),
+		vocabulary.WithIRI(Namespace+"rawResponseTruncated"))
 }
 
 func registerPartitionPredicates() {
