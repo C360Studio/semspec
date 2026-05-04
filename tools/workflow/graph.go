@@ -181,8 +181,9 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 		{
 			Name: "graph_query",
 			Description: "GraphQL query against the knowledge graph (NOT SPARQL, NOT Cypher — GraphQL).\n" +
-				"Use {field {sub-field}} brace syntax. Example query string:\n" +
-				"  { entity(id: \"semspec.semsource.code.workspace.file.main-go\") { triples { predicate object } } }\n" +
+				"Use {field {sub-field}} brace syntax. For entity IDs, copy them from the Knowledge Graph manifest in your context — the manifest's `e.g. <id>` lines list real IDs for each domain in this graph. Do NOT invent IDs from a generic template; the namespaces are graph-specific (e.g. files might live under `semsource.golang.workspace.file.*`, not `source.code.*`) and the manifest is the authoritative source.\n" +
+				"Query SHAPE (substitute a real ID from the manifest):\n" +
+				"  { entity(id: \"<id-from-manifest>\") { triples { predicate object } } }\n" +
 				"Call with introspect:true first to discover available top-level queries (entity, search, etc.) and the schema.\n" +
 				"For natural-language questions, use graph_search instead.",
 			Parameters: map[string]any{
@@ -404,22 +405,19 @@ type GlobalSearchResult {
   count: Int!
 }
 
-## Common entity ID prefixes:
-##   {org}.{platform}.wf.plan.plan.*          — Plans
-##   {org}.{platform}.wf.plan.requirement.*   — Requirements
-##   {org}.{platform}.wf.plan.scenario.*      — Scenarios
-##   {org}.{platform}.exec.task.run.*         — Task executions
-##   {org}.{platform}.exec.req.run.*          — Requirement executions
-##   {org}.{platform}.wf.plan.question.*      — Questions
-##   {org}.{platform}.source.doc.*            — Indexed documents
-##   {org}.{platform}.source.code.*           — Indexed code entities
+## Entity IDs use a 6-part dotted notation: org.platform.domain.system.type.instance
+## The actual prefixes vary by graph deployment — workflow entities typically
+## live under {org}.{platform}.wf.* and {org}.{platform}.exec.*; source-code
+## entities under {org}.{system}.{lang}.workspace.* (lang varies per source —
+## the Knowledge Graph manifest in your prompt lists the real prefixes for
+## this graph and includes example IDs).
 
-## Example queries:
+## Example query SHAPES (substitute real IDs from the Knowledge Graph manifest):
 ##   { predicates { predicates { predicate entityCount } total } }
-##   { entitiesByPrefix(prefix: "semspec.local.source.doc.") { id triples { predicate object } } }
-##   { entity(id: "semspec.local.wf.plan.plan.abc123") { id triples { predicate object } } }
-##   { traverse(start: "entity.id", depth: 2, direction: OUTBOUND) { nodes { id } edges { source target predicate } } }
-##   { globalSearch(query: "authentication handler") { answer entity_digests { id type label relevance } } }
+##   { entitiesByPrefix(prefix: "<prefix-from-manifest>") { id triples { predicate object } } }
+##   { entity(id: "<id-from-manifest>") { id triples { predicate object } } }
+##   { traverse(start: "<id-from-manifest>", depth: 2, direction: OUTBOUND) { nodes { id } edges { source target predicate } } }
+##   { globalSearch(query: "<natural language question>") { answer entity_digests { id type label relevance } } }
 `
 
 // validateEntityIDsInQuery scans a GraphQL query for `id:` and `start:`
