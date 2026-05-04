@@ -38,9 +38,12 @@ import (
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
+	"github.com/c360studio/semspec/vocabulary/observability"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/lessons"
+	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -92,6 +95,7 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+	tripleWriter  *graphutil.TripleWriter // for ADR-035 CP-1 incident emit
 	decoder       *message.Decoder
 
 	// inFlight maps a dispatched TaskID → the dispatch context (request +
@@ -199,6 +203,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:              deps.ToolRegistry,
 		assembler:                 assembler,
 		lessonWriter:              &lessons.Writer{TW: tw, Logger: logger},
+		tripleWriter:              tw,
 		decoder:                   message.NewDecoder(deps.PayloadRegistry),
 		inFlight:                  make(map[string]*inFlightDispatch),
 		rejectionsCounter:         rejectionsCounter,
@@ -679,6 +684,56 @@ func classifyBuildLessonError(err error) rejectionReason {
 // per request today. The field is retained on the log line so a future
 // retry-with-hint port (deferred per ADR-035 step 3) doesn't need to
 // change the log shape, only the value.
+// emitParseIncident writes ADR-035 CP-1 telemetry for the lesson-
+// decomposer's submit_work parse. Strict outcomes are no-ops; rejected
+// or tolerated_quirk outcomes write a parse.incident triple set keyed
+// at "<loop.ID>:parse:response_parse" so retry replays of the same
+// loop are idempotent in the SKG.
+//
+// Best-effort: a graph-write failure is logged but does NOT fail the
+// lesson-decomposer flow. CP-1 is observability — not gating. Note
+// the lesson-decomposer is best-effort to begin with (its rejection
+// path drops the lesson; nothing downstream depends on it), so the
+// SKG signal is the operator's primary visibility into per-fire
+// model regressions on this surface.
+//
+// Phase-2 wire of the named-quirks list (per ADR-035 audit Phase-1
+// note + the planner first-wire pattern in commit 403a39d). PromptVersion
+// is left empty until the prompt-pack revision is surfaced at this
+// layer; an empty value is skipped at write time so no sentinel
+// triples land in the graph.
+func (c *Component) emitParseIncident(ctx context.Context, loop *agentic.LoopEntity, disp *inFlightDispatch, quirks []jsonutil.QuirkID, parseErr error) {
+	if c.tripleWriter == nil {
+		return
+	}
+	ic := parseincident.IncidentContext{
+		CallID: loop.ID,
+		Role:   "lesson-decomposer",
+		Model:  disp.Model,
+	}
+	// TODO(ADR-035 phase 3): align Reason triple with future RETRY HINT
+	// injection when retry-with-hint is wired here, mirroring the
+	// planner / exec-mgr / req-executor TODOs. The lesson-decomposer
+	// is one-shot today (no retry path), so the alignment is a
+	// forward-only concern.
+	if _, err := parseincident.EmitForResult(
+		ctx,
+		c.tripleWriter,
+		ic,
+		observability.CheckpointResponseParse,
+		jsonutil.QuirkIDsToStrings(quirks),
+		loop.Result,
+		parseErr,
+	); err != nil {
+		c.logger.Warn("CP-1 incident emit failed",
+			"slug", disp.Req.Slug,
+			"task_id", loop.TaskID,
+			"loop_id", loop.ID,
+			"error", err,
+		)
+	}
+}
+
 func (c *Component) logRejection(reason rejectionReason, loop *agentic.LoopEntity, disp *inFlightDispatch, err error) {
 	switch reason {
 	case rejectionParseError:
@@ -904,7 +959,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	parsed, err := parseDecomposerResult(loop.Result)
+	parsed, quirks, err := parseDecomposerResult(loop.Result)
+
+	// CP-1 incident emit (ADR-035 audit B.3) — surface per-call quirk
+	// fires and parse rejections to the SKG. Best-effort; emit
+	// failures don't fail the lesson-decomposer flow (telemetry is
+	// observability, not gating). Phase-2 wire — symmetric to planner
+	// (commit 403a39d), exec-mgr (5a43716), req-executor (9cb2830).
+	c.emitParseIncident(ctx, loop, disp, quirks, err)
+
 	if err != nil {
 		c.logRejection(rejectionParseError, loop, disp, err)
 		return
@@ -914,6 +977,11 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	positive := disp.Req.Verdict == "approved"
 	lesson, err := buildLesson(parsed, scenarioID, "developer", positive)
 	if err != nil {
+		// Emit a second incident for the buildLesson rejection too —
+		// the parse succeeded but the typed result missed required
+		// fields, which is a different observable shape per the
+		// reason-class taxonomy and worth distinct SKG attribution.
+		c.emitParseIncident(ctx, loop, disp, nil, err)
 		c.logRejection(classifyBuildLessonError(err), loop, disp, err)
 		return
 	}

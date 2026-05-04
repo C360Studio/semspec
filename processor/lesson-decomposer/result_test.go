@@ -3,6 +3,8 @@ package lessondecomposer
 import (
 	"strings"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow/jsonutil"
 )
 
 func TestParseDecomposerResult_PlainJSON(t *testing.T) {
@@ -15,7 +17,7 @@ func TestParseDecomposerResult_PlainJSON(t *testing.T) {
 		"evidence_steps": [{"loop_id": "abc", "step_index": 12}],
 		"evidence_files": [{"path": "main.go", "line_start": 10, "line_end": 20, "commit_sha": "deadbeef"}]
 	}`
-	got, err := parseDecomposerResult(raw)
+	got, _, err := parseDecomposerResult(raw)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -32,23 +34,28 @@ func TestParseDecomposerResult_PlainJSON(t *testing.T) {
 
 func TestParseDecomposerResult_MarkdownFenced(t *testing.T) {
 	raw := "```json\n" + `{"summary":"x","detail":"y","injection_form":"z","root_cause_role":"developer","evidence_steps":[{"loop_id":"a","step_index":0}]}` + "\n```"
-	got, err := parseDecomposerResult(raw)
+	got, quirks, err := parseDecomposerResult(raw)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.Summary != "x" {
 		t.Errorf("summary = %q", got.Summary)
 	}
+	// ADR-035 audit B.3 — fenced input must surface
+	// QuirkFencedJSONWrapper so the CP-1 caller can attribute it.
+	if len(quirks) != 1 || quirks[0] != jsonutil.QuirkFencedJSONWrapper {
+		t.Errorf("expected QuirkFencedJSONWrapper to fire on fenced input, got %v", quirks)
+	}
 }
 
 func TestParseDecomposerResult_Empty(t *testing.T) {
-	if _, err := parseDecomposerResult(""); err == nil {
+	if _, _, err := parseDecomposerResult(""); err == nil {
 		t.Error("expected error for empty input")
 	}
 }
 
 func TestParseDecomposerResult_NotJSON(t *testing.T) {
-	if _, err := parseDecomposerResult("this is not json at all"); err == nil {
+	if _, _, err := parseDecomposerResult("this is not json at all"); err == nil {
 		t.Error("expected error for non-JSON input")
 	}
 }

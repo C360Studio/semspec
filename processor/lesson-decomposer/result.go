@@ -59,16 +59,22 @@ type decomposerFileRef struct {
 // parseDecomposerResult extracts the structured lesson payload from the
 // agent's submit_work raw output. Strips markdown fences and code blocks
 // the way other reviewers do.
-func parseDecomposerResult(raw string) (*decomposerResult, error) {
-	cleaned := jsonutil.ExtractJSON(raw)
-	if strings.TrimSpace(cleaned) == "" {
-		return nil, fmt.Errorf("decomposer result empty after JSON extraction")
+//
+// Returns (result, quirksFired, error). QuirksFired surfaces
+// jsonutil.ParseStrict's per-fire attribution so the caller can flow it
+// into parseincident.Emit for CP-1 SKG telemetry (ADR-035 audit B.3 +
+// phase-2 wire). The slice is empty when ParseStrict didn't apply any
+// named-quirk transform.
+func parseDecomposerResult(raw string) (*decomposerResult, []jsonutil.QuirkID, error) {
+	parsed := jsonutil.ParseStrict(raw)
+	if strings.TrimSpace(parsed.JSON) == "" {
+		return nil, parsed.QuirksFired, fmt.Errorf("decomposer result empty after JSON extraction")
 	}
 	var out decomposerResult
-	if err := json.Unmarshal([]byte(cleaned), &out); err != nil {
-		return nil, fmt.Errorf("unmarshal decomposer result: %w", err)
+	if err := json.Unmarshal([]byte(parsed.JSON), &out); err != nil {
+		return nil, parsed.QuirksFired, fmt.Errorf("unmarshal decomposer result: %w", err)
 	}
-	return &out, nil
+	return &out, parsed.QuirksFired, nil
 }
 
 // buildLesson translates the decomposer's structured result into a
