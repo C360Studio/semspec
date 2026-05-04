@@ -22,6 +22,7 @@ package lessondecomposer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -90,13 +91,16 @@ type Component struct {
 	lessonWriter  *lessons.Writer
 	decoder       *message.Decoder
 
-	// inFlight maps a dispatched TaskID → the originating
-	// LessonDecomposeRequested. Populated when handleMessage publishes
-	// a TaskMessage; consumed by the AGENT_LOOPS watcher when the loop
+	// inFlight maps a dispatched TaskID → the dispatch context (request +
+	// resolved model name). Populated when handleMessage publishes a
+	// TaskMessage; consumed by the AGENT_LOOPS watcher when the loop
 	// reaches terminal state. A nil map is treated as no in-flight
-	// dispatches (test-only path with no dispatch wiring).
+	// dispatches (test-only path with no dispatch wiring). Carrying the
+	// model in the entry lets logRejection attribute every dropped
+	// lesson to a (model, prompt_version) tuple — the partition key the
+	// named-quirks list (audit sites A.1/A.3/D.6) reads from.
 	inFlightMu sync.Mutex
-	inFlight   map[string]*payloads.LessonDecomposeRequested
+	inFlight   map[string]*inFlightDispatch
 
 	// Lifecycle.
 	running   bool
@@ -104,14 +108,20 @@ type Component struct {
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 
-	// Metrics.
-	requestsReceived  atomic.Int64
-	requestsSkipped   atomic.Int64
-	parseErrors       atomic.Int64
-	dispatched        atomic.Int64
-	dispatchFailures  atomic.Int64
-	lessonsRecorded   atomic.Int64
-	resultParseErrors atomic.Int64
+	// Metrics. Per-rejection-reason counters replace the previous single
+	// resultParseErrors aggregate so operators (and the future
+	// named-quirks list) can characterize quirks per failure class
+	// rather than a fold of all four. ADR-035 audit site B.3.
+	requestsReceived          atomic.Int64
+	requestsSkipped           atomic.Int64
+	parseErrors               atomic.Int64
+	dispatched                atomic.Int64
+	dispatchFailures          atomic.Int64
+	lessonsRecorded           atomic.Int64
+	parseErrorRejections      atomic.Int64
+	missingFieldsRejections   atomic.Int64
+	missingEvidenceRejections atomic.Int64
+	emptyEvidenceRejections   atomic.Int64
 
 	lastActivityMu sync.RWMutex
 	lastActivity   time.Time
@@ -165,7 +175,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
 		decoder:       message.NewDecoder(deps.PayloadRegistry),
-		inFlight:      make(map[string]*payloads.LessonDecomposeRequested),
+		inFlight:      make(map[string]*inFlightDispatch),
 	}, nil
 }
 
@@ -254,7 +264,10 @@ func (c *Component) Stop(_ time.Duration) error {
 		"dispatched", c.dispatched.Load(),
 		"dispatch_failures", c.dispatchFailures.Load(),
 		"lessons_recorded", c.lessonsRecorded.Load(),
-		"result_parse_errors", c.resultParseErrors.Load(),
+		"parse_error_rejections", c.parseErrorRejections.Load(),
+		"missing_fields_rejections", c.missingFieldsRejections.Load(),
+		"missing_evidence_rejections", c.missingEvidenceRejections.Load(),
+		"empty_evidence_rejections", c.emptyEvidenceRejections.Load(),
 	)
 	return nil
 }
@@ -312,12 +325,19 @@ func (c *Component) Health() component.HealthStatus {
 		status = "running"
 	}
 
+	// parseErrors counts envelope-decode failures at request intake;
+	// parseErrorRejections counts loop-result JSON-parse failures at
+	// completion. Distinct buckets that look near-collision-y when
+	// grepping logs — both are summed into ErrorCount but stay separate
+	// in their per-reason readers.
 	return component.HealthStatus{
-		Healthy:    running,
-		LastCheck:  time.Now(),
-		ErrorCount: int(c.parseErrors.Load()) + int(c.dispatchFailures.Load()) + int(c.resultParseErrors.Load()),
-		Uptime:     time.Since(startTime),
-		Status:     status,
+		Healthy:   running,
+		LastCheck: time.Now(),
+		ErrorCount: int(c.parseErrors.Load()) + int(c.dispatchFailures.Load()) +
+			int(c.parseErrorRejections.Load()) + int(c.missingFieldsRejections.Load()) +
+			int(c.missingEvidenceRejections.Load()) + int(c.emptyEvidenceRejections.Load()),
+		Uptime: time.Since(startTime),
+		Status: status,
 	}
 }
 
@@ -501,7 +521,7 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 		return fmt.Errorf("marshal task message: %w", err)
 	}
 
-	c.trackInFlight(taskID, req)
+	c.trackInFlight(taskID, req, modelName)
 
 	if err := c.natsClient.PublishToStream(ctx, agentTaskSubject, data); err != nil {
 		c.untrackInFlight(taskID)
@@ -520,24 +540,123 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 	return nil
 }
 
-func (c *Component) trackInFlight(taskID string, req *payloads.LessonDecomposeRequested) {
+// inFlightDispatch carries a tracked dispatch's originating request plus
+// the resolved model name. The model is captured at dispatch time so
+// post-dispatch log lines can attribute rejections to a (model,
+// prompt_version) tuple — the partition key the named-quirks list
+// (audit sites A.1/A.3/D.6) reads from. ADR-035 audit site B.3.
+type inFlightDispatch struct {
+	Req   *payloads.LessonDecomposeRequested
+	Model string
+}
+
+// rejectionReason classifies why a lesson-decomposer dispatch's output
+// was rejected. Used as the structured `reason` field on Warn logs and
+// to discriminate per-reason counters. Cardinality is bounded — adding
+// a new class requires both a new constant here and a corresponding
+// counter on Component (so operators can grep logs by reason and read
+// counters by reason).
+type rejectionReason string
+
+const (
+	rejectionParseError      rejectionReason = "parse_error"
+	rejectionMissingFields   rejectionReason = "missing_fields"
+	rejectionMissingEvidence rejectionReason = "missing_evidence"
+	rejectionEmptyEvidence   rejectionReason = "empty_evidence"
+
+	// rejectionRawHeadBytes caps the raw-response excerpt logged on every
+	// rejection. The head is sufficient to characterize most quirks
+	// (markdown fences, prose prefixes, malformed openings) without
+	// blowing log volume on long agent outputs.
+	rejectionRawHeadBytes = 512
+)
+
+// rejectionRawHead truncates raw response output to a fixed cap so the
+// log line stays bounded but still captures the head of the model's
+// output for quirk characterization.
+func rejectionRawHead(s string) string {
+	if len(s) <= rejectionRawHeadBytes {
+		return s
+	}
+	return s[:rejectionRawHeadBytes]
+}
+
+// classifyBuildLessonError maps a buildLesson error to a rejectionReason
+// using the sentinels from result.go. Falls back to
+// rejectionMissingFields when no sentinel matches — that's the safest
+// default for an unrecognized buildLesson failure (the verb "missing"
+// still applies to whatever required field tripped it). errors.Is
+// ordering matters: empty-evidence is checked before no-evidence
+// because in principle a future error could wrap both, and empty-
+// evidence is the more specific signal.
+func classifyBuildLessonError(err error) rejectionReason {
+	switch {
+	case errors.Is(err, errLessonEmptyEvidence):
+		return rejectionEmptyEvidence
+	case errors.Is(err, errLessonNoEvidence):
+		return rejectionMissingEvidence
+	case errors.Is(err, errLessonNilResult), errors.Is(err, errLessonMissingFields):
+		return rejectionMissingFields
+	default:
+		return rejectionMissingFields
+	}
+}
+
+// logRejection emits a uniform structured Warn for every lesson-
+// decomposer rejection class and increments the per-reason counter.
+//
+// ADR-035 audit site B.3: makes silent drops greppable so operators
+// can characterize quirks from logs alone, before the named-quirks
+// list (audit sites A.1/A.3/D.6) lands its formal incident-triple
+// emission. Once that infrastructure is in place this helper is the
+// natural integration point — the per-reason counter and structured
+// fields here become the inputs to the parse-incident triple.
+//
+// Attempt is currently always 1 — the lesson-decomposer is one-shot
+// per request today. The field is retained on the log line so a future
+// retry-with-hint port (deferred per ADR-035 step 3) doesn't need to
+// change the log shape, only the value.
+func (c *Component) logRejection(reason rejectionReason, loop *agentic.LoopEntity, disp *inFlightDispatch, err error) {
+	switch reason {
+	case rejectionParseError:
+		c.parseErrorRejections.Add(1)
+	case rejectionMissingFields:
+		c.missingFieldsRejections.Add(1)
+	case rejectionMissingEvidence:
+		c.missingEvidenceRejections.Add(1)
+	case rejectionEmptyEvidence:
+		c.emptyEvidenceRejections.Add(1)
+	}
+	c.logger.Warn("Lesson-decomposer rejection",
+		"reason", string(reason),
+		"slug", disp.Req.Slug,
+		"task_id", loop.TaskID,
+		"loop_id", loop.ID,
+		"model", disp.Model,
+		"error", err,
+		"raw_head", rejectionRawHead(loop.Result),
+		"attempt", 1,
+	)
+}
+
+func (c *Component) trackInFlight(taskID string, req *payloads.LessonDecomposeRequested, modelName string) {
 	c.inFlightMu.Lock()
 	defer c.inFlightMu.Unlock()
 	if c.inFlight == nil {
-		c.inFlight = make(map[string]*payloads.LessonDecomposeRequested)
+		c.inFlight = make(map[string]*inFlightDispatch)
 	}
-	c.inFlight[taskID] = req
+	c.inFlight[taskID] = &inFlightDispatch{Req: req, Model: modelName}
 }
 
-func (c *Component) untrackInFlight(taskID string) *payloads.LessonDecomposeRequested {
+func (c *Component) untrackInFlight(taskID string) *inFlightDispatch {
 	c.inFlightMu.Lock()
 	defer c.inFlightMu.Unlock()
 	if c.inFlight == nil {
 		return nil
 	}
-	req := c.inFlight[taskID]
+	disp := c.inFlight[taskID]
 	delete(c.inFlight, taskID)
-	return req
+	return disp
 }
 
 // availableToolNames returns the tool names registered with the component.
@@ -698,8 +817,8 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 // Looks up the dispatching request, parses the agent's submit_work
 // output, and writes the resulting Lesson via lessons.Writer.
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity) {
-	req := c.untrackInFlight(loop.TaskID)
-	if req == nil {
+	disp := c.untrackInFlight(loop.TaskID)
+	if disp == nil {
 		// Either replay before we tracked it, or a foreign loop with
 		// our slug. Skip silently — alerting on replay would just be
 		// noise, and a misrouted loop is the agentic-loop processor's
@@ -712,9 +831,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	if loop.Outcome != agentic.OutcomeSuccess {
 		c.dispatchFailures.Add(1)
 		c.logger.Warn("Lesson-decomposer loop did not succeed",
-			"slug", req.Slug,
+			"slug", disp.Req.Slug,
 			"task_id", loop.TaskID,
 			"loop_id", loop.ID,
+			"model", disp.Model,
 			"outcome", loop.Outcome,
 			"error", loop.Error,
 		)
@@ -723,27 +843,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	parsed, err := parseDecomposerResult(loop.Result)
 	if err != nil {
-		c.resultParseErrors.Add(1)
-		c.logger.Warn("Failed to parse decomposer result",
-			"slug", req.Slug,
-			"task_id", loop.TaskID,
-			"loop_id", loop.ID,
-			"error", err,
-		)
+		c.logRejection(rejectionParseError, loop, disp, err)
 		return
 	}
 
-	scenarioID := req.ScenarioID
-	positive := req.Verdict == "approved"
+	scenarioID := disp.Req.ScenarioID
+	positive := disp.Req.Verdict == "approved"
 	lesson, err := buildLesson(parsed, scenarioID, "developer", positive)
 	if err != nil {
-		c.resultParseErrors.Add(1)
-		c.logger.Warn("Decomposer lesson invalid",
-			"slug", req.Slug,
-			"task_id", loop.TaskID,
-			"loop_id", loop.ID,
-			"error", err,
-		)
+		c.logRejection(classifyBuildLessonError(err), loop, disp, err)
 		return
 	}
 
@@ -756,7 +864,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	if c.lessonWriter == nil {
 		c.logger.Warn("Lesson skipped — writer not wired",
-			"slug", req.Slug, "lesson_id", lesson.ID)
+			"slug", disp.Req.Slug, "lesson_id", lesson.ID)
 		return
 	}
 
@@ -767,7 +875,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	if err := c.lessonWriter.RecordLesson(graphCtx, lesson); err != nil {
 		c.dispatchFailures.Add(1)
 		c.logger.Error("Failed to record decomposer lesson",
-			"slug", req.Slug,
+			"slug", disp.Req.Slug,
 			"lesson_id", lesson.ID,
 			"error", err,
 		)
@@ -776,7 +884,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	c.lessonsRecorded.Add(1)
 	c.logger.Info("Decomposer lesson recorded",
-		"slug", req.Slug,
+		"slug", disp.Req.Slug,
 		"task_id", loop.TaskID,
 		"loop_id", loop.ID,
 		"lesson_id", lesson.ID,

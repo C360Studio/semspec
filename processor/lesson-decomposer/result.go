@@ -2,11 +2,29 @@ package lessondecomposer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/jsonutil"
+)
+
+// Sentinel errors for buildLesson rejection classes. The wrapping
+// preserves existing error-message text (test fixtures depend on it)
+// while letting the lesson-decomposer's logRejection helper classify
+// failures via errors.Is. ADR-035 audit site B.3.
+//
+// CONTRACT: every new buildLesson rejection branch MUST add a sentinel
+// here AND a corresponding case in classifyBuildLessonError
+// (component.go). Otherwise the new branch silently routes into the
+// missing_fields fallback bucket and operators reading per-reason
+// counters won't see it as a distinct quirk.
+var (
+	errLessonNilResult     = errors.New("nil decomposer result")
+	errLessonMissingFields = errors.New("decomposer result missing required fields")
+	errLessonNoEvidence    = errors.New("decomposer result has no evidence")
+	errLessonEmptyEvidence = errors.New("decomposer result evidence entries are all empty")
 )
 
 // decomposerResult is the JSON shape the lesson-decomposer agent returns
@@ -67,17 +85,18 @@ func parseDecomposerResult(raw string) (*decomposerResult, error) {
 // to true when the dispatch came from an approved-on-first-try signal.
 func buildLesson(r *decomposerResult, scenarioID, role string, positive bool) (workflow.Lesson, error) {
 	if r == nil {
-		return workflow.Lesson{}, fmt.Errorf("nil decomposer result")
+		return workflow.Lesson{}, fmt.Errorf("%w", errLessonNilResult)
 	}
 	summary := strings.TrimSpace(r.Summary)
 	detail := strings.TrimSpace(r.Detail)
 	injection := strings.TrimSpace(r.InjectionForm)
 	if summary == "" || detail == "" || injection == "" {
-		return workflow.Lesson{}, fmt.Errorf("decomposer result missing required fields (summary=%t detail=%t injection_form=%t)",
-			summary != "", detail != "", injection != "")
+		return workflow.Lesson{}, fmt.Errorf("%w (summary=%t detail=%t injection_form=%t)",
+			errLessonMissingFields, summary != "", detail != "", injection != "")
 	}
 	if len(r.EvidenceSteps) == 0 && len(r.EvidenceFiles) == 0 {
-		return workflow.Lesson{}, fmt.Errorf("decomposer result has no evidence (at least one of evidence_steps or evidence_files required)")
+		return workflow.Lesson{}, fmt.Errorf("%w (at least one of evidence_steps or evidence_files required)",
+			errLessonNoEvidence)
 	}
 
 	steps := make([]workflow.StepRef, 0, len(r.EvidenceSteps))
@@ -104,7 +123,7 @@ func buildLesson(r *decomposerResult, scenarioID, role string, positive bool) (w
 	if len(steps) == 0 && len(files) == 0 {
 		// All entries had empty LoopID/Path — reject as if no evidence was
 		// supplied at all.
-		return workflow.Lesson{}, fmt.Errorf("decomposer result evidence entries are all empty after sanitisation")
+		return workflow.Lesson{}, fmt.Errorf("%w (after sanitisation)", errLessonEmptyEvidence)
 	}
 
 	role = strings.TrimSpace(role)
