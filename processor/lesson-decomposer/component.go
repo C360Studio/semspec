@@ -29,6 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
@@ -108,20 +111,30 @@ type Component struct {
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 
-	// Metrics. Per-rejection-reason counters replace the previous single
-	// resultParseErrors aggregate so operators (and the future
-	// named-quirks list) can characterize quirks per failure class
-	// rather than a fold of all four. ADR-035 audit site B.3.
-	requestsReceived          atomic.Int64
-	requestsSkipped           atomic.Int64
-	parseErrors               atomic.Int64
-	dispatched                atomic.Int64
-	dispatchFailures          atomic.Int64
-	lessonsRecorded           atomic.Int64
-	parseErrorRejections      atomic.Int64
-	missingFieldsRejections   atomic.Int64
-	missingEvidenceRejections atomic.Int64
-	emptyEvidenceRejections   atomic.Int64
+	// Metrics — non-rejection counters stay atomic.Int64 (out of
+	// audit-035 scope; one-call-site each, no per-label discrimination
+	// required).
+	requestsReceived atomic.Int64
+	requestsSkipped  atomic.Int64
+	parseErrors      atomic.Int64
+	dispatched       atomic.Int64
+	dispatchFailures atomic.Int64
+	lessonsRecorded  atomic.Int64
+
+	// Per-rejection-reason counters. ADR-035 audit site B.3 + the
+	// Prometheus migration. The CounterVec is the metric exposed at
+	// /metrics under semspec_lesson_decomposer_rejections_total{reason=...};
+	// the four cached Counter handles below let logRejection
+	// dispatch a single .Inc() per fire without a per-call
+	// WithLabelValues map lookup. Both shapes are populated by
+	// NewComponent so logRejection sees non-nil counters whether or
+	// not deps.MetricsRegistry was provided (registration only governs
+	// /metrics exposure).
+	rejectionsCounter         *prometheus.CounterVec
+	parseErrorRejections      prometheus.Counter
+	missingFieldsRejections   prometheus.Counter
+	missingEvidenceRejections prometheus.Counter
+	emptyEvidenceRejections   prometheus.Counter
 
 	lastActivityMu sync.RWMutex
 	lastActivity   time.Time
@@ -165,18 +178,48 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		ComponentName: "lesson-decomposer",
 	}
 
-	return &Component{
-		name:          "lesson-decomposer",
-		config:        config,
-		natsClient:    deps.NATSClient,
-		logger:        logger,
-		modelRegistry: deps.ModelRegistry,
-		toolRegistry:  deps.ToolRegistry,
-		assembler:     assembler,
-		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
-		decoder:       message.NewDecoder(deps.PayloadRegistry),
-		inFlight:      make(map[string]*inFlightDispatch),
-	}, nil
+	// Build the per-rejection-reason CounterVec and pre-warm its four
+	// children so logRejection's switch dispatches to a non-nil counter
+	// whether or not the metrics registry is available. Registration
+	// against /metrics happens below, gated on deps.MetricsRegistry.
+	rejectionsCounter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "semspec_lesson_decomposer_rejections_total",
+			Help: "Total fires of lesson-decomposer rejection classes (ADR-035 audit B.3). Labeled by reason: parse_error / missing_fields / missing_evidence / empty_evidence.",
+		},
+		[]string{"reason"},
+	)
+
+	c := &Component{
+		name:                      "lesson-decomposer",
+		config:                    config,
+		natsClient:                deps.NATSClient,
+		logger:                    logger,
+		modelRegistry:             deps.ModelRegistry,
+		toolRegistry:              deps.ToolRegistry,
+		assembler:                 assembler,
+		lessonWriter:              &lessons.Writer{TW: tw, Logger: logger},
+		decoder:                   message.NewDecoder(deps.PayloadRegistry),
+		inFlight:                  make(map[string]*inFlightDispatch),
+		rejectionsCounter:         rejectionsCounter,
+		parseErrorRejections:      rejectionsCounter.WithLabelValues(string(rejectionParseError)),
+		missingFieldsRejections:   rejectionsCounter.WithLabelValues(string(rejectionMissingFields)),
+		missingEvidenceRejections: rejectionsCounter.WithLabelValues(string(rejectionMissingEvidence)),
+		emptyEvidenceRejections:   rejectionsCounter.WithLabelValues(string(rejectionEmptyEvidence)),
+	}
+
+	// Register the CounterVec with the metrics registry so per-reason
+	// fires surface at /metrics. Idempotent — the registry handles
+	// duplicate registration. Nil-safe — tests construct Components
+	// without deps and skip registration; .Inc() still works on the
+	// unregistered counter.
+	if deps.MetricsRegistry != nil {
+		if err := deps.MetricsRegistry.RegisterCounterVec("lesson-decomposer", "rejections_total", rejectionsCounter); err != nil {
+			return nil, fmt.Errorf("register lesson-decomposer rejection counters: %w", err)
+		}
+	}
+
+	return c, nil
 }
 
 // Initialize prepares the component for startup.
@@ -264,10 +307,10 @@ func (c *Component) Stop(_ time.Duration) error {
 		"dispatched", c.dispatched.Load(),
 		"dispatch_failures", c.dispatchFailures.Load(),
 		"lessons_recorded", c.lessonsRecorded.Load(),
-		"parse_error_rejections", c.parseErrorRejections.Load(),
-		"missing_fields_rejections", c.missingFieldsRejections.Load(),
-		"missing_evidence_rejections", c.missingEvidenceRejections.Load(),
-		"empty_evidence_rejections", c.emptyEvidenceRejections.Load(),
+		"parse_error_rejections", int64(testutil.ToFloat64(c.parseErrorRejections)),
+		"missing_fields_rejections", int64(testutil.ToFloat64(c.missingFieldsRejections)),
+		"missing_evidence_rejections", int64(testutil.ToFloat64(c.missingEvidenceRejections)),
+		"empty_evidence_rejections", int64(testutil.ToFloat64(c.emptyEvidenceRejections)),
 	)
 	return nil
 }
@@ -313,6 +356,27 @@ func (c *Component) ConfigSchema() component.ConfigSchema {
 	return lessonDecomposerSchema
 }
 
+// rejectionCount sums the four per-reason rejection counter handles.
+// Nil-safe so a zero-valued Component (used by tests that construct
+// `&Component{}` literals to verify lifecycle defaults) doesn't panic
+// when Health() runs before NewComponent populates the handles.
+func (c *Component) rejectionCount() int {
+	var total int
+	if c.parseErrorRejections != nil {
+		total += int(testutil.ToFloat64(c.parseErrorRejections))
+	}
+	if c.missingFieldsRejections != nil {
+		total += int(testutil.ToFloat64(c.missingFieldsRejections))
+	}
+	if c.missingEvidenceRejections != nil {
+		total += int(testutil.ToFloat64(c.missingEvidenceRejections))
+	}
+	if c.emptyEvidenceRejections != nil {
+		total += int(testutil.ToFloat64(c.emptyEvidenceRejections))
+	}
+	return total
+}
+
 // Health returns the current health status.
 func (c *Component) Health() component.HealthStatus {
 	c.mu.RLock()
@@ -334,8 +398,7 @@ func (c *Component) Health() component.HealthStatus {
 		Healthy:   running,
 		LastCheck: time.Now(),
 		ErrorCount: int(c.parseErrors.Load()) + int(c.dispatchFailures.Load()) +
-			int(c.parseErrorRejections.Load()) + int(c.missingFieldsRejections.Load()) +
-			int(c.missingEvidenceRejections.Load()) + int(c.emptyEvidenceRejections.Load()),
+			c.rejectionCount(),
 		Uptime: time.Since(startTime),
 		Status: status,
 	}
@@ -619,13 +682,13 @@ func classifyBuildLessonError(err error) rejectionReason {
 func (c *Component) logRejection(reason rejectionReason, loop *agentic.LoopEntity, disp *inFlightDispatch, err error) {
 	switch reason {
 	case rejectionParseError:
-		c.parseErrorRejections.Add(1)
+		c.parseErrorRejections.Inc()
 	case rejectionMissingFields:
-		c.missingFieldsRejections.Add(1)
+		c.missingFieldsRejections.Inc()
 	case rejectionMissingEvidence:
-		c.missingEvidenceRejections.Add(1)
+		c.missingEvidenceRejections.Inc()
 	case rejectionEmptyEvidence:
-		c.emptyEvidenceRejections.Add(1)
+		c.emptyEvidenceRejections.Inc()
 	}
 	c.logger.Warn("Lesson-decomposer rejection",
 		"reason", string(reason),

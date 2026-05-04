@@ -12,6 +12,8 @@ import (
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func discardLogger() *slog.Logger {
@@ -141,13 +143,35 @@ func TestRegister_NilRegistryReturnsError(t *testing.T) {
 // newTestComponent returns a Component that's safe to invoke
 // handleLoopCompletion on without standing up NATS or the prompt
 // assembler. Only the fields the rejection path reads need to be live:
-// logger and inFlight. lessonWriter is left nil so successful parses
-// short-circuit on the wiring check at line 769 — these tests only
-// exercise the rejection branches.
+// logger, inFlight, and the rejection CounterVec + handles. The
+// CounterVec is constructed (not registered with any
+// MetricsRegistry) so .Inc() works and testutil.ToFloat64 reads
+// return real values without panicking. lessonWriter is left nil
+// so successful parses short-circuit on the wiring check —
+// these tests only exercise the rejection branches.
+//
+// Each call returns a Component with a fresh CounterVec so tests
+// don't share counter state across the table. The ADR-035
+// migration moved this state from per-Component atomic.Int64 to
+// prometheus.Counter handles; the prior atomic.Int64 fields were
+// reset by struct construction, so a fresh-CounterVec-per-test
+// preserves the same isolation.
 func newTestComponent() *Component {
+	rejectionsCounter := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "semspec_lesson_decomposer_rejections_total_test",
+			Help: "Test-only Component-local CounterVec; not registered.",
+		},
+		[]string{"reason"},
+	)
 	return &Component{
-		logger:   discardLogger(),
-		inFlight: make(map[string]*inFlightDispatch),
+		logger:                    discardLogger(),
+		inFlight:                  make(map[string]*inFlightDispatch),
+		rejectionsCounter:         rejectionsCounter,
+		parseErrorRejections:      rejectionsCounter.WithLabelValues(string(rejectionParseError)),
+		missingFieldsRejections:   rejectionsCounter.WithLabelValues(string(rejectionMissingFields)),
+		missingEvidenceRejections: rejectionsCounter.WithLabelValues(string(rejectionMissingEvidence)),
+		emptyEvidenceRejections:   rejectionsCounter.WithLabelValues(string(rejectionEmptyEvidence)),
 	}
 }
 
@@ -163,7 +187,7 @@ func TestHandleLoopCompletion_ParseFailure_IncrementsParseErrorCounter(t *testin
 	}
 	c.handleLoopCompletion(context.Background(), loop)
 
-	if got := c.parseErrorRejections.Load(); got != 1 {
+	if got := int64(testutil.ToFloat64(c.parseErrorRejections)); got != 1 {
 		t.Errorf("parseErrorRejections = %d, want 1", got)
 	}
 	assertOnlyCounter(t, c, "parseErrorRejections")
@@ -183,7 +207,7 @@ func TestHandleLoopCompletion_BuildLessonMissingFields_IncrementsMissingFieldsCo
 	}
 	c.handleLoopCompletion(context.Background(), loop)
 
-	if got := c.missingFieldsRejections.Load(); got != 1 {
+	if got := int64(testutil.ToFloat64(c.missingFieldsRejections)); got != 1 {
 		t.Errorf("missingFieldsRejections = %d, want 1", got)
 	}
 	assertOnlyCounter(t, c, "missingFieldsRejections")
@@ -203,7 +227,7 @@ func TestHandleLoopCompletion_BuildLessonMissingEvidence_IncrementsMissingEviden
 	}
 	c.handleLoopCompletion(context.Background(), loop)
 
-	if got := c.missingEvidenceRejections.Load(); got != 1 {
+	if got := int64(testutil.ToFloat64(c.missingEvidenceRejections)); got != 1 {
 		t.Errorf("missingEvidenceRejections = %d, want 1", got)
 	}
 	assertOnlyCounter(t, c, "missingEvidenceRejections")
@@ -223,7 +247,7 @@ func TestHandleLoopCompletion_BuildLessonEmptyEvidence_IncrementsEmptyEvidenceCo
 	}
 	c.handleLoopCompletion(context.Background(), loop)
 
-	if got := c.emptyEvidenceRejections.Load(); got != 1 {
+	if got := int64(testutil.ToFloat64(c.emptyEvidenceRejections)); got != 1 {
 		t.Errorf("emptyEvidenceRejections = %d, want 1", got)
 	}
 	assertOnlyCounter(t, c, "emptyEvidenceRejections")
@@ -235,10 +259,10 @@ func TestHandleLoopCompletion_BuildLessonEmptyEvidence_IncrementsEmptyEvidenceCo
 func assertOnlyCounter(t *testing.T, c *Component, expected string) {
 	t.Helper()
 	counters := map[string]int64{
-		"parseErrorRejections":      c.parseErrorRejections.Load(),
-		"missingFieldsRejections":   c.missingFieldsRejections.Load(),
-		"missingEvidenceRejections": c.missingEvidenceRejections.Load(),
-		"emptyEvidenceRejections":   c.emptyEvidenceRejections.Load(),
+		"parseErrorRejections":      int64(testutil.ToFloat64(c.parseErrorRejections)),
+		"missingFieldsRejections":   int64(testutil.ToFloat64(c.missingFieldsRejections)),
+		"missingEvidenceRejections": int64(testutil.ToFloat64(c.missingEvidenceRejections)),
+		"emptyEvidenceRejections":   int64(testutil.ToFloat64(c.emptyEvidenceRejections)),
 	}
 	for name, val := range counters {
 		if name == expected {
