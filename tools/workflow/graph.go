@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +20,21 @@ import (
 )
 
 const maxGraphResponseBytes = 100 * 1024 // 100KB
+
+// entityIDArgPattern matches `id: "..."` or `start: "..."` arguments in
+// a GraphQL query — the two argument names that take a full entity ID
+// per the schema (entity(id:), traverse(start:)). entitiesByPrefix(prefix:)
+// is intentionally NOT matched: prefixes are partial by design.
+//
+// Variable bindings like `id: $foo` (no quotes) are also intentionally
+// not matched — runtime-bound values cannot be validated statically.
+var entityIDArgPattern = regexp.MustCompile(`\b(id|start)\s*:\s*"([^"]+)"`)
+
+// minEntityIDSegments is the smallest segment count for a valid entity
+// ID per the schema. Plans/requirements/scenarios/executions/source-doc/
+// source-code all use {org}.{platform}.{kind}.{...} shape with 4 or more
+// dot-separated segments. Below this is presumed truncated.
+const minEntityIDSegments = 4
 
 // GraphExecutor implements graph query tools for workflow context.
 type GraphExecutor struct {
@@ -338,6 +354,41 @@ type GlobalSearchResult {
 ##   { globalSearch(query: "authentication handler") { answer entity_digests { id type label relevance } } }
 `
 
+// validateEntityIDsInQuery scans a GraphQL query for `id:` and `start:`
+// arguments and returns an error citing the first malformed value. Returns
+// nil when no entity-ID arguments are present (caller continues normally —
+// entitiesByPrefix and globalSearch queries don't take full IDs).
+//
+// ADR-035 audit site D.8: pre-flight rejection here forecloses the
+// truncation wedge where models call `entity(id: "semspec.semsou")` (cut
+// from a longer ID) and the gateway returns "not found:" with no hint,
+// causing the model to loop on the same broken ID for many iterations.
+func validateEntityIDsInQuery(query string) error {
+	matches := entityIDArgPattern.FindAllStringSubmatch(query, -1)
+	for _, m := range matches {
+		argName, value := m[1], m[2]
+		if err := validateEntityIDShape(value); err != nil {
+			return fmt.Errorf("argument %q has invalid entity ID %q: %w", argName, value, err)
+		}
+	}
+	return nil
+}
+
+// validateEntityIDShape checks that an entity ID has the expected
+// dot-separated structure. Returns nil when the ID looks well-formed.
+func validateEntityIDShape(id string) error {
+	segments := strings.Split(id, ".")
+	if len(segments) < minEntityIDSegments {
+		return fmt.Errorf("entity IDs are dot-separated with at least %d segments (e.g. \"semspec.local.wf.plan.plan.abc123\"); got %d segment(s)", minEntityIDSegments, len(segments))
+	}
+	for i, seg := range segments {
+		if seg == "" {
+			return fmt.Errorf("segment %d is empty (no leading/trailing dots, no double dots allowed)", i)
+		}
+	}
+	return nil
+}
+
 // queryGraph executes a raw GraphQL query or returns the schema for introspection.
 func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	if introspect, _ := call.Arguments["introspect"].(bool); introspect {
@@ -352,6 +403,17 @@ func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (
 		return agentic.ToolResult{
 			CallID: call.ID,
 			Error:  "query argument is required (or pass introspect:true to see the schema)",
+		}, nil
+	}
+
+	// ADR-035 CP-2 (audit site D.8): pre-flight entity-ID shape validation.
+	// Catches truncated IDs before they reach the gateway so the model gets
+	// a directive error instead of an opaque "not found:" the gateway emits
+	// for malformed lookups.
+	if err := validateEntityIDsInQuery(query); err != nil {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  fmt.Sprintf("invalid entity ID in query: %v. Expected format: dot-separated segments like \"semspec.local.wf.plan.plan.abc123\". Use entitiesByPrefix(prefix:) for partial-prefix lookups or graph_search(query:) for natural-language queries.", err),
 		}, nil
 	}
 
