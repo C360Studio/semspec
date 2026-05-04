@@ -608,6 +608,46 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 // Node complete
 // ---------------------------------------------------------------------------
 
+// nodeResultPayload mirrors the synthesizer in req_completions.go's
+// handleTaskStateChange (the only production producer of node-complete
+// event.Result today). Note that producer hardcodes changes_summary="";
+// the field is retained on the parser struct for forward compatibility
+// in case a different producer wires real summaries through.
+type nodeResultPayload struct {
+	FilesModified []string `json:"files_modified"`
+	FilesCreated  []string `json:"files_created"`
+	Summary       string   `json:"changes_summary"`
+	MergeCommit   string   `json:"merge_commit"`
+}
+
+// parseNodeResultPayload extracts the structured node-completion fields
+// from a LoopCompletedEvent.Result string. Per ADR-035 audit site B.5,
+// the caller routes parse failures through the requirement-level retry
+// path rather than silently producing a zero-value NodeResult.
+//
+// Two failure classes:
+//   - shape: payload is empty after JSON extraction or json.Unmarshal fails
+//   - content: well-formed JSON has none of files_modified, files_created,
+//     changes_summary, or merge_commit populated — node produced no
+//     recordable output despite outcome=success
+//
+// Both classes return errors; the caller maps them to the same retry path.
+func parseNodeResultPayload(raw string) (*nodeResultPayload, error) {
+	extracted := jsonutil.ExtractJSON(raw)
+	if extracted == "" {
+		return nil, fmt.Errorf("no JSON object found in event result")
+	}
+	var parsed nodeResultPayload
+	if err := json.Unmarshal([]byte(extracted), &parsed); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+	if len(parsed.FilesModified) == 0 && len(parsed.FilesCreated) == 0 &&
+		parsed.Summary == "" && parsed.MergeCommit == "" {
+		return nil, fmt.Errorf("payload has no files_modified, files_created, changes_summary, or merge_commit — node produced no recordable output")
+	}
+	return &parsed, nil
+}
+
 func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 
 	// Get nodeID from current execution state. Execution is serial, so
@@ -709,24 +749,64 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 		return
 	}
 
-	// Update the DAG node graph entity to reflect successful completion.
+	// Parse the result payload BEFORE publishing completion or appending to
+	// NodeResults. ADR-035 audit site B.5: a populated-but-malformed payload
+	// (or one with no recordable output fields) routes through the
+	// requirement-level retry path rather than silently producing a
+	// zero-value NodeResult and letting the downstream reviewer judge work
+	// the executor never recorded. Empty Result remains legitimate (test
+	// fixtures and the no-payload success case fall through unchanged).
+	var parsed *nodeResultPayload
+	if event.Result != "" {
+		var parseErr error
+		parsed, parseErr = parseNodeResultPayload(event.Result)
+		if parseErr != nil {
+			c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
+			feedback := fmt.Sprintf(
+				"Node %q completed but its result payload was unrecoverable: %s. "+
+					"Re-run the same scope; ensure submit_work returns valid JSON containing "+
+					"files_modified (and/or files_created), changes_summary, and merge_commit fields.",
+				nodeID, parseErr,
+			)
+			if exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
+				exec.RetryCount++
+				exec.LastReviewFeedback = feedback
+				exec.terminated = false
+				exec.DirtyNodeIDs = []string{nodeID}
+				delete(exec.VisitedNodes, nodeID)
+
+				if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
+					"retry_count": exec.RetryCount,
+					"dirty_nodes": exec.DirtyNodeIDs,
+				}); err != nil {
+					c.logger.Warn("Failed to send req.phase mutation for node parse-failure retry", "error", err)
+				}
+
+				c.logger.Info("Node result parse failed — retrying at requirement level",
+					"entity_id", exec.EntityID,
+					"node_id", nodeID,
+					"retry_count", exec.RetryCount,
+					"parse_error", parseErr,
+				)
+
+				exec.CurrentNodeIdx--
+				c.dispatchNextNodeLocked(ctx, exec)
+				return
+			}
+			c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q result parse failed and retries exhausted: %v", nodeID, parseErr))
+			return
+		}
+	}
+
+	// Parse succeeded (or Result was empty) — node is genuinely complete.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "completed")
 
 	// Track node result for aggregate reporting.
-	var nodeResult NodeResult
-	nodeResult.NodeID = nodeID
-	if event.Result != "" {
-		var parsed struct {
-			FilesModified []string `json:"files_modified"`
-			FilesCreated  []string `json:"files_created"`
-			Summary       string   `json:"changes_summary"`
-			MergeCommit   string   `json:"merge_commit"`
-		}
-		if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &parsed); err == nil {
-			nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
-			nodeResult.Summary = parsed.Summary
-			nodeResult.CommitSHA = parsed.MergeCommit
-		}
+	nodeResult := NodeResult{NodeID: nodeID}
+	if parsed != nil {
+		nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
+		nodeResult.Summary = parsed.Summary
+		nodeResult.CommitSHA = parsed.MergeCommit
 	}
 	exec.NodeResults = append(exec.NodeResults, nodeResult)
 

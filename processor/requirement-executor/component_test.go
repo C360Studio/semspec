@@ -1569,6 +1569,218 @@ func TestHandleNodeCompleteLocked_FailedOutcome_ExhaustsRetryBudget(t *testing.T
 	}
 }
 
+// ADR-035 audit B.5: malformed result payload on outcome=success used to
+// silently produce a zero-value NodeResult, letting the downstream reviewer
+// judge work the executor never recorded. Pin the strict-parse + retry shape.
+func TestHandleNodeCompleteLocked_MalformedResult_RetriesAtRequirementLevel(t *testing.T) {
+	c := newTestComponent(t)
+
+	dag := &decompose.TaskDAG{
+		Nodes: []decompose.TaskNode{
+			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
+		},
+	}
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-mal",
+		Slug:              "p",
+		RequirementID:     "malformed",
+		Model:             "test-model",
+		CurrentNodeTaskID: "node-task-mal",
+		DAG:               dag,
+		SortedNodeIDs:     []string{"task-a"},
+		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		VisitedNodes:      map[string]bool{"task-a": true},
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        0,
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-mal",
+		TaskID:       "node-task-mal",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       "this is not json at all",
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	retryCount := exec.RetryCount
+	terminated := exec.terminated
+	dirtyNodes := exec.DirtyNodeIDs
+	_, nodeStillVisited := exec.VisitedNodes["task-a"]
+	feedback := exec.LastReviewFeedback
+	nodeResultsLen := len(exec.NodeResults)
+	exec.mu.Unlock()
+
+	if terminated {
+		t.Error("execution should NOT be terminated when retry budget remains after parse failure")
+	}
+	if retryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1 after parse-failure retry", retryCount)
+	}
+	if len(dirtyNodes) != 1 || dirtyNodes[0] != "task-a" {
+		t.Errorf("DirtyNodeIDs = %v, want [task-a]", dirtyNodes)
+	}
+	if nodeStillVisited {
+		t.Error("parse-failed node should be removed from VisitedNodes for retry")
+	}
+	if feedback == "" {
+		t.Error("LastReviewFeedback should be populated with retry-hint guidance")
+	}
+	if nodeResultsLen != 0 {
+		t.Errorf("NodeResults length = %d, want 0 — must not append a zero-value entry on parse-failure retry (otherwise duplicates accumulate)", nodeResultsLen)
+	}
+}
+
+// ADR-035 audit B.5 (content-empty case): well-formed JSON with no
+// recordable output fields (FilesModified, FilesCreated, Summary, MergeCommit
+// all empty) is the actual production wedge shape — the synthesizer at
+// req_completions.go always populates task_stage so Result is non-empty,
+// but a node could "succeed" without producing any files or a merge commit.
+// That used to silently propagate as zero-value NodeResult.
+func TestHandleNodeCompleteLocked_EmptyContentResult_RetriesAtRequirementLevel(t *testing.T) {
+	c := newTestComponent(t)
+
+	dag := &decompose.TaskDAG{
+		Nodes: []decompose.TaskNode{
+			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
+		},
+	}
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-empty",
+		Slug:              "p",
+		RequirementID:     "empty-content",
+		Model:             "test-model",
+		CurrentNodeTaskID: "node-task-empty",
+		DAG:               dag,
+		SortedNodeIDs:     []string{"task-a"},
+		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		VisitedNodes:      map[string]bool{"task-a": true},
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        0,
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	// Well-formed JSON, but every recordable output field is empty/absent —
+	// the audit's actual wedge shape (a "successful" node with no evidence).
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-empty",
+		TaskID:       "node-task-empty",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"task_stage":"completed","escalation_reason":""}`,
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	retryCount := exec.RetryCount
+	terminated := exec.terminated
+	nodeResultsLen := len(exec.NodeResults)
+	exec.mu.Unlock()
+
+	if terminated {
+		t.Error("execution should NOT be terminated on empty-content retry")
+	}
+	if retryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1 after empty-content retry", retryCount)
+	}
+	if nodeResultsLen != 0 {
+		t.Errorf("NodeResults length = %d, want 0 on empty-content retry", nodeResultsLen)
+	}
+}
+
+// Pins the markFailedLocked branch when the retry budget is already
+// exhausted and the result payload is unparseable. Pre-fix, this case
+// would have silently appended a zero-value NodeResult and continued to
+// the requirement reviewer with no evidence; post-fix it terminates.
+func TestHandleNodeCompleteLocked_ParseFailure_ExhaustsRetryBudget(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-pexh",
+		Slug:              "p",
+		RequirementID:     "parse-exhaust",
+		CurrentNodeTaskID: "node-task-pexh",
+		SortedNodeIDs:     []string{"task-a"},
+		VisitedNodes:      map[string]bool{"task-a": true},
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        2, // budget already exhausted
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-pexh",
+		TaskID:       "node-task-pexh",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       "still not json",
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	terminated := exec.terminated
+	nodeResultsLen := len(exec.NodeResults)
+	exec.mu.Unlock()
+
+	if !terminated {
+		t.Error("execution should be terminated when retry budget is exhausted on parse failure")
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+	if nodeResultsLen != 0 {
+		t.Errorf("NodeResults length = %d, want 0 — must not append a zero-value entry on terminal parse failure", nodeResultsLen)
+	}
+}
+
+// Direct unit test for parseNodeResultPayload covering the three branches:
+// shape failure (unparseable), content failure (no recordable fields), and
+// success (any one field populated). Keeps the helper's contract pinned
+// independently of the handler's retry orchestration.
+func TestParseNodeResultPayload(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"unparseable garbage", "this is not json at all", true},
+		{"empty string", "", true},
+		{"valid JSON but no useful fields", `{"task_stage":"completed"}`, true},
+		{"empty arrays + empty strings", `{"files_modified":[],"files_created":[],"changes_summary":"","merge_commit":""}`, true},
+		{"files_modified populated", `{"files_modified":["main.go"]}`, false},
+		{"files_created populated", `{"files_created":["new.go"]}`, false},
+		{"summary populated", `{"changes_summary":"added handler"}`, false},
+		{"merge_commit populated", `{"merge_commit":"abc123"}`, false},
+		{"markdown-fenced", "```json\n{\"merge_commit\":\"abc\"}\n```", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseNodeResultPayload(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error, got nil; parsed=%+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if got == nil {
+				t.Error("expected non-nil parsed payload")
+			}
+		})
+	}
+}
+
 func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *testing.T) {
 	c := newTestComponent(t)
 
