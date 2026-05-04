@@ -3,9 +3,11 @@ package terminal
 import (
 	"fmt"
 	"log/slog"
-	"sync/atomic"
 
 	"github.com/c360studio/semspec/workflow/phases"
+	"github.com/c360studio/semstreams/metric"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // QuirkID identifies a named, reviewed deliverable-validator transform
@@ -16,7 +18,8 @@ import (
 // This is the content-default flavor of the named-quirks list — the
 // shape-strip flavor lives in workflow/jsonutil. Both share the
 // "tolerance is named, reviewed, idempotent, and per-fire observable"
-// discipline.
+// discipline. Per-fire telemetry is a `prometheus.Counter` exposed at
+// /metrics via RegisterMetrics.
 type QuirkID string
 
 const (
@@ -31,18 +34,44 @@ const (
 	QuirkReviewMissingRejectionType QuirkID = "review_missing_rejection_type"
 )
 
-// quirkCounters tracks per-quirk fire counts at package level. Single
-// counter today; promoted to an ordinal-indexed array if more
-// content-default quirks land in this package.
-var quirkReviewMissingRejectionTypeCount atomic.Int64
+// reviewMissingRejectionTypeCounter is the per-fire Prometheus counter
+// exposed at /metrics when RegisterMetrics is called during startup.
+// Single Counter today (one quirk in this package); promoted to a
+// CounterVec if a second content-default quirk lands here.
+//
+// Until registered, the counter still accumulates in memory and
+// QuirkStats() still reads it — keeps tests and nil-deps construction
+// paths working without the metrics service.
+var reviewMissingRejectionTypeCounter = prometheus.NewCounter(prometheus.CounterOpts{
+	Name: "semspec_review_missing_rejection_type_total",
+	Help: "Total fires of the ValidateReviewDeliverable rejection_type auto-fill quirk (ADR-035 D.6). Indicates how often a reviewer LLM submitted verdict=rejected without an explicit rejection_type field, requiring the validator to default to 'fixable'.",
+})
+
+// RegisterMetrics registers tools/terminal's quirk counter with the
+// given metrics registry so per-fire telemetry surfaces at /metrics.
+// Call once during process startup. Idempotent — semstreams'
+// MetricsRegistry returns success on duplicate registration.
+//
+// When reg is nil, this is a no-op — see reviewMissingRejectionTypeCounter
+// godoc for the rationale.
+func RegisterMetrics(reg *metric.MetricsRegistry) error {
+	if reg == nil {
+		return nil
+	}
+	if err := reg.RegisterCounter("terminal", "review_missing_rejection_type_total", reviewMissingRejectionTypeCounter); err != nil {
+		return fmt.Errorf("register terminal review-missing-rejection-type counter: %w", err)
+	}
+	return nil
+}
 
 // fireReviewMissingRejectionType increments the counter and emits a
-// Warn log. Warn (not Debug) because this quirk is rare relative to
-// parse-shape quirks and content-default tolerance is more
-// semantically suspect — auto-filling a missing field is "we filled
-// this in for you, audit it" rather than "we stripped boilerplate."
+// Warn log. Warn (not Debug like jsonutil's parse-shape quirks)
+// because this quirk is rare relative to parse-shape quirks and
+// content-default tolerance is more semantically suspect — auto-filling
+// a missing field is "we filled this in for you, audit it" rather than
+// "we stripped boilerplate."
 func fireReviewMissingRejectionType(verdict, filledValue string) {
-	quirkReviewMissingRejectionTypeCount.Add(1)
+	reviewMissingRejectionTypeCounter.Inc()
 	slog.Default().Warn("Review deliverable quirk auto-filled",
 		"quirk", string(QuirkReviewMissingRejectionType),
 		"verdict", verdict,
@@ -53,9 +82,11 @@ func fireReviewMissingRejectionType(verdict, filledValue string) {
 // QuirkStats returns a snapshot of per-quirk fire counters in this
 // package. Operators read via debug endpoints or Health(). Counters
 // are monotonically increasing — callers compute deltas themselves.
+// Reads the counter value via prometheus testutil — works whether or
+// not RegisterMetrics has been called.
 func QuirkStats() map[QuirkID]int64 {
 	return map[QuirkID]int64{
-		QuirkReviewMissingRejectionType: quirkReviewMissingRejectionTypeCount.Load(),
+		QuirkReviewMissingRejectionType: int64(testutil.ToFloat64(reviewMissingRejectionTypeCounter)),
 	}
 }
 
