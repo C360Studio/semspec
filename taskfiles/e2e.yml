@@ -508,8 +508,7 @@ tasks:
         fi
       - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Debug=${DEBUG:-off}"
       - echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
-      - cmd: cd test/e2e/fixtures/{{.FIXTURE_DIR}} && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
-        ignore_error: true
+      - task: reset-fixtures
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} down -v --timeout 10 2>/dev/null
         ignore_error: true
@@ -526,6 +525,9 @@ tasks:
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           elif [ "{{.PROVIDER}}" = "local" ]; then
             CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.TIER}}" = "hard" ]; then
+            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=1800000 PLAYWRIGHT_TIMEOUT=1800000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
@@ -573,8 +575,7 @@ tasks:
       # the observer.
       - task: build
       - echo "[WATCH:LLM] Resetting fixture to initial commit..."
-      - cmd: cd test/e2e/fixtures/{{.FIXTURE_DIR}} && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
-        ignore_error: true
+      - task: reset-fixtures
       - echo "[WATCH:LLM] Building and starting real LLM stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml {{.EPIC_OVERLAY}} down -v --timeout 10 2>/dev/null
         ignore_error: true
@@ -630,6 +631,9 @@ tasks:
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           elif [ "{{.PROVIDER}}" = "local" ]; then
             CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.TIER}}" = "hard" ]; then
+            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=1800000 PLAYWRIGHT_TIMEOUT=1800000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
@@ -779,9 +783,28 @@ tasks:
     desc: Reset e2e fixture repos to their initial commits and prune accumulated agent/semspec branches.
     cmds:
       - |
-        for fixture in test/e2e/fixtures/go-project test/e2e/fixtures/hello-world-py test/e2e/fixtures/osh-driver-meshtastic; do
+        # Iterate every fixture directory dynamically — no hardcoded list to
+        # drift. Fixtures without their own .git are SKIPPED, never reset.
+        # Without this skip, `git -C "$fixture"` would walk up to the parent
+        # semspec repo's .git and `git reset --hard` would obliterate the
+        # main repo. Caught 2026-05-04 — osh-driver-meshtastic had no .git
+        # and a sibling task using `cd $fixture && git reset --hard` rolled
+        # the parent repo back 1274 commits. The .git check below is the
+        # primary guard; the topology assertion further down is defense in
+        # depth.
+        for fixture in test/e2e/fixtures/*/; do
+          fixture="${fixture%/}"
           if [ ! -d "$fixture/.git" ]; then
             continue
+          fi
+          # Defense in depth: assert the .git we found actually belongs to
+          # $fixture, not a parent. If the .git directory exists but is
+          # somehow a worktree pointer to a different repo, refuse to reset.
+          TOPLEVEL=$(git -C "$fixture" rev-parse --show-toplevel 2>/dev/null)
+          if [ "$(realpath "$TOPLEVEL" 2>/dev/null)" != "$(realpath "$fixture" 2>/dev/null)" ]; then
+            echo "[RESET-FIXTURES] REFUSING to reset $fixture: rev-parse --show-toplevel resolved to '$TOPLEVEL' (expected $fixture)" >&2
+            echo "[RESET-FIXTURES] Fixture .git appears broken or points outside the fixture. ABORTING for safety." >&2
+            exit 1
           fi
           ROOT=$(git -C "$fixture" rev-list --max-parents=0 HEAD 2>/dev/null | head -1)
           if [ -z "$ROOT" ]; then
