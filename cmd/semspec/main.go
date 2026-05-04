@@ -21,6 +21,7 @@ import (
 	"github.com/c360studio/semspec/tools"
 
 	// Register vocabularies via init()
+	_ "github.com/c360studio/semspec/vocabulary/observability"
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
 	"github.com/c360studio/semspec/graph"
