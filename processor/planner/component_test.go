@@ -62,6 +62,37 @@ func TestParsePlanFromResult(t *testing.T) {
 			wantContext: "ctx",
 		},
 		{
+			// ADR-035 C.3 — pin the new behavior gained by migrating to
+			// jsonutil.ParseStrict: trailing commas inside the plan JSON,
+			// which the previous local extractJSON couldn't handle, now
+			// parse cleanly via the trailing_commas named quirk.
+			name: "json with trailing commas (named-quirks list handles)",
+			input: `{
+				"goal": "Trailing-comma plan",
+				"context": "ctx",
+				"scope": {
+					"include": ["a/", "b/",],
+				},
+			}`,
+			wantGoal:    "Trailing-comma plan",
+			wantContext: "ctx",
+			wantInclude: []string{"a/", "b/"},
+		},
+		{
+			// ADR-035 C.3 — JS-style line comments inside the JSON used
+			// to break the local helper (json.Unmarshal would fail);
+			// jsonutil's js_line_comments quirk strips them first.
+			name: "json with JS line comments (named-quirks list handles)",
+			input: "```json\n" + `{
+				"goal": "Commented plan", // primary objective
+				"context": "ctx", // why this matters
+				"scope": {"include": ["x/"]}
+			}` + "\n```",
+			wantGoal:    "Commented plan",
+			wantContext: "ctx",
+			wantInclude: []string{"x/"},
+		},
+		{
 			name:    "missing goal",
 			input:   `{"context": "No goal here", "scope": {}}`,
 			wantErr: true,
@@ -103,51 +134,6 @@ func TestParsePlanFromResult(t *testing.T) {
 						t.Errorf("Scope.Include[%d] = %q, want %q", i, v, tt.wantInclude[i])
 					}
 				}
-			}
-		})
-	}
-}
-
-func TestExtractJSON(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantEmpty bool
-	}{
-		{
-			name:  "raw json",
-			input: `{"goal": "test"}`,
-		},
-		{
-			name:  "json in text",
-			input: `Here is the plan: {"goal": "embedded"} and more text`,
-		},
-		{
-			name:  "nested braces",
-			input: `{"goal": "test", "scope": {"include": ["a"]}}`,
-		},
-		{
-			name:      "no json",
-			input:     "This is just text without any JSON",
-			wantEmpty: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := extractJSON(tt.input)
-			if tt.wantEmpty {
-				if got != "" {
-					t.Errorf("expected empty, got %q", got)
-				}
-				return
-			}
-			if got == "" {
-				t.Fatal("expected JSON, got empty")
-			}
-			var parsed map[string]any
-			if err := json.Unmarshal([]byte(got), &parsed); err != nil {
-				t.Errorf("result is not valid JSON: %v", err)
 			}
 		})
 	}

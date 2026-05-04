@@ -29,6 +29,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -694,8 +695,17 @@ type PlanContent struct {
 	Status string `json:"status,omitempty"`
 }
 
-// parsePlanFromResult extracts PlanContent from an agent loop result string.
-// The result may be raw JSON or wrapped in markdown code fences.
+// parsePlanFromResult extracts PlanContent from an agent loop result
+// string. The result may be raw JSON or wrapped in markdown code fences,
+// contain JS-style line comments, or have trailing commas — all handled
+// by jsonutil.ParseStrict's named-quirks list per ADR-035 audit C.3.
+//
+// The previous local extractJSON helper did only brace-walking with no
+// fence/comment/comma handling and didn't track string-state during the
+// walk (so a JSON value containing `}` inside a string could mis-match).
+// jsonutil.ParseStrict handles all of those plus reports per-fire
+// counter telemetry so quirk regressions on the planner surface stay
+// observable.
 func parsePlanFromResult(result string) (*PlanContent, error) {
 	if result == "" {
 		return nil, fmt.Errorf("empty result")
@@ -707,14 +717,18 @@ func parsePlanFromResult(result string) (*PlanContent, error) {
 		return &pc, nil
 	}
 
-	// Try extracting from markdown code fences.
-	jsonContent := extractJSON(result)
-	if jsonContent == "" {
+	// Fall through to jsonutil.ParseStrict — first caller migrated from
+	// a local extract helper to the package-level API per ADR-035 audit
+	// C.3. QuirksFired metadata is intentionally discarded here; CP-1
+	// triple emission (Phase 2) wires per-call context at a different
+	// boundary if/when this surface needs it.
+	parsed := jsonutil.ParseStrict(result)
+	if parsed.JSON == "" {
 		return nil, fmt.Errorf("no JSON found in result")
 	}
 
-	if err := json.Unmarshal([]byte(jsonContent), &pc); err != nil {
-		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+	if err := json.Unmarshal([]byte(parsed.JSON), &pc); err != nil {
+		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, parsed.JSON[:min(200, len(parsed.JSON))])
 	}
 
 	if pc.Goal == "" {
@@ -722,35 +736,6 @@ func parsePlanFromResult(result string) (*PlanContent, error) {
 	}
 
 	return &pc, nil
-}
-
-// extractJSON pulls a JSON object from text that may contain markdown fences.
-func extractJSON(s string) string {
-	// Look for ```json ... ``` wrapper.
-	start := -1
-	for i := 0; i < len(s)-3; i++ {
-		if s[i] == '{' {
-			start = i
-			break
-		}
-	}
-	if start < 0 {
-		return ""
-	}
-	// Find matching closing brace.
-	depth := 0
-	for i := start; i < len(s); i++ {
-		switch s[i] {
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return s[start : i+1]
-			}
-		}
-	}
-	return ""
 }
 
 // retryOrFail increments the retry counter for this slug and re-dispatches
