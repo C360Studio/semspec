@@ -7,15 +7,28 @@
 // Go 1.25 json.Decoder breaking change where trailing content makes
 // Unmarshal fail.
 //
-// This package is the LLM-output equivalent of "do what the model
-// probably meant" — it is intentionally permissive. Strict callers
-// should validate after parsing.
+// ADR-035 (strict-parse discipline — no silent compensation): tolerance
+// survives only as a fixed list of named, reviewed shape transforms,
+// each idempotent and each emitting per-fire telemetry. The named
+// quirks today are fenced_json_wrapper, js_line_comments, and
+// trailing_commas — see the QuirkID block. ParseStrict reports which
+// quirks fired so callers can attribute fires to a (role, model,
+// prompt_version) tuple via vocabulary/observability predicates.
+//
+// Phase 1 telemetry: atomic counters plus a Debug log per fire. Phase 2
+// (per-caller incremental, not in this package) wires triple emission
+// through ParseStrict's QuirksFired return value.
+//
+// ExtractJSON remains a back-compat wrapper around ParseStrict and
+// discards the QuirksFired info. New callers should prefer ParseStrict.
 package jsonutil
 
 import (
 	"encoding/json"
+	"log/slog"
 	"regexp"
 	"strings"
+	"sync/atomic"
 )
 
 // Pre-compiled regex patterns for JSON extraction from LLM responses.
@@ -32,75 +45,228 @@ var (
 	trailingCommaPattern = regexp.MustCompile(`,\s*([}\]])`)
 )
 
-// ExtractJSON extracts a JSON object from an LLM response string.
-// It handles markdown code blocks, JavaScript-style comments, and trailing commas.
-// Go 1.25+ rejects trailing content after top-level JSON value, so the output
-// is validated and trimmed to ensure clean unmarshalling.
-func ExtractJSON(content string) string {
-	raw := extractRawJSON(content)
+// QuirkID identifies a named, reviewed shape transform applied by the
+// parser. Adding a new QuirkID requires (1) a new constant here, (2) a
+// matching ordinal in quirkOrdinals, (3) a fire site that records the
+// quirk via fireQuirk, and (4) at least one test fixture proving the
+// quirk fires on a real LLM-output shape. ADR-035 audit sites A.1, A.3.
+type QuirkID string
+
+const (
+	// QuirkFencedJSONWrapper fires when the parser stripped a markdown
+	// code-fence wrapper (```json ... ``` or ``` ... ```) from the input.
+	QuirkFencedJSONWrapper QuirkID = "fenced_json_wrapper"
+
+	// QuirkJSLineComments fires when the parser stripped one or more
+	// JavaScript-style line comments (`// ...`) from the input. LLMs
+	// trained on JS-style snippets sometimes emit these inside JSON.
+	QuirkJSLineComments QuirkID = "js_line_comments"
+
+	// QuirkTrailingCommas fires when the parser removed one or more
+	// trailing commas before `}` or `]`. Strict JSON rejects them; lots
+	// of code-trained models emit them anyway.
+	QuirkTrailingCommas QuirkID = "trailing_commas"
+)
+
+// quirkOrdinals maps each QuirkID to its slot in quirkCounters. Stable
+// ordinals let us use a fixed-size atomic.Int64 array without needing a
+// mutex on every fire. Adding a quirk = bumping numQuirks + adding an
+// ordinal here + adding to allQuirks.
+var quirkOrdinals = map[QuirkID]int{
+	QuirkFencedJSONWrapper: 0,
+	QuirkJSLineComments:    1,
+	QuirkTrailingCommas:    2,
+}
+
+const numQuirks = 3
+
+// allQuirks enumerates every named quirk so Stats() can materialize a
+// complete map (including zero-fire quirks — operators want to know
+// "this quirk hasn't fired yet" as a distinct signal from "this quirk
+// doesn't exist").
+var allQuirks = [numQuirks]QuirkID{
+	QuirkFencedJSONWrapper,
+	QuirkJSLineComments,
+	QuirkTrailingCommas,
+}
+
+// quirkCounters tracks per-quirk fire counts at package level. Atomic
+// access; no mutex. Counters are monotonically increasing and never
+// reset — operators reading via Stats() compute deltas themselves.
+var quirkCounters [numQuirks]atomic.Int64
+
+// fireQuirk increments the counter for the given quirk and emits a
+// Debug log so operators can grep per-fire when needed. Idempotent on
+// the counter (each fire = one increment); the call site is
+// responsible for ensuring it only fires when the quirk actually
+// transformed the input.
+func fireQuirk(q QuirkID) {
+	if i, ok := quirkOrdinals[q]; ok {
+		quirkCounters[i].Add(1)
+	}
+	slog.Default().Debug("jsonutil quirk fired", "quirk", string(q))
+}
+
+// Stats returns a snapshot of per-quirk fire counters. Includes every
+// known quirk, with zero for those that haven't fired yet. Materialized
+// fresh on each call so callers don't share storage.
+func Stats() map[QuirkID]int64 {
+	out := make(map[QuirkID]int64, numQuirks)
+	for i, q := range allQuirks {
+		out[q] = quirkCounters[i].Load()
+	}
+	return out
+}
+
+// ParseResult bundles the extracted JSON with the named quirks that
+// fired during extraction. Callers wiring CP-1 incident telemetry use
+// QuirksFired to populate parse.incident triples per ADR-035 §3 with
+// their per-call context (role, model, prompt_version). Callers that
+// only need the JSON string should use ExtractJSON.
+type ParseResult struct {
+	// JSON is the extracted, cleaned JSON string. Empty when no JSON
+	// could be extracted from the input.
+	JSON string
+
+	// QuirksFired lists the named quirks that had to be applied to
+	// produce JSON. Empty when the input was already clean JSON.
+	//
+	// Order is deterministic: fence (if any), then comments (if any),
+	// then commas (if any). New quirks append at the end of this
+	// sequence. Callers that depend on positional reads can rely on
+	// this ordering across releases — pinned in
+	// TestParseStrict_QuirkAttribution.
+	QuirksFired []QuirkID
+}
+
+// ParseStrict extracts a JSON object from an LLM response string and
+// reports which named quirks (universal shape transforms) had to be
+// applied. ADR-035 audit sites A.1, A.3.
+//
+// The returned ParseResult.JSON has the same value the legacy
+// ExtractJSON would return; ParseResult.QuirksFired is the new piece
+// of information for callers that want to attribute quirk fires to a
+// per-call context.
+func ParseStrict(content string) ParseResult {
+	var result ParseResult
+
+	raw, fenced := extractRawJSON(content)
 	if raw == "" {
-		return ""
+		return result
 	}
-	cleaned := cleanJSON(raw)
-	// Go 1.25 rejects trailing content after JSON. Validate and trim if needed.
+	if fenced {
+		result.QuirksFired = append(result.QuirksFired, QuirkFencedJSONWrapper)
+		fireQuirk(QuirkFencedJSONWrapper)
+	}
+
+	cleaned, commentsFired, commasFired := cleanJSON(raw)
+	if commentsFired {
+		result.QuirksFired = append(result.QuirksFired, QuirkJSLineComments)
+		fireQuirk(QuirkJSLineComments)
+	}
+	if commasFired {
+		result.QuirksFired = append(result.QuirksFired, QuirkTrailingCommas)
+		fireQuirk(QuirkTrailingCommas)
+	}
+
+	// Go 1.25 rejects trailing content after JSON. Validate and trim if
+	// needed. Not a named quirk — this is stdlib-compat, not LLM-output
+	// tolerance (see ADR-035 audit A.4).
 	if json.Valid([]byte(cleaned)) {
-		return cleaned
+		result.JSON = cleaned
+		return result
 	}
-	// Try to find the balanced JSON object boundary.
 	if trimmed := trimToBalancedJSON(cleaned); trimmed != "" {
-		return trimmed
+		result.JSON = trimmed
+		return result
 	}
-	return cleaned
+	result.JSON = cleaned
+	return result
+}
+
+// ExtractJSON extracts a JSON object from an LLM response string. It
+// is now a back-compat wrapper around ParseStrict that discards the
+// QuirksFired list. New callers should prefer ParseStrict so they can
+// attribute quirk fires to a per-call context for incident telemetry.
+func ExtractJSON(content string) string {
+	return ParseStrict(content).JSON
 }
 
 // ExtractJSONArray extracts a JSON array from an LLM response string.
+// Fires the same named quirks as ParseStrict when transforms apply, so
+// per-quirk counters and Debug logs cover array-shaped LLM output too.
+// Returns only the JSON string — no ParseResult equivalent yet, since
+// no array caller needs the QuirksFired list at the call site today.
+// If a future caller needs that, add ParseStrictArray.
 func ExtractJSONArray(content string) string {
 	var raw string
-	// Try markdown code block first
+	var fenced bool
 	if matches := jsonArrayBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
 		raw = matches[1]
+		fenced = true
 	} else if matches := jsonArrayPattern.FindString(content); matches != "" {
 		raw = matches
 	}
 	if raw == "" {
 		return ""
 	}
-	cleaned := cleanJSON(raw)
-	if json.Valid([]byte(cleaned)) {
-		return cleaned
+	if fenced {
+		fireQuirk(QuirkFencedJSONWrapper)
+	}
+	cleaned, commentsFired, commasFired := cleanJSON(raw)
+	if commentsFired {
+		fireQuirk(QuirkJSLineComments)
+	}
+	if commasFired {
+		fireQuirk(QuirkTrailingCommas)
 	}
 	return cleaned
 }
 
-// extractRawJSON extracts raw JSON content before cleaning.
-func extractRawJSON(content string) string {
-	// Try markdown code block first
+// extractRawJSON extracts raw JSON content from the input. Returns the
+// extracted substring plus a boolean indicating whether a markdown
+// fence wrapper was stripped. The fenced bool drives QuirkFencedJSONWrapper
+// attribution at the ParseStrict layer.
+func extractRawJSON(content string) (string, bool) {
+	// Try markdown code block first.
 	if matches := jsonBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return matches[1]
+		return matches[1], true
 	}
-	// Fallback to raw JSON object
+	// Fallback to raw JSON object.
 	if matches := jsonObjectPattern.FindString(content); matches != "" {
-		return matches
+		return matches, false
 	}
-	return ""
+	return "", false
 }
 
-// cleanJSON removes JavaScript-style comments and trailing commas from JSON.
-// LLMs commonly produce these invalid JSON artifacts.
-func cleanJSON(raw string) string {
-	// Remove // comments that are NOT inside JSON string values.
-	// Strategy: process line by line, only strip comments outside of strings.
+// cleanJSON removes JavaScript-style comments and trailing commas from
+// JSON. LLMs commonly produce these invalid JSON artifacts. Returns the
+// cleaned string plus two booleans indicating which transforms actually
+// fired (so callers can attribute QuirkJSLineComments and
+// QuirkTrailingCommas separately). A no-op cleanup returns the input
+// unchanged with both bools false.
+func cleanJSON(raw string) (string, bool, bool) {
+	// Strip line comments. Track whether any line was changed so the
+	// caller can attribute QuirkJSLineComments only when a real strip
+	// occurred (and not on every clean-input call).
 	lines := strings.Split(raw, "\n")
 	cleaned := make([]string, 0, len(lines))
+	commentsFired := false
 	for _, line := range lines {
-		cleaned = append(cleaned, stripLineComment(line))
+		stripped := stripLineComment(line)
+		if stripped != line {
+			commentsFired = true
+		}
+		cleaned = append(cleaned, stripped)
 	}
 	result := strings.Join(cleaned, "\n")
 
-	// Remove trailing commas before } or ]
-	result = trailingCommaPattern.ReplaceAllString(result, "$1")
+	// Trailing-comma replacement. Compare before/after so we attribute
+	// QuirkTrailingCommas only when a real fix happened.
+	fixed := trailingCommaPattern.ReplaceAllString(result, "$1")
+	commasFired := fixed != result
 
-	return result
+	return fixed, commentsFired, commasFired
 }
 
 // trimToBalancedJSON finds the substring from the first { to its balanced },

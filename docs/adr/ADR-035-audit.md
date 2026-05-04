@@ -520,6 +520,60 @@ Given the dispositions above, the cheapest-to-validate first flip is:
 The reviewer audit (Layer E) starts only after step 6 is stable per
 ADR-035 §5.
 
+## Phase 1 — pre-triple named-quirks landing (deliberate staging)
+
+The named-quirks list ships in two phases. This is a deliberate staging
+of the audit's "every fire emits a `parse.incident` triple" requirement,
+not a corner-cut. Calling it out here so the next reader doesn't read
+the audit letter-strict and call us on a partial implementation.
+
+### Phase 1 (shipping now): counters + structured logs
+
+The first four named quirks land with per-fire telemetry at the level
+the host package can emit unilaterally:
+
+| Quirk | Package | Telemetry on fire |
+|---|---|---|
+| `fenced_json_wrapper` | `workflow/jsonutil` | atomic counter + Debug log |
+| `js_line_comments` | `workflow/jsonutil` | atomic counter + Debug log |
+| `trailing_commas` | `workflow/jsonutil` | atomic counter + Debug log |
+| `review_missing_rejection_type` | `tools/terminal` | atomic counter + Warn log |
+
+`workflow/jsonutil` exposes `Stats() map[QuirkID]int64` so debug
+endpoints (and Health) can read aggregate fire rates. The Debug-level
+logs let operators grep per-fire detail in diagnostic windows without
+flooding production logs (parse-shape quirks fire on most LLM
+responses; Warn would be unusable). D.6's `review_missing_rejection_type`
+is rarer and content-default — it gets Warn so operators see every fire.
+
+### Why no triples yet
+
+Triple emission per ADR-035 §3 needs per-call context — `Role`,
+`Model`, `PromptVersion`, `RawResponse`, the call_id — to populate the
+partition keys in `vocabulary/observability/predicates.go`. Today
+`workflow/jsonutil/ExtractJSON(string) string` is a pure utility called
+in 6 places (audit Layer B); none pass that context. Wiring it would
+force all 6 callers into a new signature in this commit.
+
+`ParseStrict(raw string) ParseResult` (new in Phase 1) returns the list
+of quirks that fired alongside the extracted JSON. Callers opt in
+incrementally — the first caller to need triple emission migrates from
+`ExtractJSON` to `ParseStrict` and writes triples with its own
+per-call context.
+
+### Phase 2 trigger
+
+The first caller that wants CP-1 incident telemetry — likely a
+reviewer or planner caller hitting a real-LLM regression — migrates
+to `ParseStrict` and emits `parse.incident` triples using the
+vocabulary predicates from commit `8ff175a`. Phase 2 is per-caller,
+not all-at-once, because each caller has different per-call context
+sources (some have prompt-version metadata, some don't).
+
+The named-quirks list itself is the reviewable artifact this commit
+produces. Triple plumbing is downstream of having the list to attribute
+incidents to.
+
 ## Suggested ADR-035 amendments
 
 The audit surfaced one framing simplification worth folding back into
