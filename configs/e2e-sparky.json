@@ -400,7 +400,13 @@
       "enabled": true,
       "config": {
         "ports": {
-          "inputs": [],
+          "inputs": [
+            {
+              "name": "http",
+              "subject": ":8082",
+              "type": "http"
+            }
+          ],
           "outputs": [
             {
               "name": "mutations",
