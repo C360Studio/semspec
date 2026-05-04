@@ -288,6 +288,83 @@ func TestEmit_LargeRawResponse_TruncatedWithFlag(t *testing.T) {
 	}
 }
 
+// EmitForResult derives outcome from (quirks, parseErr) — the most
+// common shape callers face at a parse-checkpoint boundary. Pin all
+// three branches plus the nil-writer no-op.
+func TestEmitForResult_OutcomeBranches(t *testing.T) {
+	tests := []struct {
+		name        string
+		quirks      []string
+		parseErr    error
+		wantOutcome string
+		wantTriples bool
+	}{
+		{
+			name:        "parse failure → rejected",
+			parseErr:    errors.New("invalid JSON"),
+			wantOutcome: observability.OutcomeRejected,
+			wantTriples: true,
+		},
+		{
+			name:        "quirks fired → tolerated_quirk",
+			quirks:      []string{"fenced_json_wrapper"},
+			wantOutcome: observability.OutcomeToleratedQuirk,
+			wantTriples: true,
+		},
+		{
+			name:        "clean parse → strict (no triples)",
+			wantOutcome: observability.OutcomeStrict,
+			wantTriples: false,
+		},
+		{
+			name:        "parse error wins over quirks",
+			quirks:      []string{"fenced_json_wrapper"},
+			parseErr:    errors.New("typed unmarshal failed"),
+			wantOutcome: observability.OutcomeRejected,
+			wantTriples: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rw := &recordingWriter{}
+			ic := IncidentContext{CallID: "loop-x", Role: "developer", Model: "m1"}
+			id, err := EmitForResult(context.Background(), rw, ic, observability.CheckpointResponseParse, tt.quirks, "raw output", tt.parseErr)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.wantTriples {
+				if id == "" {
+					t.Error("expected non-empty incident ID")
+				}
+				outcome := rw.findTriple(id, observability.Outcome)
+				if outcome == nil {
+					t.Fatal("missing outcome triple")
+				}
+				if outcome.object != tt.wantOutcome {
+					t.Errorf("outcome = %v, want %s", outcome.object, tt.wantOutcome)
+				}
+			} else {
+				if id != "" {
+					t.Errorf("strict outcome should produce empty incident ID, got %q", id)
+				}
+				if len(rw.triples) != 0 {
+					t.Errorf("strict outcome should produce ZERO triples, got %d", len(rw.triples))
+				}
+			}
+		})
+	}
+}
+
+func TestEmitForResult_NilWriter_NoOp(t *testing.T) {
+	id, err := EmitForResult(context.Background(), nil, IncidentContext{CallID: "x"}, observability.CheckpointResponseParse, nil, "raw", errors.New("x"))
+	if err != nil {
+		t.Errorf("nil writer should be no-op, got error: %v", err)
+	}
+	if id != "" {
+		t.Errorf("nil writer should return empty ID, got %q", id)
+	}
+}
+
 func TestEmit_RelationWriteFails_ShortCircuits(t *testing.T) {
 	rw := &recordingWriter{failOn: observability.Incident}
 	_, err := Emit(context.Background(), rw, IncidentContext{CallID: "x"}, IncidentEvent{

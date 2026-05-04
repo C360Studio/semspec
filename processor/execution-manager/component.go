@@ -40,11 +40,13 @@ import (
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
+	"github.com/c360studio/semspec/vocabulary/observability"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/lessons"
+	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
@@ -613,6 +615,50 @@ func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution)
 // Stage 1: Developer complete (full TDD cycle — tests + implementation)
 // ---------------------------------------------------------------------------
 
+// emitDeveloperParseIncident writes ADR-035 CP-1 telemetry for the
+// developer's most recent submit_work parse. Strict outcomes are
+// no-ops; rejected or tolerated_quirk outcomes write a parse.incident
+// triple set keyed at "<event.LoopID>:parse:response_parse" so retry
+// replays of the same loop are idempotent in the SKG.
+//
+// Best-effort: a graph-write failure is logged but does NOT fail the
+// developer flow. CP-1 is observability — not gating.
+//
+// Phase 2 of the named-quirks list (per ADR-035 audit Phase-1 note +
+// the planner first-wire pattern in commit 403a39d). PromptVersion is
+// left empty until the prompt-pack revision is surfaced at this
+// layer; an empty value is skipped at write time so no sentinel
+// triples land in the graph.
+func (c *Component) emitDeveloperParseIncident(ctx context.Context, exec *taskExecution, event *agentic.LoopCompletedEvent, quirks []jsonutil.QuirkID, parseErr error) {
+	if c.tripleWriter == nil {
+		return
+	}
+	ic := parseincident.IncidentContext{
+		CallID: event.LoopID,
+		Role:   "developer",
+		Model:  exec.Model,
+	}
+	// TODO(ADR-035 phase 3): align Reason triple with the eventual
+	// RETRY HINT injected into the developer's loop on retry — same
+	// shape as the planner emit-parse-incident TODO.
+	if _, err := parseincident.EmitForResult(
+		ctx,
+		c.tripleWriter,
+		ic,
+		observability.CheckpointResponseParse,
+		jsonutil.QuirkIDsToStrings(quirks),
+		event.Result,
+		parseErr,
+	); err != nil {
+		c.logger.Warn("CP-1 incident emit failed",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"loop_id", event.LoopID,
+			"error", err,
+		)
+	}
+}
+
 func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
 	c.resetTimeoutLocked(exec)
 	c.taskRouting.Delete(exec.DeveloperTaskID)
@@ -631,7 +677,16 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	}
 
 	var result payloads.DeveloperResult
-	parseErr := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &result)
+	parsed := jsonutil.ParseStrict(event.Result)
+	parseErr := json.Unmarshal([]byte(parsed.JSON), &result)
+
+	// CP-1 incident emit (ADR-035 §3, audit B.1): surface per-call
+	// quirk fires and parse rejections to the SKG so operators can
+	// query (role=developer, model, prompt_version) incident rates.
+	// Best-effort — graph-write failures are logged but do NOT fail
+	// the developer flow (telemetry is observability, not gating).
+	c.emitDeveloperParseIncident(ctx, exec, event, parsed.QuirksFired, parseErr)
+
 	if parseErr != nil {
 		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", parseErr)
 	} else {

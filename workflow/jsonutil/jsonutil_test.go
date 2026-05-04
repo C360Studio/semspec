@@ -514,6 +514,37 @@ func TestExtractJSONArray_FiresQuirks(t *testing.T) {
 	}
 }
 
+func TestQuirkIDsToStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		in   []QuirkID
+		want []string
+	}{
+		{"nil", nil, nil},
+		{"empty", []QuirkID{}, nil},
+		{"single", []QuirkID{QuirkFencedJSONWrapper}, []string{"fenced_json_wrapper"}},
+		{
+			"multiple preserve order",
+			[]QuirkID{QuirkFencedJSONWrapper, QuirkJSLineComments, QuirkTrailingCommas},
+			[]string{"fenced_json_wrapper", "js_line_comments", "trailing_commas"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := QuirkIDsToStrings(tt.in)
+			if len(got) != len(tt.want) {
+				t.Errorf("len = %d, want %d (got %v)", len(got), len(tt.want), got)
+				return
+			}
+			for i, want := range tt.want {
+				if got[i] != want {
+					t.Errorf("[%d] = %q, want %q", i, got[i], want)
+				}
+			}
+		})
+	}
+}
+
 // ExtractJSON must remain a back-compat wrapper around ParseStrict.
 // Pin that the string returned by ExtractJSON is identical to
 // ParseStrict(input).JSON for representative inputs.

@@ -173,6 +173,38 @@ type predicateWrite struct {
 	object    any
 }
 
+// EmitForResult is a convenience wrapper that derives the IncidentEvent
+// from a (quirks, parseErr) pair — the most common shape callers face
+// at a parse-checkpoint boundary. Three branches:
+//
+//   - parseErr != nil          → OutcomeRejected, Reason = parseErr.Error()
+//   - len(quirks) > 0          → OutcomeToleratedQuirk, Quirks = quirks
+//   - otherwise                → OutcomeStrict (Emit no-op)
+//
+// rawResponse is always carried through unchanged — the truncation cap
+// is applied inside Emit. checkpoint is one of
+// observability.CheckpointResponseParse | CheckpointToolCall.
+//
+// Returns the same (incidentID, error) tuple as Emit. nil tw is a
+// no-op.
+func EmitForResult(ctx context.Context, tw tripleWriter, ic IncidentContext, checkpoint string, quirks []string, rawResponse string, parseErr error) (string, error) {
+	ev := IncidentEvent{
+		Checkpoint:  checkpoint,
+		RawResponse: rawResponse,
+	}
+	switch {
+	case parseErr != nil:
+		ev.Outcome = observability.OutcomeRejected
+		ev.Reason = parseErr.Error()
+	case len(quirks) > 0:
+		ev.Outcome = observability.OutcomeToleratedQuirk
+		ev.Quirks = quirks
+	default:
+		ev.Outcome = observability.OutcomeStrict
+	}
+	return Emit(ctx, tw, ic, ev)
+}
+
 // truncateUTF8Safe shortens s to at most maxBytes bytes without
 // splitting a multibyte rune. Returns the (possibly truncated) string
 // and a truncated flag indicating whether the input exceeded maxBytes.

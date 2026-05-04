@@ -167,6 +167,22 @@ func fireQuirk(q QuirkID) {
 	slog.Default().Debug("jsonutil quirk fired", "quirk", string(q))
 }
 
+// QuirkIDsToStrings converts a slice of typed QuirkID values to plain
+// strings — convenient for callers that pass QuirksFired into APIs
+// outside this package (notably parseincident.Emit, which intentionally
+// does not depend on jsonutil to avoid cross-package coupling on a
+// pure-observability helper). Returns a fresh slice on every call.
+func QuirkIDsToStrings(quirks []QuirkID) []string {
+	if len(quirks) == 0 {
+		return nil
+	}
+	out := make([]string, len(quirks))
+	for i, q := range quirks {
+		out[i] = string(q)
+	}
+	return out
+}
+
 // Stats returns a snapshot of per-quirk fire counters. Includes every
 // known quirk, with zero for those that haven't fired yet. Materialized
 // fresh on each call so callers don't share storage. Reads the counter

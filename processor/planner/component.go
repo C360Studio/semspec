@@ -724,44 +724,29 @@ func (c *Component) emitParseIncident(ctx context.Context, loop *agentic.LoopEnt
 	if c.tripleWriter == nil {
 		return
 	}
-
 	ic := parseincident.IncidentContext{
 		CallID: loop.ID,
 		Role:   "planner",
 		Model:  loop.Model,
 	}
-	ev := parseincident.IncidentEvent{
-		Checkpoint:  observability.CheckpointResponseParse,
-		RawResponse: loop.Result,
-	}
-
-	switch {
-	case parseErr != nil:
-		ev.Outcome = observability.OutcomeRejected
-		// TODO(ADR-035 phase 3): when RETRY HINT injection is wired
-		// at this site, the same string should flow into both the
-		// loop feedback channel AND this Reason triple, so SKG
-		// queries on parse incidents see the exact text the model
-		// received. Today parseErr.Error() is the rejection reason
-		// (which IS the precursor to a future retry hint), so
-		// alignment is forward-compatible.
-		ev.Reason = parseErr.Error()
-	case len(quirks) > 0:
-		ev.Outcome = observability.OutcomeToleratedQuirk
-		ev.Quirks = make([]string, 0, len(quirks))
-		for _, q := range quirks {
-			ev.Quirks = append(ev.Quirks, string(q))
-		}
-	default:
-		// Strict — Emit is a no-op for this case but call it anyway
-		// for symmetry; clearer than a conditional skip here.
-		ev.Outcome = observability.OutcomeStrict
-	}
-
-	if _, err := parseincident.Emit(ctx, c.tripleWriter, ic, ev); err != nil {
+	// TODO(ADR-035 phase 3): when RETRY HINT injection is wired at this
+	// site, the parseErr.Error() string flowing into Reason should
+	// also be the same text injected into the loop feedback channel,
+	// so SKG queries on parse incidents see the exact text the model
+	// received. Today parseErr.Error() is the rejection reason (which
+	// IS the precursor to a future retry hint), so alignment is
+	// forward-compatible.
+	if _, err := parseincident.EmitForResult(
+		ctx,
+		c.tripleWriter,
+		ic,
+		observability.CheckpointResponseParse,
+		jsonutil.QuirkIDsToStrings(quirks),
+		loop.Result,
+		parseErr,
+	); err != nil {
 		c.logger.Warn("CP-1 incident emit failed",
 			"loop_id", loop.ID,
-			"outcome", ev.Outcome,
 			"error", err,
 		)
 	}
