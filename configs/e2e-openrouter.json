@@ -54,7 +54,8 @@
         "provider": "openai",
         "url": "http://semembed:8081/v1",
         "model": "Snowflake/snowflake-arctic-embed-s",
-        "max_tokens": 0
+        "max_tokens": 0,
+        "disable_keepalives": true
       },
       "seminstruct-fast": {
         "provider": "openai",
@@ -64,7 +65,19 @@
         "max_output_tokens": 512,
         "supports_tools": false,
         "stream": false,
-        "request_timeout": "15s"
+        "request_timeout": "15s",
+        "disable_keepalives": true
+      },
+      "seminstruct-answer": {
+        "provider": "openai",
+        "url": "http://seminstruct-answer:8083/v1",
+        "model": "qwen3-1.7b",
+        "max_tokens": 16384,
+        "max_output_tokens": 1024,
+        "supports_tools": false,
+        "stream": false,
+        "request_timeout": "30s",
+        "disable_keepalives": true
       },
       "seminstruct-summary": {
         "provider": "openai",
@@ -74,7 +87,8 @@
         "max_output_tokens": 4096,
         "supports_tools": false,
         "stream": false,
-        "request_timeout": "45s"
+        "request_timeout": "180s",
+        "disable_keepalives": true
       },
       "qwen3-next-instruct": {
         "provider": "openrouter",
@@ -156,7 +170,7 @@
         ]
       },
       "architecture": {
-        "description": "Architecture generation — technology choices, component boundaries, data flow",
+        "description": "Architecture generation \u2014 technology choices, component boundaries, data flow",
         "preferred": [
           "openrouter-qwen3-moe"
         ],
@@ -198,21 +212,28 @@
         ]
       },
       "query_classification": {
-        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
+        "description": "graph-query T3 fallback classifier \u2014 small JSON output, latency-critical",
         "preferred": [
           "seminstruct-fast"
         ],
         "timeout": "10s"
       },
+      "answer_synthesis": {
+        "description": "graph-query globalSearch answer composition \u2014 ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
+        "preferred": [
+          "seminstruct-answer"
+        ],
+        "timeout": "30s"
+      },
       "community_summary": {
-        "description": "graph-clustering community summarization — background batch, persisted into graph",
+        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
         "preferred": [
           "seminstruct-summary"
         ],
-        "timeout": "120s"
+        "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes (agent/* in answerers.json). Bigger reasoning model, no tool-call required — answerer just produces text. MoE 80B/3B-active fits alongside the workflow model on a 128GB target without crowding it out.",
+        "description": "Answerer-agent backend for ask_question routes (agent/* in answerers.json). Bigger reasoning model, no tool-call required \u2014 answerer just produces text. MoE 80B/3B-active fits alongside the workflow model on a 128GB target without crowding it out.",
         "preferred": [
           "qwen3-next-instruct"
         ],

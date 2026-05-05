@@ -36,9 +36,13 @@ ENV PATH="/usr/local/go/bin:/go/bin:${PATH}"
 ENV GOPATH=/go
 ENV GOMODCACHE=/go/pkg/mod
 
-# Java JDK (semsource Java AST support + Gradle builds).
+# Java JDK + Maven (semsource Java AST support + Gradle/Maven builds).
+# Maven added 2026-05-05 — @hard fixture (osh-driver-meshtastic) is a
+# Maven project; without `mvn` the dev loop bashes `mvn test` and gets
+# `mvn: not found`, then has no way to validate the Java it wrote.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     openjdk-21-jdk-headless \
+    maven \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/lib/jvm/java-21-openjdk-* /usr/lib/jvm/java-21
 ENV JAVA_HOME=/usr/lib/jvm/java-21

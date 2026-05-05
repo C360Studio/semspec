@@ -46,6 +46,8 @@ services:
         condition: service_healthy
       seminstruct-fast:
         condition: service_healthy
+      seminstruct-answer:
+        condition: service_healthy
       seminstruct-summary:
         condition: service_healthy
     healthcheck:
@@ -138,16 +140,38 @@ services:
         limits:
           memory: 2G
 
-  # seminstruct-summary serves the offload-friendly graph capabilities:
-  # answer_synthesis + community_summary. 8B model with reasoning auto so
-  # community summaries persisted into the graph stay quality. Concurrent
-  # inference (-np 4 -cb baked into the image) so multiple agents'
-  # parallel graph_search calls don't queue head-of-line.
+  # seminstruct-answer serves answer_synthesis (graph_search → globalSearch).
+  # 1.7B is sub-3s per ephemeral answer on Apple Silicon CPU; quality is
+  # solid because answer_synthesis is extractive over supplied community
+  # summaries. The 8B is reserved for community_summary, where MS GraphRAG
+  # research showed sub-7B saves garbage to the persisted graph. Probed
+  # 2026-05-05: ~25 tok/s warm, vs 8B's 0.83 tok/s on the same hardware.
+  seminstruct-answer:
+    image: ghcr.io/c360studio/seminstruct:qwen3-1.7b
+    environment:
+      - MODEL_ALIAS=qwen3-1.7b
+      - MODEL_REASONING=off
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 45s
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  # seminstruct-summary serves community_summary only (background batch,
+  # persisted into graph). 8B is required per MS GraphRAG quality bar.
+  # REASONING=off because auto/think eats the entire token budget before
+  # producing content (verified 2026-05-05). Concurrent inference (-np 4
+  # -cb baked into the image) so parallel batches don't queue head-of-line.
   seminstruct-summary:
     image: ghcr.io/c360studio/seminstruct:qwen3-8b
     environment:
       - MODEL_ALIAS=qwen3-8b
-      - MODEL_REASONING=auto
+      - MODEL_REASONING=off
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
