@@ -49,6 +49,38 @@ type Bundle struct {
 	Ollama         *OllamaState    `json:"ollama,omitempty"`
 	Diagnoses      []Diagnosis     `json:"diagnoses"` // detector output
 	TrajectoryRefs []TrajectoryRef `json:"trajectory_refs,omitempty"`
+	JetStream      *JetStreamSnapshot `json:"jetstream,omitempty"` // NATS :8222/jsz snapshot
+	TraceMessages  map[string]TraceMessages `json:"trace_messages,omitempty"` // keyed by loop_id
+}
+
+// JetStreamSnapshot is the NATS JetStream monitoring endpoint's response
+// (`/jsz?streams=true&consumers=true&accounts=true`) captured as opaque
+// JSON. The full schema (streams[] with messages/bytes/consumer_count,
+// consumers[] with num_pending/num_ack_pending/delivered_seq, etc.) is
+// covered by upstream NATS docs; preserving it raw means a future NATS
+// release that adds fields lands in our bundle without code changes,
+// and detectors that care about a specific field decode just that one.
+//
+// The whole field is omitempty: when --nats-monitor is empty (offline
+// replay) or the endpoint is unreachable, the field is nil and the
+// rest of the bundle is still useful.
+type JetStreamSnapshot struct {
+	URL    string          `json:"url"`     // monitor endpoint hit (e.g. http://localhost:8222/jsz?...)
+	Status int             `json:"status"`  // HTTP status — non-200 still recorded for diagnosis
+	JSZ    json.RawMessage `json:"jsz"`     // raw response body
+}
+
+// TraceMessages is the per-loop dump of /message-logger/trace/{traceID}.
+// Captured for every active loop in Bundle.Loops whose
+// LoopEntity.Metadata carries a "trace_id" key (semstreams beta.43+).
+// Older loops without the field are silently skipped; the bundle records
+// the omission via Bundle.Diagnoses if a detector emits one.
+//
+// Body is preserved opaque (json.RawMessage) for the same forward-
+// compat reason as KVEntry.Value and JetStreamSnapshot.JSZ.
+type TraceMessages struct {
+	TraceID string          `json:"trace_id"`
+	Body    json.RawMessage `json:"body"` // /message-logger/trace/{traceID} response
 }
 
 // KVEntry is one row from a NATS KV bucket. Preserves the metadata

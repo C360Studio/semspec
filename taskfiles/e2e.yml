@@ -598,14 +598,29 @@ tasks:
         # Caught 2026-05-03 v6 where RepeatToolFailure + GraphToolFailure
         # both fired correctly, the sidecar exited, and we lost the rest
         # of the live state while Playwright kept testing.
+        #
+        # --nats-monitor points at the UI E2E stack's NATS HTTP port
+        # (8223 = 8222 + 1 to dodge the backend E2E stack's port). The
+        # sidecar scrapes /jsz?streams=true&consumers=true into every
+        # bundle so wedge investigations can see stream depth /
+        # consumer lag without a separate manual probe.
         ./bin/semspec watch --live \
           --http http://localhost:3000 \
           --nats nats://localhost:4223 \
+          --nats-monitor http://localhost:8223 \
           --max-duration 60m \
           --snapshot-interval 60s \
           --out-dir {{.OUT_DIR}} > {{.OUT_DIR}}/watch.log 2>&1 &
         echo $! > {{.OUT_DIR}}/watch.pid
         echo "[WATCH:LLM] Watch sidecar PID $(cat {{.OUT_DIR}}/watch.pid) → {{.OUT_DIR}}/watch.log"
+        # Persist semspec docker logs to disk so they survive `down -v`
+        # at cleanup. Without this every failed-run forensics loses the
+        # single most valuable signal — the actual semspec slog output.
+        # `docker logs --follow` blocks until the container goes away;
+        # we background it and clean up the PID in the cleanup defer.
+        docker logs -f ui-semspec-1 > {{.OUT_DIR}}/semspec.log 2>&1 &
+        echo $! > {{.OUT_DIR}}/semspec-log.pid
+        echo "[WATCH:LLM] semspec log tail PID $(cat {{.OUT_DIR}}/semspec-log.pid) → {{.OUT_DIR}}/semspec.log"
       - defer: |
           if [ -f {{.OUT_DIR}}/watch.pid ]; then
             PID=$(cat {{.OUT_DIR}}/watch.pid)
@@ -622,6 +637,15 @@ tasks:
             done
             kill -9 "$PID" 2>/dev/null || true
             rm -f {{.OUT_DIR}}/watch.pid
+          fi
+          # Stop the docker-logs tail. SIGTERM is enough — `docker logs
+          # -f` exits cleanly. The container itself is torn down by
+          # ui:cleanup:llm; if the kill races that, the file is already
+          # written so we don't care about a final partial line.
+          if [ -f {{.OUT_DIR}}/semspec-log.pid ]; then
+            PID=$(cat {{.OUT_DIR}}/semspec-log.pid)
+            kill "$PID" 2>/dev/null || true
+            rm -f {{.OUT_DIR}}/semspec-log.pid
           fi
       - echo "[WATCH:LLM] Running @{{.TIER}} Playwright tests..."
       - cmd: |

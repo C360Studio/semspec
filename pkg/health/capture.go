@@ -38,6 +38,14 @@ type CaptureConfig struct {
 	// in tests and on hosts where Ollama isn't installed (so we avoid
 	// the error footprint when LastError would always be "not found").
 	SkipOllama bool
+
+	// NATSMonitorURL points at the NATS HTTP monitoring endpoint
+	// (typically http://localhost:8222 in dev, :8223 for the UI E2E
+	// stack). When empty, Bundle.JetStream stays nil; non-empty
+	// triggers a /jsz?streams=true&consumers=true&accounts=true fetch
+	// during Capture. Doesn't replace the trajectory NATS dial — that
+	// uses native protocol on :4222; this is the JSON HTTP scrape.
+	NATSMonitorURL string
 }
 
 // Capture-time defaults.

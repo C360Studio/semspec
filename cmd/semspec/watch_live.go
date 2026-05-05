@@ -19,6 +19,7 @@ import (
 type liveConfig struct {
 	HTTPURL          string
 	NATSURL          string
+	NATSMonitorURL   string // HTTP /jsz endpoint for JetStream snapshots; empty disables
 	Interval         time.Duration
 	BailOn           string // "" / "warning" / "critical"
 	SkipOllama       bool
@@ -149,10 +150,11 @@ func runLiveTick(
 	seenErrorSources map[string]struct{},
 ) (bool, error) {
 	captureCfg := health.CaptureConfig{
-		HTTPBaseURL:  cfg.HTTPURL,
-		MessageLimit: liveMessageLimit,
-		CapturedBy:   "semspec-watch-live",
-		SkipOllama:   cfg.SkipOllama,
+		HTTPBaseURL:    cfg.HTTPURL,
+		MessageLimit:   liveMessageLimit,
+		CapturedBy:     "semspec-watch-live",
+		SkipOllama:     cfg.SkipOllama,
+		NATSMonitorURL: cfg.NATSMonitorURL,
 	}
 	tickCtx, cancel := context.WithTimeout(ctx, watchHTTPTimeout)
 	defer cancel()
@@ -288,10 +290,11 @@ func bailSuffix(bailOn string) string {
 // that without coupling the bundle layer to the test harness.
 func writeLiveSnapshot(ctx context.Context, cfg liveConfig, httpClient *http.Client, nats health.TrajectoryClient) error {
 	captureCfg := health.CaptureConfig{
-		HTTPBaseURL:  cfg.HTTPURL,
-		MessageLimit: liveMessageLimit,
-		CapturedBy:   "semspec-watch-snapshot",
-		SkipOllama:   cfg.SkipOllama,
+		HTTPBaseURL:    cfg.HTTPURL,
+		MessageLimit:   liveMessageLimit,
+		CapturedBy:     "semspec-watch-snapshot",
+		SkipOllama:     cfg.SkipOllama,
+		NATSMonitorURL: cfg.NATSMonitorURL,
 	}
 	tickCtx, cancel := context.WithTimeout(ctx, watchHTTPTimeout)
 	defer cancel()

@@ -112,6 +112,37 @@ func Capture(ctx context.Context, cfg CaptureConfig, http *http.Client, nats Tra
 		}
 	}
 
+	// JetStream monitoring snapshot — opt-in via cfg.NATSMonitorURL.
+	// The /jsz scrape is independent of the trajectory NATS dial (which
+	// uses native protocol on :4222); this is HTTP-only and lives on
+	// the operator's monitor port (typically :8222, or :8223 in our
+	// UI E2E stack). Failures land as CaptureErrors so the bundle
+	// records the intent rather than silently dropping.
+	if cfg.NATSMonitorURL != "" {
+		jsSnap, err := FetchJetStream(ctx, http, cfg.NATSMonitorURL)
+		if err != nil {
+			collector.add(&CaptureError{Source: "jetstream", Err: err})
+		} else {
+			bundle.JetStream = jsSnap
+		}
+	}
+
+	// Per-loop trace dumps — derive trace_id from each loop's
+	// LoopEntity.Metadata (semstreams beta.43+ stamps it via
+	// stampTraceIDFromCtx) and pull /message-logger/trace/{traceID}.
+	// Older loops without the field are silently skipped; per-trace
+	// HTTP failures land as CaptureErrors via the collector.
+	//
+	// Captured AFTER trajectories so the bundle has the loop ↔ trace
+	// chain end-to-end: loop_id → trajectory steps → trace_id → all
+	// NATS messages on that trace. The two-step lookup that wedge
+	// investigations used to require ("find the dispatching message
+	// for this loop, extract its trace_id, then query") collapses
+	// into reading bundle.TraceMessages[loop_id].
+	if traceMsgs := FetchTraceMessages(ctx, http, cfg.HTTPBaseURL, bundle.Loops, collector); len(traceMsgs) > 0 {
+		bundle.TraceMessages = traceMsgs
+	}
+
 	// v1 default redactions run unconditionally — the env-var/auth-header
 	// scrub is cheap and the failure mode (a leaked key in a shared
 	// bundle) is unrecoverable. Heavier redactions (prompt content) are

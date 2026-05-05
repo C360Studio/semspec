@@ -26,6 +26,7 @@ func watchCmd() *cobra.Command {
 		live             bool
 		httpURL          string
 		natsURL          string
+		natsMonitorURL   string
 		limit            int
 		skipOllama       bool
 		interval         time.Duration
@@ -56,6 +57,7 @@ schema and the detector library that consumes it.`,
 				return runWatchLive(cmd.Context(), liveConfig{
 					HTTPURL:          httpURL,
 					NATSURL:          natsURL,
+					NATSMonitorURL:   natsMonitorURL,
 					Interval:         interval,
 					BailOn:           bailOn,
 					SkipOllama:       skipOllama,
@@ -65,11 +67,12 @@ schema and the detector library that consumes it.`,
 				})
 			}
 			return runWatchBundle(cmd.Context(), watchBundleConfig{
-				BundlePath: bundlePath,
-				HTTPURL:    httpURL,
-				NATSURL:    natsURL,
-				Limit:      limit,
-				SkipOllama: skipOllama,
+				BundlePath:     bundlePath,
+				HTTPURL:        httpURL,
+				NATSURL:        natsURL,
+				NATSMonitorURL: natsMonitorURL,
+				Limit:          limit,
+				SkipOllama:     skipOllama,
 			})
 		},
 	}
@@ -77,6 +80,7 @@ schema and the detector library that consumes it.`,
 	cmd.Flags().BoolVar(&live, "live", false, "Stream detector alerts on a polling loop until Ctrl-C / --bail-on")
 	cmd.Flags().StringVar(&httpURL, "http", "http://localhost:8080", "Semspec HTTP gateway URL")
 	cmd.Flags().StringVar(&natsURL, "nats", "nats://localhost:4222", "NATS URL for trajectory queries (empty to skip trajectories)")
+	cmd.Flags().StringVar(&natsMonitorURL, "nats-monitor", "http://localhost:8222", "NATS HTTP monitoring endpoint for /jsz scrape (empty to skip JetStream snapshot)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "Message-logger entry cap for --bundle (0 = library default)")
 	cmd.Flags().BoolVar(&skipOllama, "skip-ollama", false, "Skip the ollama --version / ollama ps probe")
 	cmd.Flags().DurationVar(&interval, "interval", 0, "Live mode poll cadence (default 10s)")
@@ -90,11 +94,12 @@ schema and the detector library that consumes it.`,
 // watchBundleConfig is the parameter object for runWatchBundle. Mirrors
 // the cobra flags so the runner is testable without parsing argv.
 type watchBundleConfig struct {
-	BundlePath string
-	HTTPURL    string
-	NATSURL    string
-	Limit      int
-	SkipOllama bool
+	BundlePath     string
+	HTTPURL        string
+	NATSURL        string
+	NATSMonitorURL string
+	Limit          int
+	SkipOllama     bool
 }
 
 // runWatchBundle is the work-loop for `semspec watch --bundle`. Connects
@@ -111,10 +116,11 @@ func runWatchBundle(ctx context.Context, cfg watchBundleConfig) error {
 	}
 
 	captureCfg := health.CaptureConfig{
-		HTTPBaseURL:  cfg.HTTPURL,
-		MessageLimit: cfg.Limit,
-		CapturedBy:   "semspec-v" + Version,
-		SkipOllama:   cfg.SkipOllama,
+		HTTPBaseURL:    cfg.HTTPURL,
+		MessageLimit:   cfg.Limit,
+		CapturedBy:     "semspec-v" + Version,
+		SkipOllama:     cfg.SkipOllama,
+		NATSMonitorURL: cfg.NATSMonitorURL,
 	}
 	httpClient := &http.Client{Timeout: watchHTTPTimeout}
 
@@ -165,13 +171,18 @@ func dialNATSForBundle(ctx context.Context, natsURL string) (health.TrajectoryCl
 // future `--bundle -` mode (stream to stdout) stays clean.
 func summarizeBundle(path string, result *health.CaptureResult) {
 	b := result.Bundle
+	jsTag := "off"
+	if b.JetStream != nil {
+		jsTag = fmt.Sprintf("%d", b.JetStream.Status)
+	}
 	fmt.Fprintf(os.Stderr,
-		"wrote %s\n  format=%s captured_at=%s captured_by=%s\n  plans=%d loops=%d messages=%d trajectories=%d errors=%d\n",
+		"wrote %s\n  format=%s captured_at=%s captured_by=%s\n  plans=%d loops=%d messages=%d trajectories=%d trace_dumps=%d jsz=%s errors=%d\n",
 		path,
 		b.Bundle.Format,
 		b.Bundle.CapturedAt.Format(time.RFC3339),
 		b.Bundle.CapturedBy,
 		len(b.Plans), len(b.Loops), len(b.Messages), len(b.TrajectoryRefs),
+		len(b.TraceMessages), jsTag,
 		len(result.Errors),
 	)
 	for _, e := range result.Errors {
