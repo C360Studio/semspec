@@ -10,8 +10,10 @@
     },
     {
       "type": "docs",
-      "paths": ["api/", "README.md", "docs/"],
-      "watch": false
+      "paths": [
+        "/root/.semsource/repos/github-com-opengeospatial-ogcapi-connected-systems"
+      ],
+      "watch": true
     }
   ]
 }

@@ -53,6 +53,13 @@
         reverse_proxy semspec:8080
     }
 
+    # Source manifest aggregator (workspace semsource publishes per-namespace
+    # snapshots over NATS; the workspace instance's HTTP endpoint returns the
+    # aggregated view across all sources sharing the bus).
+    handle /source-manifest/* {
+        reverse_proxy semsource:8080
+    }
+
     # Health / readiness
     handle /health {
         reverse_proxy semspec:8080

@@ -32,7 +32,11 @@ const CASCADE_TIMEOUT = Number(process.env.CASCADE_TIMEOUT) || 900_000;
 const EXECUTION_TIMEOUT = Number(process.env.EXECUTION_TIMEOUT) || 3_600_000;
 const POLL_INTERVAL = 5_000;
 
-const GRAPH_MANIFEST_URL = 'http://localhost:3000/graph-gateway/manifest';
+// Aggregated source-manifest summary across every semsource sharing the bus.
+// In headless mode each semsource publishes its namespace snapshot over NATS;
+// the workspace semsource's HTTP endpoint returns the merged view (proxied by
+// caddy under /source-manifest/). Returns {phase, total_entities, domains, ...}.
+const GRAPH_MANIFEST_URL = 'http://localhost:3000/source-manifest/summary';
 const TERMINAL_FAILURE_STAGES = ['rejected', 'failed'];
 
 interface ManifestResponse {

@@ -10,14 +10,16 @@
     },
     {
       "type": "ast",
-      "path": "./",
+      "path": "/root/.semsource/repos/github-com-opensensorhub-osh-core/sensorhub-core",
       "language": "java",
-      "watch": false
+      "watch": true
     },
     {
       "type": "docs",
-      "paths": ["README.md", "docs/", "sensorhub-core/src/main/java/org/sensorhub/api/"],
-      "watch": false
+      "paths": [
+        "/root/.semsource/repos/github-com-opensensorhub-osh-core"
+      ],
+      "watch": true
     }
   ]
 }

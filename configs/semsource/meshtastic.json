@@ -10,8 +10,10 @@
     },
     {
       "type": "docs",
-      "paths": ["docs/", "README.md"],
-      "watch": false
+      "paths": [
+        "/root/.semsource/repos/github-com-meshtastic-meshtastic"
+      ],
+      "watch": true
     }
   ]
 }
