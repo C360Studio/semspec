@@ -78,12 +78,17 @@ func planSchema() map[string]any {
 			},
 			"scope": map[string]any{
 				"type":        "object",
-				"description": "File scope boundaries",
+				"description": "File scope boundaries. Use 'include' for files that already EXIST and may be modified; use 'create' for files this plan will create that don't exist yet. Putting nonexistent paths in 'include' will be rejected at submit_work — see scope.create description.",
 				"properties": map[string]any{
 					"include": map[string]any{
 						"type":        "array",
 						"items":       map[string]any{"type": "string"},
-						"description": "Files to include in the plan",
+						"description": "Workspace-relative paths to files that ALREADY EXIST on disk and may be modified by this plan. Every path here is checked against the project filesystem at submit time; nonexistent paths are rejected with a directive RETRY HINT telling you to move them to scope.create.",
+					},
+					"create": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Workspace-relative paths to files this plan will CREATE that do not yet exist on disk. Use this for new pom.xml, new source files, new test files, etc. Reviewers do NOT flag scope.create entries as hallucinated paths — that is the entire point of the field.",
 					},
 					"exclude": map[string]any{
 						"type":        "array",
