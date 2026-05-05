@@ -26,6 +26,13 @@ services:
       - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # bash tool default timeout (120s) is too aggressive for e2e fixtures
+      # that exercise full toolchain installs/compiles: mvn test cold-cache
+      # on the @hard Meshtastic fixture pulls Maven deps + compiles +
+      # runs tests. Confirmed 2026-05-05 hybrid @hard run: agent's
+      # `mvn test` calls hit the 120s deadline 3+ times per loop, RetryToolFailure
+      # critical detector fired. 600s covers cold-cache mvn/cargo/npm/go-build.
+      - SEMSPEC_BASH_TIMEOUT=600s
     ports:
       # Prometheus metrics scrape — exposed so host-side ops tooling and the
       # UI /status widgets can read semstreams_agentic_* counters. Offset to

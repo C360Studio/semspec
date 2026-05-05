@@ -64,6 +64,11 @@ services:
       - PROJECT_HOST_PATH=${PWD}/test/e2e/workspace
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
+      # bash tool default 120s is too aggressive for fixtures that exercise
+      # full toolchain installs/compiles (mvn test, cargo build, npm install).
+      # See ui/docker-compose.e2e.yml for the @hard mvn-test wedge that drove
+      # this; mirror the bump here for backend e2e symmetry.
+      - SEMSPEC_BASH_TIMEOUT=600s
       - GRAPH_SOURCES=[{"name":"workspace","url":"http://semsource:8080","type":"semsource"}]
       - SEMSOURCE_READINESS_BUDGET=60s
     volumes:
