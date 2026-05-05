@@ -16,6 +16,8 @@ import (
 
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 
+	"log/slog"
+
 	"github.com/c360studio/semspec/tools/bash"
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/httptool"
@@ -25,6 +27,7 @@ import (
 	"github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -82,11 +85,31 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 	if deps.Timeouts.Bash > 0 {
 		bashOpts = append(bashOpts, bash.WithDefaultTimeout(deps.Timeouts.Bash))
 	}
+	// Wire SKG triple emission so bash path-miss recovery hints land
+	// in the graph (per ADR-035-style loud-recovery discipline).
+	// Falls back to counter+log only when natsClient is nil.
+	if deps.NATSClient != nil {
+		bashOpts = append(bashOpts, bash.WithTripleEmitter(&graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        slog.Default(),
+			ComponentName: "bash",
+		}))
+	}
 	bashExec := bash.NewExecutor(repoRoot, os.Getenv("SANDBOX_URL"), bashOpts...)
 	errs = append(errs, reg.RegisterTool("bash", bashExec))
 
 	// submit_work — terminal tool (StopLoop=true) shared across deliverable types.
-	termExec := terminal.NewExecutor()
+	// workDir wires the planner scope.include validator (see
+	// tools/terminal/scope_validator.go); SKG triple writer makes
+	// each fire queryable via tool.recovery.incident.
+	termExec := terminal.NewExecutor().WithWorkDir(repoRoot)
+	if deps.NATSClient != nil {
+		termExec = termExec.WithTripleEmitter(&graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        slog.Default(),
+			ComponentName: "submit_work",
+		})
+	}
 	errs = append(errs, reg.RegisterTool("submit_work", termExec))
 
 	// decompose_task — validates LLM-provided TaskDAG.

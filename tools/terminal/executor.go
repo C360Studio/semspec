@@ -18,11 +18,46 @@ import (
 )
 
 // Executor handles the submit_work terminal tool.
-type Executor struct{}
+//
+// workDir + tripleEmitter are optional. When both are set, the
+// planner scope.include vs scope.create structural check fires at
+// submit_work time: any path under args.scope.include that doesn't
+// exist on disk turns the submission into a directive RETRY HINT
+// telling the model to move it to scope.create. See scope_validator.go.
+type Executor struct {
+	workDir       string
+	tripleEmitter scopeValidatorTripleEmitter
+}
+
+// CallContext mirrors tools/bash.CallContext: per-call attribution
+// for SKG triples. Sourced from agentic.ToolCall.LoopID + Metadata
+// (role, model) at submit_work time.
+type CallContext struct {
+	CallID string // loop ID
+	Role   string // planner | reviewer | developer | ...
+	Model  string // endpoint name from the registry
+}
 
 // NewExecutor creates a terminal tool executor.
 func NewExecutor() *Executor {
 	return &Executor{}
+}
+
+// WithWorkDir sets the workspace root used by the planner scope
+// validator. When empty (default), the scope check is skipped.
+// Returns the receiver for chaining.
+func (e *Executor) WithWorkDir(dir string) *Executor {
+	e.workDir = dir
+	return e
+}
+
+// WithTripleEmitter installs a triple writer so per-fire SKG triples
+// get emitted alongside the WARN log + Prom counter increment when
+// the planner scope check fires. Returns the receiver for chaining.
+// Nil-safe.
+func (e *Executor) WithTripleEmitter(tw scopeValidatorTripleEmitter) *Executor {
+	e.tripleEmitter = tw
+	return e
 }
 
 // ListTools returns the terminal tool definitions.
@@ -43,10 +78,10 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 }
 
 // Execute handles terminal tool calls.
-func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	switch call.Name {
 	case "submit_work":
-		return e.submitWork(call)
+		return e.submitWork(ctx, call)
 	default:
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -62,7 +97,13 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 // When deliverable_type metadata is present, arguments are validated against the
 // role-specific schema. Validation errors return StopLoop=false so the LLM can
 // fix and retry within the same loop iteration.
-func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error) {
+//
+// For deliverable_type="plan" with workDir configured, an additional
+// structural check runs after the schema validator: every path under
+// scope.include must exist on disk. Misses return a directive
+// RETRY HINT (see scope_validator.go) — the agent reads this on its
+// next turn and either moves the path to scope.create or removes it.
+func (e *Executor) submitWork(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	deliverableType, _ := call.Metadata["deliverable_type"].(string)
 
 	// Arguments ARE the deliverable — no result wrapper.
@@ -92,6 +133,28 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		}
 	}
 
+	// Planner scope.include vs scope.create structural check —
+	// recurring planner bug captured in
+	// project_planner_dashed_paths_cascade_2026_05_03.md (Bug #5).
+	// Reproduced 2026-05-05 on gemini-pro: planner submitted
+	// scope.include with create-paths, plan-reviewer rejected 3x
+	// with the same complaint, escalated. This check rejects at the
+	// planner boundary so the model gets a directive hint *before*
+	// reviewer cycles burn tokens. Skipped when workDir is unset.
+	if deliverableType == "plan" {
+		cc := CallContext{
+			CallID: call.LoopID,
+			Role:   stringFromMetadata(call.Metadata, "role"),
+			Model:  stringFromMetadata(call.Metadata, "model"),
+		}
+		if hint := validatePlanScope(ctx, e.workDir, e.tripleEmitter, cc, args); hint != "" {
+			return agentic.ToolResult{
+				CallID: call.ID,
+				Error:  hint,
+			}, nil
+		}
+	}
+
 	data, _ := json.Marshal(args)
 	slog.Info("submit_work accepted — returning StopLoop=true",
 		"call_id", call.ID,
@@ -102,6 +165,16 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		Content:  string(data),
 		StopLoop: true,
 	}, nil
+}
+
+// stringFromMetadata fetches a string from the tool-call metadata,
+// returning "" on absence or wrong type.
+func stringFromMetadata(md map[string]any, key string) string {
+	if md == nil {
+		return ""
+	}
+	v, _ := md[key].(string)
+	return v
 }
 
 // deliverableKeys returns a diagnostic string showing each key and its value type.

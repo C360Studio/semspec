@@ -39,6 +39,13 @@ func WithDefaultTimeout(d time.Duration) Option {
 	return func(e *Executor) { e.timeout = d }
 }
 
+// WithTripleEmitter installs a triple writer on the path-miss
+// detector so per-fire SKG triples get emitted alongside the WARN
+// log + Prom counter increment. Nil-safe.
+func WithTripleEmitter(tw tripleEmitter) Option {
+	return func(e *Executor) { e.detector = e.detector.WithTripleEmitter(tw) }
+}
+
 // NewExecutor creates a bash executor. If sandboxURL is non-empty, commands
 // are routed to the sandbox container.
 func NewExecutor(workDir, sandboxURL string, opts ...Option) *Executor {
@@ -95,20 +102,24 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	}
 
 	taskID := "default"
+	role, model := "", ""
 	if m := call.Metadata; m != nil {
 		if tid, ok := m["task_id"].(string); ok && tid != "" {
 			taskID = tid
 		}
+		role, _ = m["role"].(string)
+		model, _ = m["model"].(string)
 	}
+	cc := CallContext{CallID: call.LoopID, Role: role, Model: model}
 
 	if e.sandbox != nil {
-		return e.execSandbox(ctx, call.ID, command, taskID)
+		return e.execSandbox(ctx, call.ID, command, taskID, cc)
 	}
-	return e.execLocal(ctx, call.ID, command, taskID)
+	return e.execLocal(ctx, call.ID, command, taskID, cc)
 }
 
 // execSandbox routes the command to the sandbox container.
-func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID string) (agentic.ToolResult, error) {
+func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID string, cc CallContext) (agentic.ToolResult, error) {
 	result, err := e.sandbox.Exec(ctx, taskID, command, int(e.effectiveTimeout().Milliseconds()))
 	if err != nil {
 		return agentic.ToolResult{
@@ -134,7 +145,7 @@ func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID stri
 	}
 
 	if result.ExitCode != 0 {
-		if hint := e.detector.Inspect(taskID, command, result.ExitCode, result.Stderr); hint != "" {
+		if hint := e.detector.Inspect(ctx, cc, taskID, command, result.ExitCode, result.Stderr); hint != "" {
 			output = hint + output
 		}
 		return agentic.ToolResult{
@@ -143,7 +154,7 @@ func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID stri
 		}, nil
 	}
 
-	e.detector.Inspect(taskID, command, 0, "")
+	e.detector.Inspect(ctx, cc, taskID, command, 0, "")
 	return agentic.ToolResult{
 		CallID:  callID,
 		Content: output,
@@ -218,7 +229,7 @@ func filterEnv() []string {
 // execLocal runs the command locally via os/exec.
 // Environment variables containing secrets are filtered out to prevent
 // accidental leakage. For full isolation, use sandbox mode (SANDBOX_URL).
-func (e *Executor) execLocal(ctx context.Context, callID, command, taskID string) (agentic.ToolResult, error) {
+func (e *Executor) execLocal(ctx context.Context, callID, command, taskID string, cc CallContext) (agentic.ToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.effectiveTimeout())
 	defer cancel()
 
@@ -252,7 +263,7 @@ func (e *Executor) execLocal(ctx context.Context, callID, command, taskID string
 		if ctx.Err() == context.DeadlineExceeded {
 			output += "\n[command timed out]"
 		}
-		if hint := e.detector.Inspect(taskID, command, exitCode, stderr.String()); hint != "" {
+		if hint := e.detector.Inspect(ctx, cc, taskID, command, exitCode, stderr.String()); hint != "" {
 			output = hint + output
 		}
 		return agentic.ToolResult{
@@ -261,7 +272,7 @@ func (e *Executor) execLocal(ctx context.Context, callID, command, taskID string
 		}, nil
 	}
 
-	e.detector.Inspect(taskID, command, 0, "")
+	e.detector.Inspect(ctx, cc, taskID, command, 0, "")
 	return agentic.ToolResult{
 		CallID:  callID,
 		Content: output,

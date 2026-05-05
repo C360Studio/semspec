@@ -1,12 +1,15 @@
 package bash
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"regexp"
 	"sync"
 
 	"github.com/c360studio/semspec/vocabulary/observability"
+	"github.com/c360studio/semspec/workflow/recoveryhint"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -99,6 +102,14 @@ type pathMissEntry struct {
 	path    string
 }
 
+// tripleEmitter is the minimal interface PathMissDetector needs to
+// emit a tool.recovery.incident triple. graphutil.TripleWriter
+// satisfies it via WriteTriple. recoveryhint.Emit takes the same
+// shape, so we pass through directly.
+type tripleEmitter interface {
+	WriteTriple(ctx context.Context, entityID, predicate string, object any) error
+}
+
 // PathMissDetector tracks recent path-miss bash failures per task
 // and emits a RETRY HINT when the same (command, path) repeats in
 // immediate succession for a given task. Concurrency-safe.
@@ -107,9 +118,14 @@ type pathMissEntry struct {
 // successful command, a different path-miss, or a non-path-miss
 // failure all clear the per-task entry — only an exact (cmd, path)
 // repeat triggers the hint.
+//
+// When a tripleEmitter is configured (via WithTripleEmitter), each
+// fire also emits a tool.recovery.incident triple set to the SKG so
+// operators can query (role, model) recovery rates by tool. Nil-safe.
 type PathMissDetector struct {
 	mu      sync.Mutex
 	entries map[string]pathMissEntry
+	tw      tripleEmitter
 }
 
 // NewPathMissDetector returns a ready-to-use detector with empty state.
@@ -119,14 +135,43 @@ func NewPathMissDetector() *PathMissDetector {
 	}
 }
 
+// WithTripleEmitter installs a triple writer so per-fire SKG triples
+// get written alongside the Prom counter increment and WARN log.
+// When unset, fires still increment the counter and log at WARN, just
+// without the SKG attribution. Nil-safe; returns the receiver for
+// chaining.
+func (d *PathMissDetector) WithTripleEmitter(tw tripleEmitter) *PathMissDetector {
+	if d == nil {
+		return nil
+	}
+	d.tw = tw
+	return d
+}
+
+// CallContext carries the per-call attribution needed to emit a
+// faithful tool.recovery.incident triple set. CallID is required
+// when a triple emitter is configured; the rest are best-effort.
+// All fields are sourced from agentic.ToolCall (LoopID + Metadata)
+// at the executor boundary.
+type CallContext struct {
+	CallID string // loop ID making the call — required for triple emission
+	Role   string // planner | developer | reviewer | ...
+	Model  string // endpoint name from the registry
+}
+
 // Inspect classifies the current bash result and returns a RETRY HINT
 // to prepend to the agent-facing error if the same command + path-miss
 // has occurred in immediate succession for this taskID. Returns "" when
 // no hint should be injected. Always updates per-task state for the
 // next call.
 //
+// On a "suggested" fire, also emits a WARN log line and a
+// tool.recovery.incident triple (best-effort; nil emitter is a no-op).
+// Triple write failures are logged at WARN but do not propagate to the
+// agent — the counter already reflects the fire.
+//
 // Nil-safe: a nil receiver returns "" without side effects.
-func (d *PathMissDetector) Inspect(taskID, command string, exitCode int, stderr string) string {
+func (d *PathMissDetector) Inspect(ctx context.Context, cc CallContext, taskID, command string, exitCode int, stderr string) string {
 	if d == nil {
 		return ""
 	}
@@ -149,13 +194,54 @@ func (d *PathMissDetector) Inspect(taskID, command string, exitCode int, stderr 
 	if hadPrev && prev.command == command && prev.path == path {
 		d.mu.Unlock()
 		bashRecoveryCounter.WithLabelValues(observability.ToolRecoveryOutcomeSuggested).Inc()
+		slog.Warn("bash path-miss recovery hint injected",
+			"tool", "bash",
+			"task_id", taskID,
+			"path", path,
+			"command", command,
+			"role", cc.Role,
+			"model", cc.Model,
+			"call_id", cc.CallID,
+		)
+		d.emitIncident(ctx, cc, command, path, observability.ToolRecoveryOutcomeSuggested)
 		return formatPathMissHint(path)
 	}
 	d.entries[taskID] = pathMissEntry{command: command, path: path}
 	d.evictIfFull()
 	d.mu.Unlock()
 	bashRecoveryCounter.WithLabelValues(observability.ToolRecoveryOutcomeNotSuggested).Inc()
+	d.emitIncident(ctx, cc, command, path, observability.ToolRecoveryOutcomeNotSuggested)
 	return ""
+}
+
+// emitIncident writes a tool.recovery.incident triple set via
+// recoveryhint.Emit. Best-effort; nil emitter is a no-op. Emit
+// failures are logged at WARN only — the Prom counter and WARN log
+// in Inspect already reflect the fire.
+func (d *PathMissDetector) emitIncident(ctx context.Context, cc CallContext, command, path, outcome string) {
+	if d.tw == nil || cc.CallID == "" {
+		return
+	}
+	rc := recoveryhint.RecoveryContext{
+		CallID:   cc.CallID,
+		Role:     cc.Role,
+		Model:    cc.Model,
+		ToolName: "bash",
+	}
+	re := recoveryhint.RecoveryEvent{
+		Outcome:       outcome,
+		OriginalQuery: command,
+	}
+	if outcome == observability.ToolRecoveryOutcomeSuggested {
+		re.Candidates = []string{path}
+	}
+	if _, err := recoveryhint.Emit(ctx, d.tw, rc, re); err != nil {
+		slog.Warn("bash recovery triple emit failed",
+			"tool", "bash",
+			"call_id", cc.CallID,
+			"error", err,
+		)
+	}
 }
 
 // evictIfFull drops one arbitrary entry when the tracker exceeds the
