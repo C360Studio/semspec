@@ -1,5 +1,6 @@
 {
   "namespace": "meshtastic",
+  "mode": "headless",
   "sources": [
     {
       "type": "git",

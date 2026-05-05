@@ -1,5 +1,6 @@
 {
   "namespace": "ogc",
+  "mode": "headless",
   "sources": [
     {
       "type": "git",
