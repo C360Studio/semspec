@@ -283,10 +283,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 // controlled by config.MaxConcurrent.
 //
 // DAG gating logic:
-//  1. Load all requirements and scenarios for the plan from the workflow manager.
-//  2. A requirement is "complete" when every one of its scenarios is passing or skipped.
-//  3. A requirement is "ready" when all its DependsOn requirements are complete
-//     AND it has at least one non-terminal scenario.
+//  1. A requirement is "complete" when its EXECUTION_STATES entry has stage
+//     == "completed" (cached in c.completedReqs by req_completion_watcher,
+//     re-confirmed via reconcileCompletedRequirements at dispatch time).
+//  2. A requirement is "ready" when all its DependsOn requirements are complete
+//     AND the requirement itself is not yet complete.
 func (c *Component) dispatchRequirements(ctx context.Context, trigger *OrchestratorTrigger) error {
 	if c.tripleWriter == nil {
 		c.logger.Info("no KV store configured, skipping requirement dispatch", "plan_slug", trigger.PlanSlug)
