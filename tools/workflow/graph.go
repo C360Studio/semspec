@@ -250,6 +250,8 @@ func (e *GraphExecutor) graphSearch(ctx context.Context, call agentic.ToolCall) 
 		globalSearch(query: $query, level: $level, maxCommunities: $maxCommunities) {
 			answer
 			answer_model
+			degraded
+			degraded_reason
 			entity_digests { id type label relevance }
 			community_summaries {
 				communityId summary keywords level relevance
@@ -289,6 +291,21 @@ func formatSearchResult(data map[string]any) string {
 	}
 
 	var sb strings.Builder
+
+	// 0. Degradation banner — beta.45+ globalSearch returns degraded=true
+	// when the LLM answer-synthesizer fell back to the template path
+	// (LLM timeout or error). Surface it as the FIRST line so the
+	// reading agent treats the answer as advisory and considers
+	// re-running graph_search later or using bash to verify. Without
+	// this banner the LLM has no idea its rich answer was actually
+	// template-synthesized.
+	if degraded, _ := search["degraded"].(bool); degraded {
+		reason, _ := search["degraded_reason"].(string)
+		if reason == "" {
+			reason = "unspecified"
+		}
+		sb.WriteString(fmt.Sprintf("⚠ degraded answer (reason: %s) — LLM synthesis unavailable; answer is template-extracted from community summaries. Treat as advisory; consider retry or bash verification.\n\n", reason))
+	}
 
 	// 1. Answer — the synthesized knowledge summary
 	if answer, ok := search["answer"].(string); ok && answer != "" {
