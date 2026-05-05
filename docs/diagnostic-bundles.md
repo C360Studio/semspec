@@ -68,6 +68,11 @@ Artifacts land in `/tmp/semspec-watch-<provider>-<tier>-<ts>/`:
 - `snapshot-<UTC>.tar.gz` — periodic snapshots; **the latest one
   predates Playwright's afterAll cleanup, so it has the live plan
   the final bundle does not**
+- `semspec.log` — `docker logs -f ui-semspec-1` tailed throughout the
+  run. Survives the `down -v` at cleanup; this is the single most
+  valuable forensic signal when the bundle alone doesn't pin the
+  failure mode (e.g. an in-flight LLM call that never returned —
+  `model_requests_total` ticked but no completion log line).
 
 ## Reading the live stream
 
@@ -167,12 +172,75 @@ trajectories/<loop_id>.json       <- one file per captured loop
   "metrics":  { "loop_active_loops": 12, "model_requests_total": 38, ... },
   "ollama":   { "running": [...], "last_error": "" },
   "diagnoses": [...],           // detector output
-  "trajectory_refs": [...]      // pointers to trajectories/*.json files
+  "trajectory_refs": [...],     // pointers to trajectories/*.json files
+  "jetstream": { "url": "...", "status": 200, "jsz": {...} },
+                                // NATS /jsz scrape — present when --nats-monitor set
+  "trace_messages": {           // per-loop /message-logger/trace/{traceID} dumps
+    "<loop_id>": { "trace_id": "...", "body": {...} }
+  }
 }
 ```
 
 `format: "v1"` is load-bearing — schema evolves additively within v1;
 breaking changes mint v2 and ship a parallel writer for one cycle.
+
+### `jetstream` — NATS broker state at capture time
+
+Captured when `--nats-monitor <url>` is set. Hits the broker's HTTP
+monitoring endpoint at `/jsz?streams=true&consumers=true&accounts=true`
+and stores the response body opaque (`json.RawMessage`) so future NATS
+releases that add fields land without code changes.
+
+`status` records the HTTP response code; non-200 responses are
+preserved with body so misconfigurations (monitoring port disabled,
+wrong port) are diagnosable from the bundle alone — operators see
+`status: 404` and the body that came back rather than silent absence.
+
+The body decodes to standard NATS `JetStreamzVarz` shape. Useful one-
+liners against an extracted bundle:
+
+```bash
+# Stream depths + consumer counts
+jq '.jetstream.jsz.account_details[].stream_detail[]
+    | {name, messages, consumer_count}' bundle.json
+
+# Consumer lag (num_pending = messages waiting to deliver)
+jq '.jetstream.jsz.account_details[].stream_detail[].consumer_detail[]
+    | select(.num_pending > 0)
+    | {stream_name, name, num_pending}' bundle.json
+```
+
+When NATS shows up at 100% CPU during a run (we've seen this on @hard
+ingestion bursts), `consumer_detail[].num_pending` is the first place
+to check. A backed-up consumer means the producer is firing faster
+than the worker can process — a real signal, not just CPU noise.
+
+### `trace_messages` — per-loop NATS message history
+
+For each loop in `bundle.loops`, the bundler reads `metadata.trace_id`
+(stamped by semstreams beta.43+ via `stampTraceIDFromCtx`), pulls
+`/message-logger/trace/{traceID}`, and stores the result keyed by
+`loop_id`. Loops without a `trace_id` (older entries pre-beta.43,
+synthetic in-process dispatches) are silently skipped.
+
+This collapses the prior two-step lookup into a single map read.
+Wedge investigation flow before:
+
+1. Find the wedged loop in `bundle.loops`
+2. Search `bundle.messages` for the dispatching `agent.task.<role>.<task_id>` subject
+3. Extract `trace_id` from that message's headers
+4. Hit `/message-logger/trace/{traceID}` against the still-running stack
+
+After:
+
+```bash
+# What did this loop actually do?
+jq '.trace_messages["<wedged-loop-id>"].body.entries[] | .subject' bundle.json
+```
+
+Trace IDs are deduplicated — many loops share one trace (e.g. plan
+→ requirements → architecture all on the same trace), so the bundler
+only fetches each `/trace/{traceID}` once.
 
 ### Reading a bundle offline
 
@@ -235,6 +303,9 @@ post-cleanup zombies.
 --live                    Streaming mode; mutex with --bundle
 --http <url>              Gateway URL (default http://localhost:8080)
 --nats <url>              NATS URL (empty = skip trajectories)
+--nats-monitor <url>      NATS HTTP monitoring URL for /jsz scrape
+                          (default http://localhost:8222; empty
+                          disables JetStream snapshot section)
 --limit <n>               Per-subject message-logger entry cap
                           (default 5000 — large enough that subject
                           filter has matches even on graph-busy runs)
@@ -292,6 +363,26 @@ plan context.
 pointed at doesn't proxy `/metrics` (UI E2E used to have this gap;
 fixed 2026-04-30). Verify with
 `curl <http>/metrics | head -5`.
+
+**`jetstream` field missing or `status: 404`** — `--nats-monitor` URL
+is wrong or NATS is running without HTTP monitoring enabled. Default
+is `http://localhost:8222`; the UI E2E stack uses `:8223` (port +1 to
+dodge backend E2E). Verify with `curl <nats-monitor>/jsz | jq .now`.
+
+**`trace_messages` empty even though loops are present** — most likely
+running against pre-beta.43 semstreams where `LoopEntity.Metadata`
+didn't yet carry `trace_id`. Verify with
+`jq '.loops[].value | fromjson | .metadata.trace_id' bundle.json` —
+all `null` or absent confirms the version gap. Upgrade semstreams or
+fall back to grepping `bundle.messages` by hand for the dispatch
+subject.
+
+**`semspec.log` is huge** — `docker logs -f` writes everything
+unbuffered, including ingest-burst noise during the @hard fixture
+clone. A 50–100 MB log for a 30-min @hard run is normal. For grep
+discipline, the agent loop slog lines start with
+`level=INFO msg="agentic-loop ..."` or similar role-prefixed shapes;
+filter with `grep -E 'level=(WARN|ERROR)' semspec.log` first.
 
 ## Linked
 
