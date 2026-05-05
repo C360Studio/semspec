@@ -48,6 +48,7 @@ import (
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semspec/prompt"
 	"github.com/c360studio/semspec/semsource"
+	"github.com/c360studio/semspec/tools/bash"
 	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
@@ -426,6 +427,10 @@ func setupInfrastructure(
 	if err := workflowtools.RegisterMetrics(metricsRegistry); err != nil {
 		natsClient.Close(ctx)
 		return nil, nil, nil, fmt.Errorf("register graph_query recovery metrics: %w", err)
+	}
+	if err := bash.RegisterMetrics(metricsRegistry); err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("register bash recovery metrics: %w", err)
 	}
 
 	platform := extractPlatformMeta(cfg)

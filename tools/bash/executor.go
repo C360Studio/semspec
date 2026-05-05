@@ -27,6 +27,7 @@ type Executor struct {
 	sandboxURL string
 	sandbox    *sandbox.Client
 	timeout    time.Duration // 0 means use defaultTimeout
+	detector   *PathMissDetector
 }
 
 // Option configures a bash Executor.
@@ -44,6 +45,7 @@ func NewExecutor(workDir, sandboxURL string, opts ...Option) *Executor {
 	e := &Executor{
 		workDir:    workDir,
 		sandboxURL: sandboxURL,
+		detector:   NewPathMissDetector(),
 	}
 	for _, opt := range opts {
 		opt(e)
@@ -92,16 +94,17 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		}, nil
 	}
 
-	if e.sandbox != nil {
-		taskID := "default"
-		if m := call.Metadata; m != nil {
-			if tid, ok := m["task_id"].(string); ok && tid != "" {
-				taskID = tid
-			}
+	taskID := "default"
+	if m := call.Metadata; m != nil {
+		if tid, ok := m["task_id"].(string); ok && tid != "" {
+			taskID = tid
 		}
+	}
+
+	if e.sandbox != nil {
 		return e.execSandbox(ctx, call.ID, command, taskID)
 	}
-	return e.execLocal(ctx, call.ID, command)
+	return e.execLocal(ctx, call.ID, command, taskID)
 }
 
 // execSandbox routes the command to the sandbox container.
@@ -131,12 +134,16 @@ func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID stri
 	}
 
 	if result.ExitCode != 0 {
+		if hint := e.detector.Inspect(taskID, command, result.ExitCode, result.Stderr); hint != "" {
+			output = hint + output
+		}
 		return agentic.ToolResult{
 			CallID: callID,
 			Error:  fmt.Sprintf("exit code %d\n%s", result.ExitCode, output),
 		}, nil
 	}
 
+	e.detector.Inspect(taskID, command, 0, "")
 	return agentic.ToolResult{
 		CallID:  callID,
 		Content: output,
@@ -211,7 +218,7 @@ func filterEnv() []string {
 // execLocal runs the command locally via os/exec.
 // Environment variables containing secrets are filtered out to prevent
 // accidental leakage. For full isolation, use sandbox mode (SANDBOX_URL).
-func (e *Executor) execLocal(ctx context.Context, callID, command string) (agentic.ToolResult, error) {
+func (e *Executor) execLocal(ctx context.Context, callID, command, taskID string) (agentic.ToolResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, e.effectiveTimeout())
 	defer cancel()
 
@@ -245,12 +252,16 @@ func (e *Executor) execLocal(ctx context.Context, callID, command string) (agent
 		if ctx.Err() == context.DeadlineExceeded {
 			output += "\n[command timed out]"
 		}
+		if hint := e.detector.Inspect(taskID, command, exitCode, stderr.String()); hint != "" {
+			output = hint + output
+		}
 		return agentic.ToolResult{
 			CallID: callID,
 			Error:  fmt.Sprintf("exit code %d\n%s", exitCode, output),
 		}, nil
 	}
 
+	e.detector.Inspect(taskID, command, 0, "")
 	return agentic.ToolResult{
 		CallID:  callID,
 		Content: output,
