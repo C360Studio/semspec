@@ -121,6 +121,29 @@ func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jet
 	}
 
 	c.checkPlanConvergence(ctx, bucket, slug)
+
+	// Re-fire scenario-orchestrate when a requirement reaches completed
+	// stage so the orchestrator re-evaluates the DAG and dispatches any
+	// newly-unblocked downstream requirements. checkPlanConvergence above
+	// only handles ALL-terminal convergence; this handles intermediate
+	// completions in chain-dep plans (the @hard regression case).
+	//
+	// Only fires when the plan is still in implementing (post-convergence
+	// transitions skip this; we don't want to re-poke a plan that just
+	// advanced to reviewing_qa or complete).
+	if reqExec.Stage == "completed" {
+		c.mu.RLock()
+		ps := c.plans
+		c.mu.RUnlock()
+		if ps != nil {
+			if plan, ok := ps.get(slug); ok && plan.EffectiveStatus() == workflow.StatusImplementing {
+				if err := c.triggerScenarioOrchestrator(ctx, plan); err != nil {
+					c.logger.Warn("Failed to re-fire scenario orchestrator after requirement completion",
+						"slug", slug, "requirement_id", reqExec.RequirementID, "error", err)
+				}
+			}
+		}
+	}
 }
 
 // markPlanInfraCritical flips the plan's InfraHealth to critical after an

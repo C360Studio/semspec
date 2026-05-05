@@ -304,8 +304,28 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		return fmt.Errorf("plan %s has %d requirements but 0 scenarios — plan-manager must populate the trigger payload", trigger.PlanSlug, len(requirements))
 	}
 
-	// Apply DAG gating — only dispatch requirements whose upstream deps are satisfied.
-	toDispatch := filterReadyRequirements(requirements, allScenarios)
+	// Apply DAG gating — only dispatch requirements whose upstream deps are
+	// satisfied. Completion source-of-truth is EXECUTION_STATES.req.>.stage=="completed",
+	// surfaced through c.completedReqs (populated by req_completion_watcher).
+	//
+	// Reconcile from EXECUTION_STATES first to close a race: plan-manager
+	// re-fires scenario.orchestrate.<slug> immediately on a requirement
+	// completion KV update, and the consumer here may run BEFORE
+	// req_completion_watcher's independent goroutine has updated
+	// c.completedReqs for that same update. Without the reconcile, a
+	// just-completed requirement would look not-completed in cache, its
+	// dependents would stay blocked, and the chain would deadlock until the
+	// next completion. reconcileCompletedRequirements does a synchronous KV
+	// scan so it always reflects the latest committed state.
+	c.reconcileCompletedRequirements(ctx)
+
+	completedReqIDs := make(map[string]bool, len(requirements))
+	for _, r := range requirements {
+		if _, ok := c.completedReqs.Get(r.ID); ok {
+			completedReqIDs[r.ID] = true
+		}
+	}
+	toDispatch := filterReadyRequirements(requirements, completedReqIDs)
 
 	c.logger.Info("requirement DAG gating applied",
 		"plan_slug", trigger.PlanSlug,

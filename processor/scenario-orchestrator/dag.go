@@ -2,58 +2,52 @@ package scenarioorchestrator
 
 import "github.com/c360studio/semspec/workflow"
 
-// requirementComplete returns true when every scenario belonging to req is in a
-// terminal-passing state (passing or skipped).
+// requirementComplete returns true when the requirement has reached
+// terminal "completed" stage in EXECUTION_STATES.
 //
-// A requirement with no scenarios is considered incomplete because a
-// requirement without any verification scenarios cannot be definitively
-// satisfied.
-func requirementComplete(reqID string, reqScenarios map[string][]workflow.Scenario) bool {
-	ss, ok := reqScenarios[reqID]
-	if !ok || len(ss) == 0 {
-		return false
-	}
-	for _, s := range ss {
-		if s.Status != workflow.ScenarioStatusPassing && s.Status != workflow.ScenarioStatusSkipped {
-			return false
-		}
-	}
-	return true
+// Source of truth: req_completion_watcher caches each req.<slug>.<reqID>
+// entry from EXECUTION_STATES whose Stage == "completed". The caller passes
+// the resulting set of reqIDs through completedReqIDs.
+//
+// scenario.status is intentionally NOT consulted — historically it was the
+// gating field but nothing in processor/ writes it (verdict translation is
+// missing), which left chain-dep requirements starved. Using the same
+// signal plan-manager's checkPlanConvergence already uses keeps the two
+// gates consistent.
+func requirementComplete(reqID string, completedReqIDs map[string]bool) bool {
+	return completedReqIDs[reqID]
 }
 
 // filterReadyRequirements applies requirement-DAG gating and returns
 // requirements that are ready for execution:
 //
-//  1. All DependsOn requirements of that requirement are complete
-//     (every scenario passing or skipped).
-//  2. The requirement has at least one pending/dirty scenario (not already complete).
+//  1. The requirement is not yet complete (stage != "completed" in EXECUTION_STATES).
+//  2. All DependsOn requirements ARE complete.
 //
-// Requirements without DependsOn (root requirements) are always unblocked by
-// upstream; they are dispatched as long as they have pending scenarios.
+// Requirements without DependsOn are dispatched as long as they are not
+// already complete.
 //
 // Parameters:
 //   - requirements: all requirements for the plan.
-//   - allScenarios: all scenarios for the plan (used to compute completion).
+//   - completedReqIDs: set of reqIDs whose EXECUTION_STATES stage == "completed".
+//     Caller (scenario-orchestrator) builds this from its req_completion_watcher
+//     cache; tests pass it directly.
 //
 // Returns the subset of requirements that should be dispatched.
 func filterReadyRequirements(
 	requirements []workflow.Requirement,
-	allScenarios []workflow.Scenario,
+	completedReqIDs map[string]bool,
 ) []workflow.Requirement {
 	if len(requirements) == 0 {
 		return nil
 	}
 
-	// Group all scenarios by their RequirementID.
-	reqScenarios := make(map[string][]workflow.Scenario, len(requirements))
-	for _, s := range allScenarios {
-		reqScenarios[s.RequirementID] = append(reqScenarios[s.RequirementID], s)
-	}
-
-	// Pre-compute which requirements are fully complete.
+	// Pre-compute which requirements are fully complete. Equivalent to
+	// completedReqIDs filtered to the requirement IDs we know about, but the
+	// indirection keeps requirementComplete() a clear named predicate.
 	complete := make(map[string]bool, len(requirements))
 	for _, r := range requirements {
-		complete[r.ID] = requirementComplete(r.ID, reqScenarios)
+		complete[r.ID] = requirementComplete(r.ID, completedReqIDs)
 	}
 
 	// For each requirement, determine if all its upstream deps are complete
@@ -67,7 +61,7 @@ func filterReadyRequirements(
 		if !depsComplete(req, complete) {
 			continue
 		}
-		// Has pending scenarios and all deps satisfied.
+		// Has pending work and all deps satisfied.
 		ready = append(ready, req)
 	}
 
