@@ -559,6 +559,15 @@ tasks:
       RUN_TS:
         sh: date +%Y%m%d-%H%M%S
       OUT_DIR: "/tmp/semspec-watch-{{.PROVIDER}}-{{.TIER}}-{{.RUN_TS}}"
+    # Export E2E_FIXTURE to docker-compose env so semspec's /workspace mount
+    # ($E2E_FIXTURE:-go-project in ui/docker-compose.e2e.yml) matches what the
+    # epic overlay hardcodes for sandbox + workspace semsource. Without this
+    # export, semspec sees go-project under @hard while sandbox sees
+    # osh-driver-meshtastic — fixture mismatch the planner scope validator
+    # caught 2026-05-05 (false-positive rejections on pom.xml because semspec
+    # could not stat what sandbox had mounted).
+    env:
+      E2E_FIXTURE: "{{.FIXTURE_DIR}}"
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
