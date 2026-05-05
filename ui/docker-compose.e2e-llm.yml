@@ -31,6 +31,13 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    # 12-core host budget. Workspace semsource (watch:true, low-rate
+    # polling) needs little CPU steady-state but bursts during initial
+    # scan. Cap at 1 to prevent ingest from starving llama.cpp threads.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
 
   sandbox:
     build:

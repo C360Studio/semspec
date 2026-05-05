@@ -74,6 +74,13 @@ services:
       timeout: 10s
       retries: 60
       start_period: 60s
+    # 12-core host budget. Bursty at seed (git clone + AST), idle after
+    # phase=ready. Serial chain means only one external is bursting at
+    # a time, so 1 CPU per is fine for the steady-state agentic phase.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
 
   # External semsource: OGC Connected Systems spec (medium — second)
   semsource-ogc:
@@ -97,6 +104,10 @@ services:
       timeout: 10s
       retries: 60
       start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
 
   # External semsource: OpenSensorHub core (largest Java repo — start last)
   semsource-osh:

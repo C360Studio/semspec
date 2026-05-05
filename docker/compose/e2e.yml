@@ -38,6 +38,11 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
+    # 12-core host budget. Bursty at seed, idle after.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
 
   semspec:
     build:
@@ -144,13 +149,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    # 12-core host budget; 1 CPU is plenty for arctic-embed-s.
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
 
   # seminstruct-fast → query_classification (T3 fallback). 0.6B, no thinking.
+  #
+  # CPU budget: 1 CPU + MODEL_THREADS=1. Without these caps, llama.cpp's
+  # OpenMP grabs all 12 host cores and competes with the other 2 seminstruct
+  # containers + 4 semsources, oversubscribing ~4.5×. See seminstruct
+  # Dockerfile MODEL_THREADS docstring.
   seminstruct-fast:
     image: ghcr.io/c360studio/seminstruct:qwen3-0.6b
     environment:
       - MODEL_ALIAS=qwen3-0.6b
       - MODEL_REASONING=off
+      - MODEL_THREADS=1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -160,6 +176,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "1"
           memory: 2G
 
   # seminstruct-answer → answer_synthesis (graph_search → globalSearch).
@@ -168,11 +185,14 @@ services:
   # summaries. The 8B is reserved for community_summary, where MS GraphRAG
   # research showed sub-7B saves garbage to the persisted graph. Probed
   # 2026-05-05: ~25 tok/s warm, vs 8B's 0.83 tok/s on the same hardware.
+  #
+  # CPU budget: 2 CPUs + MODEL_THREADS=2. See seminstruct-fast comment.
   seminstruct-answer:
     image: ghcr.io/c360studio/seminstruct:qwen3-1.7b
     environment:
       - MODEL_ALIAS=qwen3-1.7b
       - MODEL_REASONING=off
+      - MODEL_THREADS=2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -182,6 +202,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "2"
           memory: 4G
 
   # seminstruct-summary → community_summary only (background batch,
@@ -189,11 +210,15 @@ services:
   # REASONING=off because auto/think eats the entire token budget before
   # producing content (verified 2026-05-05). Concurrent inference (-np 4
   # -cb baked into the image) so parallel batches don't queue head-of-line.
+  #
+  # CPU budget: 2 CPUs + MODEL_THREADS=2. graph-clustering's enable_llm:false
+  # means this container is dormant during runs.
   seminstruct-summary:
     image: ghcr.io/c360studio/seminstruct:qwen3-8b
     environment:
       - MODEL_ALIAS=qwen3-8b
       - MODEL_REASONING=off
+      - MODEL_THREADS=2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -203,6 +228,7 @@ services:
     deploy:
       resources:
         limits:
+          cpus: "2"
           memory: 8G
 
   # qa-runner handles integration and full QA tiers via nektos/act.
