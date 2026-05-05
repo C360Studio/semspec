@@ -670,7 +670,8 @@ tasks:
           echo "[WATCH:LLM] Capturing final bundle..."
           ./bin/semspec watch --bundle {{.OUT_DIR}}/bundle.tar.gz \
             --http http://localhost:3000 \
-            --nats nats://localhost:4223 || echo "[WATCH:LLM] bundle capture failed (continuing)"
+            --nats nats://localhost:4223 \
+            --nats-monitor http://localhost:8223 || echo "[WATCH:LLM] bundle capture failed (continuing)"
         ignore_error: true
       - cmd: |
           echo ""

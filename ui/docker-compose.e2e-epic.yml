@@ -33,36 +33,26 @@ services:
     volumes:
       - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace
 
-  # External semsource: OpenSensorHub core (Java)
-  semsource-osh:
-    image: ghcr.io/c360studio/semsource:latest
-    depends_on:
-      nats:
-        condition: service_healthy
-      semspec:
-        condition: service_healthy
-    environment:
-      - NATS_URL=nats://nats:4222
-      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
-    volumes:
-      - ../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
-    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
-    healthcheck:
-      # NOTE: 'version' only confirms the binary runs, not that indexing is complete.
-      # Entity-count readiness is asserted by the >100-entities preflight test
-      # (entities ingest into semspec's local graph via graph.ingest.entity).
-      test: ["CMD", "semsource", "version"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 60s  # OSH repo is large — cloning takes time
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 4G
+  # External semsources are CHAINED on healthy = "seeding done" — chain
+  # order is meshtastic (smallest) → ogc → osh (largest). Each one's
+  # initial seed burst runs in isolation: git clone + publish-all-entities
+  # cycles produce >1000 NATS publishes/sec for a few seconds, which
+  # historically pegged NATS at >100% CPU and starved the agentic LLM
+  # loops + seminstruct backends running on the same host. Serializing
+  # the bursts spreads the load over time without dropping any source.
+  #
+  # The healthcheck hits /source-manifest/status — semsource publishes
+  # phase="ready" only when all configured sources have completed their
+  # initial scan. Image already has wget; no extra layer needed.
+  # Generous retries (60×15s = 15min) cover OSH's clone + java AST
+  # indexing on slow links.
+  #
+  # Workspace semsource is intentionally NOT in the chain — it's small,
+  # watch:true (continuous low-rate polling), and starts in parallel
+  # with semspec. Adding it to the chain would delay agentic startup
+  # for no real benefit.
 
-  # External semsource: Meshtastic documentation
+  # External semsource: Meshtastic (smallest — start first)
   semsource-meshtastic:
     image: ghcr.io/c360studio/semsource:latest
     depends_on:
@@ -77,15 +67,15 @@ services:
       - ../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      # See semsource-osh note — version ≠ indexing complete; rely on the
-      # entity-count preflight assertion in the @hard test.
-      test: ["CMD", "semsource", "version"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      # phase="ready" → all sources in this semsource finished seeding.
+      # See chain comment above for the serialization rationale.
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
 
-  # External semsource: OGC Connected Systems spec
+  # External semsource: OGC Connected Systems spec (medium — second)
   semsource-ogc:
     image: ghcr.io/c360studio/semsource:latest
     depends_on:
@@ -93,6 +83,8 @@ services:
         condition: service_healthy
       semspec:
         condition: service_healthy
+      semsource-meshtastic:
+        condition: service_healthy  # wait for meshtastic seeding to complete
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
@@ -100,13 +92,39 @@ services:
       - ../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      # See semsource-osh note — version ≠ indexing complete; rely on the
-      # entity-count preflight assertion in the @hard test.
-      test: ["CMD", "semsource", "version"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+
+  # External semsource: OpenSensorHub core (largest Java repo — start last)
+  semsource-osh:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+      semspec:
+        condition: service_healthy
+      semsource-ogc:
+        condition: service_healthy  # wait for ogc seeding (and transitively meshtastic)
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 120s  # OSH clone + Java AST is the longest single seed
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
 
   # Allow extra time for OSH (large repo) ingestion to seed the local graph.
   semspec:
