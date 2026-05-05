@@ -144,6 +144,7 @@ services:
       - MODEL_ALIAS=qwen3-0.6b
       - MODEL_REASONING=off
       - MODEL_THREADS=1
+      - MODEL_PARALLEL=2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -154,7 +155,7 @@ services:
       resources:
         limits:
           cpus: "1"
-          memory: 2G
+          memory: 4G
 
   # seminstruct-answer serves answer_synthesis (graph_search → globalSearch).
   # 1.7B is sub-3s per ephemeral answer on Apple Silicon CPU; quality is
@@ -172,6 +173,7 @@ services:
       - MODEL_ALIAS=qwen3-1.7b
       - MODEL_REASONING=off
       - MODEL_THREADS=2
+      - MODEL_PARALLEL=2
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -182,7 +184,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 4G
+          memory: 6G
 
   # seminstruct-summary serves community_summary only (background batch,
   # persisted into graph). 8B is required per MS GraphRAG quality bar.
