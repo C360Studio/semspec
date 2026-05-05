@@ -211,14 +211,17 @@ services:
   # producing content (verified 2026-05-05). Concurrent inference (-np 4
   # -cb baked into the image) so parallel batches don't queue head-of-line.
   #
-  # CPU budget: 2 CPUs + MODEL_THREADS=2. graph-clustering's enable_llm:false
-  # means this container is dormant during runs.
+  # CPU budget: 2 CPUs + MODEL_THREADS=2 + MODEL_PARALLEL=1. graph-clustering's
+  # enable_llm:false means this container is dormant during runs. 8G memory
+  # cap OOM-killed (exit 137) on first @hard run with caps applied; bumped
+  # to 12G with 1 KV slot to fit GGUF + transient llama.cpp init spikes.
   seminstruct-summary:
     image: ghcr.io/c360studio/seminstruct:qwen3-8b
     environment:
       - MODEL_ALIAS=qwen3-8b
       - MODEL_REASONING=off
       - MODEL_THREADS=2
+      - MODEL_PARALLEL=1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -229,7 +232,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 8G
+          memory: 12G
 
   # qa-runner handles integration and full QA tiers via nektos/act.
   # Port offset +100 from dev (8091) → 8191 for E2E isolation.

@@ -192,14 +192,17 @@ services:
   #
   # CPU budget: 2 CPUs + MODEL_THREADS=2. graph-clustering's enable_llm:false
   # means this container is dormant during runs; the 2-CPU cap is for the
-  # eventual case when community summaries are turned back on. Bigger model
-  # would benefit from more threads but we're priced against host headroom.
+  # eventual case when community summaries are turned back on. MODEL_PARALLEL=1
+  # halves KV-cache footprint (8B × 16K ctx × 4 slots OOM-killed at 8G memory
+  # cap on first @hard run with caps; 12G + 1 slot keeps headroom for the
+  # GGUF + transient llama.cpp spikes during model load).
   seminstruct-summary:
     image: ghcr.io/c360studio/seminstruct:qwen3-8b
     environment:
       - MODEL_ALIAS=qwen3-8b
       - MODEL_REASONING=off
       - MODEL_THREADS=2
+      - MODEL_PARALLEL=1
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
       interval: 10s
@@ -210,7 +213,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 8G
+          memory: 12G
 
   # qa-runner handles integration and full QA tiers via nektos/act.
   # Port offset +200 from dev (8091) → 8291 for UI-E2E isolation.
