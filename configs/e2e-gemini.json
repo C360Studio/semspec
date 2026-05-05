@@ -112,8 +112,11 @@
         ]
       },
       "requirement_generation": {
-        "description": "Requirement decomposition",
+        "description": "Requirement decomposition — partitioning a plan into reqs with non-overlapping file ownership + chain-dep DAG. Decomposition reasoning closer to architecture than to writing; gemini-flash variance (2 vs 4 reqs across runs 2026-05-05) confirms mid-tier is too thin. Pro preferred, flash fallback.",
         "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
           "gemini-flash"
         ]
       },
