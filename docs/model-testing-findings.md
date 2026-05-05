@@ -297,6 +297,46 @@ this.
 **Test plan**: trim the persona to a tighter core, measure cycle-1 retry
 quality on qwen3-moe. Or A/B with a shorter feedback message.
 
+## Cardinality variance is a model-quality observation, not a test gate
+
+Empirical observation 2026-05-05 hybrid @hard, gemini-pro on
+`requirement_generation`:
+
+- Run A (commit 198e13c, planner scope-include validator landed,
+  pre-bash-timeout fix): plan reached `implementing` with **6
+  requirements** before wedging on a separate `mvn test` timeout.
+- Run B (commit dcdc5d1, post-bash-timeout fix, identical prompt):
+  plan reached `requirements_generated` cleanly with **1 requirement**.
+  Same provider, same model, same prompt, same workspace. No
+  intervening changes to req-gen prompt or schema.
+
+Both 1 and 6 are technically defensible decompositions of "implement
+a Meshtastic driver":
+
+- 1 req = "implement the entire driver" (treats it as one cohesive
+  unit of work).
+- 6 reqs = decomposed by component (driver class, connection,
+  data parser, etc.).
+
+The lesson is **don't pin a hard cardinality threshold in tests** —
+`expect(reqs).toBeGreaterThanOrEqual(N)` for any N>1 will be flaky
+across providers AND across runs of the same provider. We dropped
+the `≥3` gate to `≥1` in `ui/e2e/epic-meshtastic-llm.spec.ts` so the
+@hard scenario exercises the full pipeline (architecture → scenarios
+→ execution) even when the model collapses scope into a single
+requirement.
+
+If a downstream observation suggests "this model under-decomposes
+plans more than peer models," log it here as a model-quality finding
+— not by tightening test gates. Tightening test gates only catches
+the symptom on whichever side of the variance fires that day.
+
+Followup hypothesis (not yet acted on): more capable models tend
+toward finer-grained decomposition, which is intuitive but un-pinned
+empirically. If we collect `requirement_count` over many runs per
+model we can validate or refute it. Worth instrumenting before
+investing in any req-gen prompt strengthening.
+
 ## Adding a new entry
 
 When you take a model through a regression:
