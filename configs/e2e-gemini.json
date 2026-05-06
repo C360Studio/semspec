@@ -397,7 +397,8 @@
           ".suggestion",
           ".source_code",
           ".signature",
-          ".body"
+          ".body",
+          ".comment"
         ]
       }
     },
