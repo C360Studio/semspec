@@ -30,6 +30,16 @@
         "reasoning_effort": "low",
         "request_timeout": "120s"
       },
+      "gemini-flash-lite": {
+        "provider": "openai",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-flash-lite",
+        "api_key_env": "GEMINI_API_KEY",
+        "max_tokens": 1048576,
+        "supports_tools": false,
+        "stream": false,
+        "request_timeout": "60s"
+      },
       "gemini-pro": {
         "provider": "openai",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai",
@@ -220,11 +230,14 @@
         "timeout": "30s"
       },
       "community_summary": {
-        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
+        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. seminstruct-8B-on-CPU validated 2026-05-06 ADR-036 Phase 2 to be too slow at any scale beyond toy fixtures (>180s per community on 2 CPUs). gemini-flash-lite gives sub-second response and Google's quality bar exceeds the MS GraphRAG sub-7B floor anyway. Local seminstruct-summary kept as fallback for offline/quota scenarios.",
         "preferred": [
+          "gemini-flash-lite"
+        ],
+        "fallback": [
           "seminstruct-summary"
         ],
-        "timeout": "300s"
+        "timeout": "60s"
       },
       "question_answering": {
         "description": "Answerer-agent backend for ask_question routes \u2014 bigger reasoning model than workflow default.",
@@ -712,7 +725,7 @@
         },
         "detection_interval": "30s",
         "batch_size": 100,
-        "enable_llm": false,
+        "enable_llm": true,
         "min_community_size": 2,
         "max_iterations": 100,
         "enable_structural": true,
