@@ -575,7 +575,7 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 3600,
-        "model": "gemini-flash",
+        "model": "claude-sonnet",
         "decomposer_model": "gemini-pro",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
@@ -602,7 +602,7 @@
       "config": {
         "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
-        "model": "gemini-flash",
+        "model": "claude-sonnet",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "60s",
