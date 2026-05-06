@@ -399,6 +399,9 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 			"plan_slug":        plan.Slug,
 			"deliverable_type": "architecture",
 			"task_id":          "main", // architect reads repo root, no isolated worktree
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleArchitect),
+			"model": modelName,
 		},
 	}
 

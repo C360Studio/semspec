@@ -580,6 +580,9 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 			"reviewer_loop_id":  req.ReviewerLoopID,
 			"deliverable_type":  "lesson",
 			"trigger_source":    req.Source,
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleLessonDecomposer),
+			"model": modelName,
 		},
 	}
 

@@ -945,6 +945,11 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		Metadata: map[string]any{
 			"requirement_id": exec.RequirementID,
 			"plan_slug":      exec.Slug,
+			// role + model for SKG tool.recovery.incident partitioning.
+			// "task-decomposer" isn't in prompt.Role* yet; canonicalize
+			// when a second consumer needs it.
+			"role":  "task-decomposer",
+			"model": decomposerModel,
 		},
 	}
 
@@ -1325,6 +1330,9 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 			"plan_slug":        exec.Slug,
 			"task_id":          taskID,
 			"deliverable_type": "review",
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleScenarioReviewer),
+			"model": reviewerModel,
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {

@@ -369,6 +369,9 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 			"requirement_id":   req.RequirementID,
 			"deliverable_type": "scenarios",
 			"task_id":          "main", // scenario-gen reads repo root, no isolated worktree
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleScenarioGenerator),
+			"model": modelName,
 		},
 	}
 

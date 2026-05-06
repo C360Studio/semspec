@@ -611,6 +611,13 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 			"plan_slug":        slug,
 			"task_id":          "main", // planner runs against main workspace, not a worktree
 			"deliverable_type": "plan",
+			// role + model surface in tool.recovery.incident SKG triples
+			// (graph_query / bash / submit_work scope-validator) so
+			// per-fire telemetry partitions cleanly. Without these, the
+			// validator WARN log shows role="" model="" — caught
+			// 2026-05-05 hybrid @hard run.
+			"role":  string(prompt.RolePlanner),
+			"model": modelName,
 		},
 	}
 

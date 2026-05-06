@@ -531,6 +531,9 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 			"qa_level":         string(plan.EffectiveQALevel()),
 			"task_id":          "main",
 			"deliverable_type": "qa-review",
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleQA),
+			"model": modelName,
 		},
 	}
 

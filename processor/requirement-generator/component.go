@@ -348,6 +348,10 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 			"plan_slug":        trigger.Slug,
 			"deliverable_type": "requirements",
 			"task_id":          "main", // req-gen reads repo root, no isolated worktree
+			// role + model for SKG tool.recovery.incident partitioning
+			// (see planner/component.go dispatchPlanner for rationale).
+			"role":  string(prompt.RoleRequirementGenerator),
+			"model": modelName,
 		},
 	}
 

@@ -79,6 +79,18 @@ func walkAgentResponses(messages []Message) (byLoop map[string][]agentResponse, 
 		if loopID == "" {
 			continue
 		}
+		// Skip messages with no payload to decode — these are valid
+		// agent.response markers (e.g. transient state notifications)
+		// that the message-logger emits without a raw_data body. Counting
+		// them as malformed produced spurious SeverityUndetermined
+		// diagnoses on every run with even one absent payload, masking
+		// real decode failures. Caught 2026-05-05 hybrid @hard runs:
+		// detector ALERT fired with empty evidence_id on every single
+		// run because some agent.response entries had nil RawData
+		// (omitted on the wire via `omitempty`).
+		if len(m.RawData) == 0 || string(m.RawData) == "null" {
+			continue
+		}
 		var p agentResponsePayload
 		if err := json.Unmarshal(m.RawData, &p); err != nil {
 			malformedCount++

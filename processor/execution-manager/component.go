@@ -1387,6 +1387,9 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 			"plan_slug":        exec.Slug,
 			"task_id":          exec.TaskID,
 			"deliverable_type": "developer",
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleDeveloper),
+			"model": exec.Model,
 		},
 	}
 	c.publishTask(ctx, "agent.task.development", task)
@@ -1652,6 +1655,9 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 			"plan_slug":        exec.Slug,
 			"task_id":          exec.TaskID,
 			"deliverable_type": "review",
+			// role + model for SKG tool.recovery.incident partitioning.
+			"role":  string(prompt.RoleReviewer),
+			"model": reviewerModel,
 		},
 	}
 	c.publishTask(ctx, "agent.task.reviewer", task)

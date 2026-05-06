@@ -87,6 +87,41 @@ func TestWalkAgentResponses_SkipsNonAgentResponseAndMalformed(t *testing.T) {
 	}
 }
 
+// TestWalkAgentResponses_EmptyRawDataNotMalformed pins the 2026-05-06
+// fix: agent.response messages with nil/empty/literal-null RawData
+// (valid markers without a payload body) must not be counted as
+// malformed. Pre-fix every hybrid @hard run fired a spurious
+// SeverityUndetermined diagnosis with evidence_id="" because the
+// message-logger emits some response markers without raw_data on the
+// wire (omitempty), and json.Unmarshal(nil) errors with "unexpected
+// end of JSON input".
+func TestWalkAgentResponses_EmptyRawDataNotMalformed(t *testing.T) {
+	messages := []Message{
+		// nil raw_data — must not bump counter.
+		{Sequence: 1, Subject: "agent.response.loop-A:req:r1"},
+		// empty bytes — must not bump counter.
+		{Sequence: 2, Subject: "agent.response.loop-B:req:r1", RawData: json.RawMessage("")},
+		// literal "null" — must not bump counter.
+		{Sequence: 3, Subject: "agent.response.loop-C:req:r1", RawData: json.RawMessage("null")},
+		// real one for sanity.
+		{Sequence: 4, Subject: "agent.response.loop-D:req:r1",
+			RawData: json.RawMessage(`{"payload":{"finish_reason":"stop","message":{"content":"hi","tool_calls":[]}}}`),
+		},
+	}
+	byLoop, malformed := walkAgentResponses(messages)
+	if malformed != 0 {
+		t.Errorf("malformed = %d, want 0 (empty raw_data must be silent skip)", malformed)
+	}
+	if _, ok := byLoop["loop-D"]; !ok {
+		t.Errorf("loop-D should be present: %v", byLoop)
+	}
+	for _, absentLoop := range []string{"loop-A", "loop-B", "loop-C"} {
+		if _, ok := byLoop[absentLoop]; ok {
+			t.Errorf("%s had no payload — must not appear in byLoop: %v", absentLoop, byLoop)
+		}
+	}
+}
+
 func TestWalkAgentResponses_NullToolCallsTreatedAsEmpty(t *testing.T) {
 	// JSON null and [] both decode to a zero-len slice. HasToolCalls
 	// must treat them equivalently — pinning here so future struct

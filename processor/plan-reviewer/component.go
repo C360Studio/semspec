@@ -450,6 +450,10 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			"review_round":     int(round),
 			"task_id":          "main", // reviewer runs against main workspace, not a worktree
 			"deliverable_type": "review",
+			// role + model for SKG tool.recovery.incident partitioning
+			// (see planner/component.go dispatchPlanner for the full rationale).
+			"role":  string(prompt.RolePlanReviewer),
+			"model": modelName,
 		},
 	}
 
