@@ -527,7 +527,11 @@ tasks:
             CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           elif [ "{{.TIER}}" = "hard" ]; then
-            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=1800000 PLAYWRIGHT_TIMEOUT=1800000 \
+            # 90min cap for @hard execution-completes — Meshtastic driver epic
+            # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
+            # cap fired before sonnet could complete the dev pipeline (commit
+            # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
+            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
@@ -666,7 +670,11 @@ tasks:
             CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           elif [ "{{.TIER}}" = "hard" ]; then
-            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=1800000 PLAYWRIGHT_TIMEOUT=1800000 \
+            # 90min cap for @hard execution-completes — Meshtastic driver epic
+            # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
+            # cap fired before sonnet could complete the dev pipeline (commit
+            # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
+            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
