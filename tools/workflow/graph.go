@@ -276,10 +276,106 @@ func (e *GraphExecutor) graphSearch(ctx context.Context, call agentic.ToolCall) 
 		}, nil
 	}
 
+	// globalSearch in graph-query is the GraphRAG synthesis path —
+	// requires populated COMMUNITY_INDEX with LLM-enhanced summaries
+	// to surface entities. At workspace + @hard scale we observed
+	// (ADR-036 Phase 3-5, 2026-05-06) that globalSearch returns count=0
+	// even when COMMUNITY_INDEX has llm-enhanced communities — separate
+	// graph-query lookup-logic bug parked as upstream ask.
+	//
+	// Meanwhile the same query against the SKG via semanticSearch
+	// (vector similarity over entity embeddings) returns 5+ on-topic
+	// matches at 0.7+ similarity. Fall back to it when globalSearch
+	// has nothing — agents get useful results instead of "Found 0
+	// entities" and abandoning the graph mid-loop.
+	if globalSearchEmpty(result) {
+		if fallback, ok := e.semanticSearchFallback(ctx, query); ok {
+			return agentic.ToolResult{
+				CallID:  call.ID,
+				Content: fallback,
+			}, nil
+		}
+	}
+
 	return agentic.ToolResult{
 		CallID:  call.ID,
 		Content: formatSearchResult(result),
 	}, nil
+}
+
+// globalSearchEmpty reports whether a globalSearch response has no
+// surfaceable content — count==0, no entity_digests, no community
+// summaries. We trigger the semanticSearch fallback in this case.
+func globalSearchEmpty(data map[string]any) bool {
+	search, ok := data["globalSearch"].(map[string]any)
+	if !ok {
+		return true
+	}
+	if count, ok := search["count"].(float64); ok && count > 0 {
+		return false
+	}
+	if digests, ok := search["entity_digests"].([]any); ok && len(digests) > 0 {
+		return false
+	}
+	if comms, ok := search["community_summaries"].([]any); ok && len(comms) > 0 {
+		return false
+	}
+	return true
+}
+
+// semanticSearchFallback runs a vector-similarity search against the
+// SKG when globalSearch returns nothing. Returns formatted text and
+// true when at least one result lands above a small relevance floor;
+// returns "" and false when the fallback also produced nothing
+// (caller falls through to the original empty-result message).
+//
+// Limit hardcoded to 8 — enough for the agent to choose a few
+// good entities to graph_query into without flooding the response.
+func (e *GraphExecutor) semanticSearchFallback(ctx context.Context, query string) (string, bool) {
+	gql := `query($query: String!, $limit: Int) { semanticSearch(query: $query, limit: $limit) { id } }`
+	result, err := e.executeGraphQL(ctx, gql, map[string]any{"query": query, "limit": 8})
+	if err != nil {
+		return "", false
+	}
+	// graph-gateway's semanticSearch resolver returns a custom envelope
+	// `data.similaritySearch.{results: [{entity_id, similarity}], duration, embedder_type}`
+	// rather than the field-selected shape. Parse it directly.
+	envelope, ok := result["similaritySearch"].(map[string]any)
+	if !ok {
+		return "", false
+	}
+	rawResults, ok := envelope["results"].([]any)
+	if !ok || len(rawResults) == 0 {
+		return "", false
+	}
+	const minRelevance = 0.3 // empirical floor — below this, results are noise
+	type hit struct {
+		id  string
+		sim float64
+	}
+	var hits []hit
+	for _, r := range rawResults {
+		row, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		id, _ := row["entity_id"].(string)
+		sim, _ := row["similarity"].(float64)
+		if id == "" || sim < minRelevance {
+			continue
+		}
+		hits = append(hits, hit{id: id, sim: sim})
+	}
+	if len(hits) == 0 {
+		return "", false
+	}
+	var sb strings.Builder
+	sb.WriteString("Found via semantic similarity (no community-summary synthesis available):\n")
+	for _, h := range hits {
+		sb.WriteString(fmt.Sprintf("- %.3f  %s\n", h.sim, h.id))
+	}
+	sb.WriteString("\nUse graph_query entity(id: \"...\") to read full content of any of these.")
+	return sb.String(), true
 }
 
 // formatSearchResult formats a globalSearch response for LLM consumption.
