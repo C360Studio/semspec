@@ -380,10 +380,14 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
-	var maxTokens int
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
 	if c.modelRegistry != nil {
 		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
 			maxTokens = ep.MaxTokens
+			endpoint = ep
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
@@ -455,6 +459,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			"role":  string(prompt.RolePlanReviewer),
 			"model": modelName,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "review"),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-plan-reviewer")

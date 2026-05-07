@@ -552,10 +552,14 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
-	var maxTokens int
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
 	if c.modelRegistry != nil {
 		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
 			maxTokens = ep.MaxTokens
+			endpoint = ep
 		}
 	}
 	projectFileTree := c.fetchProjectFileTree(ctx)
@@ -619,6 +623,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 			"role":  string(prompt.RolePlanner),
 			"model": modelName,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "plan"),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-planner")

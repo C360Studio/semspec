@@ -540,6 +540,10 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 	}
 	provider := resolveProvider(c.modelRegistry, modelName)
 	maxTokens := resolveMaxTokens(c.modelRegistry, modelName)
+	var endpoint *ssmodel.EndpointConfig
+	if c.modelRegistry != nil {
+		endpoint = c.modelRegistry.GetEndpoint(modelName)
+	}
 
 	asmCtx := &prompt.AssemblyContext{
 		Role:                   prompt.RoleLessonDecomposer,
@@ -584,6 +588,7 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 			"role":  string(prompt.RoleLessonDecomposer),
 			"model": modelName,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "lesson"),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "lesson-decomposer")

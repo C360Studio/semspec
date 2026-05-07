@@ -468,10 +468,14 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 
 	// Resolve provider.
 	provider := c.resolveProvider()
-	var maxTokens int
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
 	if c.modelRegistry != nil {
 		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
 			maxTokens = ep.MaxTokens
+			endpoint = ep
 		}
 	}
 
@@ -535,6 +539,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 			"role":  string(prompt.RoleQA),
 			"model": modelName,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "qa-review"),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-qa-reviewer")

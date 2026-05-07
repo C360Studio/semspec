@@ -1371,6 +1371,11 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		userPrompt += "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
 	}
 
+	var endpoint *ssmodel.EndpointConfig
+	if c.modelRegistry != nil {
+		endpoint = c.modelRegistry.GetEndpoint(exec.Model)
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
@@ -1391,6 +1396,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 			"role":  string(prompt.RoleDeveloper),
 			"model": exec.Model,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "developer"),
 	}
 	c.publishTask(ctx, "agent.task.development", task)
 
@@ -1639,6 +1645,11 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		reviewerModel = exec.Model
 	}
 
+	var reviewerEndpoint *ssmodel.EndpointConfig
+	if c.modelRegistry != nil {
+		reviewerEndpoint = c.modelRegistry.GetEndpoint(reviewerModel)
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
@@ -1659,6 +1670,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 			"role":  string(prompt.RoleReviewer),
 			"model": reviewerModel,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(reviewerEndpoint, "review"),
 	}
 	c.publishTask(ctx, "agent.task.reviewer", task)
 

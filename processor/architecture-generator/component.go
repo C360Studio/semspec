@@ -341,10 +341,14 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
-	var maxTokens int
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
 	if c.modelRegistry != nil {
 		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
 			maxTokens = ep.MaxTokens
+			endpoint = ep
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
@@ -403,6 +407,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 			"role":  string(prompt.RoleArchitect),
 			"model": modelName,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "architecture"),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-architecture-generator")

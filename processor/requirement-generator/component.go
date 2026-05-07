@@ -285,10 +285,14 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
-	var maxTokens int
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
 	if c.modelRegistry != nil {
 		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
 			maxTokens = ep.MaxTokens
+			endpoint = ep
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
@@ -353,6 +357,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 			"role":  string(prompt.RoleRequirementGenerator),
 			"model": modelName,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "requirements"),
 	}
 
 	// Track the dispatch context for retry and completion lookup. Track is

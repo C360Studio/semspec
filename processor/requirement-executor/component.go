@@ -44,6 +44,7 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	ssmodel "github.com/c360studio/semstreams/model"
 	"github.com/c360studio/semstreams/natsclient"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 	"github.com/google/uuid"
@@ -97,14 +98,15 @@ func newSandboxClient(url string) sandboxClient {
 
 // Component orchestrates per-requirement execution.
 type Component struct {
-	config       Config
-	natsClient   *natsclient.Client
-	logger       *slog.Logger
-	platform     component.PlatformMeta
-	toolRegistry component.ToolRegistryReader
-	tripleWriter *graphutil.TripleWriter
-	sandbox      sandboxClient     // nil when sandbox is disabled
-	assembler    *prompt.Assembler // composes system prompts for requirement-level review
+	config        Config
+	natsClient    *natsclient.Client
+	logger        *slog.Logger
+	platform      component.PlatformMeta
+	toolRegistry  component.ToolRegistryReader
+	modelRegistry ssmodel.RegistryReader
+	tripleWriter  *graphutil.TripleWriter
+	sandbox       sandboxClient     // nil when sandbox is disabled
+	assembler     *prompt.Assembler // composes system prompts for requirement-level review
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -161,13 +163,14 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry.Register(prompt.GraphManifestFragment(workflowtools.RegistrySummaryFetchFn()))
 
 	c := &Component{
-		config:       cfg,
-		natsClient:   deps.NATSClient,
-		logger:       logger,
-		platform:     deps.Platform,
-		toolRegistry: deps.ToolRegistry,
-		sandbox:      newSandboxClient(cfg.SandboxURL),
-		assembler:    prompt.NewAssembler(registry),
+		config:        cfg,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
+		platform:      deps.Platform,
+		toolRegistry:  deps.ToolRegistry,
+		modelRegistry: deps.ModelRegistry,
+		sandbox:       newSandboxClient(cfg.SandboxURL),
+		assembler:     prompt.NewAssembler(registry),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -1313,6 +1316,11 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		reviewerModel = exec.Model
 	}
 
+	var reviewerEndpoint *ssmodel.EndpointConfig
+	if c.modelRegistry != nil {
+		reviewerEndpoint = c.modelRegistry.GetEndpoint(reviewerModel)
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
@@ -1334,6 +1342,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 			"role":  string(prompt.RoleScenarioReviewer),
 			"model": reviewerModel,
 		},
+		ResponseFormat: terminal.ResponseFormatForEndpoint(reviewerEndpoint, "review"),
 	}
 	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {
 		c.logger.Error("Failed to dispatch requirement reviewer", "error", err)
