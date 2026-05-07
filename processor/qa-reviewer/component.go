@@ -481,8 +481,9 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 
 	// Build assembly context.
 	asmCtx := &prompt.AssemblyContext{
-		Role:             prompt.RolePlanQAReviewer,
-		Provider:         provider,
+		Role:              prompt.RolePlanQAReviewer,
+		Provider:          provider,
+		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
 		Domain:           "software",
 		AvailableTools:   prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
 		SupportsTools:    true,

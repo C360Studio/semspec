@@ -1213,24 +1213,32 @@ func resolveProvider(modelStr string) prompt.Provider {
 }
 
 // buildAssemblyContext creates a prompt.AssemblyContext for the given role and execution state.
+// modelName is the model the agent will run on; it determines whether the
+// dispatch attaches a ResponseFormat (and therefore whether the prompt
+// assembler elides schema prose).
 // The ctx parameter is used for graph reads (error trends, lessons); context.WithoutCancel
 // is applied so these reads survive caller cancellation without inheriting the deadline.
-func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
-	var maxTokens int
+func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution, modelName string) *prompt.AssemblyContext {
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
 	if c.modelRegistry != nil {
-		if ep := c.modelRegistry.GetEndpoint(exec.Model); ep != nil {
+		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
 			maxTokens = ep.MaxTokens
+			endpoint = ep
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
-		Role:           role,
-		Provider:       resolveProvider(exec.Model),
-		Domain:         "software",
-		AvailableTools: prompt.FilterTools(c.availableToolNames(), role),
-		SupportsTools:  true,
-		MaxTokens:      maxTokens,
-		Persona:        prompt.GlobalPersonas().ForRole(role),
-		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
+		Role:              role,
+		Provider:          resolveProvider(modelName),
+		Domain:            "software",
+		AvailableTools:    prompt.FilterTools(c.availableToolNames(), role),
+		SupportsTools:     true,
+		MaxTokens:         maxTokens,
+		Persona:           prompt.GlobalPersonas().ForRole(role),
+		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
 	}
 
 	// Wire role-filtered project standards.
@@ -1362,8 +1370,10 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	exec.DeveloperTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
 
-	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec)
+	// Assemble system prompt via fragment pipeline. Pass exec.Model so the
+	// assembler sees HasResponseFormat for the endpoint the dispatch will
+	// hit; ResponseFormat is attached on the TaskMessage below.
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec, exec.Model)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	userPrompt := exec.Prompt
@@ -1618,8 +1628,16 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	exec.ReviewerTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
 
+	// Resolve the reviewer model up-front so buildAssemblyContext sees the
+	// endpoint the dispatch will actually hit (ResponseFormat support is
+	// per-endpoint and gates schema-prose elision in the assembled prompt).
+	reviewerModel := c.config.CodeReviewerModel
+	if reviewerModel == "" {
+		reviewerModel = exec.Model
+	}
+
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec, reviewerModel)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	// User prompt carries task context (what to review), not implementation
@@ -1638,11 +1656,6 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	if len(exec.FilesModified) > 0 {
 		reviewSubject.WriteString("\nFiles modified: ")
 		reviewSubject.WriteString(strings.Join(exec.FilesModified, ", "))
-	}
-
-	reviewerModel := c.config.CodeReviewerModel
-	if reviewerModel == "" {
-		reviewerModel = exec.Model
 	}
 
 	var reviewerEndpoint *ssmodel.EndpointConfig

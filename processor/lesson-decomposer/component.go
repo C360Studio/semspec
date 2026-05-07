@@ -548,6 +548,7 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 	asmCtx := &prompt.AssemblyContext{
 		Role:                   prompt.RoleLessonDecomposer,
 		Provider:               provider,
+		HasResponseFormat:      terminal.EndpointSupportsResponseFormat(endpoint),
 		Domain:                 "software",
 		AvailableTools:         prompt.FilterTools(c.availableToolNames(), prompt.RoleLessonDecomposer),
 		SupportsTools:          true,

@@ -298,6 +298,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 	asmCtx := &prompt.AssemblyContext{
 		Role:                 prompt.RoleRequirementGenerator,
 		Provider:             provider,
+		HasResponseFormat:    terminal.EndpointSupportsResponseFormat(endpoint),
 		Domain:               "software",
 		AvailableTools:       prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
 		SupportsTools:        true,

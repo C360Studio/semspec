@@ -1308,13 +1308,13 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
 	}
 
-	asmCtx := c.buildRequirementReviewContext(exec)
-	assembled := c.assembler.Assemble(asmCtx)
-
 	reviewerModel := c.config.ReviewerModel
 	if reviewerModel == "" {
 		reviewerModel = exec.Model
 	}
+
+	asmCtx := c.buildRequirementReviewContext(exec, reviewerModel)
+	assembled := c.assembler.Assemble(asmCtx)
 
 	var reviewerEndpoint *ssmodel.EndpointConfig
 	if c.modelRegistry != nil {
@@ -1716,7 +1716,14 @@ func (c *Component) isNodeDirty(exec *requirementExecution, nodeID string) bool 
 }
 
 // buildRequirementReviewContext assembles the prompt context for requirement-level review.
-func (c *Component) buildRequirementReviewContext(exec *requirementExecution) *prompt.AssemblyContext {
+// reviewerModel is the model the reviewer dispatch will hit; it determines
+// HasResponseFormat so the assembler can elide schema prose when the
+// endpoint honors response_format.
+func (c *Component) buildRequirementReviewContext(exec *requirementExecution, reviewerModel string) *prompt.AssemblyContext {
+	var endpoint *ssmodel.EndpointConfig
+	if c.modelRegistry != nil {
+		endpoint = c.modelRegistry.GetEndpoint(reviewerModel)
+	}
 	rc := &prompt.ScenarioReviewContext{
 		FilesModified: c.aggregateFiles(exec),
 		NodeResults:   c.buildNodeSummaries(exec),
@@ -1743,13 +1750,14 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution) *p
 
 	return &prompt.AssemblyContext{
 		Role:                  prompt.RoleScenarioReviewer,
-		Provider:              resolveProvider(exec.Model),
+		Provider:              resolveProvider(reviewerModel),
 		Domain:                "software",
 		AvailableTools:        prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
 		SupportsTools:         true,
 		ScenarioReviewContext: rc,
 		Persona:               prompt.GlobalPersonas().ForRole(prompt.RoleScenarioReviewer),
 		Vocabulary:            prompt.GlobalPersonas().Vocabulary(),
+		HasResponseFormat:     terminal.EndpointSupportsResponseFormat(endpoint),
 	}
 }
 

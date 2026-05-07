@@ -352,8 +352,9 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
-		Role:            prompt.RoleArchitect,
-		Provider:        provider,
+		Role:              prompt.RoleArchitect,
+		Provider:          provider,
+		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
 		Domain:          "software",
 		AvailableTools:  prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
 		SupportsTools:   true,

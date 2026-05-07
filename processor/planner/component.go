@@ -564,8 +564,9 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	}
 	projectFileTree := c.fetchProjectFileTree(ctx)
 	asmCtx := &prompt.AssemblyContext{
-		Role:           prompt.RolePlanner,
-		Provider:       provider,
+		Role:              prompt.RolePlanner,
+		Provider:          provider,
+		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
 		SupportsTools:  true,

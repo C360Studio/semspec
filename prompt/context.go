@@ -62,6 +62,19 @@ type AssemblyContext struct {
 	// When nil, hardcoded defaults are used.
 	Vocabulary *Vocabulary
 
+	// HasResponseFormat is true when the dispatch component has attached a
+	// JSON-schema ResponseFormat to the outgoing TaskMessage and the
+	// resolved endpoint is known to honor it (small-model providers per
+	// ADR-034). When true, output-format fragments elide the literal schema
+	// prose (intro line, JSON example, "Required: X (string)..." listing)
+	// since the model already receives the schema via response_format /
+	// submit_work.parameters. CRITICAL semantic guidance and behavioral
+	// directives ("Respond ONLY via submit_work") remain.
+	//
+	// Frontier providers (Anthropic, Gemini OpenAI-compat) leave this
+	// false, keeping the existing prose unchanged.
+	HasResponseFormat bool
+
 	// RequirementGenerator carries data for the requirement-generator user
 	// prompt. Set by the requirement-generator component before assembly;
 	// nil for any other role.

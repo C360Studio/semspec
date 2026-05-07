@@ -322,6 +322,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	asmCtx := &prompt.AssemblyContext{
 		Role:                    prompt.RoleScenarioGenerator,
 		Provider:                provider,
+		HasResponseFormat:       terminal.EndpointSupportsResponseFormat(endpoint),
 		Domain:                  "software",
 		AvailableTools:          prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
 		SupportsTools:           true,

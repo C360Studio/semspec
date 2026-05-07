@@ -10,6 +10,33 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
+// elideSchemaProse returns a Content function for output-format fragments
+// that drops the schema-prose prelude (intro line + JSON example + "Required:
+// X (string)..." listing) when the dispatch attaches a JSON-schema
+// ResponseFormat. The tail (CRITICAL semantic guidance + behavioral
+// directive) always renders since the schema can't capture rules like "field
+// X is required only when verdict is rejected" or "respond ONLY via the tool
+// call."
+//
+// When ctx.HasResponseFormat is false (frontier providers per ADR-034 —
+// Anthropic, Gemini OpenAI-compat — that don't honor response_format), the
+// concatenated prelude+tail renders, preserving today's prompt verbatim.
+func elideSchemaProse(prelude, tail string) func(*prompt.AssemblyContext) string {
+	return func(ctx *prompt.AssemblyContext) string {
+		if ctx.HasResponseFormat {
+			return tail
+		}
+		switch {
+		case prelude == "":
+			return tail
+		case tail == "":
+			return prelude
+		default:
+			return prelude + "\n\n" + tail
+		}
+	}
+}
+
 // formatChecklist renders project-specific quality gate checks for prompt injection.
 // Returns the formatted list, or empty string if no checks are available.
 func formatChecklist(checks []workflow.Check) string {
@@ -200,15 +227,17 @@ qa-reviewer judges coverage against this declared surface.`)
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `When your changes are complete, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your changes are complete, call the submit_work tool with these JSON fields:
 
 {
   "summary": "Implemented /goodbye endpoint with tests",
   "files_modified": ["api/app.py", "api/test_goodbye.py"]
 }
 
-Required: summary (string), files_modified (array of file paths you created or changed).
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+Required: summary (string), files_modified (array of file paths you created or changed).`,
+				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 
 		// =====================================================================
@@ -364,7 +393,8 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			ID:       "software.planner.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `When your plan is ready, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your plan is ready, call the submit_work tool with these JSON fields:
 
 {
   "goal": "Add /goodbye endpoint with JSON response and tests",
@@ -377,9 +407,8 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
   }
 }
 
-Required: goal (string), context (string). Optional: scope (object with include/create/exclude/do_not_touch arrays).
-
-CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
+Required: goal (string), context (string). Optional: scope (object with include/create/exclude/do_not_touch arrays).`,
+				`CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
 scope.create is for files the plan intends to CREATE that don't exist yet.
 Putting a not-yet-existing file in include will be flagged as a hallucinated
 path and the plan will be rejected. Putting an existing file in create is
@@ -421,6 +450,7 @@ Examples for goal="Add /health endpoint":
                                                          touch auth — out
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 		{
 			ID:       "software.planner.role-context",
@@ -535,7 +565,8 @@ Guidelines:
 			ID:       "software.plan-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanReviewer},
-			Content: `When your review is complete, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your review is complete, call the submit_work tool with these JSON fields:
 
 {
   "verdict": "approved",
@@ -551,9 +582,8 @@ Guidelines:
   ]
 }
 
-For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
-
-CRITICAL: findings drive the verdict, not summary. The summary is informational —
+For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.`,
+				`CRITICAL: findings drive the verdict, not summary. The summary is informational —
 the verdict gate is computed from findings. If you observe ANY plan defect (broken
 scope path, missing field, conflicting boundary, hallucinated file), you MUST
 encode it as a finding entry with severity="error" and status="violation". A
@@ -563,6 +593,7 @@ summary needs a matching error-severity finding. If you have nothing rising to
 error severity, the plan is approved — say so cleanly without hedging in summary.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 
 		// =====================================================================
@@ -613,7 +644,8 @@ Guidelines:
 			ID:       "software.task-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleTaskReviewer},
-			Content: `When your review is complete, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your review is complete, call the submit_work tool with these JSON fields:
 
 {
   "verdict": "approved",
@@ -621,8 +653,9 @@ Guidelines:
   "findings": []
 }
 
-For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.`,
+				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 
 		// =====================================================================
@@ -693,7 +726,8 @@ same useless rejection while the dev kept editing the wrong file.`,
 			ID:       "software.reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleReviewer},
-			Content: `When your review is complete, call the submit_work tool with these JSON fields.
+			ContentFunc: elideSchemaProse(
+				`When your review is complete, call the submit_work tool with these JSON fields.
 
 APPROVED shape:
 
@@ -712,15 +746,15 @@ re-decomposition):
   "verdict": "rejected",
   "rejection_type": "fixable",
   "feedback": "Test coverage missing for /goodbye edge cases — add a TestGoodbyeNotFound case at handler_test.go:42."
-}
-
-REQUIRED fields:
+}`,
+				`REQUIRED fields:
 - verdict: MUST be exactly one of "approved", "rejected", or "needs_changes" (no other values accepted, MUST NOT be empty)
 - feedback: string describing what you found (REQUIRED on every verdict)
 - rejection_type: MUST be "fixable" or "restructure" (REQUIRED whenever verdict is "rejected" — submitting verdict=rejected without rejection_type is rejected by the validator and your turn is wasted)
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.
 Note: You have READ-ONLY access via bash — you cannot modify files.`,
+			),
 		},
 
 		// =====================================================================
@@ -846,9 +880,9 @@ A rejected plan costs you the iteration. Get files_owned and depends_on right th
 			ID:       "software.requirement-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
-			Content: `When your requirements are ready, call the submit_work tool with these JSON fields:
-
-Example 1 — two requirements, chain pattern (one feature + its router wire-up):
+			ContentFunc: elideSchemaProse(
+				`When your requirements are ready, call the submit_work tool with these JSON fields:`,
+				`Example 1 — two requirements, chain pattern (one feature + its router wire-up):
 
 {
   "requirements": [
@@ -898,6 +932,7 @@ Required fields per requirement:
 - depends_on (array of titles) — optional, use when one requirement must follow another or when sharing a file with another requirement.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 
 		// =====================================================================
@@ -942,7 +977,8 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
 			ID:       "software.scenario-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
-			Content: `When your scenarios are ready, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your scenarios are ready, call the submit_work tool with these JSON fields:
 
 {
   "scenarios": [
@@ -958,8 +994,9 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
   ]
 }
 
-Required: scenarios (array of objects, each with title, given, when strings and then array of strings).
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+Required: scenarios (array of objects, each with title, given, when strings and then array of strings).`,
+				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 
 		// =====================================================================
@@ -1004,7 +1041,8 @@ Guidelines:
 			ID:       "software.architect.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleArchitect},
-			Content: `When your architecture analysis is ready, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your architecture analysis is ready, call the submit_work tool with these JSON fields:
 
 {
   "technology_choices": [
@@ -1025,8 +1063,9 @@ Guidelines:
   ]
 }
 
-Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string).
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string).`,
+				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+			),
 		},
 
 		// =====================================================================
@@ -1552,29 +1591,31 @@ You optimize for CORRECTNESS against the scenario specification.`,
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				sc := ctx.ScenarioReviewContext
 				if len(sc.Scenarios) > 0 {
-					return `Output Format
+					return elideSchemaProse(
+						`Output Format
 
 When your review is complete, call the submit_work tool with these JSON fields:
 
-REQUIRED fields:
+{"verdict": "approved", "feedback": "All scenarios satisfied.", "scenario_verdicts": [{"scenario_id": "sc-1", "passed": true}, {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling"}]}`,
+						`REQUIRED fields:
 - verdict: MUST be exactly "approved" or "rejected" (no other values accepted, MUST NOT be empty)
 - feedback: string (REQUIRED)
 - scenario_verdicts: array of per-scenario verdicts (REQUIRED)
 On rejection: add rejection_type (MUST be "fixable" or "restructure").
 
-{"verdict": "approved", "feedback": "All scenarios satisfied.", "scenario_verdicts": [{"scenario_id": "sc-1", "passed": true}, {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling"}]}
-
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+					)(ctx)
 				}
 
 				// Legacy single-scenario path.
-				return `Output Format
+				return elideSchemaProse(
+					`Output Format
 
 When your review is complete, call the submit_work tool with these JSON fields:
 
-{"verdict": "approved", "feedback": "Summary with specific details"}
-
-Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`
+{"verdict": "approved", "feedback": "Summary with specific details"}`,
+					`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+				)(ctx)
 			},
 		},
 
@@ -1768,8 +1809,10 @@ MUST NOT skip submit_work or respond in prose. The pipeline will reject any loop
 				var sb strings.Builder
 
 				sb.WriteString("## Output Format\n\n")
-				sb.WriteString("Call submit_work with a JSON object matching this schema:\n\n")
-				sb.WriteString("Required fields: `verdict`, `summary`\n\n")
+				if !ctx.HasResponseFormat {
+					sb.WriteString("Call submit_work with a JSON object matching this schema:\n\n")
+					sb.WriteString("Required fields: `verdict`, `summary`\n\n")
+				}
 
 				// Level-appropriate example
 				switch qc.QALevel {
@@ -1877,7 +1920,8 @@ Useful framings:
 			ID:       "software.lesson-decomposer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleLessonDecomposer},
-			Content: `When your decomposition is complete, call the submit_work tool with these JSON fields:
+			ContentFunc: elideSchemaProse(
+				`When your decomposition is complete, call the submit_work tool with these JSON fields:
 
 {
   "summary": "When refactoring shared types, run the consumer's test suite before submitting — submit_work's static check only verifies the file you edited compiles.",
@@ -1895,11 +1939,12 @@ Useful framings:
 }
 
 Required: summary, detail, injection_form, root_cause_role.
-Required: at least one entry in evidence_steps OR evidence_files. A lesson with no evidence is rejected by the writer.
 Optional: category_ids (array of strings from the catalogue).
-Optional: evidence_files entries — line_start, line_end, and commit_sha can be omitted when only a path is known.
+Optional: evidence_files entries — line_start, line_end, and commit_sha can be omitted when only a path is known.`,
+				`Required: at least one entry in evidence_steps OR evidence_files. A lesson with no evidence is rejected by the writer.
 
 Respond ONLY via the submit_work tool call. No markdown prose, no preamble, no explanation outside the tool call.`,
+			),
 		},
 	}
 }
