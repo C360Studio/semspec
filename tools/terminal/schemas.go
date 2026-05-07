@@ -101,9 +101,11 @@ func planSchema() map[string]any {
 						"description": "Protected files that must not be modified",
 					},
 				},
+				"additionalProperties": false,
 			},
 		},
-		"required": []string{"goal", "context"},
+		"required":             []string{"goal", "context"},
+		"additionalProperties": false,
 	}
 }
 
@@ -136,11 +138,13 @@ func requirementsSchema() map[string]any {
 							"description": "Optional list of prerequisite requirement titles. Use when one requirement must finish before another, or when two requirements legitimately need to write to the same file (impl + its test, define + use). The executor sequences depends_on chains so the dependent rebases on the prerequisite's merge commit.",
 						},
 					},
-					"required": []string{"title", "description", "files_owned"},
+					"required":             []string{"title", "description", "files_owned"},
+					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"requirements"},
+		"required":             []string{"requirements"},
+		"additionalProperties": false,
 	}
 }
 
@@ -172,11 +176,13 @@ func scenariosSchema() map[string]any {
 							"description": "Expected outcomes",
 						},
 					},
-					"required": []string{"title", "given", "when", "then"},
+					"required":             []string{"title", "given", "when", "then"},
+					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"scenarios"},
+		"required":             []string{"scenarios"},
+		"additionalProperties": false,
 	}
 }
 
@@ -194,7 +200,8 @@ func architectureSchema() map[string]any {
 						"choice":    map[string]any{"type": "string"},
 						"rationale": map[string]any{"type": "string"},
 					},
-					"required": []string{"category", "choice", "rationale"},
+					"required":             []string{"category", "choice", "rationale"},
+					"additionalProperties": false,
 				},
 			},
 			"component_boundaries": map[string]any{
@@ -210,7 +217,8 @@ func architectureSchema() map[string]any {
 							"items": map[string]any{"type": "string"},
 						},
 					},
-					"required": []string{"name", "responsibility", "dependencies"},
+					"required":             []string{"name", "responsibility", "dependencies"},
+					"additionalProperties": false,
 				},
 			},
 			"data_flow": map[string]any{
@@ -228,7 +236,8 @@ func architectureSchema() map[string]any {
 						"decision":  map[string]any{"type": "string"},
 						"rationale": map[string]any{"type": "string"},
 					},
-					"required": []string{"id", "title", "decision", "rationale"},
+					"required":             []string{"id", "title", "decision", "rationale"},
+					"additionalProperties": false,
 				},
 			},
 			"actors": map[string]any{
@@ -251,7 +260,8 @@ func architectureSchema() map[string]any {
 							"items": map[string]any{"type": "string"},
 						},
 					},
-					"required": []string{"name", "type", "triggers"},
+					"required":             []string{"name", "type", "triggers"},
+					"additionalProperties": false,
 				},
 			},
 			"integrations": map[string]any{
@@ -269,7 +279,8 @@ func architectureSchema() map[string]any {
 						"contract":   map[string]any{"type": "string"},
 						"error_mode": map[string]any{"type": "string"},
 					},
-					"required": []string{"name", "direction", "protocol"},
+					"required":             []string{"name", "direction", "protocol"},
+					"additionalProperties": false,
 				},
 			},
 			"test_surface": map[string]any{
@@ -287,7 +298,8 @@ func architectureSchema() map[string]any {
 								"scenario_refs":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Scenario IDs that must verify this flow"},
 								"description":         map[string]any{"type": "string", "description": "What the flow does and why it needs integration testing"},
 							},
-							"required": []string{"name", "components_involved", "description"},
+							"required":             []string{"name", "components_involved", "description"},
+							"additionalProperties": false,
 						},
 					},
 					"e2e_flows": map[string]any{
@@ -300,13 +312,16 @@ func architectureSchema() map[string]any {
 								"steps":            map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Ordered user actions the test should perform"},
 								"success_criteria": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Observable conditions that mean the flow succeeded"},
 							},
-							"required": []string{"actor", "steps", "success_criteria"},
+							"required":             []string{"actor", "steps", "success_criteria"},
+							"additionalProperties": false,
 						},
 					},
 				},
+				"additionalProperties": false,
 			},
 		},
-		"required": []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"},
+		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"},
+		"additionalProperties": false,
 	}
 }
 
@@ -346,11 +361,13 @@ func reviewSchema() map[string]any {
 						"passed":      map[string]any{"type": "boolean", "description": "Whether the scenario passed"},
 						"feedback":    map[string]any{"type": "string", "description": "Per-scenario feedback"},
 					},
-					"required": []string{"scenario_id", "passed"},
+					"required":             []string{"scenario_id", "passed"},
+					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"verdict", "feedback"},
+		"required":             []string{"verdict", "feedback"},
+		"additionalProperties": false,
 	}
 }
 
@@ -368,7 +385,8 @@ func developerSchema() map[string]any {
 				"description": "List of files created or modified",
 			},
 		},
-		"required": []string{"summary", "files_modified"},
+		"required":             []string{"summary", "files_modified"},
+		"additionalProperties": false,
 	}
 }
 
@@ -419,7 +437,8 @@ func lessonSchema() map[string]any {
 							"description": "Zero-based step index inside the trajectory.",
 						},
 					},
-					"required": []string{"loop_id", "step_index"},
+					"required":             []string{"loop_id", "step_index"},
+					"additionalProperties": false,
 				},
 			},
 			"evidence_files": map[string]any{
@@ -433,11 +452,13 @@ func lessonSchema() map[string]any {
 						"line_end":   map[string]any{"type": "integer", "description": "Last cited line (1-based, inclusive). Omit for whole-file citation."},
 						"commit_sha": map[string]any{"type": "string", "description": "Commit SHA the citation refers to. Used by the retirement sweep to detect drift."},
 					},
-					"required": []string{"path"},
+					"required":             []string{"path"},
+					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"summary", "detail", "injection_form", "root_cause_role"},
+		"required":             []string{"summary", "detail", "injection_form", "root_cause_role"},
+		"additionalProperties": false,
 	}
 }
 
@@ -479,6 +500,7 @@ func qaReviewSchema() map[string]any {
 						"description": "Level ≥ integration. Do failures look like genuine defects or likely test flakiness (timing, environment, network)? What evidence supports your judgment?",
 					},
 				},
+				"additionalProperties": false,
 			},
 			"plan_decisions": map[string]any{
 				"type":        "array",
@@ -514,14 +536,17 @@ func qaReviewSchema() map[string]any {
 									"type":    map[string]any{"type": "string", "enum": []string{"screenshot", "log", "trace", "coverage-report"}},
 									"purpose": map[string]any{"type": "string"},
 								},
-								"required": []string{"path", "type"},
+								"required":             []string{"path", "type"},
+								"additionalProperties": false,
 							},
 						},
 					},
-					"required": []string{"title", "rationale", "rejection_type"},
+					"required":             []string{"title", "rationale", "rejection_type"},
+					"additionalProperties": false,
 				},
 			},
 		},
-		"required": []string{"verdict", "summary"},
+		"required":             []string{"verdict", "summary"},
+		"additionalProperties": false,
 	}
 }
