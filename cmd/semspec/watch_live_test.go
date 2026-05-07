@@ -388,6 +388,197 @@ func TestIsTriviallyEmptyBundle(t *testing.T) {
 	}
 }
 
+func TestComputeKVActiveLoops(t *testing.T) {
+	tests := []struct {
+		name  string
+		loops []health.KVEntry
+		want  int
+	}{
+		{
+			name:  "empty bucket",
+			loops: nil,
+			want:  0,
+		},
+		{
+			name: "two open loops, no completions",
+			loops: []health.KVEntry{
+				{Key: "loop-a"},
+				{Key: "loop-b"},
+			},
+			want: 2,
+		},
+		{
+			name: "all loops have COMPLETE_ companions — none active",
+			loops: []health.KVEntry{
+				{Key: "loop-a"},
+				{Key: "COMPLETE_loop-a"},
+				{Key: "loop-b"},
+				{Key: "COMPLETE_loop-b"},
+			},
+			want: 0,
+		},
+		{
+			name: "mixed — only loops without COMPLETE_ companion count",
+			loops: []health.KVEntry{
+				{Key: "loop-a"},
+				{Key: "COMPLETE_loop-a"},
+				{Key: "loop-b"}, // active
+				{Key: "loop-c"}, // active
+				{Key: "COMPLETE_loop-c"},
+				{Key: "loop-d"}, // active
+			},
+			want: 2,
+		},
+		{
+			name: "stale COMPLETE_ without matching loop is ignored (no double-count)",
+			loops: []health.KVEntry{
+				{Key: "COMPLETE_orphan"},
+				{Key: "loop-a"},
+			},
+			want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := computeKVActiveLoops(tt.loops)
+			if got != tt.want {
+				t.Errorf("got %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunWatchLive_GaugeKVDisagreementSurfaced(t *testing.T) {
+	// Reproduces the 2026-05-07 bs3bg0pkf shape: gauge says active=10
+	// but KV shows every loop has a COMPLETE_ companion. Heartbeat
+	// must show "active_loops=10 (kv:0)" so the disagreement is loud.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metrics":
+			_, _ = w.Write([]byte("semstreams_agentic_loop_active_loops 10\n"))
+		case "/message-logger/entries":
+			_, _ = w.Write([]byte(`[]`))
+		case "/message-logger/kv/PLAN_STATES":
+			_, _ = w.Write([]byte(`{"bucket":"x","entries":[]}`))
+		case "/message-logger/kv/AGENT_LOOPS":
+			// 2 loops, both completed (COMPLETE_ companion present)
+			_, _ = w.Write([]byte(`{"bucket":"AGENT_LOOPS","entries":[
+				{"key":"loop-a","revision":1,"created":"2026-05-07T19:00:00Z","value":"e30="},
+				{"key":"COMPLETE_loop-a","revision":2,"created":"2026-05-07T19:00:01Z","value":"e30="},
+				{"key":"loop-b","revision":3,"created":"2026-05-07T19:00:02Z","value":"e30="},
+				{"key":"COMPLETE_loop-b","revision":4,"created":"2026-05-07T19:00:03Z","value":"e30="}
+			]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:     srv.URL,
+		Interval:    30 * time.Millisecond,
+		SkipOllama:  true,
+		MaxDuration: 60 * time.Millisecond,
+		Out:         &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	dump := out.String()
+	if !strings.Contains(dump, "active_loops=10 (kv:0)") {
+		t.Errorf("heartbeat must surface gauge↔KV disagreement; got:\n%s", dump)
+	}
+}
+
+func TestRunWatchLive_GaugeKVAgreement_NoAnnotation(t *testing.T) {
+	// When gauge and KV agree, heartbeat keeps the simpler "active_loops=N"
+	// form — no annotation noise on the happy path.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/metrics":
+			_, _ = w.Write([]byte("semstreams_agentic_loop_active_loops 1\n"))
+		case "/message-logger/entries":
+			_, _ = w.Write([]byte(`[]`))
+		case "/message-logger/kv/PLAN_STATES":
+			_, _ = w.Write([]byte(`{"bucket":"x","entries":[]}`))
+		case "/message-logger/kv/AGENT_LOOPS":
+			_, _ = w.Write([]byte(`{"bucket":"AGENT_LOOPS","entries":[
+				{"key":"loop-a","revision":1,"created":"2026-05-07T19:00:00Z","value":"e30="}
+			]}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:     srv.URL,
+		Interval:    30 * time.Millisecond,
+		SkipOllama:  true,
+		MaxDuration: 60 * time.Millisecond,
+		Out:         &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	dump := out.String()
+	if !strings.Contains(dump, "active_loops=1 ") {
+		t.Errorf("expected simple active_loops=1 form when gauge↔KV agree; got:\n%s", dump)
+	}
+	if strings.Contains(dump, "active_loops=1 (kv:") {
+		t.Errorf("should NOT surface (kv:N) annotation when values agree; got:\n%s", dump)
+	}
+}
+
+func TestRunWatchLive_TickGapWarningEmitted(t *testing.T) {
+	// When the watcher resumes after a long pause, a "tick gap" warning
+	// must precede the next heartbeat. Simulated here via a slow HTTP
+	// server that holds the request for >2× the configured interval —
+	// the per-tick http call is bounded by watchHTTPTimeout, so the
+	// next tick fires well after the previous returned.
+	delayCh := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/metrics" {
+			// First call: hold long enough to push the next tick past 2× interval.
+			select {
+			case <-delayCh:
+			case <-time.After(120 * time.Millisecond):
+			}
+			_, _ = w.Write([]byte("semstreams_agentic_loop_active_loops 0\n"))
+			return
+		}
+		if r.URL.Path == "/message-logger/entries" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/message-logger/kv/") {
+			_, _ = w.Write([]byte(`{"bucket":"x","entries":[]}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	defer close(delayCh)
+
+	var out bytes.Buffer
+	cfg := liveConfig{
+		HTTPURL:     srv.URL,
+		Interval:    30 * time.Millisecond, // 2× = 60ms; the 120ms first-call delay forces a gap warning
+		SkipOllama:  true,
+		MaxDuration: 400 * time.Millisecond,
+		Out:         &out,
+	}
+	if err := runWatchLive(context.Background(), cfg); err != nil {
+		t.Fatalf("runWatchLive: %v", err)
+	}
+	dump := out.String()
+	if !strings.Contains(dump, "warn: tick gap") {
+		t.Errorf("expected 'warn: tick gap' line after slow first tick; got:\n%s", dump)
+	}
+}
+
 func TestSeverityRank_OrderingPinnedForBailOn(t *testing.T) {
 	// --bail-on uses severityRank to compare observed vs threshold.
 	// If the ranking changes silently, a "warning" threshold could

@@ -102,6 +102,16 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 	fmt.Fprintf(cfg.Out, "semspec watch --live · interval=%s · http=%s%s%s\n",
 		cfg.Interval, cfg.HTTPURL, bailSuffix(cfg.BailOn), snapshotSuffix(cfg))
 
+	// lastTickAt tracks when the previous tick fired. When a new tick
+	// fires more than 2× cfg.Interval after the last, the loop must
+	// have been suspended (macOS power management, docker-desktop
+	// freeze, OS sleep) — print a loud warning so the operator sees the
+	// gap explicitly instead of only noticing values look stale. Caught
+	// 2026-05-07 openrouter @easy run bs3bg0pkf — sidecar went silent
+	// for 8 min mid-run with no warning, leading to misclassification
+	// of the cascade as "wedged" when it was correctly idle.
+	var lastTickAt time.Time
+
 	// Run one capture immediately so the operator sees output without
 	// waiting for the first tick — important for "did this even start?"
 	if shouldExit, err := runLiveTick(ctx, cfg, httpClient, nats, detectors, seen, seenErrorSources); err != nil {
@@ -109,12 +119,21 @@ func runWatchLive(ctx context.Context, cfg liveConfig) error {
 	} else if shouldExit {
 		return nil
 	}
+	lastTickAt = time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			fmt.Fprintln(cfg.Out, "shutting down (context done)")
 			return nil
 		case <-tick.C:
+			if !lastTickAt.IsZero() {
+				gap := time.Since(lastTickAt)
+				if gap > 2*cfg.Interval {
+					fmt.Fprintf(cfg.Out, "warn: tick gap %v exceeded 2× interval %v (sidecar paused or upstream blocked — values from this tick may be stale)\n",
+						gap.Truncate(time.Second), cfg.Interval)
+				}
+			}
+			lastTickAt = time.Now()
 			if shouldExit, err := runLiveTick(ctx, cfg, httpClient, nats, detectors, seen, seenErrorSources); err != nil {
 				fmt.Fprintf(cfg.Out, "warn: tick failed (%v); continuing\n", err)
 				continue
@@ -171,12 +190,26 @@ func runLiveTick(
 	if len(newSources) > 0 {
 		suffix = " [new: " + strings.Join(newSources, ",") + "]"
 	}
-	fmt.Fprintf(cfg.Out, "[%s] plans=%d loops=%d msgs=%d active_loops=%d ctx_util=%.2f errors=%d%s\n",
+	// Compute "actual" active loop count from the AGENT_LOOPS KV bucket
+	// directly — count entries whose key has no COMPLETE_<id> companion.
+	// The Prometheus gauge `semstreams_agentic_loop_active_loops` has
+	// been observed pinning at non-zero after every loop emitted
+	// completion (2026-05-07 openrouter @easy run bs3bg0pkf — gauge=10
+	// while bundle showed 12/12 trajectories outcome=success). Surfacing
+	// both numbers makes the disagreement visible instead of trusting
+	// the gauge blindly.
+	gaugeActive := result.Bundle.Metrics.LoopActiveLoops
+	kvActive := computeKVActiveLoops(result.Bundle.Loops)
+	activeStr := fmt.Sprintf("%d", gaugeActive)
+	if int64(kvActive) != gaugeActive {
+		activeStr = fmt.Sprintf("%d (kv:%d)", gaugeActive, kvActive)
+	}
+	fmt.Fprintf(cfg.Out, "[%s] plans=%d loops=%d msgs=%d active_loops=%s ctx_util=%.2f errors=%d%s\n",
 		now,
 		len(result.Bundle.Plans),
 		len(result.Bundle.Loops),
 		len(result.Bundle.Messages),
-		result.Bundle.Metrics.LoopActiveLoops,
+		activeStr,
 		result.Bundle.Metrics.LoopContextUtilization,
 		len(result.Errors),
 		suffix,
@@ -200,6 +233,43 @@ func runLiveTick(
 		return true, nil
 	}
 	return false, nil
+}
+
+// computeKVActiveLoops counts loops in AGENT_LOOPS that haven't yet
+// been marked terminal. Each completed loop is recorded as a sibling
+// `COMPLETE_<loop_id>` key by execution-manager / requirement-executor
+// when the loop emits its terminal outcome; absent that companion, the
+// loop is in-flight or escalated.
+//
+// Returned value is what `semstreams_agentic_loop_active_loops` gauge
+// SHOULD say. A divergence from the gauge means either:
+//   - the upstream gauge is failing to decrement on completion (real
+//     semstreams bug — file as ask if reproducible)
+//   - the watch sidecar is reading a stale Prometheus snapshot (local
+//     bug — check the gap-warning above)
+//
+// Either way, the operator should trust this number over the gauge for
+// "is the cascade still doing work". Caught 2026-05-07 openrouter @easy
+// run bs3bg0pkf — gauge stuck at 10 while every loop had completion
+// committed; led to a misclassification of the run as "wedged" when it
+// was correctly idle awaiting human escalation decision.
+func computeKVActiveLoops(loops []health.KVEntry) int {
+	completed := make(map[string]struct{})
+	var candidates []string
+	for _, e := range loops {
+		if strings.HasPrefix(e.Key, "COMPLETE_") {
+			completed[strings.TrimPrefix(e.Key, "COMPLETE_")] = struct{}{}
+			continue
+		}
+		candidates = append(candidates, e.Key)
+	}
+	active := 0
+	for _, k := range candidates {
+		if _, done := completed[k]; !done {
+			active++
+		}
+	}
+	return active
 }
 
 // newErrorSources returns the source names in errs that aren't yet
