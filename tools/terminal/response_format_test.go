@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"context"
 	"testing"
 
 	"github.com/c360studio/semstreams/agentic"
@@ -44,8 +45,8 @@ func TestResponseFormatForDeliverable(t *testing.T) {
 		if rf.Name != "plan_args" {
 			t.Errorf("Name = %q, want plan_args", rf.Name)
 		}
-		if rf.Strict {
-			t.Error("Strict should default false until schemas pass strict-mode audit")
+		if !rf.Strict {
+			t.Error("Strict should be true — schemas pass TestSchemasNoAdditionalProperties + TestSchemasRequiredCompleteness as of 2026-05-07")
 		}
 		if len(rf.Schema) == 0 {
 			t.Error("Schema should be populated")
@@ -65,6 +66,68 @@ func TestResponseFormatForDeliverable(t *testing.T) {
 			t.Errorf("Name = %q, want _args", rf.Name)
 		}
 	})
+}
+
+func TestToolsForEndpoint_StrictPropagation(t *testing.T) {
+	// Build a minimal in-memory tool registry whose ListTools returns
+	// just submit_work + bash (the realistic minimum for a dispatch).
+	reg := &fakeToolReg{tools: []agentic.ToolDefinition{
+		{Name: "submit_work", Parameters: map[string]any{"type": "object"}},
+		{Name: "bash", Parameters: map[string]any{"type": "object"}},
+	}}
+
+	t.Run("strict-supporting endpoint sets submit_work.Strict=true", func(t *testing.T) {
+		ep := &ssmodel.EndpointConfig{Provider: "openai", URL: "http://seminstruct-fast:8083/v1"}
+		tools := ToolsForEndpoint(reg, "developer", ep)
+		var got *agentic.ToolDefinition
+		for i := range tools {
+			if tools[i].Name == "submit_work" {
+				got = &tools[i]
+			}
+		}
+		if got == nil {
+			t.Fatal("submit_work missing from result")
+		}
+		if !got.Strict {
+			t.Error("submit_work.Strict should be true on a strict-supporting endpoint")
+		}
+	})
+
+	t.Run("anthropic endpoint leaves submit_work.Strict=false", func(t *testing.T) {
+		ep := &ssmodel.EndpointConfig{Provider: "anthropic"}
+		tools := ToolsForEndpoint(reg, "developer", ep)
+		for _, tool := range tools {
+			if tool.Strict {
+				t.Errorf("tool %q has Strict=true on anthropic endpoint — should be unset", tool.Name)
+			}
+		}
+	})
+
+	t.Run("nil endpoint leaves submit_work.Strict=false", func(t *testing.T) {
+		tools := ToolsForEndpoint(reg, "developer", nil)
+		for _, tool := range tools {
+			if tool.Strict {
+				t.Errorf("tool %q has Strict=true on nil endpoint", tool.Name)
+			}
+		}
+	})
+
+	t.Run("non-submit_work tools never get Strict=true", func(t *testing.T) {
+		ep := &ssmodel.EndpointConfig{Provider: "openai", URL: "http://localhost"}
+		tools := ToolsForEndpoint(reg, "developer", ep)
+		for _, tool := range tools {
+			if tool.Name == "bash" && tool.Strict {
+				t.Error("bash tool should not get Strict=true — only submit_work is the structured-output tool")
+			}
+		}
+	})
+}
+
+type fakeToolReg struct{ tools []agentic.ToolDefinition }
+
+func (f *fakeToolReg) ListTools() []agentic.ToolDefinition { return f.tools }
+func (f *fakeToolReg) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	return agentic.ToolResult{}, nil
 }
 
 func TestResponseFormatForEndpoint(t *testing.T) {

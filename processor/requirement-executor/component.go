@@ -1325,7 +1325,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        reviewerModel,
-		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "review", availableToolNames()...),
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, availableToolNames()...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
 		Prompt:       c.buildReviewPrompt(exec),

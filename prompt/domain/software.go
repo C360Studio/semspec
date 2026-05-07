@@ -407,7 +407,7 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
   }
 }
 
-Required: goal (string), context (string). Optional: scope (object with include/create/exclude/do_not_touch arrays).`,
+Required: goal (string), context (string), scope (object with include/create/exclude/do_not_touch arrays — emit empty arrays for unused fields, never omit).`,
 				`CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
 scope.create is for files the plan intends to CREATE that don't exist yet.
 Putting a not-yet-existing file in include will be flagged as a hallucinated
@@ -1938,10 +1938,9 @@ Useful framings:
   ]
 }
 
-Required: summary, detail, injection_form, root_cause_role.
-Optional: category_ids (array of strings from the catalogue).
-Optional: evidence_files entries — line_start, line_end, and commit_sha can be omitted when only a path is known.`,
-				`Required: at least one entry in evidence_steps OR evidence_files. A lesson with no evidence is rejected by the writer.
+Required: summary, detail, injection_form, root_cause_role, category_ids (array, [] OK), evidence_steps (array, [] OK), evidence_files (array, [] OK).
+For evidence_files entries: line_start, line_end, and commit_sha may be set null when only a path is known.`,
+				`Required: at least one entry in evidence_steps OR evidence_files must be non-empty. A lesson with no evidence is rejected by the writer.
 
 Respond ONLY via the submit_work tool call. No markdown prose, no preamble, no explanation outside the tool call.`,
 			),

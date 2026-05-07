@@ -65,17 +65,17 @@ func TestSchemasNoAdditionalProperties(t *testing.T) {
 	}
 }
 
-// TestSchemasRequiredCompleteness reports schemas with properties that are
-// not in the required list. Strict-mode demands every property be required;
-// our schemas use the absence-as-optional convention. Refactoring this is
-// semantic surgery (each "optional" field needs nullable-type + prompt
-// adjustments) and is parked until needed by a Strict:true rollout.
+// TestSchemasRequiredCompleteness enforces the second half of the OpenAI
+// strict-mode subset: every declared property must appear in the parent's
+// required list. The contract is "every field is required; nullable-type
+// encodes optional semantics" — `"type": ["string", "null"]` for fields
+// the model may legitimately leave unset, with the prompt directing it to
+// set null/empty when not applicable.
 //
-// Marked t.Skip so it surfaces violation counts on demand
-// (`go test -run TestSchemasRequiredCompleteness -v`) without failing CI.
+// Migrated 2026-05-07. Schemas previously used the absence-as-optional
+// convention; required-completeness landed alongside the Strict:true flip
+// on ResponseFormat and ToolDefinition.Strict.
 func TestSchemasRequiredCompleteness(t *testing.T) {
-	t.Skip("strict-mode required-completeness deferred — see Task #34 followup; ResponseFormat ships with Strict:false until this lands")
-
 	for name, schema := range allDeliverableSchemas() {
 		t.Run(name, func(t *testing.T) {
 			var violations []string

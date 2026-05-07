@@ -342,7 +342,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "requirements", c.availableToolNames()...),
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "requirements", endpoint, c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepRequirementGeneration,

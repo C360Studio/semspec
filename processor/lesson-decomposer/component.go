@@ -569,7 +569,7 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "lesson", c.availableToolNames()...),
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "lesson", endpoint, c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugLessonDecomposition,
 		WorkflowStep: stepDecompose,

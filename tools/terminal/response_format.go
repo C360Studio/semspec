@@ -45,13 +45,13 @@ func EndpointSupportsResponseFormat(ep *ssmodel.EndpointConfig) bool {
 // given deliverable type using the same schema wired into submit_work via
 // ToolsForDeliverable. Returns nil for unknown deliverable types.
 //
-// Strict is intentionally false: the existing schemas predate the OpenAI
-// strict-mode subset (require every property in `required`,
-// additionalProperties:false at every object level). With Strict:false the
-// provider still constrains decoding (xgrammar/outlines on vLLM, JSON-mode
-// on Ollama) without rejecting on subset violations. A strict-mode audit of
-// schemas.go is tracked separately; once that lands the caller can flip
-// Strict to true here.
+// Strict is true: schemas in schemas.go satisfy the OpenAI strict-mode
+// subset (TestSchemasNoAdditionalProperties + TestSchemasRequiredCompleteness
+// pin this). On OpenAI proper the response is guaranteed schema-conformant;
+// on vLLM/sparky/OpenRouter the same xgrammar/outlines constraint applies
+// during decoding. Optional semantics are encoded as nullable types
+// (`"type": ["string", "null"]`) — the model populates or sets null per the
+// schema description.
 func ResponseFormatForDeliverable(deliverableType string) *agentic.ResponseFormat {
 	schema := schemaForDeliverable(deliverableType)
 	if len(schema) == 0 {
@@ -61,7 +61,7 @@ func ResponseFormatForDeliverable(deliverableType string) *agentic.ResponseForma
 		Type:   agentic.ResponseFormatJSONSchema,
 		Name:   deliverableType + "_args",
 		Schema: schema,
-		Strict: false,
+		Strict: true,
 	}
 }
 

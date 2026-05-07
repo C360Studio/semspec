@@ -393,7 +393,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForDeliverable(c.toolRegistry, "architecture", c.availableToolNames()...),
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "architecture", endpoint, c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepArchitectureGeneration,
