@@ -170,12 +170,16 @@ func (s *planStore) create(ctx context.Context, slug, title string, qaLevel work
 		return nil, fmt.Errorf("%w: %s", workflow.ErrPlanExists, slug)
 	}
 
-	// Truncate raw prompt to 60 chars for initial title — the planner will
-	// replace this with an LLM-generated title when the plan is drafted.
+	// Keep the full title in KV — the planner doesn't emit a title field
+	// (planSchema only has goal/context/scope), so any truncation here
+	// becomes the persistent plan.Title that plan-reviewer marshals into
+	// its review prompt. The reviewer LLM then flags the truncation as a
+	// completeness violation and rejects the plan, repeating until
+	// revision-cap escalation. Caught 2026-05-08 bgbigq271 — three review
+	// rounds rejected with "title contains truncation ('endpoi...')"
+	// before terminal rejection. UI can truncate at display time when
+	// length matters; the canonical title in KV stays full.
 	displayTitle := title
-	if len(displayTitle) > 60 {
-		displayTitle = displayTitle[:57] + "..."
-	}
 
 	if qaLevel == "" {
 		qaLevel = workflow.QALevelSynthesis
