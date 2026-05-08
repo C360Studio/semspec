@@ -55,9 +55,12 @@
         "url": "https://openrouter.ai/api/v1",
         "model": "qwen/qwen3.6-27b",
         "api_key_env": "OPENROUTER_API_KEY",
-        "max_tokens": 32768,
-        "max_output_tokens": 8000,
+        "max_tokens": 131072,
+        "max_output_tokens": 32000,
         "reasoning_effort": "none",
+        "options": {
+          "enable_thinking": false
+        },
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
@@ -125,7 +128,7 @@
       "planning": {
         "description": "Plan generation and architecture",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -134,7 +137,7 @@
       "writing": {
         "description": "Documentation, plans, specifications",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -152,7 +155,7 @@
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -161,7 +164,7 @@
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -170,7 +173,7 @@
       "scenario_generation": {
         "description": "BDD scenario generation",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -179,16 +182,16 @@
       "plan_review": {
         "description": "SOP-aware plan review",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
         ]
       },
       "architecture": {
-        "description": "Architecture generation \u2014 technology choices, component boundaries, data flow",
+        "description": "Architecture generation — technology choices, component boundaries, data flow",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -197,7 +200,7 @@
       "qa": {
         "description": "Rollup quality review",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -206,7 +209,7 @@
       "lesson_decomposition": {
         "description": "ADR-033 lesson decomposer",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -215,7 +218,7 @@
       "task_decomposition": {
         "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -224,7 +227,7 @@
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
-          "openrouter-qwen3-moe"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
@@ -237,28 +240,28 @@
         ]
       },
       "query_classification": {
-        "description": "graph-query T3 fallback classifier \u2014 small JSON output, latency-critical",
+        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
         "preferred": [
           "seminstruct-fast"
         ],
         "timeout": "10s"
       },
       "answer_synthesis": {
-        "description": "graph-query globalSearch answer composition \u2014 ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
+        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
         "preferred": [
           "seminstruct-answer"
         ],
         "timeout": "30s"
       },
       "community_summary": {
-        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
+        "description": "graph-clustering community summarization — background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
         "preferred": [
           "seminstruct-summary"
         ],
         "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes (agent/* in answerers.json). Bigger reasoning model, no tool-call required \u2014 answerer just produces text. MoE 80B/3B-active fits alongside the workflow model on a 128GB target without crowding it out.",
+        "description": "Answerer-agent backend for ask_question routes (agent/* in answerers.json). Bigger reasoning model, no tool-call required — answerer just produces text. MoE 80B/3B-active fits alongside the workflow model on a 128GB target without crowding it out.",
         "preferred": [
           "qwen3-next-instruct"
         ],
