@@ -361,6 +361,21 @@
                 "heartbeat_interval": "120s"
               }
             }
+          ],
+          "outputs": [
+            {
+              "name": "agent.response",
+              "type": "jetstream",
+              "subject": "agent.response.*",
+              "stream_name": "AGENT",
+              "required": true
+            },
+            {
+              "name": "agent.stream",
+              "type": "nats",
+              "subject": "agent.stream.*",
+              "required": false
+            }
           ]
         }
       }
@@ -385,6 +400,15 @@
                 "ack_wait": "300s",
                 "heartbeat_interval": "120s"
               }
+            }
+          ],
+          "outputs": [
+            {
+              "name": "tool.result",
+              "type": "jetstream",
+              "subject": "tool.result.*",
+              "stream_name": "AGENT",
+              "required": true
             }
           ]
         }
