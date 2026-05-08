@@ -1,6 +1,10 @@
 package prompt
 
-import "github.com/c360studio/semspec/workflow"
+import (
+	"os"
+
+	"github.com/c360studio/semspec/workflow"
+)
 
 // StandardsContext carries role-filtered project standards for prompt injection.
 type StandardsContext struct {
@@ -37,4 +41,26 @@ func NewStandardsContext(items []workflow.Standard) *StandardsContext {
 		}
 	}
 	return sc
+}
+
+// LoadStandardsForRoleFromDisk reads .semspec/standards.json from
+// SEMSPEC_REPO_PATH (or the current working directory as fallback) and
+// returns a role-filtered StandardsContext. Returns nil when the file is
+// missing OR contains no rules tagged for the requested role — both cases
+// the shared.standards fragment treats as "no standards section to render."
+//
+// Centralizing the load + filter pattern lets every component dispatch site
+// stay one line ("Standards: prompt.LoadStandardsForRoleFromDisk(role)"),
+// preventing the per-component duplication that pushed dispatch functions
+// past the function-length lint threshold.
+func LoadStandardsForRoleFromDisk(role Role) *StandardsContext {
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	stds := workflow.LoadStandardsFromDisk(repoRoot)
+	if stds == nil {
+		return nil
+	}
+	return NewStandardsContext(stds.ForRole(string(role)))
 }

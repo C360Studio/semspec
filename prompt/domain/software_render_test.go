@@ -339,3 +339,147 @@ func TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits(t *testing.T) {
 		t.Errorf("R2 prompt missing its own header\nGot:\n%s", out)
 	}
 }
+
+// TestRenderPlanReviewerPrompt_ProjectFileTreeInjection pins the take-20 fix:
+// when the plan-reviewer is given a ground-truth file tree, it MUST appear
+// before plan content with reviewer-appropriate framing ("verify scope.include
+// against this list", not the planner's "any path you put in scope MUST appear
+// here"). Without this section the role-context's path-check rule fires
+// against ground truth the reviewer never received and weak models default
+// to flagging real files as hallucinated.
+func TestRenderPlanReviewerPrompt_ProjectFileTreeInjection(t *testing.T) {
+	tests := []struct {
+		name        string
+		ctx         *prompt.PlanReviewerPromptContext
+		mustContain []string
+		mustNotHave []string
+	}{
+		{
+			name: "tree present — section rendered with reviewer framing",
+			ctx: &prompt.PlanReviewerPromptContext{
+				Slug:            "abc123",
+				PlanContent:     `{"goal":"x","scope":{"include":["main.go"]}}`,
+				Round:           1,
+				ProjectFileTree: "main.go\ngo.mod\ninternal/auth/auth.go",
+			},
+			mustContain: []string{
+				"## Project Files",
+				"main.go\ngo.mod\ninternal/auth/auth.go",
+				"Use this list to verify the plan's scope.include paths",
+				"do NOT flag it as hallucinated",
+				"Paths in scope.create are creation-intent declarations",
+			},
+		},
+		{
+			name: "tree empty — section silently omitted (greenfield-safe)",
+			ctx: &prompt.PlanReviewerPromptContext{
+				Slug:            "abc123",
+				PlanContent:     `{"goal":"x"}`,
+				Round:           1,
+				ProjectFileTree: "",
+			},
+			mustNotHave: []string{
+				"## Project Files",
+				"do NOT flag it as hallucinated",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := renderPlanReviewerPrompt(tt.ctx)
+			for _, want := range tt.mustContain {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing pinned string %q\nGot:\n%s", want, out)
+				}
+			}
+			for _, banned := range tt.mustNotHave {
+				if strings.Contains(out, banned) {
+					t.Errorf("unexpected string %q present\nGot:\n%s", banned, out)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderPlanReviewerPrompt_TreeBeforePlanContent guards that the file
+// tree (when present) appears BEFORE the plan content — the reviewer must
+// read ground truth before judging the planner's scope claims.
+func TestRenderPlanReviewerPrompt_TreeBeforePlanContent(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:            "abc123",
+		PlanContent:     `{"goal":"verify ordering"}`,
+		Round:           1,
+		ProjectFileTree: "main.go",
+	})
+
+	treeIdx := strings.Index(out, "## Project Files")
+	planIdx := strings.Index(out, "## Plan to Review")
+	if treeIdx < 0 || planIdx < 0 {
+		t.Fatalf("expected both sections present\nGot:\n%s", out)
+	}
+	if treeIdx >= planIdx {
+		t.Errorf("file tree must appear before plan content; tree@%d plan@%d", treeIdx, planIdx)
+	}
+}
+
+// TestRenderScenarioGeneratorPrompt_PlanContextRendered pins a silent-data-loss
+// bug found in the 2026-05-08 audit: scenario-generator's PlanContext field
+// was set by the producer (plan_watcher.go) but never read by the renderer.
+// The model never saw the plan's "why" — only goal + requirement details +
+// architecture. When the planner's context says something like "no existing
+// endpoints, this is greenfield", losing that line means the scenario-
+// generator can write scenarios that assume existing surface area.
+func TestRenderScenarioGeneratorPrompt_PlanContextRendered(t *testing.T) {
+	tests := []struct {
+		name        string
+		ctx         *prompt.ScenarioGeneratorPromptContext
+		mustContain []string
+		mustNotHave []string
+	}{
+		{
+			name: "context present — surfaced in user prompt",
+			ctx: &prompt.ScenarioGeneratorPromptContext{
+				PlanTitle:              "Add /health",
+				PlanGoal:               "expose service health",
+				PlanContext:            "no existing endpoints; this is a greenfield service",
+				RequirementID:          "req-1",
+				RequirementTitle:       "/health endpoint",
+				RequirementDescription: "GET /health returns JSON",
+			},
+			mustContain: []string{
+				"**Goal:** expose service health",
+				"**Context:** no existing endpoints; this is a greenfield service",
+				"## Requirement: /health endpoint",
+			},
+		},
+		{
+			name: "context empty — section silently omitted, no '**Context:**' header",
+			ctx: &prompt.ScenarioGeneratorPromptContext{
+				PlanTitle:        "Add /health",
+				PlanGoal:         "expose service health",
+				PlanContext:      "",
+				RequirementTitle: "/health endpoint",
+			},
+			mustNotHave: []string{
+				"**Context:**",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := renderScenarioGeneratorPrompt(tt.ctx)
+			for _, want := range tt.mustContain {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing pinned string %q\nGot:\n%s", want, out)
+				}
+			}
+			for _, banned := range tt.mustNotHave {
+				if strings.Contains(out, banned) {
+					t.Errorf("unexpected string %q present\nGot:\n%s", banned, out)
+				}
+			}
+		})
+	}
+}

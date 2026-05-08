@@ -34,6 +34,16 @@ type Config struct {
 	// Default 200ms; non-positive values fall back to the default.
 	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between review retries (ms),category:advanced,default:200"`
 
+	// SandboxURL is the URL of the sandbox container. When set, the reviewer
+	// fetches a `git ls-files` snapshot of the project at dispatch time and
+	// injects it into the user prompt as ground-truth file inventory. Without
+	// this the reviewer's R1 scope-validity criterion ("compare scope.include
+	// against the project file tree") fires against a tree it never received
+	// and weak models default to flagging real files as hallucinated. Caught
+	// 2026-05-08 take 20 on openrouter llama-3.3-70b @easy. Greenfield-safe:
+	// empty output skips the section silently.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox URL for project file tree snapshot,category:advanced"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

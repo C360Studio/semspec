@@ -21,6 +21,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/vocabulary/observability"
@@ -66,6 +67,7 @@ type Component struct {
 	assembler       *prompt.Assembler
 	lessonWriter    *lessons.Writer
 	tripleWriter    *graphutil.TripleWriter // ADR-035 CP-1 incident emit
+	sandboxClient   *sandbox.Client         // ground-truth project file tree fetch (take 20 fix)
 	errorCategories *workflow.ErrorCategoryRegistry
 
 	// retry tracks per-plan attempts keyed by slug; payload is *reviewRetryPayload.
@@ -140,6 +142,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		errorCats = reg
 	}
 
+	var sandboxClient *sandbox.Client
+	if config.SandboxURL != "" {
+		sandboxClient = sandbox.NewClient(config.SandboxURL)
+	}
+
 	return &Component{
 		name:            "plan-reviewer",
 		config:          config,
@@ -150,6 +157,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		assembler:       assembler,
 		lessonWriter:    &lessons.Writer{TW: tw, Logger: logger},
 		tripleWriter:    tw,
+		sandboxClient:   sandboxClient,
 		errorCategories: errorCats,
 		retry: dispatchretry.New(dispatchretry.Config{
 			MaxRetries: config.MaxReviewRetries,
@@ -414,11 +422,12 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
 		PlanReviewerPrompt: &prompt.PlanReviewerPromptContext{
-			Slug:          slug,
-			PlanContent:   planContent,
-			HasStandards:  hasStandards,
-			Round:         int(round),
-			PreviousError: previousError,
+			Slug:            slug,
+			PlanContent:     planContent,
+			HasStandards:    hasStandards,
+			Round:           int(round),
+			PreviousError:   previousError,
+			ProjectFileTree: c.fetchProjectFileTree(ctx),
 		},
 	}
 
@@ -510,6 +519,35 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		"model", modelName,
 		"fragments", len(assembled.FragmentsUsed),
 		"system_chars", assembled.SystemMessageChars)
+}
+
+// fetchProjectFileTree returns a ground-truth snapshot of the project's
+// tracked files. Mirrors processor/planner/component.go fetchProjectFileTree
+// — same `git ls-files | head -50` against the sandbox's "main" workspace,
+// same .semspec/.git filter, same 5s timeout, same silent-skip on any
+// failure. Reviewer-side fetch (rather than threading the planner's
+// snapshot through plan KV) means each review reads current ground truth,
+// which matters during multi-round revisions of greenfield plans where
+// scope.create files become real between rounds. Returns "" when the
+// sandbox is unavailable; the renderer omits the section silently and the
+// path-check criterion weakens to "verify scope.create coverage only".
+func (c *Component) fetchProjectFileTree(ctx context.Context) string {
+	if c.sandboxClient == nil {
+		return ""
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result, err := c.sandboxClient.Exec(fetchCtx, "main",
+		"git ls-files | grep -v '^\\.semspec/' | grep -v '^\\.git/' | head -50", 5000)
+	if err != nil {
+		c.logger.Debug("fetchProjectFileTree: sandbox exec failed, skipping injection",
+			"error", err)
+		return ""
+	}
+	if result == nil || result.ExitCode != 0 {
+		return ""
+	}
+	return strings.TrimSpace(result.Stdout)
 }
 
 // availableToolNames returns the full list of tool names for prompt assembly.

@@ -571,6 +571,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
 		SupportsTools:     true,
 		MaxTokens:         maxTokens,
+		Standards:         prompt.LoadStandardsForRoleFromDisk(prompt.RolePlanner),
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
 		PlannerPrompt:     buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError, projectFileTree),

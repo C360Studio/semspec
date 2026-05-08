@@ -505,7 +505,8 @@
       "enabled": true,
       "config": {
         "default_capability": "reviewing",
-        "auto_approve": false
+        "auto_approve": false,
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "project-manager": {

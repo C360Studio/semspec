@@ -371,6 +371,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
 		SupportsTools:     true,
 		MaxTokens:         maxTokens,
+		Standards:         prompt.LoadStandardsForRoleFromDisk(prompt.RoleArchitect),
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
 		ArchitectPrompt:   archCtx,

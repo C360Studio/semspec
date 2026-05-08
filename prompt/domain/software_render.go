@@ -177,6 +177,30 @@ func writeProjectFileTree(sb *strings.Builder, tree string) {
 	sb.WriteString("```\n\n")
 }
 
+// writePlanReviewerProjectFileTree renders the same `git ls-files` snapshot
+// for the plan-reviewer with reviewer-appropriate framing. The reviewer's job
+// is to verify the planner's scope.include against ground truth — paths in
+// scope.include that appear here are valid, paths that don't appear are
+// hallucinations UNLESS they're declared in scope.create (creation intent).
+// Without this section the reviewer's path-check criterion is asked to
+// validate against a tree it never received and weak models default to
+// "flag it" on real files. Caught 2026-05-08 take 20: llama-3.3-70b
+// false-positived "Hallucinated paths in scope.include" on main.go (a real
+// file) two rounds running.
+func writePlanReviewerProjectFileTree(sb *strings.Builder, tree string) {
+	tree = strings.TrimSpace(tree)
+	if tree == "" {
+		return
+	}
+	sb.WriteString("## Project Files (ground truth — captured at dispatch via git ls-files)\n\n")
+	sb.WriteString("Use this list to verify the plan's scope.include paths. A path in scope.include that appears in this list IS valid — do NOT flag it as hallucinated. A path in scope.include that does NOT appear here AND is NOT in scope.create is a hallucination (error-severity finding). Paths in scope.create are creation-intent declarations and never need to appear in this list.\n\n```\n")
+	sb.WriteString(tree)
+	if !strings.HasSuffix(tree, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("```\n\n")
+}
+
 // renderScenarioGeneratorPrompt produces the scenario-generator agent's user
 // message. Mirrors the legacy workflow/prompts.ScenarioGeneratorPrompt body
 // byte-for-byte; ArchitectureContext is pre-rendered upstream.
@@ -186,12 +210,17 @@ func renderScenarioGeneratorPrompt(p *prompt.ScenarioGeneratorPromptContext) str
 		archSection = "\n" + p.ArchitectureContext + "\n"
 	}
 
+	contextSection := ""
+	if p.PlanContext != "" {
+		contextSection = fmt.Sprintf("\n**Context:** %s\n", p.PlanContext)
+	}
+
 	base := fmt.Sprintf(`You are generating BDD scenarios for a specific requirement.
 
 ## Plan: %s
 
 **Goal:** %s
-
+%s
 ## Requirement: %s
 
 %s
@@ -251,7 +280,7 @@ Return ONLY valid JSON matching this exact structure:
 `+"```"+`
 
 **Important:** Return ONLY the JSON object, no additional text or explanation.
-`, p.PlanTitle, p.PlanGoal, p.RequirementTitle, p.RequirementDescription, archSection)
+`, p.PlanTitle, p.PlanGoal, contextSection, p.RequirementTitle, p.RequirementDescription, archSection)
 
 	if p.PreviousError != "" {
 		base += fmt.Sprintf(`
@@ -383,6 +412,13 @@ func renderPlanReviewerPrompt(p *prompt.PlanReviewerPromptContext) string {
 		sb.WriteString(p.PreviousError)
 		sb.WriteString("\n```\n\nProduce a valid response this time. Address the failure mode above before reviewing the plan content.\n\n")
 	}
+
+	// Project file tree — ground truth for the scope-validity check. Must
+	// appear BEFORE plan content so the reviewer reads the source-of-truth
+	// before judging. Empty for greenfield (silently omitted); the renderer
+	// then leaves the path-check criterion to fire on the planner's
+	// scope.create declarations alone.
+	writePlanReviewerProjectFileTree(&sb, p.ProjectFileTree)
 
 	if p.HasStandards {
 		sb.WriteString("Review the following plan against the project standards and completeness criteria.\n\n")

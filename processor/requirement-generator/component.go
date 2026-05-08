@@ -303,6 +303,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		AvailableTools:       prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
 		SupportsTools:        true,
 		MaxTokens:            maxTokens,
+		Standards:            prompt.LoadStandardsForRoleFromDisk(prompt.RoleRequirementGenerator),
 		Persona:              prompt.GlobalPersonas().ForRole(prompt.RoleRequirementGenerator),
 		Vocabulary:           prompt.GlobalPersonas().Vocabulary(),
 		RequirementGenerator: buildRequirementGeneratorPromptContext(trigger, previousError, reviewFindings...),

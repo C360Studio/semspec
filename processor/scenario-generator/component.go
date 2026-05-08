@@ -327,6 +327,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		AvailableTools:          prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
 		SupportsTools:           true,
 		MaxTokens:               maxTokens,
+		Standards:               prompt.LoadStandardsForRoleFromDisk(prompt.RoleScenarioGenerator),
 		Persona:                 prompt.GlobalPersonas().ForRole(prompt.RoleScenarioGenerator),
 		Vocabulary:              prompt.GlobalPersonas().Vocabulary(),
 		ScenarioGeneratorPrompt: scenCtx,

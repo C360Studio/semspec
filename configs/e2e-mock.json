@@ -496,7 +496,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "plan_review"
+        "default_capability": "plan_review",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "architecture-generator": {
