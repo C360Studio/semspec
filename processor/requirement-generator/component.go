@@ -22,6 +22,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
@@ -142,6 +143,7 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+	sandboxClient *sandbox.Client // ground-truth project file tree fetch
 
 	// retry tracks per-plan attempts keyed by slug; payload is *pendingDispatch
 	// (carrying the trigger + reviewFindings needed to re-publish on success
@@ -206,6 +208,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		ComponentName: "requirement-generator",
 	}
 
+	var sandboxClient *sandbox.Client
+	if config.SandboxURL != "" {
+		sandboxClient = sandbox.NewClient(config.SandboxURL)
+	}
+
 	return &Component{
 		name:          "requirement-generator",
 		config:        config,
@@ -215,6 +222,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		sandboxClient: sandboxClient,
 		retry: dispatchretry.New(dispatchretry.Config{
 			MaxRetries: config.MaxGenerationRetries,
 			BackoffMs:  config.RetryBackoffMs,
@@ -306,7 +314,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Standards:            prompt.LoadStandardsForRoleFromDisk(prompt.RoleRequirementGenerator),
 		Persona:              prompt.GlobalPersonas().ForRole(prompt.RoleRequirementGenerator),
 		Vocabulary:           prompt.GlobalPersonas().Vocabulary(),
-		RequirementGenerator: buildRequirementGeneratorPromptContext(trigger, previousError, reviewFindings...),
+		RequirementGenerator: buildRequirementGeneratorPromptContext(trigger, previousError, c.fetchProjectFileTree(ctx), reviewFindings...),
 	}
 
 	// Wire role-scoped lessons learned.
@@ -400,6 +408,32 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		"system_chars", assembled.SystemMessageChars)
 }
 
+// fetchProjectFileTree returns a ground-truth snapshot of the project's
+// tracked files. Mirrors processor/planner/component.go fetchProjectFileTree
+// — same `git ls-files | head -50` against the sandbox's "main" workspace,
+// same .semspec/.git filter, same 5s timeout, same silent-skip on any
+// failure. Without this the persona's files_owned partitioning rule fires
+// against scope.include alone and weak models can still invent
+// idiomatic-looking paths into files_owned.
+func (c *Component) fetchProjectFileTree(ctx context.Context) string {
+	if c.sandboxClient == nil {
+		return ""
+	}
+	fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	result, err := c.sandboxClient.Exec(fetchCtx, "main",
+		"git ls-files | grep -v '^\\.semspec/' | grep -v '^\\.git/' | head -50", 5000)
+	if err != nil {
+		c.logger.Debug("fetchProjectFileTree: sandbox exec failed, skipping injection",
+			"error", err)
+		return ""
+	}
+	if result == nil || result.ExitCode != 0 {
+		return ""
+	}
+	return strings.TrimSpace(result.Stdout)
+}
+
 // buildRequirementGeneratorPromptContext maps the trigger payload into the
 // typed prompt-package context the user-prompt fragment renders against.
 // All actual prompt content lives in
@@ -407,7 +441,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 // function does pure data adaptation so the prompt and the dispatch logic
 // can evolve independently. Replaces the legacy c.buildUserPrompt method
 // the registry consumed before Plan B.
-func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGeneratorRequest, previousError string, reviewFindings ...string) *prompt.RequirementGeneratorContext {
+func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGeneratorRequest, previousError, projectFileTree string, reviewFindings ...string) *prompt.RequirementGeneratorContext {
 	rg := &prompt.RequirementGeneratorContext{
 		Title:                 trigger.Title,
 		Goal:                  trigger.Goal,
@@ -415,6 +449,7 @@ func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGenerat
 		ReplaceRequirementIDs: trigger.ReplaceRequirementIDs,
 		RejectionReasons:      trigger.RejectionReasons,
 		PreviousError:         previousError,
+		ProjectFileTree:       projectFileTree,
 	}
 	if trigger.Scope != nil {
 		rg.ScopeInclude = trigger.Scope.Include

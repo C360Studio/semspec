@@ -27,7 +27,7 @@ func TestBuildPromptContext_FreshGeneration(t *testing.T) {
 		},
 	}
 
-	got := buildRequirementGeneratorPromptContext(trigger, "")
+	got := buildRequirementGeneratorPromptContext(trigger, "", "")
 
 	if got.Title != "Test Plan" || got.Goal != "Add endpoint" || got.Context != "Flask API" {
 		t.Errorf("trigger plan fields not mapped: got %+v", got)
@@ -75,7 +75,7 @@ func TestBuildPromptContext_PartialRegen(t *testing.T) {
 		},
 	}
 
-	got := buildRequirementGeneratorPromptContext(trigger, "")
+	got := buildRequirementGeneratorPromptContext(trigger, "", "")
 
 	if len(got.ExistingRequirements) != 1 {
 		t.Fatalf("ExistingRequirements length = %d, want 1", len(got.ExistingRequirements))
@@ -103,7 +103,7 @@ func TestBuildPromptContext_PartialRegen(t *testing.T) {
 // prompt context so the renderer can surface them to the LLM.
 func TestBuildPromptContext_PreviousErrorAndReviewFindings(t *testing.T) {
 	trigger := &payloads.RequirementGeneratorRequest{Slug: "test", Goal: "x"}
-	got := buildRequirementGeneratorPromptContext(trigger, "json parse failure", "missing scenarios")
+	got := buildRequirementGeneratorPromptContext(trigger, "json parse failure", "", "missing scenarios")
 	if got.PreviousError != "json parse failure" {
 		t.Errorf("PreviousError = %q, want %q", got.PreviousError, "json parse failure")
 	}
@@ -117,7 +117,7 @@ func TestBuildPromptContext_PreviousErrorAndReviewFindings(t *testing.T) {
 // programming error and surfaces a render error, so the adapter must always
 // return a usable context even for nearly-empty triggers.
 func TestBuildPromptContext_ProducesNonNilForEmptyTrigger(t *testing.T) {
-	got := buildRequirementGeneratorPromptContext(&payloads.RequirementGeneratorRequest{}, "")
+	got := buildRequirementGeneratorPromptContext(&payloads.RequirementGeneratorRequest{}, "", "")
 	if got == nil {
 		t.Fatal("buildRequirementGeneratorPromptContext must never return nil")
 	}

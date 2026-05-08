@@ -381,14 +381,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	c.retry.SetActiveLoop(slug, taskID)
 
 	// Load role-filtered standards for the fragment pipeline.
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		repoRoot, _ = os.Getwd()
-	}
-	var stdCtx *prompt.StandardsContext
-	if stds := workflow.LoadStandardsFromDisk(repoRoot); stds != nil {
-		stdCtx = prompt.NewStandardsContext(stds.ForRole(string(prompt.RolePlanReviewer)))
-	}
+	stdCtx := prompt.LoadStandardsForRoleFromDisk(prompt.RolePlanReviewer)
 	hasStandards := stdCtx != nil && len(stdCtx.Items) > 0
 
 	// Resolve model.

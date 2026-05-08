@@ -606,7 +606,8 @@
       "enabled": true,
       "config": {
         "default_capability": "requirement_generation",
-        "max_generation_retries": 3
+        "max_generation_retries": 3,
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "scenario-generator": {

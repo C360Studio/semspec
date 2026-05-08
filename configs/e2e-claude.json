@@ -481,7 +481,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "requirement_generation"
+        "default_capability": "requirement_generation",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "architecture-generator": {

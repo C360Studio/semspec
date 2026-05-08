@@ -423,6 +423,86 @@ func TestRenderPlanReviewerPrompt_TreeBeforePlanContent(t *testing.T) {
 	}
 }
 
+// TestRenderRequirementGeneratorPrompt_ProjectFileTreeInjection mirrors the
+// plan-reviewer take-20 fix one layer up: the requirement-generator persona
+// repeatedly tells the model to draw files_owned from real paths and warns
+// against "inventing fake file splits". Without a ground-truth tree, weak
+// models still hallucinate idiomatic-looking paths (api/handlers/*.go on a
+// project with no api/ directory). When ProjectFileTree is set, the renderer
+// surfaces it BEFORE the plan section with framing tied to the files_owned
+// rule. Empty input silently omits the section so greenfield is unaffected.
+func TestRenderRequirementGeneratorPrompt_ProjectFileTreeInjection(t *testing.T) {
+	tests := []struct {
+		name        string
+		ctx         *prompt.RequirementGeneratorContext
+		mustContain []string
+		mustNotHave []string
+	}{
+		{
+			name: "tree present — surfaced with files_owned framing",
+			ctx: &prompt.RequirementGeneratorContext{
+				Title:           "Add /health",
+				Goal:            "expose service health",
+				ProjectFileTree: "main.go\ninternal/auth/auth.go",
+			},
+			mustContain: []string{
+				"## Project Files",
+				"main.go\ninternal/auth/auth.go",
+				"Use this list when filling files_owned",
+				"Do NOT invent paths that look idiomatic",
+			},
+		},
+		{
+			name: "tree empty — section omitted (greenfield-safe)",
+			ctx: &prompt.RequirementGeneratorContext{
+				Title:           "Bootstrap service",
+				Goal:            "create new service",
+				ProjectFileTree: "",
+			},
+			mustNotHave: []string{
+				"## Project Files",
+				"Use this list when filling files_owned",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := renderRequirementGeneratorPrompt(tt.ctx)
+			for _, want := range tt.mustContain {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing pinned string %q\nGot:\n%s", want, out)
+				}
+			}
+			for _, banned := range tt.mustNotHave {
+				if strings.Contains(out, banned) {
+					t.Errorf("unexpected string %q present\nGot:\n%s", banned, out)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderRequirementGeneratorPrompt_TreeBeforePlanSection guards that the
+// file tree (when present) appears BEFORE the plan-decompose section — the
+// generator should ground itself in real paths before partitioning files.
+func TestRenderRequirementGeneratorPrompt_TreeBeforePlanSection(t *testing.T) {
+	out := renderRequirementGeneratorPrompt(&prompt.RequirementGeneratorContext{
+		Title:           "ordering check",
+		Goal:            "verify ordering",
+		ProjectFileTree: "main.go",
+	})
+
+	treeIdx := strings.Index(out, "## Project Files")
+	planIdx := strings.Index(out, "## Plan to Decompose")
+	if treeIdx < 0 || planIdx < 0 {
+		t.Fatalf("expected both sections present\nGot:\n%s", out)
+	}
+	if treeIdx >= planIdx {
+		t.Errorf("file tree must appear before plan section; tree@%d plan@%d", treeIdx, planIdx)
+	}
+}
+
 // TestRenderScenarioGeneratorPrompt_PlanContextRendered pins a silent-data-loss
 // bug found in the 2026-05-08 audit: scenario-generator's PlanContext field
 // was set by the producer (plan_watcher.go) but never read by the renderer.

@@ -17,7 +17,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -454,14 +453,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 	qrc := buildQAReviewContext(plan)
 
 	// Load role-filtered standards.
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		repoRoot, _ = os.Getwd()
-	}
-	var stdCtx *prompt.StandardsContext
-	if stds := workflow.LoadStandardsFromDisk(repoRoot); stds != nil {
-		stdCtx = prompt.NewStandardsContext(stds.ForRole(string(prompt.RolePlanQAReviewer)))
-	}
+	stdCtx := prompt.LoadStandardsForRoleFromDisk(prompt.RolePlanQAReviewer)
 
 	// Resolve model.
 	capability := c.config.DefaultCapability

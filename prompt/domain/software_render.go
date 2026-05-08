@@ -17,6 +17,13 @@ import (
 func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) string {
 	var sb strings.Builder
 
+	// Project file tree — ground truth for files_owned partitioning. Must
+	// appear BEFORE the plan so the model reads the inventory before
+	// deciding which files each requirement should claim. Empty for
+	// greenfield (silently omitted) — model then relies on scope.include
+	// + scope.create alone, same as before this section was wired.
+	writeRequirementGeneratorProjectFileTree(&sb, rg.ProjectFileTree)
+
 	sb.WriteString("## Plan to Decompose\n\n")
 	if rg.Title != "" {
 		fmt.Fprintf(&sb, "**Title**: %s\n\n", rg.Title)
@@ -170,6 +177,27 @@ func writeProjectFileTree(sb *strings.Builder, tree string) {
 	}
 	sb.WriteString("## Project Files (ground truth — captured at dispatch via git ls-files)\n\n")
 	sb.WriteString("Any path you put into scope.include MUST appear in this list, OR be a file the plan explicitly intends to CREATE (new test files, new modules). Hallucinating directories that look idiomatic but don't exist is the most common cause of plan rejection — verify with bash if uncertain.\n\n```\n")
+	sb.WriteString(tree)
+	if !strings.HasSuffix(tree, "\n") {
+		sb.WriteString("\n")
+	}
+	sb.WriteString("```\n\n")
+}
+
+// writeRequirementGeneratorProjectFileTree renders the `git ls-files`
+// snapshot for the requirement-generator with framing focused on the
+// files_owned partitioning rule. The persona warns against "inventing fake
+// file splits" — without a real tree, weak models still hallucinate
+// idiomatic-looking paths (api/handlers/*.go on projects with no api/
+// directory) into files_owned. Empty input silently omits the section so
+// greenfield projects aren't penalized.
+func writeRequirementGeneratorProjectFileTree(sb *strings.Builder, tree string) {
+	tree = strings.TrimSpace(tree)
+	if tree == "" {
+		return
+	}
+	sb.WriteString("## Project Files (ground truth — captured at dispatch via git ls-files)\n\n")
+	sb.WriteString("Use this list when filling files_owned. Real, existing files belong here. The plan's scope.include is your allow-list — every files_owned entry should appear in scope.include AND in this tree, OR be a file the plan declares in scope.create. Do NOT invent paths that look idiomatic but aren't in this list.\n\n```\n")
 	sb.WriteString(tree)
 	if !strings.HasSuffix(tree, "\n") {
 		sb.WriteString("\n")

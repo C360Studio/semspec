@@ -27,6 +27,16 @@ type Config struct {
 	// Default 200ms; non-positive values fall back to the default.
 	RetryBackoffMs int `json:"retry_backoff_ms" schema:"type:integer,description:Floor of jittered backoff between generation retries (ms),category:advanced,default:200"`
 
+	// SandboxURL is the URL of the sandbox container. When set, the
+	// requirement-generator fetches a `git ls-files` snapshot of the project
+	// at dispatch time and injects it into the user prompt as ground-truth
+	// file inventory. Without this the persona's files_owned partitioning
+	// rule fires against scope.include alone, and weak models can still
+	// invent idiomatic-looking paths (api/handlers/*.go on projects with no
+	// api/ directory). Greenfield-safe: empty output skips the section
+	// silently. Same shape as plan-reviewer/planner sandbox_url.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox URL for project file tree snapshot,category:advanced"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
