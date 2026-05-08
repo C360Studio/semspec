@@ -567,13 +567,13 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		Role:              prompt.RolePlanner,
 		Provider:          provider,
 		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
-		Domain:         "software",
-		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
-		SupportsTools:  true,
-		MaxTokens:      maxTokens,
-		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
-		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
-		PlannerPrompt:  buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError, projectFileTree),
+		Domain:            "software",
+		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
+		SupportsTools:     true,
+		MaxTokens:         maxTokens,
+		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
+		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		PlannerPrompt:     buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError, projectFileTree),
 	}
 
 	// Wire role-scoped lessons learned.

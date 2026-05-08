@@ -357,9 +357,9 @@ func TestParseStrict_CountersIncrement(t *testing.T) {
 			wantNoMoves: []QuirkID{QuirkFencedJSONWrapper, QuirkJSLineComments, QuirkTrailingCommas},
 		},
 		{
-			name:       "fenced only",
-			input:      "```json\n{\"a\":1}\n```",
-			wantDeltas: map[QuirkID]int64{QuirkFencedJSONWrapper: 1},
+			name:        "fenced only",
+			input:       "```json\n{\"a\":1}\n```",
+			wantDeltas:  map[QuirkID]int64{QuirkFencedJSONWrapper: 1},
 			wantNoMoves: []QuirkID{QuirkJSLineComments, QuirkTrailingCommas},
 		},
 	}

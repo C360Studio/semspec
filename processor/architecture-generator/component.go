@@ -355,13 +355,13 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		Role:              prompt.RoleArchitect,
 		Provider:          provider,
 		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
-		Domain:          "software",
-		AvailableTools:  prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
-		SupportsTools:   true,
-		MaxTokens:       maxTokens,
-		Persona:         prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
-		Vocabulary:      prompt.GlobalPersonas().Vocabulary(),
-		ArchitectPrompt: archCtx,
+		Domain:            "software",
+		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
+		SupportsTools:     true,
+		MaxTokens:         maxTokens,
+		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
+		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		ArchitectPrompt:   archCtx,
 	}
 
 	// Wire role-scoped lessons learned.

@@ -50,6 +50,36 @@ const repeatThreshold = 3
 func (RepeatToolFailure) Name() string { return RepeatToolFailureShape }
 
 // Run implements Detector. Pure; no I/O.
+// streakKey identifies a same-(loop, tool, error-class) failure streak.
+type repeatStreakKey struct {
+	loopID  string
+	tool    string
+	errorCl string
+}
+
+// streakState tracks the running streak count for a repeatStreakKey.
+type repeatStreakState struct {
+	count    int
+	firstSeq int64 // sequence of the first failure in the streak
+	lastSeq  int64 // sequence of the most recent failure
+}
+
+// repeatToolResult is the parsed shape of a tool.result payload that
+// the repeat-failure walker actually consumes. Defining it once keeps
+// the inline-anonymous-struct churn out of the walk loop.
+type repeatToolResult struct {
+	CallID string `json:"call_id"`
+	Name   string `json:"name"`
+	Error  string `json:"error"`
+	LoopID string `json:"loop_id"`
+}
+
+// Run scans the bundle's tool.result entries and emits one diagnosis
+// per (loop_id, tool_name, error_class) tuple whose failure streak hits
+// repeatThreshold. The walk is chronological by message Sequence;
+// streaks reset on a same-tool success or a different error class for
+// the same (loop, tool) pair. Idempotent — re-running on the same
+// bundle yields the same diagnoses in the same order.
 func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 	if b == nil || len(b.Messages) == 0 {
 		return nil
@@ -58,24 +88,7 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 	// Pre-pass: build call_id → tool name from tool.execute dispatches
 	// so we can label the failure by the tool that produced it. Same
 	// shape as detector_graphtoolfailure for consistency.
-	callIDToName := make(map[string]string)
-	for _, m := range b.Messages {
-		if !strings.HasPrefix(m.Subject, "tool.execute.") {
-			continue
-		}
-		var env struct {
-			Payload struct {
-				ID   string `json:"id"`
-				Name string `json:"name"`
-			} `json:"payload"`
-		}
-		if err := json.Unmarshal(m.RawData, &env); err != nil {
-			continue
-		}
-		if env.Payload.ID != "" && env.Payload.Name != "" {
-			callIDToName[env.Payload.ID] = env.Payload.Name
-		}
-	}
+	callIDToName := buildToolCallIDIndex(b.Messages)
 
 	// Walk tool.result entries in chronological order, tracking the
 	// running streak per (loop_id, tool_name, error_class) tuple.
@@ -83,19 +96,8 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 	// different error class. Emit one diagnosis per loop+tool when
 	// the streak hits the threshold; subsequent failures on the same
 	// streak DON'T re-emit — once is enough for the operator.
-
-	type streakKey struct {
-		loopID  string
-		tool    string
-		errorCl string
-	}
-	type streakState struct {
-		count    int
-		firstSeq int64 // sequence of the first failure in the streak
-		lastSeq  int64 // sequence of the most recent failure
-	}
-	streaks := make(map[streakKey]*streakState)
-	emitted := make(map[streakKey]bool)
+	streaks := make(map[repeatStreakKey]*repeatStreakState)
+	emitted := make(map[repeatStreakKey]bool)
 	malformed := 0
 
 	type seqDiag struct {
@@ -104,29 +106,10 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 	}
 	var matches []seqDiag
 
-	// b.Messages is not guaranteed to be in chronological order, so
-	// build an index sorted by sequence to walk deterministically.
-	type indexed struct {
-		idx int
-		seq int64
-	}
-	order := make([]indexed, 0, len(b.Messages))
-	for i, m := range b.Messages {
-		if strings.HasPrefix(m.Subject, "tool.result") {
-			order = append(order, indexed{idx: i, seq: m.Sequence})
-		}
-	}
-	sort.Slice(order, func(i, j int) bool { return order[i].seq < order[j].seq })
-
-	for _, o := range order {
-		m := b.Messages[o.idx]
+	for _, idx := range chronoToolResultIndices(b.Messages) {
+		m := b.Messages[idx]
 		var env struct {
-			Payload struct {
-				CallID string `json:"call_id"`
-				Name   string `json:"name"`
-				Error  string `json:"error"`
-				LoopID string `json:"loop_id"`
-			} `json:"payload"`
+			Payload repeatToolResult `json:"payload"`
 		}
 		if err := json.Unmarshal(m.RawData, &env); err != nil {
 			malformed++
@@ -147,24 +130,15 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 		}
 
 		if env.Payload.Error == "" {
-			// Success on this tool resets every streak in this loop
-			// for this tool, regardless of error class. The model made
-			// progress; whatever was wedging it is no longer wedging.
-			for k := range streaks {
-				if k.loopID == env.Payload.LoopID && k.tool == toolName {
-					delete(streaks, k)
-				}
-			}
+			resetStreaksForTool(streaks, env.Payload.LoopID, toolName)
 			continue
 		}
 
-		errorCl := classifyError(env.Payload.Error)
-		key := streakKey{
+		key := repeatStreakKey{
 			loopID:  env.Payload.LoopID,
 			tool:    toolName,
-			errorCl: errorCl,
+			errorCl: classifyError(env.Payload.Error),
 		}
-
 		// A different error class on the same (loop, tool) means the
 		// model's behavior changed — reset competing streaks.
 		for k := range streaks {
@@ -175,7 +149,7 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 
 		st, ok := streaks[key]
 		if !ok {
-			st = &streakState{firstSeq: m.Sequence}
+			st = &repeatStreakState{firstSeq: m.Sequence}
 			streaks[key] = st
 		}
 		st.count++
@@ -184,33 +158,8 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 		if st.count == repeatThreshold && !emitted[key] {
 			emitted[key] = true
 			matches = append(matches, seqDiag{
-				seq: st.lastSeq,
-				diag: Diagnosis{
-					Shape:    RepeatToolFailureShape,
-					Severity: SeverityCritical,
-					Evidence: []EvidenceRef{
-						{
-							Kind:  EvidenceLoopEntry,
-							ID:    key.loopID,
-							Field: "tool",
-							Value: key.tool,
-						},
-						{
-							Kind:  EvidenceLogLine,
-							ID:    strconv.FormatInt(st.firstSeq, 10),
-							Field: "first_failure",
-							Value: env.Payload.Error,
-						},
-						{
-							Kind:  EvidenceLogLine,
-							ID:    strconv.FormatInt(st.lastSeq, 10),
-							Field: "repeat_count",
-							Value: strconv.Itoa(repeatThreshold),
-						},
-					},
-					Remediation: "Loop is calling tool " + key.tool + " with the same error class (" + key.errorCl + ") " + strconv.Itoa(repeatThreshold) + "+ times in a row — the model is not reading the tool's error response. Classic instruction-following failure under example-anchoring bias. Fix shapes, in order: (a) auto-fill / soften the validator if the missing field has an obvious safe default; (b) hoist the missing field into the tool's persona JSON example as a populated first-class key (prose rules lose to JSON examples for mid-tier models); (c) inject the validator error with a 'RETRY HINT:' prefix so it stands out from happy-path tool results. Continuing the run wastes tokens and budget — terminate or remediate.",
-					MemoryRef:   "feedback_failure_mode_taxonomy.md",
-				},
+				seq:  st.lastSeq,
+				diag: buildRepeatFailureDiagnosis(key, st, env.Payload.Error),
 			})
 		}
 	}
@@ -227,6 +176,102 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 		return nil
 	}
 	return out
+}
+
+// buildToolCallIDIndex walks tool.execute dispatches and returns a
+// call_id → tool_name lookup so tool.result entries that omit the name
+// (older payload shape) can still be attributed.
+func buildToolCallIDIndex(messages []Message) map[string]string {
+	idx := make(map[string]string)
+	for _, m := range messages {
+		if !strings.HasPrefix(m.Subject, "tool.execute.") {
+			continue
+		}
+		var env struct {
+			Payload struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"payload"`
+		}
+		if err := json.Unmarshal(m.RawData, &env); err != nil {
+			continue
+		}
+		if env.Payload.ID != "" && env.Payload.Name != "" {
+			idx[env.Payload.ID] = env.Payload.Name
+		}
+	}
+	return idx
+}
+
+// chronoToolResultIndices returns the indices into messages of every
+// tool.result entry, sorted by Sequence ascending. b.Messages is not
+// guaranteed to be in chronological order so we sort by sequence to
+// walk deterministically.
+func chronoToolResultIndices(messages []Message) []int {
+	type indexed struct {
+		idx int
+		seq int64
+	}
+	order := make([]indexed, 0, len(messages))
+	for i, m := range messages {
+		if strings.HasPrefix(m.Subject, "tool.result") {
+			order = append(order, indexed{idx: i, seq: m.Sequence})
+		}
+	}
+	sort.Slice(order, func(i, j int) bool { return order[i].seq < order[j].seq })
+	out := make([]int, len(order))
+	for i, o := range order {
+		out[i] = o.idx
+	}
+	return out
+}
+
+// resetStreaksForTool drops every streak for this (loop, tool) pair
+// regardless of error class, used when the same tool succeeds in the
+// same loop — the model made progress so the wedge cleared.
+func resetStreaksForTool(streaks map[repeatStreakKey]*repeatStreakState, loopID, tool string) {
+	for k := range streaks {
+		if k.loopID == loopID && k.tool == tool {
+			delete(streaks, k)
+		}
+	}
+}
+
+// buildRepeatFailureDiagnosis assembles the Diagnosis for a streak that
+// hit the repeat threshold. firstError is the verbatim error message
+// from the just-arrived (lastSeq) failure; carrying it on the
+// EvidenceLogLine pinned to firstSeq is a documented oversimplification
+// — the streak's first error class matched, even if the wording drifted.
+// For investigators the most-recent error wording is the more useful
+// surface, and pinning it to firstSeq keeps the evidence chain tied to
+// the streak's start.
+func buildRepeatFailureDiagnosis(key repeatStreakKey, st *repeatStreakState, latestError string) Diagnosis {
+	return Diagnosis{
+		Shape:    RepeatToolFailureShape,
+		Severity: SeverityCritical,
+		Evidence: []EvidenceRef{
+			{
+				Kind:  EvidenceLoopEntry,
+				ID:    key.loopID,
+				Field: "tool",
+				Value: key.tool,
+			},
+			{
+				Kind:  EvidenceLogLine,
+				ID:    strconv.FormatInt(st.firstSeq, 10),
+				Field: "first_failure",
+				Value: latestError,
+			},
+			{
+				Kind:  EvidenceLogLine,
+				ID:    strconv.FormatInt(st.lastSeq, 10),
+				Field: "repeat_count",
+				Value: strconv.Itoa(repeatThreshold),
+			},
+		},
+		Remediation: "Loop is calling tool " + key.tool + " with the same error class (" + key.errorCl + ") " + strconv.Itoa(repeatThreshold) + "+ times in a row — the model is not reading the tool's error response. Classic instruction-following failure under example-anchoring bias. Fix shapes, in order: (a) auto-fill / soften the validator if the missing field has an obvious safe default; (b) hoist the missing field into the tool's persona JSON example as a populated first-class key (prose rules lose to JSON examples for mid-tier models); (c) inject the validator error with a 'RETRY HINT:' prefix so it stands out from happy-path tool results. Continuing the run wastes tokens and budget — terminate or remediate.",
+		MemoryRef:   "feedback_failure_mode_taxonomy.md",
+	}
 }
 
 // classifyError reduces an error message to a stable class so streak

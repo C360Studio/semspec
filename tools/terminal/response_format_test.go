@@ -126,7 +126,7 @@ func TestToolsForEndpoint_StrictPropagation(t *testing.T) {
 type fakeToolReg struct{ tools []agentic.ToolDefinition }
 
 func (f *fakeToolReg) ListTools() []agentic.ToolDefinition { return f.tools }
-func (f *fakeToolReg) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+func (f *fakeToolReg) Execute(_ context.Context, _ agentic.ToolCall) (agentic.ToolResult, error) {
 	return agentic.ToolResult{}, nil
 }
 

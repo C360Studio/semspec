@@ -714,7 +714,6 @@ func parseNodeResultPayload(raw string) (*nodeResultPayload, []jsonutil.QuirkID,
 }
 
 func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-
 	// Get nodeID from current execution state. Execution is serial, so
 	// CurrentNodeIdx always identifies the active node. This works for both
 	// direct agentic-loop completions (WorkflowStep=nodeID) and
@@ -727,90 +726,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	exec.VisitedNodes[nodeID] = true
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
-
-		// Parse the failure stage out of the synthetic event payload so we
-		// can distinguish phase=escalated (deterministic upstream defect —
-		// TDD budget exhausted) from phase=error (transient flake — bug-#9
-		// claim/observation mismatch, merge race, sandbox wedge). Stages
-		// are surfaced by req_completions.handleTaskStateChange.
-		var failurePayload struct {
-			TaskStage        string `json:"task_stage"`
-			EscalationReason string `json:"escalation_reason"`
-		}
-		if event.Result != "" {
-			_ = json.Unmarshal([]byte(event.Result), &failurePayload)
-		}
-
-		// On node failure, check if we can retry at the requirement level.
-		//
-		// Layer-2 retry (this branch): AGENT failures worth a fresh
-		// generation — the bug-#9 claim/observation guard fired because the
-		// developer reported files_modified that produced no commit, code
-		// didn't compile, merge raced, etc. Re-dispatch the developer for
-		// the SAME node with prior workspace + feedback so a NEW generation
-		// can fix what the prior one missed.
-		//
-		// Layer-1 retry lives in processor/execution-manager/component.go's
-		// mergeWorktree (see that comment for cross-reference). Layer-1
-		// fixes INFRASTRUCTURE flakes (repoMu contention, transient git
-		// plumbing) by retrying the merge of the same hash. Different
-		// cause, different remedy, do not collapse.
-		//
-		// 2026-04-29 Gemini @easy run validated the split: layer-2 fired
-		// twice on test-health-endpoint (claim/observation mismatch on
-		// attempts 1+2); third re-dispatch produced real test code and
-		// the merge succeeded.
-		//
-		// Skip retry on phase=escalated. TDD-budget exhaustion at the
-		// execution-manager level means the developer already burned its
-		// full max_tdd_cycles budget on the same task with no progress.
-		// Retrying spawns a NEW task with cycle=0 against the same scope,
-		// same prompt, same upstream defect — and burns another full
-		// budget. Caught 2026-05-03 on openrouter @easy /health where the
-		// retry chain produced ~570K input tokens per dev dispatch ×
-		// (max_tdd_cycles 3) × (max_requirement_retries 2 + 1 first try)
-		// = 9 dev dispatches all hallucinating against a broken scope.
-		// PlanDecision (Kind=ExecutionExhausted) is the right escalation
-		// path; markFailedLocked surfaces it.
-		tddExhausted := failurePayload.TaskStage == "escalated"
-
-		if !tddExhausted && exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
-			exec.RetryCount++
-			exec.LastReviewFeedback = fmt.Sprintf("Node %q failed (outcome=%s). Retry the implementation.", nodeID, event.Outcome)
-			exec.terminated = false
-			exec.DirtyNodeIDs = []string{nodeID}
-			delete(exec.VisitedNodes, nodeID)
-
-			if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
-				"retry_count": exec.RetryCount,
-				"dirty_nodes": exec.DirtyNodeIDs,
-			}); err != nil {
-				c.logger.Warn("Failed to send req.phase mutation for node retry", "error", err)
-			}
-
-			c.logger.Info("Retrying failed node at requirement level",
-				"entity_id", exec.EntityID,
-				"node_id", nodeID,
-				"retry_count", exec.RetryCount,
-			)
-
-			// Reset to just before the failed node and re-dispatch.
-			exec.CurrentNodeIdx--
-			c.dispatchNextNodeLocked(ctx, exec)
-			return
-		}
-
-		failureReason := fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome)
-		if tddExhausted {
-			failureReason = fmt.Sprintf("node %q TDD budget exhausted at task level: %s",
-				nodeID, failurePayload.EscalationReason)
-			c.logger.Info("Skipping requirement-level retry — TDD budget exhausted upstream",
-				"entity_id", exec.EntityID,
-				"node_id", nodeID,
-				"escalation_reason", failurePayload.EscalationReason)
-		}
-		c.markFailedLocked(ctx, exec, failureReason)
+		c.handleNodeFailureLocked(ctx, event, exec, nodeID)
 		return
 	}
 
@@ -821,65 +737,155 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	// zero-value NodeResult and letting the downstream reviewer judge work
 	// the executor never recorded. Empty Result remains legitimate (test
 	// fixtures and the no-payload success case fall through unchanged).
-	var parsed *nodeResultPayload
-	if event.Result != "" {
-		var parseErr error
-		var quirks []jsonutil.QuirkID
-		parsed, quirks, parseErr = parseNodeResultPayload(event.Result)
-
-		// CP-1 incident emit (ADR-035 audit B.5) — DAG nodes dispatch
-		// as developer tasks, so role=developer aggregates with B.1
-		// developer fires under per-(role, model) operator queries.
-		// B.1 dispatches one developer call per task; B.5 dispatches N
-		// per requirement (one per DAG node). Keeping the same role
-		// label means the partition stays queryable end-to-end without
-		// fragmenting on dispatch path. If dispatch-path attribution
-		// becomes load-bearing, add a separate predicate to
-		// vocabulary/observability rather than fragment the role axis.
-		c.emitParseIncident(ctx, "developer", event, exec, quirks, parseErr, "node_id", nodeID)
-
-		if parseErr != nil {
-			c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
-			feedback := fmt.Sprintf(
-				"Node %q completed but its result payload was unrecoverable: %s. "+
-					"Re-run the same scope; ensure submit_work returns valid JSON containing "+
-					"files_modified (and/or files_created), changes_summary, and merge_commit fields.",
-				nodeID, parseErr,
-			)
-			if exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
-				exec.RetryCount++
-				exec.LastReviewFeedback = feedback
-				exec.terminated = false
-				exec.DirtyNodeIDs = []string{nodeID}
-				delete(exec.VisitedNodes, nodeID)
-
-				if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
-					"retry_count": exec.RetryCount,
-					"dirty_nodes": exec.DirtyNodeIDs,
-				}); err != nil {
-					c.logger.Warn("Failed to send req.phase mutation for node parse-failure retry", "error", err)
-				}
-
-				c.logger.Info("Node result parse failed — retrying at requirement level",
-					"entity_id", exec.EntityID,
-					"node_id", nodeID,
-					"retry_count", exec.RetryCount,
-					"parse_error", parseErr,
-				)
-
-				exec.CurrentNodeIdx--
-				c.dispatchNextNodeLocked(ctx, exec)
-				return
-			}
-			c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q result parse failed and retries exhausted: %v", nodeID, parseErr))
-			return
-		}
+	parsed, ok := c.parseNodeCompletionPayloadLocked(ctx, event, exec, nodeID)
+	if !ok {
+		return
 	}
 
-	// Parse succeeded (or Result was empty) — node is genuinely complete.
+	c.recordNodeSuccessLocked(ctx, exec, nodeID, parsed)
+}
+
+// handleNodeFailureLocked deals with a non-success node outcome. It splits
+// the TDD-exhaustion (deterministic upstream defect — markFailed) and
+// retry-the-node (transient flake — re-dispatch with feedback) paths.
+// Caller must hold exec.mu.
+//
+// Layer-2 retry: AGENT failures worth a fresh generation — the bug-#9
+// claim/observation guard fired because the developer reported
+// files_modified that produced no commit, code didn't compile, merge
+// raced, etc. Re-dispatch the developer for the SAME node with prior
+// workspace + feedback so a NEW generation can fix what the prior one
+// missed.
+//
+// Layer-1 retry lives in processor/execution-manager/component.go's
+// mergeWorktree (see that comment for cross-reference). Layer-1 fixes
+// INFRASTRUCTURE flakes (repoMu contention, transient git plumbing) by
+// retrying the merge of the same hash. Different cause, different
+// remedy, do not collapse.
+//
+// Skip retry on phase=escalated. TDD-budget exhaustion at the
+// execution-manager level means the developer already burned its full
+// max_tdd_cycles budget on the same task with no progress. Retrying
+// spawns a NEW task with cycle=0 against the same scope, same prompt,
+// same upstream defect — and burns another full budget. Caught
+// 2026-05-03 on openrouter @easy /health where the retry chain produced
+// ~570K input tokens per dev dispatch × (max_tdd_cycles 3) ×
+// (max_requirement_retries 2 + 1 first try) = 9 dev dispatches all
+// hallucinating against a broken scope. PlanDecision
+// (Kind=ExecutionExhausted) is the right escalation path;
+// markFailedLocked surfaces it.
+func (c *Component) handleNodeFailureLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution, nodeID string) {
+	c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
+
+	// Parse the failure stage out of the synthetic event payload so we
+	// can distinguish phase=escalated from phase=error. Stages are
+	// surfaced by req_completions.handleTaskStateChange.
+	var failurePayload struct {
+		TaskStage        string `json:"task_stage"`
+		EscalationReason string `json:"escalation_reason"`
+	}
+	if event.Result != "" {
+		_ = json.Unmarshal([]byte(event.Result), &failurePayload)
+	}
+
+	tddExhausted := failurePayload.TaskStage == "escalated"
+
+	if !tddExhausted && exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
+		feedback := fmt.Sprintf("Node %q failed (outcome=%s). Retry the implementation.", nodeID, event.Outcome)
+		c.retryNodeAtRequirementLevelLocked(ctx, exec, nodeID, feedback, "Retrying failed node at requirement level")
+		return
+	}
+
+	failureReason := fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome)
+	if tddExhausted {
+		failureReason = fmt.Sprintf("node %q TDD budget exhausted at task level: %s",
+			nodeID, failurePayload.EscalationReason)
+		c.logger.Info("Skipping requirement-level retry — TDD budget exhausted upstream",
+			"entity_id", exec.EntityID,
+			"node_id", nodeID,
+			"escalation_reason", failurePayload.EscalationReason)
+	}
+	c.markFailedLocked(ctx, exec, failureReason)
+}
+
+// parseNodeCompletionPayloadLocked parses event.Result for a successful
+// node completion. Returns the parsed payload (nil when event.Result is
+// empty — legitimate for fixtures and no-payload successes) and ok=true
+// to continue, or ok=false when parse failure routed through the retry
+// path and the caller must abort. Caller must hold exec.mu.
+func (c *Component) parseNodeCompletionPayloadLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution, nodeID string) (*nodeResultPayload, bool) {
+	if event.Result == "" {
+		return nil, true
+	}
+	parsed, quirks, parseErr := parseNodeResultPayload(event.Result)
+
+	// CP-1 incident emit (ADR-035 audit B.5) — DAG nodes dispatch as
+	// developer tasks, so role=developer aggregates with B.1 developer
+	// fires under per-(role, model) operator queries. B.1 dispatches one
+	// developer call per task; B.5 dispatches N per requirement (one per
+	// DAG node). Keeping the same role label means the partition stays
+	// queryable end-to-end without fragmenting on dispatch path. If
+	// dispatch-path attribution becomes load-bearing, add a separate
+	// predicate to vocabulary/observability rather than fragment the role
+	// axis.
+	c.emitParseIncident(ctx, "developer", event, exec, quirks, parseErr, "node_id", nodeID)
+
+	if parseErr == nil {
+		return parsed, true
+	}
+
+	c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
+	feedback := fmt.Sprintf(
+		"Node %q completed but its result payload was unrecoverable: %s. "+
+			"Re-run the same scope; ensure submit_work returns valid JSON containing "+
+			"files_modified (and/or files_created), changes_summary, and merge_commit fields.",
+		nodeID, parseErr,
+	)
+	if exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
+		c.retryNodeAtRequirementLevelLocked(ctx, exec, nodeID, feedback, "Node result parse failed — retrying at requirement level", "parse_error", parseErr)
+		return nil, false
+	}
+	c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q result parse failed and retries exhausted: %v", nodeID, parseErr))
+	return nil, false
+}
+
+// retryNodeAtRequirementLevelLocked rewinds the DAG cursor and
+// re-dispatches the just-failed node with feedback. Shared by the
+// outcome-failure and parse-failure paths so retry bookkeeping (counter,
+// dirty-nodes, KV mutation, log line) stays consistent. Caller must hold
+// exec.mu.
+func (c *Component) retryNodeAtRequirementLevelLocked(ctx context.Context, exec *requirementExecution, nodeID, feedback, logMsg string, extraLogFields ...any) {
+	exec.RetryCount++
+	exec.LastReviewFeedback = feedback
+	exec.terminated = false
+	exec.DirtyNodeIDs = []string{nodeID}
+	delete(exec.VisitedNodes, nodeID)
+
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
+		"retry_count": exec.RetryCount,
+		"dirty_nodes": exec.DirtyNodeIDs,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation for node retry", "error", err)
+	}
+
+	fields := []any{
+		"entity_id", exec.EntityID,
+		"node_id", nodeID,
+		"retry_count", exec.RetryCount,
+	}
+	fields = append(fields, extraLogFields...)
+	c.logger.Info(logMsg, fields...)
+
+	exec.CurrentNodeIdx--
+	c.dispatchNextNodeLocked(ctx, exec)
+}
+
+// recordNodeSuccessLocked appends the node's result, updates KV, and
+// either advances to the next node or kicks off the requirement
+// reviewer when the DAG is complete. Caller must hold exec.mu.
+func (c *Component) recordNodeSuccessLocked(ctx context.Context, exec *requirementExecution, nodeID string, parsed *nodeResultPayload) {
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "completed")
 
-	// Track node result for aggregate reporting.
 	nodeResult := NodeResult{NodeID: nodeID}
 	if parsed != nil {
 		nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
@@ -888,7 +894,6 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	}
 	exec.NodeResults = append(exec.NodeResults, nodeResult)
 
-	// Send node completion mutation to execution-manager.
 	wfResult := &workflow.NodeResult{
 		NodeID:        nodeResult.NodeID,
 		FilesModified: nodeResult.FilesModified,
@@ -905,14 +910,10 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 		"total", len(exec.SortedNodeIDs),
 	)
 
-	// Check if all nodes are done.
 	if len(exec.VisitedNodes) >= len(exec.SortedNodeIDs) {
-		// All nodes complete — proceed to requirement-level review.
 		c.beginRequirementReviewLocked(ctx, exec)
 		return
 	}
-
-	// Dispatch next node.
 	c.dispatchNextNodeLocked(ctx, exec)
 }
 

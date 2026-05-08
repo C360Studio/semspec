@@ -18,9 +18,9 @@ func TestOutputFormatElidesSchemaProse(t *testing.T) {
 	a := prompt.NewAssembler(r)
 
 	tests := []struct {
-		role            prompt.Role
-		dropWhenSet     []string // substrings that MUST be elided when HasResponseFormat=true
-		keepAlways      []string // substrings that MUST appear in both modes
+		role        prompt.Role
+		dropWhenSet []string // substrings that MUST be elided when HasResponseFormat=true
+		keepAlways  []string // substrings that MUST appear in both modes
 	}{
 		{
 			role: prompt.RoleDeveloper,

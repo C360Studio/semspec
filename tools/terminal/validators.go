@@ -61,10 +61,7 @@ func RegisterMetrics(reg *metric.MetricsRegistry) error {
 	if err := reg.RegisterCounter("terminal", "review_missing_rejection_type_total", reviewMissingRejectionTypeCounter); err != nil {
 		return fmt.Errorf("register terminal review-missing-rejection-type counter: %w", err)
 	}
-	if err := registerScopeValidatorMetrics(reg); err != nil {
-		return err
-	}
-	return nil
+	return registerScopeValidatorMetrics(reg)
 }
 
 // fireReviewMissingRejectionType increments the counter and emits a

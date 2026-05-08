@@ -97,8 +97,8 @@ func RegisterMetrics(reg *metric.MetricsRegistry) error {
 // GraphExecutor implements graph query tools for workflow context.
 type GraphExecutor struct {
 	registry     *graph.SourceRegistry
-	querier      graph.Querier            // federated querier (nil = graph not configured)
-	tripleWriter *graphutil.TripleWriter  // for ADR-035 tool.recovery.incident emit; nil-safe
+	querier      graph.Querier           // federated querier (nil = graph not configured)
+	tripleWriter *graphutil.TripleWriter // for ADR-035 tool.recovery.incident emit; nil-safe
 }
 
 // WithTripleWriter installs a triple writer so tool-recovery

@@ -39,17 +39,17 @@ const BundleFormat = "v1"
 // An empty Diagnoses array means detectors ran cleanly and matched
 // nothing. An absent TrajectoryRefs means none were captured.
 type Bundle struct {
-	Bundle         BundleMeta      `json:"bundle"`
-	Host           HostInfo        `json:"host"`
-	Config         ConfigSnapshot  `json:"config"`
-	Plans          []KVEntry       `json:"plans"`    // PLAN_STATES KV entries
-	Loops          []KVEntry       `json:"loops"`    // AGENT_LOOPS KV entries
-	Messages       []Message       `json:"messages"` // most-recent N message-logger entries
-	Metrics        MetricsSnapshot `json:"metrics"`  // parsed Prometheus exposition
-	Ollama         *OllamaState    `json:"ollama,omitempty"`
-	Diagnoses      []Diagnosis     `json:"diagnoses"` // detector output
-	TrajectoryRefs []TrajectoryRef `json:"trajectory_refs,omitempty"`
-	JetStream      *JetStreamSnapshot `json:"jetstream,omitempty"` // NATS :8222/jsz snapshot
+	Bundle         BundleMeta               `json:"bundle"`
+	Host           HostInfo                 `json:"host"`
+	Config         ConfigSnapshot           `json:"config"`
+	Plans          []KVEntry                `json:"plans"`    // PLAN_STATES KV entries
+	Loops          []KVEntry                `json:"loops"`    // AGENT_LOOPS KV entries
+	Messages       []Message                `json:"messages"` // most-recent N message-logger entries
+	Metrics        MetricsSnapshot          `json:"metrics"`  // parsed Prometheus exposition
+	Ollama         *OllamaState             `json:"ollama,omitempty"`
+	Diagnoses      []Diagnosis              `json:"diagnoses"` // detector output
+	TrajectoryRefs []TrajectoryRef          `json:"trajectory_refs,omitempty"`
+	JetStream      *JetStreamSnapshot       `json:"jetstream,omitempty"`      // NATS :8222/jsz snapshot
 	TraceMessages  map[string]TraceMessages `json:"trace_messages,omitempty"` // keyed by loop_id
 }
 
@@ -65,9 +65,9 @@ type Bundle struct {
 // replay) or the endpoint is unreachable, the field is nil and the
 // rest of the bundle is still useful.
 type JetStreamSnapshot struct {
-	URL    string          `json:"url"`     // monitor endpoint hit (e.g. http://localhost:8222/jsz?...)
-	Status int             `json:"status"`  // HTTP status — non-200 still recorded for diagnosis
-	JSZ    json.RawMessage `json:"jsz"`     // raw response body
+	URL    string          `json:"url"`    // monitor endpoint hit (e.g. http://localhost:8222/jsz?...)
+	Status int             `json:"status"` // HTTP status — non-200 still recorded for diagnosis
+	JSZ    json.RawMessage `json:"jsz"`    // raw response body
 }
 
 // TraceMessages is the per-loop dump of /message-logger/trace/{traceID}.
@@ -110,28 +110,9 @@ type BundleMeta struct {
 // Time fields throughout the bundle SHOULD be UTC. Capture writes
 // time.Now().UTC(); adopter tooling that compares bundles across hosts
 // expects this convention.
-type HostInfo struct {
-	OS                string          `json:"os"`                 // runtime.GOOS
-	Arch              string          `json:"arch"`               // runtime.GOARCH
-	SemspecVersion    string          `json:"semspec_version"`    // from runtime/debug.ReadBuildInfo
-	SemstreamsVersion string          `json:"semstreams_version"` // best-effort from build info; "" if unreadable
-	Ollama            *OllamaHostInfo `json:"ollama,omitempty"`   // present only if Ollama is the LLM provider
-}
-
-// OllamaHostInfo records static-ish info about the Ollama daemon.
-// Running models are captured separately on Bundle.Ollama.Running so
-// the static and runtime views don't overlap.
-type OllamaHostInfo struct {
-	Version string `json:"version,omitempty"`
-}
-
-// ConfigSnapshot is a redaction-aware view of the running config. We
-// don't ship the entire config JSON — that risks leaking endpoint URLs
-// or auth headers — only the fields that matter for diagnosis.
-type ConfigSnapshot struct {
-	ActiveCapabilities map[string]string `json:"active_capabilities"` // capability name → resolved model name
-	RedactedEndpoints  []string          `json:"redacted_endpoints"`  // endpoint names whose URLs were redacted
-}
+// HostInfo, OllamaHostInfo, ConfigSnapshot, OllamaState, and
+// OllamaRunningModel live in bundle_host.go to keep this file under the
+// package's max-public-structs threshold.
 
 // Message is the message-logger envelope as it appeared on the wire.
 // RawData is preserved as json.RawMessage so detectors can decode the
@@ -172,22 +153,6 @@ type MetricsSnapshot struct {
 
 	// CapturedAt — when the snapshot was pulled. UTC.
 	CapturedAt time.Time `json:"captured_at"`
-}
-
-// OllamaState is captured separately from HostInfo when the run uses
-// Ollama; HostInfo.Ollama covers static metadata, this covers the
-// running daemon's snapshot during the run.
-type OllamaState struct {
-	Running   []OllamaRunningModel `json:"running,omitempty"`
-	LastError string               `json:"last_error,omitempty"` // from "ollama ps" stderr if any
-}
-
-// OllamaRunningModel is one row from `ollama ps`.
-type OllamaRunningModel struct {
-	Name      string `json:"name"`
-	ID        string `json:"id,omitempty"`
-	SizeBytes int64  `json:"size_bytes,omitempty"`
-	Until     string `json:"until,omitempty"` // raw "Until" column; opaque time format from Ollama
 }
 
 // TrajectoryRef points at a sibling file in the bundle's tarball:

@@ -411,55 +411,26 @@ func setupInfrastructure(
 
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
-	metricsRegistry := metric.NewMetricsRegistry()
-
-	// Register ADR-035 named-quirks counters with the metrics registry so
-	// per-fire telemetry surfaces at /metrics. Idempotent — semstreams'
-	// MetricsRegistry returns success on duplicate registration.
-	if err := jsonutil.RegisterMetrics(metricsRegistry); err != nil {
+	metricsRegistry, err := buildMetricsRegistry()
+	if err != nil {
 		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("register jsonutil metrics: %w", err)
-	}
-	if err := terminal.RegisterMetrics(metricsRegistry); err != nil {
-		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("register terminal metrics: %w", err)
-	}
-	if err := workflowtools.RegisterMetrics(metricsRegistry); err != nil {
-		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("register graph_query recovery metrics: %w", err)
-	}
-	if err := bash.RegisterMetrics(metricsRegistry); err != nil {
-		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("register bash recovery metrics: %w", err)
+		return nil, nil, nil, err
 	}
 
 	platform := extractPlatformMeta(cfg)
 
-	configManager, err := config.NewConfigManager(cfg, natsClient, logger)
+	configManager, err := startConfigManager(ctx, cfg, natsClient, logger, platform)
 	if err != nil {
 		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("create config manager: %w", err)
+		return nil, nil, nil, err
 	}
-	if err := configManager.Start(ctx); err != nil {
-		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("start config manager: %w", err)
-	}
-	slog.Info("Platform identity configured", "org", platform.Org, "platform", platform.Platform)
 
-	componentRegistry := component.NewRegistry()
-	slog.Debug("Registering semstreams component factories")
-	if err := componentregistry.Register(componentRegistry); err != nil {
-		configManager.Stop(5 * time.Second)
-		natsClient.Close(ctx)
-		return nil, nil, nil, fmt.Errorf("register semstreams components: %w", err)
-	}
-	if err := registerSemspecComponents(componentRegistry); err != nil {
+	componentRegistry, err := buildComponentRegistry()
+	if err != nil {
 		configManager.Stop(5 * time.Second)
 		natsClient.Close(ctx)
 		return nil, nil, nil, err
 	}
-	factories := componentRegistry.ListFactories()
-	slog.Info("Component factories registered", "count", len(factories))
 
 	manager, err := setupServiceManager(cfg, natsClient, toolRegistry, payloadReg, metricsRegistry, logger, platform, configManager, componentRegistry)
 	if err != nil {
@@ -473,6 +444,60 @@ func setupInfrastructure(
 		natsClient.Close(ctx)
 	}
 	return natsClient, manager, cleanup, nil
+}
+
+// buildMetricsRegistry registers ADR-035 named-quirks counters with the
+// metrics registry so per-fire telemetry surfaces at /metrics.
+// Idempotent — semstreams' MetricsRegistry returns success on duplicate
+// registration.
+func buildMetricsRegistry() (*metric.MetricsRegistry, error) {
+	reg := metric.NewMetricsRegistry()
+	type registrar struct {
+		name string
+		fn   func(*metric.MetricsRegistry) error
+	}
+	for _, r := range []registrar{
+		{"jsonutil", jsonutil.RegisterMetrics},
+		{"terminal", terminal.RegisterMetrics},
+		{"graph_query recovery", workflowtools.RegisterMetrics},
+		{"bash recovery", bash.RegisterMetrics},
+	} {
+		if err := r.fn(reg); err != nil {
+			return nil, fmt.Errorf("register %s metrics: %w", r.name, err)
+		}
+	}
+	return reg, nil
+}
+
+// startConfigManager creates and starts the config manager, logging the
+// platform identity once startup succeeds. Caller owns Stop on the
+// returned manager.
+func startConfigManager(ctx context.Context, cfg *config.Config, natsClient *natsclient.Client, logger *slog.Logger, platform types.PlatformMeta) (*config.Manager, error) {
+	configManager, err := config.NewConfigManager(cfg, natsClient, logger)
+	if err != nil {
+		return nil, fmt.Errorf("create config manager: %w", err)
+	}
+	if err := configManager.Start(ctx); err != nil {
+		return nil, fmt.Errorf("start config manager: %w", err)
+	}
+	slog.Info("Platform identity configured", "org", platform.Org, "platform", platform.Platform)
+	return configManager, nil
+}
+
+// buildComponentRegistry registers the semstreams component factories
+// followed by the semspec-local factories. The registration order
+// matters: semspec factories may shadow semstreams ones.
+func buildComponentRegistry() (*component.Registry, error) {
+	reg := component.NewRegistry()
+	slog.Debug("Registering semstreams component factories")
+	if err := componentregistry.Register(reg); err != nil {
+		return nil, fmt.Errorf("register semstreams components: %w", err)
+	}
+	if err := registerSemspecComponents(reg); err != nil {
+		return nil, err
+	}
+	slog.Info("Component factories registered", "count", len(reg.ListFactories()))
+	return reg, nil
 }
 
 func loadConfig(configPath, repoPath string) (*config.Config, error) {

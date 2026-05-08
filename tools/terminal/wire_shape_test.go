@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/c360studio/semstreams/agentic"
-	agenticmodel "github.com/c360studio/semstreams/processor/agentic-model"
 	ssmodel "github.com/c360studio/semstreams/model"
+	agenticmodel "github.com/c360studio/semstreams/processor/agentic-model"
 )
 
 // TestStrictModeWireShape validates the end-to-end wire shape of a
@@ -222,10 +222,10 @@ func TestStrictModeWireShape_AnthropicNoOp(t *testing.T) {
 	defer func() { _ = client.Close() }()
 
 	if _, err := client.ChatCompletion(context.Background(), agentic.AgentRequest{
-		RequestID: "anth-noop",
-		Model:     ep.Model,
-		Messages:  []agentic.ChatMessage{{Role: "user", Content: "hi"}},
-		Tools:     tools,
+		RequestID:      "anth-noop",
+		Model:          ep.Model,
+		Messages:       []agentic.ChatMessage{{Role: "user", Content: "hi"}},
+		Tools:          tools,
 		ResponseFormat: rf, // nil
 	}); err != nil {
 		t.Fatalf("ChatCompletion: %v", err)

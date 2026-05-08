@@ -417,13 +417,13 @@ func TestEmit_RelationWriteFails_ShortCircuits(t *testing.T) {
 func TestTruncateUTF8Safe_PinsRuneBoundary(t *testing.T) {
 	// 4-byte rune emoji repeated such that the cap lands mid-rune.
 	in := strings.Repeat("🦀", 100) // each crab is 4 bytes
-	cap := 7                        // forces the cap to land mid-rune (🦀🦀 = 8 bytes; 7 = halfway through second)
-	out, truncated := truncateUTF8Safe(in, cap)
+	maxBytes := 7                  // forces the cap to land mid-rune (🦀🦀 = 8 bytes; 7 = halfway through second)
+	out, truncated := truncateUTF8Safe(in, maxBytes)
 	if !truncated {
 		t.Error("expected truncated=true for over-cap input")
 	}
-	if len(out) > cap {
-		t.Errorf("output longer than cap: %d > %d", len(out), cap)
+	if len(out) > maxBytes {
+		t.Errorf("output longer than cap: %d > %d", len(out), maxBytes)
 	}
 	// Result must be valid UTF-8 — no mid-rune byte split.
 	if !utf8.ValidString(out) {

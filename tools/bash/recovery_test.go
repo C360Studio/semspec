@@ -36,7 +36,7 @@ func TestClassifyPathMiss(t *testing.T) {
 
 func TestPathMissDetector_FirstMissNoHint(t *testing.T) {
 	d := NewPathMissDetector()
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", "ls bad/path", 2, "ls: cannot access 'bad/path': No such file or directory")
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", "ls bad/path", 2, "ls: cannot access 'bad/path': No such file or directory")
 	if hint != "" {
 		t.Errorf("first miss should not hint, got %q", hint)
 	}
@@ -46,8 +46,8 @@ func TestPathMissDetector_RepeatHints(t *testing.T) {
 	d := NewPathMissDetector()
 	cmd := "ls bad/path"
 	stderr := "ls: cannot access 'bad/path': No such file or directory"
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", cmd, 2, stderr)
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", cmd, 2, stderr)
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", cmd, 2, stderr)
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", cmd, 2, stderr)
 	if hint == "" {
 		t.Fatal("repeat miss should hint, got empty")
 	}
@@ -72,9 +72,9 @@ func TestPathMissDetector_HintRepeatsOnThirdCall(t *testing.T) {
 	d := NewPathMissDetector()
 	cmd := "ls bad/path"
 	stderr := "ls: cannot access 'bad/path': No such file or directory"
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", cmd, 2, stderr)
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", cmd, 2, stderr)
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", cmd, 2, stderr)
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", cmd, 2, stderr)
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", cmd, 2, stderr)
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", cmd, 2, stderr)
 	if hint == "" {
 		t.Error("third repeat should still hint (model may need it more than once)")
 	}
@@ -82,9 +82,9 @@ func TestPathMissDetector_HintRepeatsOnThirdCall(t *testing.T) {
 
 func TestPathMissDetector_DifferentCommandResets(t *testing.T) {
 	d := NewPathMissDetector()
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", "ls c/d", 2, "ls: cannot access 'c/d': No such file or directory")
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", "ls c/d", 2, "ls: cannot access 'c/d': No such file or directory")
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
 	if hint != "" {
 		t.Errorf("after a different miss, repeating earlier command should not hint immediately, got %q", hint)
 	}
@@ -92,8 +92,8 @@ func TestPathMissDetector_DifferentCommandResets(t *testing.T) {
 
 func TestPathMissDetector_NonPathMissNoHint(t *testing.T) {
 	d := NewPathMissDetector()
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", "cat secret", 1, "cat: secret: Permission denied")
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", "cat secret", 1, "cat: secret: Permission denied")
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", "cat secret", 1, "cat: secret: Permission denied")
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", "cat secret", 1, "cat: secret: Permission denied")
 	if hint != "" {
 		t.Errorf("non-path-miss class should not hint, got %q", hint)
 	}
@@ -101,8 +101,8 @@ func TestPathMissDetector_NonPathMissNoHint(t *testing.T) {
 
 func TestPathMissDetector_ParallelTasks(t *testing.T) {
 	d := NewPathMissDetector()
-	_ = d.Inspect(context.Background(), CallContext{},"task-A", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
-	hint := d.Inspect(context.Background(), CallContext{},"task-B", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
+	_ = d.Inspect(context.Background(), CallContext{}, "task-A", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
+	hint := d.Inspect(context.Background(), CallContext{}, "task-B", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
 	if hint != "" {
 		t.Errorf("task B should not see task A's state, got %q", hint)
 	}
@@ -113,15 +113,23 @@ func TestPathMissDetector_ConcurrentSafe(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Go(func() {
-			_ = d.Inspect(context.Background(), CallContext{},"task-X", "ls foo", 2, "ls: cannot access 'foo': No such file or directory")
+			_ = d.Inspect(context.Background(), CallContext{}, "task-X", "ls foo", 2, "ls: cannot access 'foo': No such file or directory")
 		})
 	}
 	wg.Wait()
+
+	// Detector must remain functional after concurrent fills — verify it
+	// can still record a fresh signal without panicking or losing state.
+	// The race detector covers data-race surface; this assertion covers
+	// liveness so a silent-broken detector cannot pass under -race.
+	if hint := d.Inspect(context.Background(), CallContext{}, "task-X", "ls foo", 2, "ls: cannot access 'foo': No such file or directory"); hint == "" {
+		t.Error("post-concurrent Inspect should still emit a hint after 50 priors of the same miss")
+	}
 }
 
 func TestPathMissDetector_NilSafe(t *testing.T) {
 	var d *PathMissDetector
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", "ls", 2, "ls: cannot access 'x': No such file or directory")
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", "ls", 2, "ls: cannot access 'x': No such file or directory")
 	if hint != "" {
 		t.Errorf("nil detector should return empty, got %q", hint)
 	}
@@ -129,9 +137,9 @@ func TestPathMissDetector_NilSafe(t *testing.T) {
 
 func TestPathMissDetector_SuccessClearsState(t *testing.T) {
 	d := NewPathMissDetector()
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
-	_ = d.Inspect(context.Background(), CallContext{},"task-1", "ls .", 0, "")
-	hint := d.Inspect(context.Background(), CallContext{},"task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
+	_ = d.Inspect(context.Background(), CallContext{}, "task-1", "ls .", 0, "")
+	hint := d.Inspect(context.Background(), CallContext{}, "task-1", "ls a/b", 2, "ls: cannot access 'a/b': No such file or directory")
 	if hint != "" {
 		t.Errorf("success between misses should reset state, got %q", hint)
 	}
@@ -141,7 +149,7 @@ func TestPathMissDetector_EvictionCap(t *testing.T) {
 	d := NewPathMissDetector()
 	for i := range maxTrackedTasks + 50 {
 		taskID := strings.Repeat("x", 1) + string(rune('a'+i%26)) + string(rune('a'+(i/26)%26)) + string(rune('a'+(i/676)%26))
-		d.Inspect(context.Background(), CallContext{},taskID, "ls foo", 2, "ls: cannot access 'foo': No such file or directory")
+		d.Inspect(context.Background(), CallContext{}, taskID, "ls foo", 2, "ls: cannot access 'foo': No such file or directory")
 	}
 	d.mu.Lock()
 	n := len(d.entries)

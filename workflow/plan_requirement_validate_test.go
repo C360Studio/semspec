@@ -311,12 +311,12 @@ func TestValidateFileOwnershipPartition_HintIncludesWorkedExamples(t *testing.T)
 	}
 	msg := err.Error()
 	mustContain := []string{
-		"FIX: choose ONE",            // directive framing
-		"(a) Consolidate",            // first valid resolution
-		"(b) Keep two requirements",  // second valid resolution
-		"depends_on",                 // hint pin from existing test
-		"impl + its test",            // disambiguation cue
-		"router/main wire-up",        // disambiguation cue
+		"FIX: choose ONE",           // directive framing
+		"(a) Consolidate",           // first valid resolution
+		"(b) Keep two requirements", // second valid resolution
+		"depends_on",                // hint pin from existing test
+		"impl + its test",           // disambiguation cue
+		"router/main wire-up",       // disambiguation cue
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(msg, s) {
