@@ -403,6 +403,15 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			endpoint = ep
 		}
 	}
+	// Extract prior-round context from the plan content (already a marshaled
+	// workflow.Plan). plan-manager has stored ReviewFormattedFindings + the
+	// iteration counter on every revision round; we unmarshal once here to
+	// surface them to the reviewer prompt. Stateless across revisions
+	// caused take-22's wedge: planner pass-2 addressed the prior finding,
+	// reviewer pass-2 (with no memory of pass-1) re-rejected with the same
+	// complaint shape and hit max_revisions → escalated.
+	priorFindings, priorIteration := extractPriorReviewContext(planContent)
+
 	asmCtx := &prompt.AssemblyContext{
 		Role:              prompt.RolePlanReviewer,
 		Provider:          provider,
@@ -415,12 +424,15 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
 		PlanReviewerPrompt: &prompt.PlanReviewerPromptContext{
-			Slug:            slug,
-			PlanContent:     planContent,
-			HasStandards:    hasStandards,
-			Round:           int(round),
-			PreviousError:   previousError,
-			ProjectFileTree: c.fetchProjectFileTree(ctx),
+			Slug:                slug,
+			PlanContent:         planContent,
+			HasStandards:        hasStandards,
+			Round:               int(round),
+			PreviousError:       previousError,
+			ProjectFileTree:     c.fetchProjectFileTree(ctx),
+			PreviousFindings:    priorFindings,
+			ReviewIteration:     priorIteration,
+			MaxReviewIterations: c.config.MaxReviewRetries,
 		},
 	}
 
@@ -541,6 +553,22 @@ func (c *Component) fetchProjectFileTree(ctx context.Context) string {
 		return ""
 	}
 	return strings.TrimSpace(result.Stdout)
+}
+
+// extractPriorReviewContext pulls ReviewFormattedFindings + ReviewIteration
+// from a marshaled workflow.Plan so the reviewer can be made aware of its
+// own prior verdict on revision rounds. Returns ("", 0) on the first review
+// pass (no prior round) or when the plan content can't be parsed
+// (defensive: never block the dispatch on this — degrade to stateless).
+func extractPriorReviewContext(planContent string) (findings string, iteration int) {
+	if planContent == "" {
+		return "", 0
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal([]byte(planContent), &plan); err != nil {
+		return "", 0
+	}
+	return plan.ReviewFormattedFindings, plan.ReviewIteration
 }
 
 // availableToolNames returns the full list of tool names for prompt assembly.

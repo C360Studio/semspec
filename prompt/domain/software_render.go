@@ -205,6 +205,35 @@ func writeRequirementGeneratorProjectFileTree(sb *strings.Builder, tree string) 
 	sb.WriteString("```\n\n")
 }
 
+// writePlanReviewerPriorRound surfaces the reviewer's own previous verdict
+// on this plan when it's a revision round (ReviewIteration > 0). Closes the
+// take-22 wedge: the reviewer was stateless across revision rounds, so a
+// non-deterministic model would re-fire the same complaint shape on the
+// revised plan even when the planner addressed it. Surfacing the prior
+// findings + iteration budget anchors the reviewer to "did the revision
+// resolve what I asked for" rather than re-evaluating from scratch.
+//
+// No-op on the first review pass (ReviewIteration == 0) and when no
+// PreviousFindings text is available — degrades cleanly.
+func writePlanReviewerPriorRound(sb *strings.Builder, p *prompt.PlanReviewerPromptContext) {
+	if p.ReviewIteration <= 0 || strings.TrimSpace(p.PreviousFindings) == "" {
+		return
+	}
+	sb.WriteString("## Previous Review Round (this is a revision)\n\n")
+	if p.MaxReviewIterations > 0 {
+		fmt.Fprintf(sb, "This is review iteration %d of %d. After the iteration cap is reached the plan is escalated rather than re-revised.\n\n",
+			p.ReviewIteration+1, p.MaxReviewIterations)
+	} else {
+		fmt.Fprintf(sb, "This is review iteration %d.\n\n", p.ReviewIteration+1)
+	}
+	sb.WriteString("You previously rejected this plan with the findings below. The planner has revised the plan to address them. Verify the revised plan resolves the prior findings — if it does, approve this round, even if you can imagine further improvements (you have a bounded budget; see iteration count above).\n\n")
+	sb.WriteString("**Re-rejecting on the same complaint shape after the planner has attempted to address it produces a wedge.** If your prior finding was \"goal lacks specifics\" and the planner added specifics, the right verdict on this round is approved with whatever residual concerns logged at info severity (not error). Reserve error-severity rejection for a NEW class of issue you didn't flag last round, or a clear failure to address what you asked for.\n\n")
+	sb.WriteString("Previous findings:\n\n")
+	sb.WriteString("<previous-review trust=\"semspec-internal\">\n")
+	sb.WriteString(strings.TrimSpace(p.PreviousFindings))
+	sb.WriteString("\n</previous-review>\n\n")
+}
+
 // writePlanReviewerProjectFileTree renders the same `git ls-files` snapshot
 // for the plan-reviewer with reviewer-appropriate framing. The reviewer's job
 // is to verify the planner's scope.include against ground truth — paths in
@@ -440,6 +469,12 @@ func renderPlanReviewerPrompt(p *prompt.PlanReviewerPromptContext) string {
 		sb.WriteString(p.PreviousError)
 		sb.WriteString("\n```\n\nProduce a valid response this time. Address the failure mode above before reviewing the plan content.\n\n")
 	}
+
+	// Prior-round context — fires on revision rounds (ReviewIteration > 0)
+	// so the reviewer sees its own previous verdict on this plan. Without
+	// this the reviewer is stateless across revisions and can re-fire the
+	// same complaint even when the planner addressed it (take 22 wedge).
+	writePlanReviewerPriorRound(&sb, p)
 
 	// Project file tree — ground truth for the scope-validity check. Must
 	// appear BEFORE plan content so the reviewer reads the source-of-truth

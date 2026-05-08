@@ -340,6 +340,126 @@ func TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits(t *testing.T) {
 	}
 }
 
+// TestRenderPlanReviewerPrompt_PriorRoundInjectsFindings pins the take-22
+// fix: on revision rounds (ReviewIteration > 0), the reviewer must see its
+// own previous findings + iteration context. Without this the reviewer is
+// stateless across rounds and a non-deterministic model can re-fire the
+// same complaint shape even when the planner addressed it (the take-22
+// 1/8 wedge). First-round (ReviewIteration=0) MUST omit the section.
+func TestRenderPlanReviewerPrompt_PriorRoundInjectsFindings(t *testing.T) {
+	tests := []struct {
+		name        string
+		ctx         *prompt.PlanReviewerPromptContext
+		mustContain []string
+		mustNotHave []string
+	}{
+		{
+			name: "first review round — no prior-round section",
+			ctx: &prompt.PlanReviewerPromptContext{
+				Slug:             "abc123",
+				PlanContent:      `{"goal":"x"}`,
+				Round:            1,
+				ReviewIteration:  0,
+				PreviousFindings: "",
+			},
+			mustNotHave: []string{
+				"## Previous Review Round",
+				"<previous-review",
+				"This is review iteration",
+			},
+		},
+		{
+			name: "revision round — prior findings rendered with iteration + budget",
+			ctx: &prompt.PlanReviewerPromptContext{
+				Slug:                "abc123",
+				PlanContent:         `{"goal":"x"}`,
+				Round:               1,
+				ReviewIteration:     1,
+				MaxReviewIterations: 3,
+				PreviousFindings:    "- [error] goal-clarity: lacks specifics on health endpoint",
+			},
+			mustContain: []string{
+				"## Previous Review Round (this is a revision)",
+				"This is review iteration 2 of 3",
+				"approve this round, even if you can imagine further improvements",
+				"Re-rejecting on the same complaint shape",
+				`<previous-review trust="semspec-internal">`,
+				"goal-clarity: lacks specifics on health endpoint",
+				"</previous-review>",
+			},
+		},
+		{
+			name: "revision round with no max — iteration without ceiling",
+			ctx: &prompt.PlanReviewerPromptContext{
+				Slug:                "abc123",
+				PlanContent:         `{"goal":"x"}`,
+				Round:               1,
+				ReviewIteration:     1,
+				MaxReviewIterations: 0,
+				PreviousFindings:    "- [error] something",
+			},
+			mustContain: []string{
+				"This is review iteration 2.",
+			},
+			mustNotHave: []string{
+				"of 0", // never render the noisy "of 0" framing
+			},
+		},
+		{
+			name: "ReviewIteration > 0 but findings empty — degrade gracefully",
+			ctx: &prompt.PlanReviewerPromptContext{
+				Slug:             "abc123",
+				PlanContent:      `{"goal":"x"}`,
+				Round:            1,
+				ReviewIteration:  1,
+				PreviousFindings: "   ", // whitespace-only
+			},
+			mustNotHave: []string{
+				"## Previous Review Round",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := renderPlanReviewerPrompt(tt.ctx)
+			for _, want := range tt.mustContain {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing pinned string %q\nGot:\n%s", want, out)
+				}
+			}
+			for _, banned := range tt.mustNotHave {
+				if strings.Contains(out, banned) {
+					t.Errorf("unexpected string %q present\nGot:\n%s", banned, out)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderPlanReviewerPrompt_PriorRoundBeforeContent guards the ordering:
+// prior-round context must appear BEFORE the plan content so the reviewer
+// reads "I previously rejected this for X" before re-evaluating the plan.
+func TestRenderPlanReviewerPrompt_PriorRoundBeforeContent(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:                "abc123",
+		PlanContent:         `{"goal":"verify ordering"}`,
+		Round:               1,
+		ReviewIteration:     1,
+		MaxReviewIterations: 3,
+		PreviousFindings:    "- [error] something",
+	})
+
+	priorIdx := strings.Index(out, "## Previous Review Round")
+	planIdx := strings.Index(out, "## Plan to Review")
+	if priorIdx < 0 || planIdx < 0 {
+		t.Fatalf("expected both sections present\nGot:\n%s", out)
+	}
+	if priorIdx >= planIdx {
+		t.Errorf("prior-round must appear before plan content; prior@%d plan@%d", priorIdx, planIdx)
+	}
+}
+
 // TestRenderPlanReviewerPrompt_ProjectFileTreeInjection pins the take-20 fix:
 // when the plan-reviewer is given a ground-truth file tree, it MUST appear
 // before plan content with reviewer-appropriate framing ("verify scope.include

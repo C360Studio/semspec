@@ -135,3 +135,59 @@ func TestReviewRoundConstants(t *testing.T) {
 		t.Errorf("roundScenariosReview = %d, want 2", roundScenariosReview)
 	}
 }
+
+// TestExtractPriorReviewContext_FirstRound covers the no-prior-state shape.
+// On the first review pass plan.ReviewIteration is 0 and findings are empty
+// — the extractor must return zero values so the renderer omits the
+// prior-round section.
+func TestExtractPriorReviewContext_FirstRound(t *testing.T) {
+	plan := workflow.Plan{Slug: "abc", Goal: "x", Status: workflow.StatusDrafted}
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	findings, iter := extractPriorReviewContext(string(data))
+	if findings != "" {
+		t.Errorf("first-round findings should be empty, got %q", findings)
+	}
+	if iter != 0 {
+		t.Errorf("first-round iteration should be 0, got %d", iter)
+	}
+}
+
+// TestExtractPriorReviewContext_RevisionRound covers the take-22 fix path:
+// plan-manager has stored ReviewFormattedFindings + ReviewIteration on the
+// revision round; the extractor surfaces them so the reviewer prompt can
+// inject "you previously rejected this for X" context.
+func TestExtractPriorReviewContext_RevisionRound(t *testing.T) {
+	plan := workflow.Plan{
+		Slug:                    "abc",
+		Goal:                    "x",
+		Status:                  workflow.StatusDrafted,
+		ReviewFormattedFindings: "- [error] goal-clarity: lacks specifics",
+		ReviewIteration:         1,
+	}
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	findings, iter := extractPriorReviewContext(string(data))
+	if findings != "- [error] goal-clarity: lacks specifics" {
+		t.Errorf("expected prior findings, got %q", findings)
+	}
+	if iter != 1 {
+		t.Errorf("expected iteration=1, got %d", iter)
+	}
+}
+
+// TestExtractPriorReviewContext_DegradesOnGarbage guards the defensive
+// path: malformed plan content returns zero values rather than panicking,
+// so a parse glitch never blocks the dispatch.
+func TestExtractPriorReviewContext_DegradesOnGarbage(t *testing.T) {
+	for _, input := range []string{"", "not-json", "{", `{"goal":`} {
+		findings, iter := extractPriorReviewContext(input)
+		if findings != "" || iter != 0 {
+			t.Errorf("garbage input %q should return zero values, got (%q, %d)", input, findings, iter)
+		}
+	}
+}
