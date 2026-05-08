@@ -50,10 +50,10 @@
         "disable_keepalives": true,
         "request_timeout": "180s"
       },
-      "openrouter-qwen2-5-coder-32b": {
+      "openrouter-qwen3-6-27b": {
         "provider": "openrouter",
         "url": "https://openrouter.ai/api/v1",
-        "model": "qwen/qwen-2.5-coder-32b-instruct",
+        "model": "qwen/qwen3.6-27b",
         "api_key_env": "OPENROUTER_API_KEY",
         "max_tokens": 32768,
         "max_output_tokens": 8000,
@@ -141,9 +141,9 @@
         ]
       },
       "coding": {
-        "description": "Code generation, implementation. Routed to qwen-2.5-coder-32b dense (2026-05-07) — qwen3-coder-next MoE produced submit_work claim/observation mismatches (claimed files_modified non-empty but worktree clean) on @easy /health every TDD cycle. Conservative isolation: only coding swapped, plan/review/etc still on MoE.",
+        "description": "Code generation, implementation. Routed to qwen3.6-27b dense (2026-05-08 take 11) — earlier dense pick qwen-2.5-coder-32b returned 404 'no providers support tool use' on OpenRouter, even though our endpoint config claimed supports_tools=true. qwen3.6-27b is verified tool-capable per OpenRouter's models API and stays in the qwen-family, ~30B-class, dense-not-MoE constraint that motivated the original swap from qwen3-coder-next MoE (which hallucinated submit_work claim/observation mismatches every TDD cycle).",
         "preferred": [
-          "openrouter-qwen2-5-coder-32b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
           "openrouter-qwen3-moe"
