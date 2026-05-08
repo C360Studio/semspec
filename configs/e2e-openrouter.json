@@ -387,31 +387,7 @@
       "config": {
         "stream_name": "AGENT",
         "consumer_name_suffix": "semspec-e2e",
-        "timeout": "180s",
-        "ports": {
-          "inputs": [
-            {
-              "name": "tool.execute",
-              "type": "jetstream",
-              "subject": "tool.execute.>",
-              "stream_name": "AGENT",
-              "required": true,
-              "config": {
-                "ack_wait": "300s",
-                "heartbeat_interval": "120s"
-              }
-            }
-          ],
-          "outputs": [
-            {
-              "name": "tool.result",
-              "type": "jetstream",
-              "subject": "tool.result.*",
-              "stream_name": "AGENT",
-              "required": true
-            }
-          ]
-        }
+        "timeout": "180s"
       }
     },
     "graph-ingest": {
