@@ -877,7 +877,14 @@ type Requirement struct {
 	PlanID      string            `json:"plan_id"`
 	Title       string            `json:"title"`
 	Description string            `json:"description"`
-	Status      RequirementStatus `json:"status"`
+	// Status is a runtime/execution-time field. omitempty so freshly-generated
+	// requirements (Status == "") don't poison the plan-reviewer's design-
+	// time review with empty-string asymmetry across requirements. Caught
+	// 2026-05-08 b7r50o9ov — reviewer hallucinated "inconsistent status
+	// field values" because some scenarios had "" and any populated value
+	// would have looked inconsistent against them. Same applies to
+	// Scenario.Status below.
+	Status      RequirementStatus `json:"status,omitempty"`
 	DependsOn   []string          `json:"depends_on,omitempty"`  // IDs of prerequisite requirements
 	FilesOwned  []string          `json:"files_owned,omitempty"` // workspace-relative paths this requirement owns; two requirements that both list the same path must have a DependsOn edge between them or the plan-level merge will conflict
 	CreatedAt   time.Time         `json:"created_at"`
@@ -939,7 +946,9 @@ type Scenario struct {
 	Given         string         `json:"given"`
 	When          string         `json:"when"`
 	Then          []string       `json:"then"`
-	Status        ScenarioStatus `json:"status"`
+	// Status is a runtime/execution-time field — see Requirement.Status
+	// note above for the same omitempty rationale (b7r50o9ov 2026-05-08).
+	Status        ScenarioStatus `json:"status,omitempty"`
 	CreatedAt     time.Time      `json:"created_at"`
 	UpdatedAt     time.Time      `json:"updated_at"`
 }
