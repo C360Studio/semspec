@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -641,5 +642,138 @@ func TestDeriveGoTestPackages_EmptyList(t *testing.T) {
 	pkgs := DeriveGoTestPackages([]string{})
 	if pkgs != nil {
 		t.Errorf("expected nil for empty list, got %v", pkgs)
+	}
+}
+
+// TestDerivePackagesWithNonTestGoChanges_FiltersTestFiles guards the helper:
+// when the only modified Go files in a package are *_test.go, the package
+// must NOT appear in the result (the tests-exist gate has nothing to enforce
+// when the developer is editing tests).
+func TestDerivePackagesWithNonTestGoChanges_FiltersTestFiles(t *testing.T) {
+	pkgs := derivePackagesWithNonTestGoChanges([]string{
+		"main.go",                    // → ./.
+		"internal/auth/auth.go",      // → ./internal/auth
+		"internal/auth/auth_test.go", // skipped (test-only would fall back, but pkg is included via auth.go)
+		"internal/util/util_test.go", // skipped — pkg has only test changes
+		"README.md",                  // skipped — non-Go
+	})
+	want := map[string]bool{"./.": true, "./internal/auth": true}
+	if len(pkgs) != len(want) {
+		t.Fatalf("expected %d packages, got %d: %v", len(want), len(pkgs), pkgs)
+	}
+	for _, p := range pkgs {
+		if !want[p] {
+			t.Errorf("unexpected package %q in result", p)
+		}
+	}
+}
+
+// TestRunGoTestsExist_FailsWhenNoTestsForChangedFile pins the take-21 fix:
+// when the developer modifies main.go but doesn't ship main_test.go, the
+// gate must REJECT, even when `go test ./...` would happily return exit 0
+// (Go quirk: "no test files" = exit 0). The check is hardcoded into Run()
+// so it cannot be opted out of via checklist contents.
+func TestRunGoTestsExist_FailsWhenNoTestsForChangedFile(t *testing.T) {
+	dir := t.TempDir()
+	// Mark this as a Go project so the gate fires.
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	// main.go exists; no main_test.go alongside.
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	// Empty checklist so only the always-on gate runs (plus the go-test fallback,
+	// which would pass — that's the bug shape we're guarding against).
+	writeChecklist(t, dir, workflow.Checklist{Version: "1", Checks: nil})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "missing-tests",
+		FilesModified: []string{"main.go"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var gateResult *payloads.CheckResult
+	for i := range result.CheckResults {
+		if result.CheckResults[i].Name == "go-tests-exist-for-changes" {
+			gateResult = &result.CheckResults[i]
+		}
+	}
+	if gateResult == nil {
+		t.Fatalf("go-tests-exist-for-changes check did not run; got checks: %v", result.CheckResults)
+	}
+	if gateResult.Passed {
+		t.Errorf("expected gate FAIL (no main_test.go for main.go); got Passed=true. Stderr: %s", gateResult.Stderr)
+	}
+	if result.Passed {
+		t.Errorf("expected overall result Passed=false when required gate fails; got true")
+	}
+}
+
+// TestRunGoTestsExist_PassesWhenTestFileExists confirms the gate doesn't
+// false-positive: when a package has a pre-existing *_test.go, modifying
+// the impl file is fine even if no new test file ships in this submission.
+// (The gate enforces presence, not coverage — a coverage check is a
+// separate, more complex concern.)
+func TestRunGoTestsExist_PassesWhenTestFileExists(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\nfunc main() {}\n"), 0644); err != nil {
+		t.Fatalf("write main.go: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main_test.go"), []byte("package main\n"), 0644); err != nil {
+		t.Fatalf("write main_test.go: %v", err)
+	}
+	writeChecklist(t, dir, workflow.Checklist{Version: "1", Checks: nil})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "tests-present",
+		FilesModified: []string{"main.go"}, // only impl file modified; pre-existing test counts
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, r := range result.CheckResults {
+		if r.Name == "go-tests-exist-for-changes" && !r.Passed {
+			t.Errorf("expected gate PASS (main_test.go exists); got Passed=false. Stderr: %s", r.Stderr)
+		}
+	}
+}
+
+// TestRunGoTestsExist_SkipsWhenOnlyTestFileModified ensures the gate doesn't
+// fire when the developer is editing test files only — that's a legitimate
+// non-implementation change.
+func TestRunGoTestsExist_SkipsWhenOnlyTestFileModified(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/test\n"), 0644); err != nil {
+		t.Fatalf("write go.mod: %v", err)
+	}
+	writeChecklist(t, dir, workflow.Checklist{Version: "1", Checks: nil})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "test-only-edit",
+		FilesModified: []string{"main_test.go"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, r := range result.CheckResults {
+		if r.Name == "go-tests-exist-for-changes" {
+			if !r.Passed {
+				t.Errorf("expected PASS for test-only edit; got Passed=false. Stderr: %s", r.Stderr)
+			}
+			if !strings.Contains(r.Stdout, "no non-test Go files modified") {
+				t.Errorf("expected stdout to indicate skip-with-success; got %q", r.Stdout)
+			}
+		}
 	}
 }

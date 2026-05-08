@@ -108,6 +108,19 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		}
 	}
 
+	// Always-on gate: tests-must-exist-for-changed-non-test-Go-files. Runs
+	// regardless of checklist contents because `go test ./...` returns exit 0
+	// when packages have no test files (Go quirk), so neither the project's
+	// own go-test check nor the fallback above will catch a submission that
+	// modifies code without adding any test. Caught take 21 (2026-05-08
+	// openrouter @easy): llama-3.3-70b shipped main.go with no test file and
+	// the code-reviewer approved because `go test ./...` reported "passes
+	// all tests" — the auth/ package's pre-existing tests passed and the
+	// reviewer didn't notice main.go's package showed `?  [no test files]`.
+	if hasGoFiles(trigger.FilesModified) && e.isGoProjectIn(workDir) {
+		results = append(results, e.runGoTestsExistOnModifiedIn(ctx, trigger.FilesModified, workDir, runner))
+	}
+
 	// Advisory anti-mock governance check — only when test files are present.
 	if hasTestFiles(trigger.FilesModified) {
 		antiMockResult := CheckAntiMock(workDir, trigger.FilesModified)
@@ -363,6 +376,109 @@ func DeriveGoTestPackages(filesModified []string) []string {
 		pkg := "./" + filepath.ToSlash(dir)
 		if dir == "." {
 			pkg = "."
+		}
+		seen[pkg] = struct{}{}
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+
+	pkgs := make([]string, 0, len(seen))
+	for p := range seen {
+		pkgs = append(pkgs, p)
+	}
+	return pkgs
+}
+
+// runGoTestsExistOnModifiedIn asserts that every package containing a modified
+// non-test Go file has at least one `*_test.go` file. Closes the take-21 gap
+// where `go test ./...` returns exit 0 when packages have NO test files (a Go
+// quirk: "no test files" is not a failure mode), so the structural validator
+// would happily approve a submission that ignored the plan's "include unit
+// tests" requirement. The check is hardcoded into the validator (alongside
+// the go-test fallback) rather than the per-project checklist because every
+// Go agent submission should be held to "if you changed code, the package
+// has test files" — there's no project-specific reason to opt out.
+//
+// Skips packages whose only modified file is itself a `_test.go` (editing a
+// test, not new code). Pre-existing test files in the package count toward
+// satisfaction — this gate enforces presence, not coverage of the new code.
+// A coverage gate would be a separate, more complex check.
+func (e *Executor) runGoTestsExistOnModifiedIn(ctx context.Context, filesModified []string, baseDir string, runner CommandRunner) payloads.CheckResult {
+	pkgs := derivePackagesWithNonTestGoChanges(filesModified)
+	if len(pkgs) == 0 {
+		return payloads.CheckResult{
+			Name:     "go-tests-exist-for-changes",
+			Passed:   true,
+			Required: true,
+			Command:  "find <pkg> -maxdepth 1 -name '*_test.go' -type f (per package)",
+			Stdout:   "no non-test Go files modified — nothing to verify",
+			Duration: "0s",
+		}
+	}
+
+	start := time.Now()
+	var missing []string
+	for _, pkg := range pkgs {
+		// `find` with a quoted glob arg — splitCommand preserves the single-quoted
+		// token. Returns exit 0 with empty stdout if no matches; non-empty stdout
+		// when at least one test file exists.
+		cmd := fmt.Sprintf("find %s -maxdepth 1 -name '*_test.go' -type f", pkg)
+		stdout, _, exitCode, err := runner.Run(ctx, cmd, baseDir, 5*time.Second)
+		if err != nil || exitCode != 0 {
+			// Treat runtime errors as missing — better to false-positive than
+			// silently let a no-tests submission through.
+			missing = append(missing, pkg)
+			continue
+		}
+		if strings.TrimSpace(stdout) == "" {
+			missing = append(missing, pkg)
+		}
+	}
+	duration := time.Since(start)
+
+	if len(missing) > 0 {
+		return payloads.CheckResult{
+			Name:     "go-tests-exist-for-changes",
+			Passed:   false,
+			Required: true,
+			Command:  "find <pkg> -maxdepth 1 -name '*_test.go' -type f (per package)",
+			ExitCode: 1,
+			Stderr: fmt.Sprintf("packages with non-test .go changes but no *_test.go file present: %s. "+
+				"`go test` returns exit 0 when a package has no tests (a Go quirk), so the plan's "+
+				"test requirement was silently dropped. Add a *_test.go file in each listed package "+
+				"and resubmit.", strings.Join(missing, ", ")),
+			Duration: duration.String(),
+		}
+	}
+
+	return payloads.CheckResult{
+		Name:     "go-tests-exist-for-changes",
+		Passed:   true,
+		Required: true,
+		Command:  "find <pkg> -maxdepth 1 -name '*_test.go' -type f (per package)",
+		Stdout:   fmt.Sprintf("all %d modified package(s) have at least one *_test.go file", len(pkgs)),
+		Duration: duration.String(),
+	}
+}
+
+// derivePackagesWithNonTestGoChanges returns the deduplicated list of Go
+// package paths (relative to repoPath, in "./pkg/path" form) that contain
+// at least one modified .go file that is NOT a *_test.go file. Mirrors
+// DeriveGoTestPackages but excludes packages whose only Go changes are to
+// test files — the tests-exist check has nothing to enforce when the only
+// change IS a test file.
+func derivePackagesWithNonTestGoChanges(filesModified []string) []string {
+	seen := make(map[string]struct{})
+	for _, f := range filesModified {
+		if !strings.HasSuffix(f, ".go") || strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		dir := filepath.Dir(f)
+		pkg := "./" + filepath.ToSlash(dir)
+		if dir == "." {
+			pkg = "./."
 		}
 		seen[pkg] = struct{}{}
 	}
