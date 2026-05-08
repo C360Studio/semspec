@@ -1,0 +1,20 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-05-05T20:53:35.61101559Z",
+  "updated_at": "2026-05-05T20:53:35.61101559Z",
+  "checks": [
+    {
+      "name": "mvn-test",
+      "command": "mvn test",
+      "trigger": [
+        "*.java",
+        "pom.xml"
+      ],
+      "category": "test",
+      "required": true,
+      "timeout": "600s",
+      "description": "Run Java test suite with Maven",
+      "working_dir": "."
+    }
+  ]
+}

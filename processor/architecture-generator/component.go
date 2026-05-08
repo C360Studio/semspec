@@ -401,11 +401,14 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "architecture", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RoleArchitect — see take-11 fix in
+		// execution-manager for rationale. Filter added in tool_filter.go
+		// alongside this change.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "architecture", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect)...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepArchitectureGeneration,

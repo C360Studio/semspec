@@ -338,11 +338,13 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "requirements", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RoleRequirementGenerator — see take-11
+		// fix in execution-manager for rationale.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "requirements", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator)...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepRequirementGeneration,

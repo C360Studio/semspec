@@ -440,11 +440,13 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleReviewer,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleReviewer,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RolePlanReviewer — see take-11 fix
+		// in execution-manager for rationale.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer)...),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepReviewing,
 		Context: &agentic.ConstructedContext{

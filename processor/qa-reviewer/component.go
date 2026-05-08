@@ -521,11 +521,13 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleReviewer,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "qa-review", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleReviewer,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RolePlanQAReviewer — see take-11 fix
+		// in execution-manager for rationale.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "qa-review", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer)...),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepQAReviewing,
 		Context: &agentic.ConstructedContext{

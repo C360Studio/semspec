@@ -940,10 +940,23 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 	// dispatchDeveloperLocked / dispatchCodeReviewer.
 	decomposerModel := model.ResolveModel(c.modelRegistry, c.config.DecomposerModel, model.CapabilityTaskDecomposition)
 
+	// Decomposer's wire palette is exactly {decompose_task}. ToolChoice
+	// already forces this on the first turn, but without an explicit Tools
+	// field the agentic-loop falls back to the registry's full palette —
+	// which means after the forced first call returns, the model could
+	// pick wrong-role terminals (bash, submit_work, etc.) on subsequent
+	// turns. Explicit single-tool palette closes that gap and matches the
+	// take-11 fix shape applied to the other dispatch sites.
+	var decomposerEndpoint *ssmodel.EndpointConfig
+	if c.modelRegistry != nil {
+		decomposerEndpoint = c.modelRegistry.GetEndpoint(decomposerModel)
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        decomposerModel,
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", decomposerEndpoint, "decompose_task"),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Prompt:       c.buildDecomposerPrompt(exec, exec.DecomposerLastError),
@@ -1331,10 +1344,16 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleReviewer,
-		Model:        reviewerModel,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleReviewer,
+		Model:  reviewerModel,
+		// Filter the wire tool palette by RoleScenarioReviewer (req-level
+		// reviewer is scenario-shaped — see buildRequirementReviewContext
+		// at the symmetric prompt-side filter). Without this, the reviewer
+		// sees decompose_task / review_scenario / web_search / http_request
+		// — terminals from other roles that confuse small models. Same fix
+		// shape as execution-manager applied take 11.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer)...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
 		Prompt:       c.buildReviewPrompt(exec),

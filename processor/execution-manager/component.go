@@ -1405,10 +1405,19 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        devModel,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  devModel,
+		// Filter the wire tool palette by RoleDeveloper. Without this, the
+		// developer sees every registered tool — including decompose_task
+		// (a requirement-executor terminal) and review_scenario (a
+		// scenario-reviewer terminal). Take 11 (2026-05-08) had qwen3.6-27b
+		// call decompose_task instead of submit_work after exploring with
+		// bash, then wedge with finish_reason=stop because the dispatch had
+		// no developer-shaped next move. The prompt-side FilterTools above
+		// only filters guidance text; the wire palette must be filtered
+		// here too.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleDeveloper)...),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 		Prompt:       userPrompt,
@@ -1681,10 +1690,13 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleReviewer,
-		Model:        reviewerModel,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleReviewer,
+		Model:  reviewerModel,
+		// Filter the wire tool palette by RoleReviewer — same rationale as
+		// the developer dispatch above. Reviewer's filter excludes
+		// decompose_task / review_scenario / web_search / http_request.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleReviewer)...),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
 		Prompt:       reviewSubject.String(),

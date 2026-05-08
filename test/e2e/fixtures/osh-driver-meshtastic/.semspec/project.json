@@ -1,0 +1,16 @@
+{
+  "name": "workspace",
+  "version": "1.0.0",
+  "org": "semspec",
+  "initialized_at": "2026-05-05T20:53:35.61101559Z",
+  "updated_at": "2026-05-05T20:53:35.662436674Z",
+  "languages": [
+    {
+      "name": "Java",
+      "version": null,
+      "primary": true
+    }
+  ],
+  "tooling": {},
+  "repository": {}
+}

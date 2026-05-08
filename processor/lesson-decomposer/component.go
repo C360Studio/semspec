@@ -565,11 +565,14 @@ func (c *Component) dispatchDecomposer(ctx context.Context, req *payloads.Lesson
 
 	taskID := fmt.Sprintf("decompose-%s-%s", req.Slug, uuid.New().String())
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "lesson", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RoleLessonDecomposer — see take-11 fix
+		// in execution-manager for rationale. Filter added in tool_filter.go
+		// alongside this change.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "lesson", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleLessonDecomposer)...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugLessonDecomposition,
 		WorkflowStep: stepDecompose,

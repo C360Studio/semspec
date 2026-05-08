@@ -358,11 +358,13 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "scenarios", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RoleScenarioGenerator — see take-11 fix
+		// in execution-manager for rationale.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "scenarios", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator)...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepScenarioGeneration,

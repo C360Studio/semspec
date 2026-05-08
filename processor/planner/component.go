@@ -601,11 +601,14 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "plan", endpoint, c.availableToolNames()...),
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
+		// Wire palette filtered by RolePlanner — see take-11 fix in
+		// execution-manager for rationale (small models pick wrong-role
+		// terminals when the wire list contains them).
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "plan", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner)...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepDrafting,

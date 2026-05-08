@@ -63,6 +63,21 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		RoleDeveloper: {
 			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
 		},
+
+		// Architect: technology choices, component boundaries, data flow.
+		// Read-only exploration via bash + graph; web/http for tech docs.
+		// No decompose_task / review_scenario — those are other-role
+		// terminals that confused take 11's developer.
+		RoleArchitect: {
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
+		},
+
+		// Lesson decomposer: reads trajectory + reviewer verdict, emits one
+		// audited lesson via submit_work. Bash for cited-evidence file
+		// reads, graph_query for trajectory pull. ADR-033 Phase 2b.
+		RoleLessonDecomposer: {
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
+		},
 	}
 }
 
