@@ -35,6 +35,7 @@ import (
 
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
@@ -1030,6 +1031,13 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 	c.discardWorktree(exec)
 
 	exec.Stage = phaseEscalated
+	// Mirror the reason on the in-memory struct so syncToStore + the
+	// downstream synthetic completion event (req_completions.go) carry it
+	// to requirement-executor. Without this, the EscalationReason triple
+	// is the only carrier and the requirement-level "Skipping retry — TDD
+	// budget exhausted upstream" log fires with escalation_reason="".
+	// Caught 2026-05-08 take 7 OpenRouter @easy.
+	exec.EscalationReason = reason
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseEscalated, "error", err)
 	}
@@ -1370,10 +1378,20 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	exec.DeveloperTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
 
-	// Assemble system prompt via fragment pipeline. Pass exec.Model so the
+	// Resolve developer model via capability registry. config.Model is the
+	// component-level override knob; the canonical path is CapabilityCoding →
+	// registry. exec.Model (set upstream by req-executor when it dispatched
+	// the node) is intentionally NOT consulted here — the previous code path
+	// let req-executor.config.Model silently pin every downstream developer,
+	// which made execution-manager.config.Model inert and tripped the take-7
+	// MoE-vs-dense bug. Each dispatch site owns its own resolution; upstream
+	// state does not leak into role-specific routing.
+	devModel := model.ResolveModel(c.modelRegistry, c.config.Model, model.CapabilityCoding)
+
+	// Assemble system prompt via fragment pipeline. Pass devModel so the
 	// assembler sees HasResponseFormat for the endpoint the dispatch will
 	// hit; ResponseFormat is attached on the TaskMessage below.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec, exec.Model)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec, devModel)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	userPrompt := exec.Prompt
@@ -1383,13 +1401,13 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 
 	var endpoint *ssmodel.EndpointConfig
 	if c.modelRegistry != nil {
-		endpoint = c.modelRegistry.GetEndpoint(exec.Model)
+		endpoint = c.modelRegistry.GetEndpoint(devModel)
 	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
-		Model:        exec.Model,
+		Model:        devModel,
 		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", endpoint, c.availableToolNames()...),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
@@ -1404,7 +1422,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 			"deliverable_type": "developer",
 			// role + model for SKG tool.recovery.incident partitioning.
 			"role":  string(prompt.RoleDeveloper),
-			"model": exec.Model,
+			"model": devModel,
 		},
 		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "developer"),
 	}
@@ -1631,10 +1649,9 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	// Resolve the reviewer model up-front so buildAssemblyContext sees the
 	// endpoint the dispatch will actually hit (ResponseFormat support is
 	// per-endpoint and gates schema-prose elision in the assembled prompt).
-	reviewerModel := c.config.CodeReviewerModel
-	if reviewerModel == "" {
-		reviewerModel = exec.Model
-	}
+	// Capability-first with config.CodeReviewerModel as a hard override —
+	// matches the pattern used by the developer dispatch above.
+	reviewerModel := model.ResolveModel(c.modelRegistry, c.config.CodeReviewerModel, model.CapabilityReviewing)
 
 	// Assemble system prompt via fragment pipeline.
 	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec, reviewerModel)

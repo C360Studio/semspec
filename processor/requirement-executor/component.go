@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
@@ -931,11 +932,12 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		c.logger.Warn("Failed to send req.phase mutation for decomposer dispatch", "error", err)
 	}
 
-	// Use separate decomposer model if configured, otherwise fall back to exec model.
-	decomposerModel := c.config.DecomposerModel
-	if decomposerModel == "" {
-		decomposerModel = exec.Model
-	}
+	// Resolve decomposer model via capability registry. config.DecomposerModel
+	// is honored as a hard override (fixture pinning); the canonical path is
+	// CapabilityTaskDecomposition → registry, which routes to a planner-class
+	// model rather than a coder-class model. Matches the pattern at
+	// dispatchDeveloperLocked / dispatchCodeReviewer.
+	decomposerModel := model.ResolveModel(c.modelRegistry, c.config.DecomposerModel, model.CapabilityTaskDecomposition)
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
@@ -1249,13 +1251,18 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 
 	// Dispatch to execution-manager for TDD pipeline processing via mutation.
 	// execution-manager's KV watcher picks up the pending task entry.
+	//
+	// We intentionally do NOT carry exec.Model on the wire. execution-manager
+	// resolves the developer model via its own capability+config.Model knob;
+	// propagating exec.Model here would silently override that resolution and
+	// recreate the take-7 bug (req-executor.config.Model="moe" pinning every
+	// downstream developer regardless of execution-manager.config.Model).
 	taskReq := map[string]any{
 		"slug":            exec.Slug,
 		"task_id":         taskID,
 		"requirement_id":  exec.RequirementID,
 		"title":           node.Prompt,
 		"prompt":          nodePrompt,
-		"model":           exec.Model,
 		"project_id":      exec.ProjectID,
 		"trace_id":        exec.TraceID,
 		"loop_id":         exec.LoopID,
@@ -1308,10 +1315,11 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
 	}
 
-	reviewerModel := c.config.ReviewerModel
-	if reviewerModel == "" {
-		reviewerModel = exec.Model
-	}
+	// Resolve requirement-reviewer model via capability registry.
+	// config.ReviewerModel is honored as a hard override; the canonical path
+	// is CapabilityReviewing → registry. Matches the pattern at
+	// dispatchDeveloperLocked / dispatchCodeReviewer.
+	reviewerModel := model.ResolveModel(c.modelRegistry, c.config.ReviewerModel, model.CapabilityReviewing)
 
 	asmCtx := c.buildRequirementReviewContext(exec, reviewerModel)
 	assembled := c.assembler.Assemble(asmCtx)

@@ -212,6 +212,15 @@
           "openrouter-qwen3-moe"
         ]
       },
+      "task_decomposition": {
+        "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
+        "preferred": [
+          "openrouter-qwen3-moe"
+        ],
+        "fallback": [
+          "openrouter-qwen3-moe"
+        ]
+      },
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
@@ -635,8 +644,6 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 3600,
-        "model": "openrouter-qwen3-moe",
-        "decomposer_model": "openrouter-qwen3-moe",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
@@ -662,7 +669,6 @@
       "config": {
         "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
-        "model": "openrouter-qwen2-5-coder-32b",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "60s",

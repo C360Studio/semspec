@@ -143,7 +143,7 @@
         ]
       },
       "architecture": {
-        "description": "Architecture generation \u2014 technology choices, component boundaries, data flow",
+        "description": "Architecture generation — technology choices, component boundaries, data flow",
         "preferred": [
           "gemini-pro"
         ],
@@ -158,7 +158,7 @@
         ]
       },
       "lesson_decomposition": {
-        "description": "ADR-033 lesson decomposer \u2014 rare, benefits from a smarter model",
+        "description": "ADR-033 lesson decomposer — rare, benefits from a smarter model",
         "preferred": [
           "gemini-pro",
           "gemini-flash"
@@ -177,21 +177,21 @@
         ]
       },
       "query_classification": {
-        "description": "graph-query T3 fallback classifier \u2014 small JSON output, latency-critical",
+        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
         "preferred": [
           "seminstruct-fast"
         ],
         "timeout": "10s"
       },
       "answer_synthesis": {
-        "description": "graph-query globalSearch answer composition \u2014 ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
+        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
         "preferred": [
           "seminstruct-answer"
         ],
         "timeout": "30s"
       },
       "community_summary": {
-        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. seminstruct-8B-on-CPU validated 2026-05-06 ADR-036 Phase 2 to be too slow at any scale beyond toy fixtures (>180s per community on 2 CPUs). gemini-flash-lite gives sub-second response and Google's quality bar exceeds the MS GraphRAG sub-7B floor anyway. Local seminstruct-summary kept as fallback for offline/quota scenarios.",
+        "description": "graph-clustering community summarization — background batch, persisted into graph. seminstruct-8B-on-CPU validated 2026-05-06 ADR-036 Phase 2 to be too slow at any scale beyond toy fixtures (>180s per community on 2 CPUs). gemini-flash-lite gives sub-second response and Google's quality bar exceeds the MS GraphRAG sub-7B floor anyway. Local seminstruct-summary kept as fallback for offline/quota scenarios.",
         "preferred": [
           "gemini-flash-lite"
         ],
@@ -201,7 +201,7 @@
         "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes \u2014 bigger reasoning model than workflow default.",
+        "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
         "preferred": [
           "gemini-pro"
         ],
@@ -209,6 +209,15 @@
           "gemini-flash"
         ],
         "timeout": "60s"
+      },
+      "task_decomposition": {
+        "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
+        "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       }
     },
     "defaults": {
@@ -550,8 +559,6 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 3600,
-        "model": "gemini-flash",
-        "decomposer_model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
@@ -577,7 +584,6 @@
       "config": {
         "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
-        "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "60s",

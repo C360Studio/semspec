@@ -182,7 +182,7 @@
         ]
       },
       "lesson_decomposition": {
-        "description": "ADR-033 lesson decomposer \u2014 falls back to reviewing model on local",
+        "description": "ADR-033 lesson decomposer — falls back to reviewing model on local",
         "preferred": [
           "qwen3-14b"
         ],
@@ -206,28 +206,28 @@
         ]
       },
       "query_classification": {
-        "description": "graph-query T3 fallback classifier \u2014 small JSON output, latency-critical",
+        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
         "preferred": [
           "seminstruct-fast"
         ],
         "timeout": "10s"
       },
       "answer_synthesis": {
-        "description": "graph-query globalSearch answer composition \u2014 ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
+        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
         "preferred": [
           "seminstruct-answer"
         ],
         "timeout": "30s"
       },
       "community_summary": {
-        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
+        "description": "graph-clustering community summarization — background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
         "preferred": [
           "seminstruct-summary"
         ],
         "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes \u2014 bigger reasoning model than workflow default.",
+        "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
         "preferred": [
           "qwen3-coder-30b"
         ],
@@ -235,6 +235,15 @@
           "qwen3-14b"
         ],
         "timeout": "60s"
+      },
+      "task_decomposition": {
+        "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
+        "preferred": [
+          "qwen3-14b"
+        ],
+        "fallback": [
+          "qwen3-14b"
+        ]
       }
     },
     "defaults": {
@@ -582,8 +591,6 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 900,
-        "model": "qwen3-14b",
-        "decomposer_model": "qwen3-14b",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
@@ -609,7 +616,6 @@
       "config": {
         "max_tdd_cycles": 3,
         "timeout_seconds": 900,
-        "model": "qwen3-14b",
         "sandbox_url": "http://sandbox:8090"
       }
     },

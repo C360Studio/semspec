@@ -124,7 +124,7 @@
         ]
       },
       "architecture": {
-        "description": "Architecture generation \u2014 technology choices, component boundaries, data flow",
+        "description": "Architecture generation — technology choices, component boundaries, data flow",
         "preferred": [
           "sparky-qwen"
         ],
@@ -157,32 +157,41 @@
         ]
       },
       "query_classification": {
-        "description": "graph-query T3 fallback classifier \u2014 small JSON output, latency-critical",
+        "description": "graph-query T3 fallback classifier — small JSON output, latency-critical",
         "preferred": [
           "seminstruct-fast"
         ],
         "timeout": "10s"
       },
       "answer_synthesis": {
-        "description": "graph-query globalSearch answer composition \u2014 ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
+        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
         "preferred": [
           "seminstruct-answer"
         ],
         "timeout": "30s"
       },
       "community_summary": {
-        "description": "graph-clustering community summarization \u2014 background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
+        "description": "graph-clustering community summarization — background batch, persisted into graph. 8B required per MS GraphRAG quality bar; sub-7B writes garbage to the persisted graph.",
         "preferred": [
           "seminstruct-summary"
         ],
         "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes. Currently the same workflow model \u2014 replace preferred when a bigger answerer endpoint is added to sparky.",
+        "description": "Answerer-agent backend for ask_question routes. Currently the same workflow model — replace preferred when a bigger answerer endpoint is added to sparky.",
         "preferred": [
           "sparky-qwen"
         ],
         "timeout": "60s"
+      },
+      "task_decomposition": {
+        "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
+        "preferred": [
+          "sparky-qwen"
+        ],
+        "fallback": [
+          "sparky-qwen"
+        ]
       }
     },
     "defaults": {
@@ -527,8 +536,6 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 3600,
-        "model": "sparky-qwen",
-        "decomposer_model": "sparky-qwen",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
         "max_decomposer_retries": 2
@@ -554,7 +561,6 @@
       "config": {
         "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
-        "model": "sparky-qwen",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "60s",

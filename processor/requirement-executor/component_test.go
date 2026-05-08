@@ -486,9 +486,19 @@ func TestDataFlow_LastActivityUpdates(t *testing.T) {
 
 // newTestComponent creates a Component with no NATS client suitable for
 // unit-testing handler logic without I/O.
+//
+// Pre-populates DecomposerModel + ReviewerModel = "default" because
+// ResolveModel returns empty when neither override nor a registry is
+// configured. Tests that don't supply a model registry rely on these
+// overrides so dispatch payloads pass BaseMessage.Validate (which rejects
+// model="" with "model required"). Tests that want capability resolution
+// should provide deps.ModelRegistry instead.
 func newTestComponent(t *testing.T) *Component {
 	t.Helper()
-	raw, _ := json.Marshal(DefaultConfig())
+	cfg := DefaultConfig()
+	cfg.DecomposerModel = "default"
+	cfg.ReviewerModel = "default"
+	raw, _ := json.Marshal(cfg)
 	comp, err := NewComponent(raw, component.Dependencies{})
 	if err != nil {
 		t.Fatalf("newTestComponent: %v", err)

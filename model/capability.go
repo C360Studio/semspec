@@ -44,6 +44,13 @@ const (
 	// than the executing role; deployments typically point this at the
 	// same endpoint as CapabilityReviewing.
 	CapabilityLessonDecomposition Capability = "lesson_decomposition"
+
+	// CapabilityTaskDecomposition is for breaking a requirement into a
+	// DAG of executable nodes (requirement-executor's decomposer step).
+	// Benefits from planner-class reasoning rather than coder-class
+	// generation; deployments typically point this at the same endpoint
+	// as CapabilityPlanning.
+	CapabilityTaskDecomposition Capability = "task_decomposition"
 )
 
 // RoleCapabilities maps workflow roles to their default capability.
@@ -58,11 +65,14 @@ var RoleCapabilities = map[string]Capability{
 	"validator":             CapabilityCoding,
 	"developer":             CapabilityCoding,
 	"reviewer":              CapabilityReviewing,
+	"code-reviewer":         CapabilityReviewing,
+	"requirement-reviewer":  CapabilityReviewing,
 	"plan-reviewer":         CapabilityPlanReview,
 	"qa":                    CapabilityQA,
 	"coordinator":           CapabilityPlanning,
 	"writer":                CapabilityWriting,
 	"lesson-decomposer":     CapabilityLessonDecomposition,
+	"task-decomposer":       CapabilityTaskDecomposition,
 }
 
 // CapabilityForRole returns the default capability for a given role.
@@ -80,7 +90,7 @@ func (c Capability) IsValid() bool {
 	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing,
 		CapabilityPlanReview, CapabilityArchitecture, CapabilityRequirementGeneration,
 		CapabilityScenarioGeneration, CapabilityQA, CapabilityFast,
-		CapabilityLessonDecomposition:
+		CapabilityLessonDecomposition, CapabilityTaskDecomposition:
 		return true
 	}
 	return false
