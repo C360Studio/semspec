@@ -334,7 +334,11 @@
         "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "content_bucket": "AGENT_CONTENT"
+        "content_bucket": "AGENT_CONTENT",
+        "consumer": {
+          "ack_wait": "300s",
+          "heartbeat_interval": "120s"
+        }
       }
     },
     "agentic-model": {
@@ -343,7 +347,22 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "900s"
+        "timeout": "900s",
+        "ports": {
+          "inputs": [
+            {
+              "name": "agent.request",
+              "type": "jetstream",
+              "subject": "agent.request.>",
+              "stream_name": "AGENT",
+              "required": true,
+              "config": {
+                "ack_wait": "300s",
+                "heartbeat_interval": "120s"
+              }
+            }
+          ]
+        }
       }
     },
     "agentic-tools": {
@@ -352,7 +371,22 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "consumer_name_suffix": "semspec-e2e"
+        "consumer_name_suffix": "semspec-e2e",
+        "ports": {
+          "inputs": [
+            {
+              "name": "tool.execute",
+              "type": "jetstream",
+              "subject": "tool.execute.>",
+              "stream_name": "AGENT",
+              "required": true,
+              "config": {
+                "ack_wait": "300s",
+                "heartbeat_interval": "120s"
+              }
+            }
+          ]
+        }
       }
     },
     "graph-ingest": {
