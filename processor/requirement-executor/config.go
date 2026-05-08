@@ -17,8 +17,13 @@ type Config struct {
 	// decompose → serial-execute pipeline).
 	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per requirement execution in seconds,category:advanced,default:3600"`
 
-	// Model is the model endpoint name passed through to dispatched agents.
-	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
+	// Model is an OPTIONAL hard override propagated to req-executor's own
+	// dispatches (via exec.Model on the in-memory state). Empty signals
+	// "let each downstream dispatch resolve via capability registry."
+	// Distinct from DecomposerModel / ReviewerModel which override the
+	// req-executor's own role-specific dispatches. Do NOT default-fill;
+	// empty is load-bearing for the capability-resolution path.
+	Model string `json:"model,omitempty" schema:"type:string,description:Optional override propagated to req-executor dispatches (empty = use capability registry),category:basic"`
 
 	// DecomposerModel is the model endpoint for the decomposer agent. When empty,
 	// falls back to Model. Separate model allows independent mock fixtures.
@@ -101,11 +106,12 @@ func (c *Config) requireCommitObservation() bool {
 	return *c.RequireCommitObservation
 }
 
-// DefaultConfig returns a Config with sensible defaults.
+// DefaultConfig returns a Config with sensible defaults. Model fields
+// are left empty on purpose — empty signals "use capability registry
+// resolution" per model.ResolveModel.
 func DefaultConfig() Config {
 	return Config{
 		TimeoutSeconds: 3600,
-		Model:          "default",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -149,9 +155,12 @@ func (c Config) withDefaults() Config {
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
 	}
-	if c.Model == "" {
-		c.Model = d.Model
-	}
+	// Intentionally NOT auto-defaulting Model / DecomposerModel /
+	// ReviewerModel. Empty fields signal "use capability registry
+	// resolution" — see model.ResolveModel. Auto-injecting "default"
+	// here would short-circuit ResolveModel and route every dispatch to
+	// registry defaults.Model instead of the role's capability. Caught
+	// 2026-05-08 take 8 trajectory inspection.
 	if c.MaxRequirementRetries < 0 {
 		c.MaxRequirementRetries = 2
 	}

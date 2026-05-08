@@ -136,8 +136,10 @@ func TestDefaultConfig_HasExpectedDefaults(t *testing.T) {
 	if cfg.TimeoutSeconds != 3600 {
 		t.Errorf("TimeoutSeconds = %d, want 3600", cfg.TimeoutSeconds)
 	}
-	if cfg.Model != "default" {
-		t.Errorf("Model = %q, want default", cfg.Model)
+	// Model intentionally empty — capability registry drives resolution
+	// at dispatch time. See Config.Model docs.
+	if cfg.Model != "" {
+		t.Errorf("Model = %q, want \"\" (capability resolution path)", cfg.Model)
 	}
 	if cfg.Ports == nil {
 		t.Fatal("Ports should not be nil")
@@ -217,8 +219,12 @@ func TestConfig_WithDefaults_FillsZeroFields(t *testing.T) {
 	if got.TimeoutSeconds != 3600 {
 		t.Errorf("withDefaults() TimeoutSeconds = %d, want 3600", got.TimeoutSeconds)
 	}
-	if got.Model != "default" {
-		t.Errorf("withDefaults() Model = %q, want default", got.Model)
+	// Model intentionally NOT auto-defaulted — empty signals "use
+	// capability registry resolution" per model.ResolveModel. Auto-
+	// defaulting would short-circuit ResolveModel and route every
+	// dispatch to registry defaults.Model regardless of capability.
+	if got.Model != "" {
+		t.Errorf("withDefaults() Model = %q, want \"\" (capability resolution path)", got.Model)
 	}
 	if got.Ports == nil {
 		t.Error("withDefaults() Ports should not be nil")
@@ -284,8 +290,9 @@ func TestNewComponent_AppliesDefaults(t *testing.T) {
 	if c.config.TimeoutSeconds != 3600 {
 		t.Errorf("TimeoutSeconds = %d, want 3600", c.config.TimeoutSeconds)
 	}
-	if c.config.Model != "default" {
-		t.Errorf("Model = %q, want default", c.config.Model)
+	// Empty Model is the capability-resolution signal; see Config docs.
+	if c.config.Model != "" {
+		t.Errorf("Model = %q, want \"\" (capability resolution path)", c.config.Model)
 	}
 }
 

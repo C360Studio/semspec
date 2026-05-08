@@ -34,8 +34,10 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.TimeoutSeconds != 1800 {
 		t.Errorf("TimeoutSeconds: want 1800, got %d", cfg.TimeoutSeconds)
 	}
-	if cfg.Model != "default" {
-		t.Errorf("Model: want \"default\", got %q", cfg.Model)
+	// Model intentionally empty — capability registry drives resolution
+	// at dispatch time. See Config.Model docs.
+	if cfg.Model != "" {
+		t.Errorf("Model: want \"\" (capability resolution), got %q", cfg.Model)
 	}
 	if cfg.Ports == nil {
 		t.Fatal("Ports must not be nil")
@@ -122,8 +124,10 @@ func TestConfigWithDefaults_AllZeroAppliesDefaults(t *testing.T) {
 	if got.TimeoutSeconds != 1800 {
 		t.Errorf("TimeoutSeconds: want 1800, got %d", got.TimeoutSeconds)
 	}
-	if got.Model != "default" {
-		t.Errorf("Model: want \"default\", got %q", got.Model)
+	// Model intentionally empty — capability registry drives resolution
+	// at dispatch time. See Config.Model docs.
+	if got.Model != "" {
+		t.Errorf("Model: want \"\" (capability resolution), got %q", got.Model)
 	}
 	if got.Ports == nil {
 		t.Error("Ports should not be nil after withDefaults")

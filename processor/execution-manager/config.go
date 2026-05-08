@@ -53,8 +53,13 @@ type Config struct {
 	// reaches this count, a warning is logged and a NATS event published.
 	LessonThreshold int `json:"lesson_threshold,omitempty" schema:"type:int,description:Error count per role per category that triggers notification,category:advanced,default:2"`
 
-	// Model is the model endpoint name passed through to dispatched agents.
-	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
+	// Model is an OPTIONAL hard override for the developer dispatch model.
+	// When empty, model.ResolveModel(registry, "", CapabilityCoding) drives
+	// resolution via the capability registry. When set, this value wins
+	// regardless of capability — useful for fixture pinning or per-component
+	// model debugging. Do NOT default-fill this field; an empty value is
+	// load-bearing for the capability-resolution path.
+	Model string `json:"model,omitempty" schema:"type:string,description:Optional override for developer dispatch model (empty = use capability registry),category:basic"`
 
 	// CodeReviewerModel is the model endpoint for the in-TDD-cycle code-reviewer
 	// agent (dispatched after structural validation passes, before merge). When
@@ -128,13 +133,15 @@ func (c *Config) requireDeveloperDiff() bool {
 	return *c.RequireDeveloperDiff
 }
 
-// DefaultConfig returns a Config with sensible defaults.
+// DefaultConfig returns a Config with sensible defaults. Model is left
+// empty on purpose — empty signals "use capability registry resolution"
+// per model.ResolveModel; pre-filling "default" would short-circuit
+// every dispatch through registry defaults.Model.
 func DefaultConfig() Config {
 	return Config{
 		MaxTDDCycles:     3,
 		MaxReviewRetries: 3,
 		TimeoutSeconds:   1800,
-		Model:            "default",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -202,9 +209,13 @@ func (c Config) withDefaults() Config {
 	if c.MaxReviewRetries == 0 {
 		c.MaxReviewRetries = d.MaxReviewRetries
 	}
-	if c.Model == "" {
-		c.Model = d.Model
-	}
+	// Intentionally NOT auto-defaulting Model. An empty Model means "use
+	// capability registry resolution" — see model.ResolveModel. Auto-
+	// injecting "default" here makes the override always non-empty, which
+	// short-circuits ResolveModel and routes every developer to the
+	// registry's defaults.Model instead of CapabilityCoding. Caught
+	// 2026-05-08 take 8 trajectory 99f314e7 — model="default" reached the
+	// dispatch payload despite empty config.model.
 	if c.Ports == nil {
 		c.Ports = d.Ports
 	}
