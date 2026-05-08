@@ -282,6 +282,22 @@ Your previous output could not be processed: %s
 Please fix the issue and ensure your deliverable matches the required structure.`, p.PreviousError)
 	}
 
+	if p.ReviewFindings != "" {
+		// Plan-reviewer rejected the prior round; surface the formatted
+		// findings so the architect can avoid re-introducing the
+		// architectural shape (actors / integrations / triggers) that
+		// the scenarios then hallucinated around. Take 9 (2026-05-08)
+		// confirmed arch-gen would otherwise reproduce the same shape
+		// every revision round.
+		prevErr += fmt.Sprintf(`
+
+## Previous Review Findings (Address These)
+
+The previous round was reviewed and rejected. Read every finding before deciding actor / integration / test_surface shape — repeating the same shape will fail the next review the same way.
+
+%s`, p.ReviewFindings)
+	}
+
 	return fmt.Sprintf(`Analyze the following plan and its requirements to produce architecture decisions.
 
 **Goal:** %s

@@ -72,6 +72,17 @@ func (r *PlanReviewResult) NormalizeVerdict() {
 }
 
 // FormatFindings formats findings for display, grouped by status.
+//
+// The violations block is what downstream generators (req-gen, arch-gen,
+// scen-gen) consume on revision rounds — every dropped field is a thread
+// of context the next-round model must reconstruct from prose. Take 9
+// (2026-05-08) confirmed this: SOPTitle="n/a" for completeness findings
+// produced "[ERROR] n/a" bullet headers, and target_id/phase/evidence
+// were stripped entirely, so scen-gen could not pin its fix to a
+// specific scenario or know which phase to retarget. The format below
+// is structured-prose: the bullet header is meaningful even when
+// SOPTitle is empty (category + phase carry the topic), and the
+// evidence quote is preserved verbatim for the model to anchor on.
 func (r *PlanReviewResult) FormatFindings() string {
 	if len(r.Findings) == 0 {
 		return "No findings."
@@ -94,24 +105,64 @@ func (r *PlanReviewResult) FormatFindings() string {
 	if len(violations) > 0 {
 		sb.WriteString("### Violations\n\n")
 		for _, f := range violations {
-			fmt.Fprintf(&sb, "- **[%s]** %s\n", strings.ToUpper(f.Severity), f.SOPTitle)
-			if f.Issue != "" {
-				fmt.Fprintf(&sb, "  - Issue: %s\n", f.Issue)
-			}
-			if f.Suggestion != "" {
-				fmt.Fprintf(&sb, "  - Suggestion: %s\n", f.Suggestion)
-			}
+			writeViolationFinding(&sb, f)
 		}
-		sb.WriteString("\n")
 	}
 
 	if len(compliant) > 0 {
 		sb.WriteString("### Compliant\n\n")
 		for _, f := range compliant {
-			fmt.Fprintf(&sb, "- %s\n", f.SOPTitle)
+			fmt.Fprintf(&sb, "- %s\n", findingHeader(f))
 		}
 		sb.WriteString("\n")
 	}
 
 	return sb.String()
+}
+
+// writeViolationFinding renders one violation as structured prose
+// preserving every diagnostic field. The order is fixed so model
+// attention is consistent across findings within a round and across
+// rounds: header → issue → evidence → suggestion. Evidence is the
+// reviewer's verbatim quote of the inconsistency and is the highest-
+// signal field for the next-round generator.
+func writeViolationFinding(sb *strings.Builder, f PlanReviewFinding) {
+	fmt.Fprintf(sb, "- **[%s]** %s\n", strings.ToUpper(f.Severity), findingHeader(f))
+	if f.Issue != "" {
+		fmt.Fprintf(sb, "  - Issue: %s\n", f.Issue)
+	}
+	if f.Evidence != "" {
+		fmt.Fprintf(sb, "  - Evidence: %s\n", f.Evidence)
+	}
+	if f.Suggestion != "" {
+		fmt.Fprintf(sb, "  - Suggestion: %s\n", f.Suggestion)
+	}
+	sb.WriteString("\n")
+}
+
+// findingHeader composes a meaningful bullet header even when SOPTitle
+// is "n/a" (completeness findings, which carry no SOP). Format:
+//   - "category=completeness phase=requirements target=scenario.X.1.1"
+//   - "<sop-title> [phase=architecture target=integration.health]"
+//
+// Empty fields are omitted. Falls back to "(no detail)" only when every
+// component is empty — which would itself be a malformed finding.
+func findingHeader(f PlanReviewFinding) string {
+	var parts []string
+	switch {
+	case f.SOPTitle != "" && f.SOPTitle != "n/a":
+		parts = append(parts, f.SOPTitle)
+	case f.Category != "":
+		parts = append(parts, "category="+f.Category)
+	}
+	if f.Phase != "" {
+		parts = append(parts, "phase="+f.Phase)
+	}
+	if f.TargetID != "" {
+		parts = append(parts, "target="+f.TargetID)
+	}
+	if len(parts) == 0 {
+		return "(no detail)"
+	}
+	return strings.Join(parts, " ")
 }

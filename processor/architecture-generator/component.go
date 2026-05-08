@@ -297,7 +297,12 @@ func (c *Component) processArchitecturePhase(ctx context.Context, plan *workflow
 	}
 
 	c.retry.Track(plan.Slug, plan)
-	c.dispatchArchitectureGenerator(ctx, plan, "")
+	// Pass plan.ReviewFormattedFindings on revision rounds so the
+	// architect can see why the prior round was rejected and adjust
+	// actor / integration shape accordingly. Without this, arch-gen
+	// reproduces the same architectural shape that scen-gen then
+	// hallucinates around — caught take 9 (2026-05-08).
+	c.dispatchArchitectureGenerator(ctx, plan, "", plan.ReviewFormattedFindings)
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +311,11 @@ func (c *Component) processArchitecturePhase(ctx context.Context, plan *workflow
 
 // dispatchArchitectureGenerator dispatches an architecture-generator agent loop
 // via agentic-dispatch. previousError is non-empty on retry attempts.
-func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *workflow.Plan, previousError string) {
+// reviewFindings is the formatted plan-reviewer rejection text from the
+// prior R2 round (empty on the first arch-gen pass, populated on
+// revision); the architect uses it to avoid re-introducing the
+// architectural shape that the scenarios then hallucinated around.
+func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *workflow.Plan, previousError string, reviewFindings ...string) {
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("archgen-%s-%s", plan.Slug, uuid.New().String())
@@ -330,6 +339,9 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		ScopeProtected: plan.Scope.DoNotTouch,
 		Requirements:   reqSummaries,
 		PreviousError:  previousError,
+	}
+	if len(reviewFindings) > 0 {
+		archCtx.ReviewFindings = reviewFindings[0]
 	}
 
 	// Resolve model for architecture capability.
