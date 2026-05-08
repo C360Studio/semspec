@@ -126,6 +126,26 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 **Title:** %s
 
 Read the codebase to understand the current state. If any critical information is missing for implementation, ask questions. Then produce the Goal/Context/Scope structure.`, p.Title)
+
+	// Scope-schema reminder on first-pass planning (mirror of the revision-
+	// prompt block above). Caught take 12 (2026-05-08): qwen3-MoE planner
+	// produced scope: {include:[], create:[], exclude:[], do_not_touch:[]}
+	// for an "Add /health endpoint" task. req-gen then invented
+	// files_owned: [health.go, health_test.go]; plan-reviewer correctly
+	// flagged the inconsistency; rollback cascaded to drafting; planner
+	// re-produced the same empty scope; thrash. Small models skim past
+	// the tool-definition schema description — the rule has to appear in
+	// the user prompt to anchor first-pass attention.
+	sb.WriteString("\n\n## Scope Schema (REQUIRED)\n\n")
+	sb.WriteString("scope.include = files that ALREADY EXIST and the plan will read or modify.\n")
+	sb.WriteString("scope.create  = files the plan will CREATE that don't exist yet.\n")
+	sb.WriteString("scope.exclude / scope.do_not_touch = boundaries (rarely used).\n\n")
+	sb.WriteString("**If the plan will create ANY new files, list them in scope.create.** Empty scope.create + scope.include is only valid for read-only / inspection-only plans. A plan that says 'add /health endpoint' will create at least one file (the implementation, the test, or both) — name them.\n\n")
+	sb.WriteString("Example shape for a typical 'add a feature' plan:\n")
+	sb.WriteString("  scope.include: [\"main.go\"]                  ← existing files we'll modify\n")
+	sb.WriteString("  scope.create:  [\"main_test.go\"]             ← test file we'll add\n\n")
+	sb.WriteString("Downstream req-gen will only own files that appear in include + create. If you leave scope empty, req-gen still names files for itself and the reviewer rejects the plan for inconsistency. Avoid the loop by being explicit up front.\n")
+
 	if p.PreviousError != "" {
 		sb.WriteString("\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n")
 		sb.WriteString(p.PreviousError)

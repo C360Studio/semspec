@@ -597,7 +597,7 @@
       "config": {
         "execution_bucket_name": "EXECUTION_STATES",
         "max_concurrent_planners": 3,
-        "max_review_iterations": 3,
+        "max_review_iterations": 2,
         "auto_approve": false,
         "default_capability": "planning",
         "sandbox_url": "http://sandbox:8090"
