@@ -304,7 +304,8 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "consumer_name_suffix": "semspec-e2e"
+        "consumer_name_suffix": "semspec-e2e",
+        "timeout": "180s"
       }
     },
     "graph-ingest": {
