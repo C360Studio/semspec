@@ -48,17 +48,27 @@ func ToolsForDeliverable(reg component.ToolRegistryReader, deliverableType strin
 // ToolsForEndpoint is ToolsForDeliverable plus Strict-mode tool calling
 // (ADR-035). When the endpoint honors OpenAI's strict-mode tool calling
 // (per the same provider matrix as response_format — see
-// EndpointSupportsResponseFormat), submit_work's Strict flag is set true so
-// the model's tool-call arguments are guaranteed schema-conformant. On
-// no-op providers (anthropic, Gemini OpenAI-compat) Strict stays zero-value
-// and omitempty drops it from the wire.
+// EndpointSupportsResponseFormat), the Strict flag is set true on every
+// terminal tool whose schema has been audited as strict-mode-compliant
+// (additionalProperties:false everywhere, every property in required,
+// nullable types for optional fields). On no-op providers (anthropic,
+// Gemini OpenAI-compat) Strict stays zero-value and omitempty drops it
+// from the wire.
+//
+// Audited terminals:
+//   - submit_work — schemas in schemas.go (TestSchemasNoAdditionalProperties +
+//     TestSchemasRequiredCompleteness pin compliance per deliverable type)
+//   - decompose_task — schema in tools/decompose/executor.go (audited
+//     2026-05-08 take-14 follow-up; required-completeness enforced and
+//     additionalProperties:false on both top-level and nested node items)
 func ToolsForEndpoint(reg component.ToolRegistryReader, deliverableType string, ep *ssmodel.EndpointConfig, allowedNames ...string) []agentic.ToolDefinition {
 	tools := ToolsForDeliverable(reg, deliverableType, allowedNames...)
 	if !EndpointSupportsResponseFormat(ep) {
 		return tools
 	}
 	for i := range tools {
-		if tools[i].Name == "submit_work" {
+		switch tools[i].Name {
+		case "submit_work", "decompose_task":
 			tools[i].Strict = true
 		}
 	}

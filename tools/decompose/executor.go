@@ -72,24 +72,31 @@ CRITICAL: Each node's prompt MUST include CONCRETE FILE PATHS (e.g., 'Create pkg
 
 Example call:
 {"goal":"Add health endpoint","nodes":[{"id":"health-handler","prompt":"Create cmd/server/health.go with a HealthHandler that returns JSON {\"status\":\"ok\"}. Register it on GET /health in cmd/server/main.go.","role":"developer","file_scope":["cmd/server/health.go","cmd/server/main.go"],"depends_on":[]},{"id":"health-test","prompt":"Create cmd/server/health_test.go with table-driven tests for the health endpoint: verify 200 status, JSON content-type, and response body.","role":"developer","file_scope":["cmd/server/health_test.go"],"depends_on":["health-handler"]}]}`,
+		// Strict-mode-compliant: every property listed in required, every
+		// nested object closed with additionalProperties:false, optional
+		// fields encoded as nullable types per the OpenAI strict-mode
+		// subset. Mirrors the submit_work schema shape audited in
+		// tools/terminal/schemas.go (commit e9c4a6d). Required for the
+		// terminal.ToolsForEndpoint Strict flag extension to safely flip
+		// true on response-format-supporting endpoints.
 		Parameters: map[string]any{
 			"type":     "object",
-			"required": []string{"goal", "nodes"},
+			"required": []string{"goal", "context", "nodes"},
 			"properties": map[string]any{
 				"goal": map[string]any{
 					"type":        "string",
 					"description": "High-level goal to decompose",
 				},
 				"context": map[string]any{
-					"type":        "string",
-					"description": "Additional context for the decomposition",
+					"type":        []any{"string", "null"},
+					"description": "Additional context for the decomposition. Set null when not needed.",
 				},
 				"nodes": map[string]any{
 					"type":        "array",
 					"description": "Subtask nodes forming the DAG",
 					"items": map[string]any{
 						"type":     "object",
-						"required": []string{"id", "prompt", "role", "file_scope"},
+						"required": []string{"id", "prompt", "role", "depends_on", "file_scope", "scenario_ids"},
 						"properties": map[string]any{
 							"id": map[string]any{
 								"type":        "string",
@@ -105,7 +112,7 @@ Example call:
 							},
 							"depends_on": map[string]any{
 								"type":        "array",
-								"description": "IDs of nodes that must complete before this one",
+								"description": "IDs of nodes that must complete before this one. Emit [] for nodes with no dependencies.",
 								"items":       map[string]any{"type": "string"},
 							},
 							"file_scope": map[string]any{
@@ -115,13 +122,15 @@ Example call:
 							},
 							"scenario_ids": map[string]any{
 								"type":        "array",
-								"description": "IDs of the acceptance criteria scenarios this node addresses. Used to route retry feedback when specific scenarios fail.",
+								"description": "IDs of the acceptance criteria scenarios this node addresses. Used to route retry feedback when specific scenarios fail. Emit [] when not addressing specific scenarios.",
 								"items":       map[string]any{"type": "string"},
 							},
 						},
+						"additionalProperties": false,
 					},
 				},
 			},
+			"additionalProperties": false,
 		},
 	}}
 }

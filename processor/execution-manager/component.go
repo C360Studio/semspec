@@ -1323,12 +1323,16 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 // This is a best-effort list for prompt assembly — actual tool availability is
 // controlled by the agentic-tools component at runtime.
 func (c *Component) availableToolNames() []string {
+	// review_scenario was registered for the legacy scenario-reviewer
+	// terminal that was deleted; left it in for cleanup tracking. Dropped
+	// 2026-05-08 take-14 follow-up — no executor implements it, so its
+	// presence here just bloated the wire palette and confused small
+	// models that picked it instead of submit_work.
 	return []string{
 		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task",
-		"review_scenario",
 	}
 }
 

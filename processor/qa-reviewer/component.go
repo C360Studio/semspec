@@ -30,10 +30,12 @@ import (
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
+	"github.com/c360studio/semspec/vocabulary/observability"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/lessons"
+	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -71,6 +73,7 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+	tripleWriter  *graphutil.TripleWriter // ADR-035 CP-1 incident emit
 
 	// retry tracks in-flight reviews: slug → retry state. The payload stored
 	// per slug is *workflow.Plan — fetched on retry to rebuild the dispatch.
@@ -145,6 +148,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		tripleWriter:  tw,
 		retry: dispatchretry.New(dispatchretry.Config{
 			MaxRetries: config.MaxReviewRetries,
 			BackoffMs:  config.RetryBackoffMs,
@@ -520,14 +524,27 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 		return
 	}
 
+	// Wire palette filtered by RolePlanQAReviewer — see take-11 fix
+	// in execution-manager for rationale.
+	qaTools := prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer)
+
 	task := &agentic.TaskMessage{
 		TaskID: taskID,
 		Role:   agentic.RoleReviewer,
 		Model:  modelName,
 		Prompt: assembled.UserMessage,
-		// Wire palette filtered by RolePlanQAReviewer — see take-11 fix
-		// in execution-manager for rationale.
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "qa-review", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer)...),
+		Tools:  terminal.ToolsForEndpoint(c.toolRegistry, "qa-review", endpoint, qaTools...),
+		// ToolChoice forces the model to call a tool every iteration —
+		// without it, the model can return plain content and the loop
+		// terminates with empty/unparseable loop.Result. Caught take 14
+		// (2026-05-08): qa-reviewer dispatched twice, both came back with
+		// "no JSON found in result" within 3 seconds (no real LLM work);
+		// model returned text without calling submit_work. ResolveToolChoice
+		// for RolePlanQAReviewer returns Mode:"required" (must use a tool;
+		// model picks from palette). submit_work is the only StopLoop tool,
+		// so the loop will eventually terminate via submit_work whose args
+		// JSON becomes loop.Result for the parser.
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RolePlanQAReviewer, qaTools),
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepQAReviewing,
 		Context: &agentic.ConstructedContext{
@@ -612,8 +629,18 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	result, err := parseQAReviewResult(loop.Result)
 	if err != nil {
+		// Emit ADR-035 CP-1 incident so the unparseable response is
+		// captured as audited telemetry before it scrolls off. Without
+		// this the WARN log alone has no body — the model's actual
+		// output is lost. Caught take 14 (2026-05-08): two consecutive
+		// QA dispatches both failed parse, the snapshot interval missed
+		// the trajectories, and we had nothing to debug from. The
+		// preview log is defensive on top of the SKG emit.
+		c.emitParseIncident(ctx, "qa", loop.ID, loop.Model, loop.Result, err)
 		c.logger.Warn("Failed to parse QA review result, retrying",
-			"slug", slug, "loop_id", loop.ID, "error", err)
+			"slug", slug, "loop_id", loop.ID, "error", err,
+			"result_len", len(loop.Result),
+			"result_preview", truncatePreview(loop.Result, 240))
 		c.retryOrFail(ctx, slug, fmt.Sprintf("failed to parse qa-review result: %v", err))
 		return
 	}
@@ -943,6 +970,54 @@ type qaReviewOutput struct {
 	} `json:"dimensions"`
 
 	PlanDecisions []qaPlanDecision `json:"plan_decisions"`
+}
+
+// emitParseIncident writes ADR-035 CP-1 telemetry when QA review parse
+// fails. Mirrors the requirement-executor.emitParseIncident shape:
+// best-effort SKG triple emit so the unparseable response is captured
+// for post-mortem analysis. nil tripleWriter is a no-op (test-only
+// path with no graph wiring).
+//
+// Without this, a parse failure leaves only a WARN log line — the
+// model's actual response text is gone and operators have no way to
+// classify the failure (empty content vs malformed JSON vs non-JSON
+// text). Take 14 (2026-05-08) hit exactly that gap.
+func (c *Component) emitParseIncident(ctx context.Context, role, loopID, model, rawResponse string, parseErr error) {
+	if c.tripleWriter == nil {
+		return
+	}
+	ic := parseincident.IncidentContext{
+		CallID: loopID,
+		Role:   role,
+		Model:  model,
+	}
+	if _, err := parseincident.EmitForResult(
+		ctx,
+		c.tripleWriter,
+		ic,
+		observability.CheckpointResponseParse,
+		nil, // no quirks tracked for QA parser yet
+		rawResponse,
+		parseErr,
+	); err != nil {
+		c.logger.Warn("CP-1 incident emit failed",
+			"loop_id", loopID, "role", role, "error", err)
+	}
+}
+
+// truncatePreview returns a single-line, length-capped view of s
+// suitable for embedding in a structured log field. Newlines collapse
+// to spaces so the WARN line stays parseable; max bounds the bytes so
+// 50KB model dumps don't blow the log shipper.
+func truncatePreview(s string, max int) string {
+	if max <= 0 || len(s) == 0 {
+		return ""
+	}
+	out := strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
+	if len(out) > max {
+		out = out[:max] + "…"
+	}
+	return out
 }
 
 // qaPlanDecision is a single change proposal from the agent's submit_work output.

@@ -40,8 +40,18 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "http_request", Order: 21, Guidance: "Fetch a URL or test a local API endpoint. For web research: use web_search FIRST to find URLs — NEVER guess or fabricate URLs. For local API testing: use with localhost/sandbox URLs you built yourself."},
 
 		// Agentic tools
-		{Name: "decompose_task", Order: 30, Guidance: "Break a task into a DAG of subtasks for parallel execution.", Roles: []Role{RoleDeveloper}},
-		{Name: "review_scenario", Order: 32, Guidance: "Submit scenario review verdict with structured findings.", Roles: []Role{RoleScenarioReviewer}},
+		// decompose_task is registered with RoleTaskGenerator semantically
+		// (the requirement-executor decomposer is what calls it). The
+		// previous RoleDeveloper tag was a take-11 footgun that put it
+		// in the developer's prompt-side guidance — model picked it
+		// instead of submit_work. Keep the role tag aligned with the
+		// dispatcher.
+		{Name: "decompose_task", Order: 30, Guidance: "Break a task into a DAG of subtasks for parallel execution.", Roles: []Role{RoleTaskGenerator}},
+		// review_scenario was the terminal for the legacy scenario-
+		// reviewer dispatch that was deleted; the tool itself was never
+		// re-registered. Listing it in tool guidance pollutes the
+		// reviewer's prompt with a non-existent tool name. Removed
+		// 2026-05-08 take-14 follow-up.
 	}
 }
 

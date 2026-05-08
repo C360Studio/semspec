@@ -401,10 +401,14 @@ func TestExecutor_ListTools_ReturnsOneDefinition(t *testing.T) {
 	if !ok {
 		t.Fatalf("Parameters[required] type = %T, want []string", def.Parameters["required"])
 	}
-	if len(required) != 2 {
-		t.Fatalf("required len = %d, want 2", len(required))
+	// Strict-mode-compliant schema requires every property in required;
+	// optional fields use nullable types instead of being omitted from
+	// the required list. Take-14 follow-up audited this for the
+	// terminal.ToolsForEndpoint Strict-flag extension.
+	wantRequired := map[string]bool{"goal": true, "context": true, "nodes": true}
+	if len(required) != len(wantRequired) {
+		t.Fatalf("required len = %d (%v), want %d (%v)", len(required), required, len(wantRequired), wantRequired)
 	}
-	wantRequired := map[string]bool{"goal": true, "nodes": true}
 	for _, r := range required {
 		if !wantRequired[r] {
 			t.Errorf("unexpected required field %q", r)
@@ -428,14 +432,15 @@ func TestExecutor_ListTools_ReturnsOneDefinition(t *testing.T) {
 	if !ok {
 		t.Fatalf("nodes.items.required type = %T, want []string", items["required"])
 	}
-	wantNodeRequired := map[string]bool{"id": true, "prompt": true, "role": true, "file_scope": true}
+	// Strict-mode required-completeness — every property in required.
+	wantNodeRequired := map[string]bool{"id": true, "prompt": true, "role": true, "depends_on": true, "file_scope": true, "scenario_ids": true}
 	for _, r := range nodeRequired {
 		if !wantNodeRequired[r] {
 			t.Errorf("unexpected node required field %q", r)
 		}
 	}
 	if len(nodeRequired) != len(wantNodeRequired) {
-		t.Errorf("node required fields = %v, want %v", nodeRequired, []string{"id", "prompt", "role", "file_scope"})
+		t.Errorf("node required fields = %v, want %v keys", nodeRequired, wantNodeRequired)
 	}
 
 	// Verify file_scope property is present in node schema.

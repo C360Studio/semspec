@@ -1805,11 +1805,14 @@ func resolveProvider(modelStr string) prompt.Provider {
 
 // availableToolNames returns the full tool list the component knows about.
 func availableToolNames() []string {
+	// review_scenario was registered for the legacy scenario-reviewer
+	// terminal that was deleted; dropped 2026-05-08 take-14 follow-up.
+	// No executor implements it, presence here just bloated the wire
+	// palette and risked small-model wrong-tool selection.
 	return []string{
 		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
-		"review_scenario",
 	}
 }
 
