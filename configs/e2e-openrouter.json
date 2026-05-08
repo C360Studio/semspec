@@ -662,7 +662,7 @@
       "config": {
         "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
-        "model": "openrouter-qwen3-moe",
+        "model": "openrouter-qwen2-5-coder-32b",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "60s",
