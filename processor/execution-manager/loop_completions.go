@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -376,4 +377,95 @@ func buildLoopFailureFeedback(event *agentic.LoopCompletedEvent) string {
 			"to terminate the loop.",
 		event.Outcome,
 	)
+}
+
+// maxValidationOutputBytes caps each Stdout/Stderr field rendered into the
+// developer's retry prompt. 2KB per field strikes the balance between
+// preserving actionable detail (failures usually fail at the END so the tail
+// is what the developer needs) and protecting the dev's reasoning budget on
+// providers with completion-token caps (OpenRouter caps at 16K). Without a
+// bound, a verbose `go test -v` failure or a multi-KB cmp.Diff can consume
+// most of the prompt and starve the model's actual reasoning.
+const maxValidationOutputBytes = 2048
+
+// buildValidationFailureFeedback returns retry-prompt feedback for a
+// structural validation failure. Replaces a raw json.Marshal of the
+// CheckResult slice that was unbounded (multi-KB stdout/stderr could starve
+// the dev's reasoning budget on capped providers), JSON-shaped (~30%
+// field-name overhead vs markdown), and lacked an untrusted-content
+// delimiter (test-output stdout could carry prompt-injection text — the
+// developer agent's own test code can `fmt.Println` arbitrary content into
+// stdout, which then becomes the next dispatch's prompt).
+//
+// Output is bounded human markdown with each FAILED REQUIRED check rendered
+// as its own section. Advisory checks (Required=false) are skipped — they
+// don't gate the retry, no need to bloat the prompt with anti-mock warnings.
+// Stdout/Stderr are tail-truncated at maxValidationOutputBytes per field.
+// Untrusted fields are wrapped in <validation-output trust="untrusted">
+// blocks so the LLM treats them as data, not instructions.
+//
+// Caught 2026-05-08 take-21 follow-up audit; see memory entry
+// feedback_retry_feedback_must_bound_and_delimit.
+func buildValidationFailureFeedback(results []payloads.CheckResult) string {
+	var sb strings.Builder
+	sb.WriteString("Structural validation failed. Fix the following issues:\n\n")
+
+	failed := 0
+	for _, r := range results {
+		if r.Passed || !r.Required {
+			continue
+		}
+		failed++
+		renderFailedCheck(&sb, r)
+	}
+
+	if failed == 0 {
+		// Defensive: caller checked overall Passed=false, so at least one
+		// required check should be failing. If we end up here the result
+		// shape is wrong upstream — surface it rather than silently emit
+		// an empty retry prompt.
+		return "Structural validation failed but no required check reported a failure. " +
+			"This indicates a validation result wiring issue — escalate rather than retry blindly."
+	}
+	return sb.String()
+}
+
+// renderFailedCheck writes one failed-check section to sb. Untrusted output
+// fields are wrapped in delimiter blocks; long output is tail-truncated.
+func renderFailedCheck(sb *strings.Builder, r payloads.CheckResult) {
+	fmt.Fprintf(sb, "## Check: %s (FAILED, required)\n\n", r.Name)
+	if r.Command != "" {
+		fmt.Fprintf(sb, "Command: `%s`\n", r.Command)
+	}
+	if r.ExitCode != 0 {
+		fmt.Fprintf(sb, "Exit code: %d\n", r.ExitCode)
+	}
+	if r.Duration != "" {
+		fmt.Fprintf(sb, "Duration: %s\n", r.Duration)
+	}
+
+	if r.Stderr != "" {
+		sb.WriteString("\nstderr:\n<validation-output trust=\"untrusted\">\n")
+		sb.WriteString(tailTruncate(r.Stderr, maxValidationOutputBytes))
+		sb.WriteString("\n</validation-output>\n")
+	}
+	if r.Stdout != "" {
+		sb.WriteString("\nstdout:\n<validation-output trust=\"untrusted\">\n")
+		sb.WriteString(tailTruncate(r.Stdout, maxValidationOutputBytes))
+		sb.WriteString("\n</validation-output>\n")
+	}
+	sb.WriteString("\n")
+}
+
+// tailTruncate returns the last n bytes of s with a "[...truncated]" prefix
+// when truncation occurs. Failures usually fail at the END (test errors
+// print stack + assertion at the bottom, build errors print the failed file
+// last, lint errors are listed file-by-file from the top but the last is as
+// useful as the first), so head bytes are usually setup noise and the tail
+// is the actionable part.
+func tailTruncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return fmt.Sprintf("[...truncated %d bytes from start...]\n%s", len(s)-n, s[len(s)-n:])
 }

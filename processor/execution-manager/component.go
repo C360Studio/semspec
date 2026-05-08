@@ -1511,9 +1511,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		c.extractStructuralLessons(ctx, exec, exec.ValidationResults)
 
 		if exec.TDDCycle+1 < exec.MaxTDDCycles {
-			feedback, _ := json.Marshal(exec.ValidationResults)
-			msg := "Structural validation failed. Fix the following issues:\n" + string(feedback)
-			c.startDeveloperRetryLocked(ctx, exec, msg)
+			c.startDeveloperRetryLocked(ctx, exec, buildValidationFailureFeedback(exec.ValidationResults))
 		} else {
 			c.markEscalatedLocked(ctx, exec, "validation failures exceeded TDD cycle budget")
 		}
