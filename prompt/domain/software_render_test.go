@@ -292,3 +292,50 @@ func TestAssemblerEndToEnd_RequirementGenerator(t *testing.T) {
 		t.Errorf("user-prompt content leaked into system message — assembler bug")
 	}
 }
+
+// TestRenderPlanReviewerPrompt_R1PhaseBoundaries pins the take-19 fix from the
+// 2026-05-08 OpenRouter @easy run: llama-3.3-70b's reviewer rejected a
+// well-formed /health plan two rounds in a row, demanding "specific details
+// about the implementation" — implementation form is downstream-phase work,
+// not a plan-gate concern. The R1 completeness block now leads with a
+// Phase boundaries stanza and anchors criterion #2 to a downstream-test
+// framing ("could a requirement-generator derive at least one testable
+// requirement"). Drop either and weak reviewer models start manufacturing
+// implementation-detail concerns at the plan gate again.
+func TestRenderPlanReviewerPrompt_R1PhaseBoundaries(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x","context":"y","scope":{}}`,
+		Round:       1,
+	})
+
+	mustContain := []string{
+		"Phase boundaries",
+		"goal + context + scope",
+		"requirements and architecture phases that run AFTER this review",
+		"could derive at least one testable requirement",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(out, want) {
+			t.Errorf("R1 prompt missing pinned string %q\nGot:\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits guards against accidentally
+// dragging the R1 phase-boundary stanza into R2 (which reviews requirements +
+// scenarios + architecture and SHOULD demand implementation-adjacent rigor).
+func TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x"}`,
+		Round:       2,
+	})
+
+	if strings.Contains(out, "Phase boundaries") {
+		t.Error("R2 prompt should NOT carry the R1 phase-boundary stanza — R2 reviews downstream artifacts")
+	}
+	if !strings.Contains(out, "Round 2") {
+		t.Errorf("R2 prompt missing its own header\nGot:\n%s", out)
+	}
+}

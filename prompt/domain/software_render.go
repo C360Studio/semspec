@@ -606,10 +606,6 @@ func renderDecomposerCommitSHA(sb *strings.Builder, sha string) {
 		sha)
 }
 
-func renderDecomposerTaskInstructions(sb *strings.Builder) {
-	renderDecomposerTaskInstructionsBranched(sb, false)
-}
-
 // renderDecomposerTaskInstructionsBranched is the Phase 6-aware version
 // of the task instructions block. The negative branch retains the
 // original "root cause" framing; the positive branch swaps to "what
@@ -635,11 +631,13 @@ func renderDecomposerTaskInstructionsBranched(sb *strings.Builder, positive bool
 
 const planReviewerCompletenessR1 = `## Completeness Criteria (Round 1 — Plan Document)
 
+**Phase boundaries** — You are reviewing the plan artifact: goal + context + scope. Implementation form — function signatures, response schemas, struct fields, library choices, file layout — is produced by the requirements and architecture phases that run AFTER this review.
+
 In addition to SOP compliance, verify the following structural completeness checks.
 Flag failures as error-severity findings with category "completeness".
 
 1. **Goal clarity** — The goal must be specific and actionable. A vague goal like "improve the system" is insufficient. The goal should state what is being built or fixed and what the expected outcome is.
-2. **Context sufficiency** — The context must provide enough background for requirements to be derived. It should explain the current state, why this change matters, and any relevant constraints.
+2. **Context sufficiency** — The context must provide enough background for requirements to be derived. It should name the current state, why this change matters, and any constraints. Sufficient means a downstream requirement-generator could derive at least one testable requirement from it; a context naming "build a /health endpoint returning JSON, in a project with no existing endpoints" is sufficient even without specifying response shape.
 3. **Scope validity** — All scope.include paths must either exist in the project or be files the plan intends to create. Hallucinated paths (typos, wrong directories) are error-severity violations.
 
 `
