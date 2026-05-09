@@ -634,7 +634,7 @@
       "config": {
         "execution_bucket_name": "EXECUTION_STATES",
         "max_concurrent_planners": 3,
-        "max_review_iterations": 2,
+        "max_review_iterations": 4,
         "auto_approve": false,
         "default_capability": "planning",
         "auto_reject_on_exhaustion": true,
