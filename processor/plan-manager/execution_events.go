@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -321,8 +322,35 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 		return
 	}
 
-	// Some requirements failed — don't auto-reject.
-	// Stay in implementing and let the user decide: retry, complete partial, or reject.
+	// Some requirements failed.
+	//
+	// Default (production / human-in-the-loop): stay in implementing, log the
+	// stall, and wait for an operator to decide retry / complete-partial /
+	// reject. The savePlanCached bump nudges the SSE watcher so the UI can
+	// render the stall signal from ExecutionSummary.
+	//
+	// Autonomous mode (config.AutoRejectOnExhaustion=true): no human to
+	// decide, so auto-transition to rejected. Set in E2E configs so
+	// Playwright fails fast on real escalation rather than blocking the
+	// test budget on the same wedge for 30+ minutes. Caught take 23.
+	if c.config.AutoRejectOnExhaustion {
+		summary := fmt.Sprintf("autonomous mode: %d/%d requirements failed; auto-rejecting (production mode would await human decision)",
+			failedCount, totalRequired)
+		c.logger.Warn("Auto-rejecting plan on requirement-failure convergence (AutoRejectOnExhaustion)",
+			"slug", slug,
+			"completed", completedCount,
+			"failed", failedCount,
+			"total", totalRequired)
+		plan.LastError = summary
+		now := time.Now()
+		plan.LastErrorAt = &now
+		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusRejected); err != nil {
+			c.logger.Error("Failed to auto-reject plan on exhaustion",
+				"slug", slug, "error", err)
+		}
+		return
+	}
+
 	c.logger.Info("Requirements finished with failures — awaiting user decision",
 		"slug", slug,
 		"completed", completedCount,

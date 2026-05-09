@@ -49,6 +49,19 @@ type Config struct {
 	// GitHub-originated plans always gate regardless of this setting.
 	AutoApproveReview *bool `json:"auto_approve_review" schema:"type:bool,description:Skip human review gate before completion,category:basic,default:true"`
 
+	// AutoRejectOnExhaustion controls behavior when all requirements have
+	// reached terminal state but at least one failed. Default false preserves
+	// the human-in-the-loop production behavior — plan stays in implementing
+	// and waits for an operator to retry / partial-complete / reject. Set
+	// true for autonomous environments (E2E test runs, CI) where there is
+	// no human to make the call — the plan auto-transitions to rejected so
+	// the test suite fast-fails on the actual escalation instead of blocking
+	// on a Playwright timeout. Caught take 23 (2026-05-08): plan stuck in
+	// implementing for 40 minutes after all requirements failed because no
+	// human pushed it forward; "execution completes" timed out at the test
+	// budget instead of failing on the real escalation 35 minutes earlier.
+	AutoRejectOnExhaustion bool `json:"auto_reject_on_exhaustion" schema:"type:bool,description:Auto-reject plan when all requirements terminal with any failure (autonomous mode; default false preserves human-in-loop),category:basic,default:false"`
+
 	// Model is the model endpoint name passed through to dispatched planner agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for planner agent tasks,category:basic,default:default"`
 

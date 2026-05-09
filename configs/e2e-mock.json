@@ -489,7 +489,8 @@
         "max_concurrent_planners": 3,
         "max_review_iterations": 3,
         "auto_approve": true,
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "auto_reject_on_exhaustion": true
       }
     },
     "plan-reviewer": {

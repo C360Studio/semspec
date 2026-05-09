@@ -511,6 +511,7 @@
         "max_review_iterations": 3,
         "auto_approve": false,
         "default_capability": "planning",
+        "auto_reject_on_exhaustion": true,
         "sandbox_url": "http://sandbox:8090"
       }
     },
