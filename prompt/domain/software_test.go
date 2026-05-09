@@ -366,6 +366,20 @@ func TestSoftwareRequirementGeneratorFilesOwned(t *testing.T) {
 		"Splitting \"implement\" from \"test\"",
 		"Option (a), consolidate",
 		"Option (b), depends_on",
+		// 2026-05-08 take-23 fix: req-gen had been told only
+		// "drawn from the plan's scope.include" — completely ignored
+		// scope.create. Result: planner said create internal/health/,
+		// req-gen put internal/auth/* into files_owned, dev wrote in
+		// the wrong dir for 5 cycles. Persona now must explicitly name
+		// BOTH buckets and call out the take-23 failure mode by name.
+		"files_owned is drawn from BOTH scope.include AND scope.create",
+		"existing files the requirement may MODIFY",
+		"new files the plan intends to ADD",
+		// Worked example must demonstrate the rule it's teaching:
+		// scope.create paths flowing into files_owned alongside
+		// scope.include paths.
+		"Plan it's working from",
+		"scope.create",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(result.SystemMessage, want) {

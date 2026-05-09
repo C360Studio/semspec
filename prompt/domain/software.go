@@ -820,9 +820,16 @@ CRITICAL — Partition files across requirements (parallel execution rule):
 
 Requirements run in parallel git worktrees. If two requirements both write to the same file with no dependency between them, the integration merge fails and the entire plan stalls.
 
-For EVERY requirement, set files_owned to the workspace-relative paths that requirement is allowed to modify (drawn from the plan's scope.include). The set across all requirements must satisfy:
-- Cover the work — every path that needs editing must appear in some requirement's files_owned.
-- Stay in scope — only list paths that appear in the plan's scope.include and not in scope.protected.
+For EVERY requirement, set files_owned to the workspace-relative paths that requirement is allowed to touch. **files_owned is drawn from BOTH scope.include AND scope.create** — these are two different bookkeeping buckets but both are valid sources for files_owned:
+- scope.include = existing files the requirement may MODIFY (already in the workspace)
+- scope.create = new files the plan intends to ADD (don't exist yet; the requirement that owns this path is the one that creates the file)
+- scope.protected = files NEVER in any requirement's files_owned (read-only)
+
+If the plan declares scope.create=["internal/health/health.go"], then the requirement responsible for the /health endpoint MUST list "internal/health/health.go" in its files_owned — picking only from scope.include and ignoring scope.create means the dev gets prompted with the wrong target path and writes code in the wrong directory. (Caught take 23: planner said internal/health/, req-gen ignored scope.create and assigned internal/auth/* from scope.include — dev wrote in internal/auth/ which already had a different package, broke the build five cycles in a row.)
+
+The set across all requirements must satisfy:
+- Cover the work — every path that needs editing or creating must appear in some requirement's files_owned.
+- Stay in scope — only list paths that appear in scope.include OR scope.create, and never in scope.protected.
 - Resolve overlap explicitly — when two requirements legitimately need the same file (impl + its test, define + use, refactor + feature), list both in files_owned AND add depends_on so the executor sequences them. The later requirement rebases on the earlier one's merge commit, so they don't collide.
 
 DO NOT lie about files_owned to dodge the overlap rule. If your reqs honestly touch the same file, that's expected — say so and add depends_on. Inventing fake file splits to make the partition look clean produces broken work at execution time.
@@ -882,7 +889,14 @@ A rejected plan costs you the iteration. Get files_owned and depends_on right th
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
 			ContentFunc: elideSchemaProse(
 				`When your requirements are ready, call the submit_work tool with these JSON fields:`,
-				`Example 1 — two requirements, chain pattern (one feature + its router wire-up):
+				`Example 1 — two requirements, chain pattern (one feature + its router wire-up).
+Note how files_owned mixes scope.create entries (the two new goodbye files) with a
+scope.include entry (the existing main.go). Both buckets are valid sources.
+
+Plan it's working from:
+  scope.include: ["main.go"]                             // existing, may modify
+  scope.create:  ["api/handlers/goodbye.go",             // new, will author
+                  "api/handlers/goodbye_test.go"]
 
 {
   "requirements": [
