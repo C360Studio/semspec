@@ -1459,6 +1459,28 @@ The same translation applies whenever you put a path into a structured output fi
 Use the right tool for the question: graph for indexing, relationships, and prior decisions; bash for reading specific files and running commands.`,
 		},
 		{
+			// Graph tool error-recovery escape hatches. Take 30 (openrouter
+			// @medium qwen3.6-27b thinking-on) wedged because graph_search
+			// hit the 100KB response cap and the model retried the SAME
+			// query 3+ times until RepeatToolFailure tripped. The error
+			// message itself names the fix ("use more specific queries
+			// with predicates, entity IDs, or limits") but small models
+			// don't always act on inline error advice — pinning it in the
+			// persona moves the guidance to where the model is anchored.
+			ID:       "software.orientation.graph-errors",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 1 && ctx.HasTool("graph_summary")
+			},
+			Content: `When a graph tool returns an error, the recovery is almost never to repeat the same call. The error string is signal — read it and adapt:
+
+- "response too large" / "exceeds N bytes limit": the query matched too much. Narrow it. Add a specific entity_id, restrict to one predicate, lower the hop count or limit. Re-running the identical broad query produces the identical error and burns your iteration budget.
+- "no results" / empty response on a natural-language graph_search: the index may not have matched your phrasing. Try graph_summary to see what entities actually exist, or fall back to bash (grep/find) — don't loop on rephrasings of the same question.
+- GraphQL syntax errors from graph_query: re-read the syntax (it's GraphQL, not SPARQL/Cypher/SQL). Call graph_query with introspect:true once to see the schema; don't keep guessing query shapes.
+
+Two failed graph calls of the same shape is the signal to switch tools, not to try a third variant. Bash can read files directly when the graph isn't cooperating.`,
+		},
+		{
 			// Fallback orientation for personas whose tool allowlist excludes
 			// the graph tools (some narrow roles). Preserves the prior
 			// "orient briefly" guidance without the graph-first directive.

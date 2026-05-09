@@ -365,6 +365,62 @@ func TestSoftwareOrientationGraphFirst(t *testing.T) {
 	}
 }
 
+// TestSoftwareGraphErrorEscapeHatches pins the take-30 fix: graph-equipped
+// personas must see explicit guidance to NARROW (not retry) on
+// response-too-large errors, FALL BACK on empty graph_search results, and
+// INTROSPECT (not guess) on graph_query syntax errors. Take 30 wedged
+// because qwen-thinking re-issued the same broad graph_search query 3+
+// times after each "response too large (102401 bytes)" error until the
+// RepeatToolFailure detector tripped — the inline error message named the
+// fix but the model didn't act on it, so the guidance is pinned in the
+// persona where the model is anchored. Also asserts the bash-fallback
+// directive ("two failed graph calls of the same shape") so the agent
+// switches tools instead of looping.
+func TestSoftwareGraphErrorEscapeHatches(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	withGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "graph_summary", "graph_search", "graph_query"},
+	})
+
+	mustContain := []string{
+		"response too large",
+		"Narrow it",
+		"entity_id",
+		"hop count",
+		"Two failed graph calls of the same shape",
+		"switch tools",
+		"introspect:true",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(withGraph.SystemMessage, want) {
+			t.Errorf("graph-error escape hatches missing %q from developer persona", want)
+		}
+	}
+
+	// Personas without graph tools must NOT receive the graph-error stanza
+	// — it would be dead weight and could confuse small models that don't
+	// have the tools the guidance references.
+	withoutGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	mustNotContain := []string{
+		"response too large",
+		"Two failed graph calls",
+	}
+	for _, want := range mustNotContain {
+		if strings.Contains(withoutGraph.SystemMessage, want) {
+			t.Errorf("non-graph persona must not receive graph-error escape hatches; found %q", want)
+		}
+	}
+}
+
 // TestSoftwareRequirementGeneratorFilesOwned pins the dial-#1 prompt landing
 // in the right persona. The first attempt edited workflow/prompts/
 // requirement_generator.go which was dead code and never reached Gemini —
