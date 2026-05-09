@@ -381,8 +381,8 @@
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
         "consumer": {
-          "ack_wait": "300s",
-          "heartbeat_interval": "120s"
+          "ack_wait": "720s",
+          "heartbeat_interval": "240s"
         }
       }
     },
@@ -402,8 +402,8 @@
               "stream_name": "AGENT",
               "required": true,
               "config": {
-                "ack_wait": "300s",
-                "heartbeat_interval": "120s"
+                "ack_wait": "720s",
+                "heartbeat_interval": "240s"
               }
             }
           ],
