@@ -3,6 +3,8 @@ package planmanager
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 // TestDefaultConfig_AutoRejectOnExhaustionFalse pins the production-safe
@@ -52,6 +54,106 @@ func TestConfigUnmarshal_AutoRejectOnExhaustion(t *testing.T) {
 			}
 			if cfg.AutoRejectOnExhaustion != tt.want {
 				t.Errorf("AutoRejectOnExhaustion = %v, want %v", cfg.AutoRejectOnExhaustion, tt.want)
+			}
+		})
+	}
+}
+
+// TestCountBlockedByFailure pins the take-24 fix: when a requirement fails,
+// every requirement that transitively depends_on it can never reach a
+// successful terminal state (the orchestrator only dispatches reqs whose
+// deps completed). Without counting these as terminal-equivalent, the plan
+// hangs in implementing forever waiting for reqs that will never start.
+func TestCountBlockedByFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		plan      *workflow.Plan
+		failedIDs map[string]bool
+		want      int
+	}{
+		{
+			name:      "nil plan returns 0",
+			plan:      nil,
+			failedIDs: map[string]bool{"req-1": true},
+			want:      0,
+		},
+		{
+			name: "no failures returns 0",
+			plan: &workflow.Plan{
+				Requirements: []workflow.Requirement{
+					{ID: "req-1", DependsOn: nil},
+					{ID: "req-2", DependsOn: []string{"req-1"}},
+				},
+			},
+			failedIDs: map[string]bool{},
+			want:      0,
+		},
+		{
+			name: "take-24 shape: req-1 failed, req-2 depends on req-1",
+			plan: &workflow.Plan{
+				Requirements: []workflow.Requirement{
+					{ID: "req-1", DependsOn: nil},
+					{ID: "req-2", DependsOn: []string{"req-1"}},
+				},
+			},
+			failedIDs: map[string]bool{"req-1": true},
+			want:      1, // req-2 is blocked
+		},
+		{
+			name: "transitive chain: req-1 → req-2 → req-3, req-1 fails",
+			plan: &workflow.Plan{
+				Requirements: []workflow.Requirement{
+					{ID: "req-1", DependsOn: nil},
+					{ID: "req-2", DependsOn: []string{"req-1"}},
+					{ID: "req-3", DependsOn: []string{"req-2"}},
+				},
+			},
+			failedIDs: map[string]bool{"req-1": true},
+			want:      2, // req-2 + req-3 both blocked transitively
+		},
+		{
+			name: "fan-out: req-1 fails, req-2 + req-3 + req-4 all depend on it",
+			plan: &workflow.Plan{
+				Requirements: []workflow.Requirement{
+					{ID: "req-1"},
+					{ID: "req-2", DependsOn: []string{"req-1"}},
+					{ID: "req-3", DependsOn: []string{"req-1"}},
+					{ID: "req-4", DependsOn: []string{"req-1"}},
+				},
+			},
+			failedIDs: map[string]bool{"req-1": true},
+			want:      3,
+		},
+		{
+			name: "independent reqs are NOT blocked when peer fails",
+			plan: &workflow.Plan{
+				Requirements: []workflow.Requirement{
+					{ID: "req-1"},
+					{ID: "req-2"}, // no depends_on — independent
+				},
+			},
+			failedIDs: map[string]bool{"req-1": true},
+			want:      0,
+		},
+		{
+			name: "multi-dep: req-3 depends on both req-1 (failed) and req-2 (running) — still blocked",
+			plan: &workflow.Plan{
+				Requirements: []workflow.Requirement{
+					{ID: "req-1"},
+					{ID: "req-2"},
+					{ID: "req-3", DependsOn: []string{"req-1", "req-2"}},
+				},
+			},
+			failedIDs: map[string]bool{"req-1": true},
+			want:      1, // req-3 can never run because one of its deps failed
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := countBlockedByFailure(tt.plan, tt.failedIDs)
+			if got != tt.want {
+				t.Errorf("countBlockedByFailure = %d, want %d", got, tt.want)
 			}
 		})
 	}

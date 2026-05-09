@@ -162,109 +162,109 @@
       "planning": {
         "description": "Plan generation and architecture",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "coding": {
         "description": "Code generation, implementation. Routed to qwen3.6-27b dense (2026-05-08 take 11) — earlier dense pick qwen-2.5-coder-32b returned 404 'no providers support tool use' on OpenRouter, even though our endpoint config claimed supports_tools=true. qwen3.6-27b is verified tool-capable per OpenRouter's models API and stays in the qwen-family, ~30B-class, dense-not-MoE constraint that motivated the original swap from qwen3-coder-next MoE (which hallucinated submit_work claim/observation mismatches every TDD cycle).",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "plan_review": {
         "description": "SOP-aware plan review",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "architecture": {
         "description": "Architecture generation — technology choices, component boundaries, data flow",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "qa": {
         "description": "Rollup quality review",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "lesson_decomposition": {
         "description": "ADR-033 lesson decomposer",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "task_decomposition": {
         "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
-          "openrouter-llama-3-3-70b"
+          "openrouter-qwen3-6-27b"
         ],
         "fallback": [
-          "openrouter-qwen3-6-27b"
+          "openrouter-llama-3-3-70b"
         ]
       },
       "embedding": {

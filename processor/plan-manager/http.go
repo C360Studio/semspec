@@ -973,7 +973,7 @@ func (c *Component) computeExecutionSummary(ctx context.Context, plan *workflow.
 		c.logger.Warn("computeExecutionSummary: could not get exec bucket", "slug", plan.Slug, "error", err)
 		return nil
 	}
-	completed, failed, err := c.countTerminalRequirements(ctx, bucket, plan.Slug)
+	completed, failed, _, err := c.countTerminalRequirements(ctx, bucket, plan.Slug)
 	if err != nil {
 		c.logger.Warn("computeExecutionSummary: could not count terminal requirements", "slug", plan.Slug, "error", err)
 		return nil

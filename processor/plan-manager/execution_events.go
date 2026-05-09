@@ -276,11 +276,12 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 		return
 	}
 
-	completedCount, failedCount, err := c.countTerminalRequirements(ctx, bucket, slug)
+	completedCount, failedCount, failedIDs, err := c.countTerminalRequirements(ctx, bucket, slug)
 	if err != nil {
 		c.logger.Warn("Failed to count terminal requirements", "slug", slug, "error", err)
 		return
 	}
+	failedCount = c.augmentFailedWithBlocked(plan, failedIDs, failedCount, completedCount, totalRequired)
 
 	terminalCount := completedCount + failedCount
 	if terminalCount < totalRequired {
@@ -475,15 +476,25 @@ func (c *Component) checkPostReplayConvergence(ctx context.Context, bucket jetst
 }
 
 // countTerminalRequirements scans EXECUTION_STATES for all req.<slug>.* keys
-// and counts entries in terminal stages.
-func (c *Component) countTerminalRequirements(ctx context.Context, bucket jetstream.KeyValue, slug string) (completed, failed int, err error) {
+// and counts entries in terminal stages. Also returns the set of failed
+// requirement IDs (failed OR error) so callers can compute the transitive
+// blocked-by-failure set — when a requirement fails, every requirement that
+// depends_on it (transitively) can never reach a successful terminal state
+// because the orchestrator won't dispatch a req whose deps haven't completed.
+// Without that signal, checkPlanConvergence sees terminalCount < totalRequired
+// for a plan that can never make further progress and waits forever.
+// Caught take 24 (2026-05-08): req 1 failed, req 2 (depends_on req 1) never
+// dispatched, plan stuck in implementing because terminalCount=1 < total=2,
+// AutoRejectOnExhaustion never fired.
+func (c *Component) countTerminalRequirements(ctx context.Context, bucket jetstream.KeyValue, slug string) (completed, failed int, failedIDs map[string]bool, err error) {
 	prefix := "req." + slug + "."
+	failedIDs = make(map[string]bool)
 	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
 	if err != nil {
 		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return 0, 0, nil
+			return 0, 0, failedIDs, nil
 		}
-		return 0, 0, err
+		return 0, 0, failedIDs, err
 	}
 
 	for _, key := range keys {
@@ -503,9 +514,87 @@ func (c *Component) countTerminalRequirements(ctx context.Context, bucket jetstr
 			completed++
 		case "failed", "error":
 			failed++
+			if reqExec.RequirementID != "" {
+				failedIDs[reqExec.RequirementID] = true
+			}
 		}
 	}
-	return completed, failed, nil
+	return completed, failed, failedIDs, nil
+}
+
+// augmentFailedWithBlocked rolls cascaded blocked-by-failure reqs into the
+// failed count for convergence purposes. Logs at info when the cascade adds
+// reqs (these are reqs the orchestrator can never dispatch, so plan-manager
+// must stop waiting for them or the plan hangs in implementing forever).
+// Returns the new failedCount; the caller passes other counts only for
+// log context. Extracted from checkPlanConvergence to keep that function
+// under the function-length lint limit.
+func (c *Component) augmentFailedWithBlocked(plan *workflow.Plan, failedIDs map[string]bool, failedCount, completedCount, totalRequired int) int {
+	blocked := countBlockedByFailure(plan, failedIDs)
+	if blocked == 0 {
+		return failedCount
+	}
+	c.logger.Info("Treating dependents-of-failed as terminal-failed for convergence",
+		"slug", plan.Slug,
+		"failed_directly", failedCount,
+		"blocked_by_failure", blocked,
+		"completed", completedCount,
+		"total", totalRequired)
+	return failedCount + blocked
+}
+
+// countBlockedByFailure walks the requirement DAG and returns the count of
+// non-terminal requirements that transitively depend on a failed requirement.
+// These reqs can never reach a successful terminal state (the orchestrator
+// only dispatches reqs whose deps have completed), so they should be treated
+// as terminal-equivalent for convergence purposes — otherwise the plan hangs
+// in implementing waiting for them to start.
+//
+// Pure function over plan.Requirements + already-failed-IDs; no I/O, easy
+// to unit-test. Iterative transitive closure: each pass adds reqs whose
+// depends_on contains an already-blocked or already-failed ID. Stops when
+// a pass adds nothing new — bounded at len(plan.Requirements) iterations.
+func countBlockedByFailure(plan *workflow.Plan, failedIDs map[string]bool) int {
+	if plan == nil || len(failedIDs) == 0 {
+		return 0
+	}
+	// Start the blocked set with the failed IDs themselves so transitive
+	// dependents see them. We'll subtract failed at the end so we only
+	// return the count of NEW blocked-but-not-yet-counted reqs.
+	blocked := make(map[string]bool, len(failedIDs))
+	for id := range failedIDs {
+		blocked[id] = true
+	}
+
+	// Iterate until no new additions. Worst case is a chain of N reqs where
+	// each iteration adds one — bounded at len(plan.Requirements).
+	for i := 0; i < len(plan.Requirements); i++ {
+		added := false
+		for _, req := range plan.Requirements {
+			if blocked[req.ID] {
+				continue
+			}
+			for _, dep := range req.DependsOn {
+				if blocked[dep] {
+					blocked[req.ID] = true
+					added = true
+					break
+				}
+			}
+		}
+		if !added {
+			break
+		}
+	}
+
+	// Subtract the failed IDs — caller already counted those.
+	count := 0
+	for id := range blocked {
+		if !failedIDs[id] {
+			count++
+		}
+	}
+	return count
 }
 
 // isTerminalStage returns true for requirement execution stages that indicate
