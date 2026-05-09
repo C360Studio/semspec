@@ -57,9 +57,8 @@
         "api_key_env": "OPENROUTER_API_KEY",
         "max_tokens": 131072,
         "max_output_tokens": 32000,
-        "reasoning_effort": "none",
         "options": {
-          "enable_thinking": false
+          "enable_thinking": true
         },
         "supports_tools": true,
         "tool_format": "openai",
@@ -67,7 +66,7 @@
         "max_concurrent": 4,
         "requests_per_minute": 60,
         "disable_keepalives": true,
-        "request_timeout": "360s"
+        "request_timeout": "600s"
       },
       "openrouter-qwen3-32b": {
         "provider": "openrouter",
