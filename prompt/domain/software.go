@@ -138,7 +138,17 @@ COMMON MISTAKE: Writing all files then running tests once. This wastes iteration
 Environment Setup (if build/test fails with import errors):
 - Go: bash('go mod tidy && go mod download')
 - Node: bash('npm install')
-- Python: bash('pip install -r requirements.txt')`,
+- Python: bash('pip install -r requirements.txt')
+
+CREATING A FILE IN AN EXISTING DIRECTORY — read before you write:
+
+When you add a new source file to a directory that already has files of the same language, the directory has established conventions you MUST match: package/namespace declaration, import path style, file header comment, sometimes naming. Mismatching these is a near-certain compile error or import failure.
+
+Before writing the new file, read ONE existing sibling and the project's module manifest:
+- Run bash('head -5 <existing-file-in-same-dir>') to see how the existing file declares its package/namespace, and copy that declaration verbatim into your new file. Don't infer the package name from the directory or the filename — read it from a sibling.
+- Run bash('cat <module-manifest>') for the project's import root. Examples: go.mod (Go), package.json "name" (Node), pyproject.toml [project].name (Python), Cargo.toml [package].name (Rust). Use the FULL project import root in your imports — never a bare path that looks like it could be a standard-library path.
+
+These are not stylistic preferences. The compiler / interpreter / type checker enforces them, and a mismatched package declaration or bare-vs-fully-qualified import produces a deterministic build failure on the first compile. Two TDD cycles wasted on this is two too many — read the sibling first.`,
 		},
 		{
 			// Workspace contract: tells the developer agent how its environment

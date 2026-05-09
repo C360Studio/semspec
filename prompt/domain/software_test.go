@@ -96,6 +96,47 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 			t.Errorf("expected hallucination-wedge guidance %q in workspace-contract", want)
 		}
 	}
+
+	// Take-23 pin: dev created a .go file in an existing dir and declared
+	// the wrong package name (matched dir-name instead of the existing
+	// sibling's `package X`), then imported it bare instead of via the
+	// project's module path. Five TDD cycles wasted on the same compile
+	// error. Persona must instruct the dev to read a sibling file before
+	// declaring package/namespace and read the module manifest before
+	// writing imports. Language-AGNOSTIC framing — Go gotchas in the
+	// persona pollute prompts for Python/Node/etc projects, so the
+	// guidance names manifests for multiple languages and lets the dev
+	// pick the right one.
+	wantSiblingReadPins := []string{
+		"CREATING A FILE IN AN EXISTING DIRECTORY",
+		"head -5", // the bash one-liner that catches it
+		"copy that declaration verbatim",
+		"go.mod",            // Go manifest mention
+		"package.json",      // Node manifest mention
+		"pyproject.toml",    // Python manifest mention
+		"never a bare path", // the take-23 specific failure shape
+	}
+	for _, want := range wantSiblingReadPins {
+		if !strings.Contains(result.SystemMessage, want) {
+			t.Errorf("expected sibling-read guidance %q in role-context (take-23 fix)", want)
+		}
+	}
+
+	// Anti-pin: the persona must NOT name Go-specific failure modes that
+	// don't apply to Python/Node/etc projects. The user (2026-05-08)
+	// caught and rejected a Go-specific draft of this fragment that
+	// would have polluted every dispatch with internal/auth-style
+	// examples regardless of project language.
+	wantAbsent := []string{
+		"package internal", // would name a Go-specific package error
+		"internal/auth",    // would name a Go-specific stdlib reservation
+		"is not in std",    // Go compiler error string
+	}
+	for _, banned := range wantAbsent {
+		if strings.Contains(result.SystemMessage, banned) {
+			t.Errorf("developer persona contains Go-specific text %q — should be language-agnostic so Python/Node/etc dispatches aren't polluted", banned)
+		}
+	}
 }
 
 func TestSoftwarePlannerAssembly(t *testing.T) {
