@@ -295,7 +295,11 @@
         "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "content_bucket": "AGENT_CONTENT"
+        "content_bucket": "AGENT_CONTENT",
+        "consumer": {
+          "ack_wait": "720s",
+          "heartbeat_interval": "240s"
+        }
       }
     },
     "agentic-model": {
@@ -304,7 +308,37 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "900s"
+        "timeout": "900s",
+        "ports": {
+          "inputs": [
+            {
+              "name": "agent.request",
+              "type": "jetstream",
+              "subject": "agent.request.>",
+              "stream_name": "AGENT",
+              "required": true,
+              "config": {
+                "ack_wait": "720s",
+                "heartbeat_interval": "240s"
+              }
+            }
+          ],
+          "outputs": [
+            {
+              "name": "agent.response",
+              "type": "jetstream",
+              "subject": "agent.response.*",
+              "stream_name": "AGENT",
+              "required": true
+            },
+            {
+              "name": "agent.stream",
+              "type": "nats",
+              "subject": "agent.stream.*",
+              "required": false
+            }
+          ]
+        }
       }
     },
     "agentic-tools": {
