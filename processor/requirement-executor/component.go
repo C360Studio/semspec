@@ -41,6 +41,7 @@ import (
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/parseincident"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -1946,6 +1947,60 @@ func (c *Component) emitExhaustionDecision(ctx context.Context, exec *requiremen
 		"requirement_id", exec.RequirementID,
 		"decision_id", decisionID,
 	)
+
+	// ADR-037 stage 1: fire phase-local recovery alongside the PlanDecision
+	// emit. Caught 2026-05-10 take 4 — requirement-level retry-exhaustion
+	// is the third escalation route (alongside plan-manager.escalateRevision
+	// and execution-manager.markEscalatedLocked). The req-reviewer produces
+	// the richest diagnoses across the codebase (3 rounds × full sub-task
+	// trajectories) but Stage 1 was missing the publish here, so all that
+	// signal landed in the proposed PlanDecision and stopped. Wiring this
+	// publish gives the recovery agent the same chance to dispatch a
+	// manager-role diagnosis here as on the other two routes.
+	c.publishRecoveryRequested(ctx, &payloads.RecoveryRequested{
+		RecoveryID:          uuid.New().String(),
+		Layer:               payloads.RecoveryLayerPhaseLocal,
+		Slug:                exec.Slug,
+		RequirementID:       exec.RequirementID,
+		LoopID:              exec.LoopID,
+		EscalationReason:    fmt.Sprintf("requirement retries exhausted (%d/%d); last verdict=%q", exec.RetryCount, exec.MaxRetries, verdict),
+		LastFailureFeedback: feedback,
+	})
+}
+
+// publishRecoveryRequested fires an ADR-037 stage-1 phase-local recovery
+// request on recovery.requested.<slug>. Best-effort: failure does not roll
+// back the exhaustion (the PlanDecision is already emitted and the req
+// will move to failed regardless). The recovery-agent component consumes
+// these and, on submit_work, emits RecoveryComplete on
+// recovery.complete.<slug> for the watcher to reconcile.
+func (c *Component) publishRecoveryRequested(ctx context.Context, req *payloads.RecoveryRequested) {
+	if c.natsClient == nil {
+		return
+	}
+	if err := req.Validate(); err != nil {
+		c.logger.Warn("Recovery request failed local validation; skipping publish",
+			"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
+		return
+	}
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "requirement-executor")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Warn("Failed to marshal RecoveryRequested",
+			"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
+		return
+	}
+	subject := payloads.RecoveryRequestedSubjectPrefix + req.Slug
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Warn("Failed to publish RecoveryRequested",
+			"slug", req.Slug, "subject", subject, "error", err)
+		return
+	}
+	c.logger.Info("Recovery requested (phase-local, req-level exhaustion)",
+		"slug", req.Slug,
+		"requirement_id", req.RequirementID,
+		"recovery_id", req.RecoveryID,
+		"reason", req.EscalationReason)
 }
 
 // markFailedLocked transitions to the failed terminal state.
