@@ -1,8 +1,8 @@
 # ADR-037: Wedge Recovery via Manager-Role Supervision
 
-**Status:** Proposed (2026-05-10, revised 2026-05-10 after audit)
+**Status:** Proposed (2026-05-10, revised 2026-05-10 after audit, revised again 2026-05-10 after the ADR-033 sister-pattern observation)
 **Deciders:** Coby, Claude
-**Related:** ADR-029 (plan completeness + retry — local revision loop within plan-phase), ADR-030 (BMAD personas), ADR-033 (lessons pipeline — captures wedge causes post-hoc; the only existing consumer of `agentic.query.trajectory`), ADR-034 (watch CLI — debug tool, not production data plane), ADR-035 (strict-parse — narrows what counts as a wedge vs silent compensation).
+**Related:** ADR-029 (plan completeness + retry — local revision loop within plan-phase), ADR-030 (BMAD personas), **ADR-033 (lessons pipeline — sister pattern; same trigger class, same data source, post-hoc documentation half of the diagnose-then-act loop ADR-037 completes)**, ADR-034 (watch CLI — debug tool, not production data plane), ADR-035 (strict-parse — narrows what counts as a wedge vs silent compensation).
 
 ## Context
 
@@ -20,6 +20,24 @@ Two failure modes that look similar but need different handling:
 - **Unrecoverable failure** — goal not reachable from current state regardless of agent (e.g., fixture's parent pom isn't on Maven Central; req scope contradicts another req).
 
 A recovery layer that doesn't distinguish these will burn tokens trying to fix unrecoverable cases. Recovery must diagnose first, recover second, and "escalate-to-human-with-analysis" must be a valid recovery outcome.
+
+### Sister pattern: ADR-033 already does the diagnosis half
+
+Lesson-decomposer (ADR-033) already runs trajectory-driven failure analysis on rejection events. The architectural shapes match closely:
+
+| | ADR-033 lesson-decomposer | ADR-037 wedge recovery |
+|---|---|---|
+| Trigger | Rejection event | Escalation event (recoverable wedge) |
+| Data source | `agentic.query.trajectory` + graph + plan/req state | Same |
+| LLM analysis | "What did the agent miss?" | Same |
+| Output | Typed, role-scoped lessons (graph triples) | RecoveryAction from bounded set (state mutation) |
+| Time horizon | Post-hoc — improves *future* runs | In-run — saves *this* run |
+
+The diagnosis half is identical; only the action half differs. Lesson-decomposer is "what we learn from this failure for future runs"; recovery is "what we do about this failure now." They are complementary — short-loop recovery + long-loop learning running on the same wedge events — and ADR-037 should reuse what ADR-033 has already proved out, not parallel-implement it. Specifically:
+
+- The trajectory-fetch + step-summarization helpers in `processor/lesson-decomposer/trajectory.go` are the working version of what every wedge-handling component needs. Stage 0 below promotes them rather than re-implements them.
+- The diagnostic prompt prelude ("given this trajectory + failure context, what did the agent miss?") is structurally the same. Lesson-decomposer's existing fragments under `software.lesson-decomposer.*` are the donor.
+- Trigger sets should be aligned: any wedge class that fires recovery should also fire lesson-decomposition, so we don't lose long-loop learning on the cases recovery handles.
 
 ## Audit finding: trajectory access already exists, only one component uses it
 
@@ -86,13 +104,16 @@ What's **not** new (audit confirmed):
 
 ## Implementation phasing
 
-**Stage 0 — universal trajectory consumption (ships independently of recovery):**
+**Stage 0 — extract trajectory consumption to a shared package (ships independently of recovery):**
 
-This is a coverage-gap fix worth doing on its own merits — every wedge-handling component should be able to read the trajectory of the work it's handling, regardless of whether recovery dispatches downstream.
+This is not net-new wiring. Lesson-decomposer's `trajectory.go` already implements the working pattern (`fetchTrajectory`, `classifyTrajectoryError`, `summarizeStep`, plus small helpers). Stage 0 promotes those helpers to a shared location and broadens the consumer set.
 
-- Wire `agentic.query.trajectory` consumption into execution-manager (on TDD escalation), plan-manager (on revision-loop exhaustion), qa-reviewer, code-reviewer, structural-validator.
+- Extract `processor/lesson-decomposer/trajectory.go` to `internal/trajectory/` (Go-conventional shared-internal location). Lesson-decomposer becomes one consumer among several.
+- Add the shared package as a dependency in execution-manager (on TDD escalation), plan-manager (on revision-loop exhaustion), qa-reviewer, code-reviewer, structural-validator.
 - Each component logs the trajectory summary with its escalation/rejection event so operators can diagnose without sidecar bundles.
-- No recovery dispatch yet — just observability + future-proofing for stages 1/2.
+- No recovery dispatch yet — just observability + the shared utility that stages 1/2 build on.
+
+Stage 0 has near-zero risk: extraction is mechanical, the pattern is already proven in lesson-decomposer's tests, and the new consumers gain trajectory visibility on every escalation event without any new infrastructure.
 
 **Stage 1 — phase-local recovery:**
 
@@ -117,6 +138,8 @@ Stages may ship as separate ADR addenda + OpenSpec changes. Stage 0 in particula
 - Recovery diagnosis surfaces in trajectories — every failed run produces actionable analysis instead of `outcome=failed merge_commit=""`.
 - Capability-resolve pattern keeps model selection out of code; per-env tuning becomes a config edit. Bumping to a smarter model for recovery is a config knob, not a code change.
 - Bounded action set means recovery agents can't go off-leash.
+- **Diagnosis prompt is reusable across ADR-033 + ADR-037.** The "given this trajectory + failure context, what did the agent miss?" prelude is the same for lesson-decomposition and recovery; existing `software.lesson-decomposer.*` fragments are the donor. Output schemas differ (lesson vs RecoveryAction) but the diagnostic core can be a shared prompt fragment, kept in sync with one regression test.
+- **Short-loop + long-loop learning compose.** When recovery and lesson-decomposition fire on the same wedge events, the immediate run benefits from the recovery action AND future runs benefit from the persisted lesson. The two patterns are complementary, not competing.
 
 **Negative:**
 - New paid LLM calls on every escalation. Same model class by default keeps cost in line with the wedged agent's call, but volume goes up by one call per escalation.
@@ -143,7 +166,9 @@ These need resolution before Stage 1 ships, not before this ADR is accepted. (St
 - `project_capability_resolve_with_override_pattern.md` (memory) — the seam this design uses for model selection.
 - `project_dev_wedge_diagnosis_2026_05_03.md` (memory) — pre-reviewer diff gate pattern; precedent for cheap detect-then-react.
 - `project_retry_feedback_gap_iter50.md` (memory) — the iter=50 wedge this design directly addresses.
-- `processor/lesson-decomposer/trajectory.go` — the only existing semspec consumer of `agentic.query.trajectory`. Stage 0 generalizes its pattern across all wedge-handling components.
+- `processor/lesson-decomposer/trajectory.go` — the donor implementation. Stage 0 promotes `fetchTrajectory`, `classifyTrajectoryError`, `summarizeStep`, and small helpers (`firstNonEmpty`, `clip`, `strContains`) to `internal/trajectory/` for reuse by all wedge-handling components.
+- `prompt/domain/software.go` (`software.lesson-decomposer.*` fragments) — donor for the diagnosis prompt prelude. Recovery adds an action-set output schema; the diagnostic prelude is shared.
+- ADR-033 — sister pattern. ADR-037 is the in-run actionable form of what ADR-033 already does as post-hoc documentation. Trigger sets should be aligned to keep both running on the same wedge events.
 - semstreams `vocabulary/agentic/predicates.go:460` — `agent.loop.has_step` predicate; trajectory steps are graph-queryable today.
 - semstreams `processor/agentic-loop/graph_writer.go:WriteTrajectorySteps` — proves trajectory storage already exists in ObjectStore + graph triples.
 - ADR-029 — local plan revision retry; this ADR generalizes that pattern across phases with manager-role recovery rather than retry budget exhaustion.
