@@ -184,8 +184,11 @@
         "timeout": "10s"
       },
       "answer_synthesis": {
-        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. 1.7B at ~25 tok/s gives sub-3s answers; quality solid because the path is extractive over supplied community summaries.",
+        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. Take 3 (gemini @hard 2026-05-10) wedged here: seminstruct-answer 1.7B-on-CPU hit 30s context-deadline-exceeded on real @hard queries (extractive composition over community summaries can be slower than the toy-fixture benchmark suggested). Mirroring community_summary's resolution: gemini-flash-lite primary (sub-second, Google's quality bar over the sub-7B floor) with seminstruct-answer kept as fallback for offline/quota scenarios.",
         "preferred": [
+          "gemini-flash-lite"
+        ],
+        "fallback": [
           "seminstruct-answer"
         ],
         "timeout": "30s"

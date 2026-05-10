@@ -10,6 +10,12 @@ build/
 *.class
 *.jar
 *.war
+# Re-include the Gradle Wrapper jar — convention is to commit it so
+# contributors don't need Gradle pre-installed. Without this negation
+# the *.jar pattern above silently excludes the wrapper, which makes
+# `./gradlew` fall through to "gradle: command not found" or trigger a
+# slow-bootstrap-from-zip wedge (caught take 4 2026-05-10).
+!gradle/wrapper/gradle-wrapper.jar
 
 # IDE noise.
 .idea/
