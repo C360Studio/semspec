@@ -4,13 +4,12 @@
 # inside the workspace, this entry keeps it out of commits.
 sources/
 
-# Standard Java/Maven build artefacts.
-target/
+# Standard Java/Gradle build artefacts.
+.gradle/
+build/
 *.class
 *.jar
 *.war
-.gradle/
-build/
 
 # IDE noise.
 .idea/

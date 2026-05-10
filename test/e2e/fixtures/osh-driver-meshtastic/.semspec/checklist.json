@@ -1,19 +1,35 @@
 {
   "version": "1.0.0",
-  "created_at": "2026-05-05T20:53:35.61101559Z",
-  "updated_at": "2026-05-05T20:53:35.61101559Z",
+  "created_at": "2026-05-10T18:00:00Z",
+  "updated_at": "2026-05-10T18:00:00Z",
   "checks": [
     {
-      "name": "mvn-test",
-      "command": "mvn test",
+      "name": "gradle-dependencies",
+      "command": "./gradlew dependencies --quiet",
+      "trigger": [
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts"
+      ],
+      "category": "compile",
+      "required": true,
+      "timeout": "180s",
+      "description": "Resolve Gradle dependencies (catches unresolvable coords)",
+      "working_dir": "."
+    },
+    {
+      "name": "gradle-test",
+      "command": "./gradlew test",
       "trigger": [
         "*.java",
-        "pom.xml"
+        "build.gradle",
+        "build.gradle.kts"
       ],
       "category": "test",
       "required": true,
       "timeout": "600s",
-      "description": "Run Java test suite with Maven",
+      "description": "Run Java test suite with Gradle",
       "working_dir": "."
     }
   ]

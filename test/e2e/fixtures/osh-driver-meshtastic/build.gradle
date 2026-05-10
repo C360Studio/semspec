@@ -1,0 +1,56 @@
+// OSH driver skeleton — to be filled in by the agent during the @hard scenario.
+//
+// Reality check: OpenSensorHub (osh-core) is a Gradle multi-module project
+// that publishes its `org.sensorhub:*` artifacts. The historical publishing
+// target was Bintray, which JFrog sunset in 2021. Where its current public
+// artifacts live (snapshot repo, Maven Central, alternate mirror) is the
+// agent's job to discover by reading the upstream sources at
+// /sources/osh/github-com-opensensorhub-osh-core/build.gradle and
+// /sources/osh/github-com-opensensorhub-osh-core/release.gradle — then
+// declaring the matching `repositories` + `dependencies` blocks below.
+//
+// Upstream coords (already known from /sources/osh):
+//   group   = 'org.sensorhub'
+//   version = '2.0.0'  // see common.gradle: ext.oshCoreVersion
+//   relevant subprojects = sensorhub-core, sensorhub-service-consys, ...
+//
+// The Connected Systems API spec lives at
+// /sources/ogc/github-com-opengeospatial-ogcapi-connected-systems for
+// reference. Use it to design the driver's API surface.
+
+plugins {
+    id 'java-library'
+}
+
+group = 'org.sensorhub'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    // Match osh-core's Java 17 target (see /sources/osh/.../common.gradle).
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    // TODO(agent): add the OSH artifact repository here once you've
+    // identified it from /sources/osh/.../release.gradle. The original
+    // bintray target is dead; check the upstream for the current
+    // snapshot/release URL.
+}
+
+dependencies {
+    // TODO(agent): declare OSH dependencies. Read upstream subprojects
+    // from /sources/osh/.../sensorhub-core/build.gradle (and siblings)
+    // to identify which artifacts your driver needs. Common picks for
+    // a sensor driver:
+    //   implementation 'org.sensorhub:sensorhub-core:2.0.0'
+    //   implementation 'org.sensorhub:sensorhub-service-consys:2.0.0'
+    // Adjust based on what the upstream actually publishes.
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+test {
+    useJUnitPlatform()
+}
