@@ -1,16 +1,17 @@
-package lessondecomposer
+package trajectory
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
 )
 
-// stubRequester implements trajectoryRequester for unit tests.
+// stubRequester implements Requester for unit tests.
 type stubRequester struct {
 	resp []byte
 	err  error
@@ -28,7 +29,7 @@ func (s *stubRequester) Request(_ context.Context, subject string, data []byte, 
 	return s.resp, s.err
 }
 
-func TestFetchTrajectory_Success(t *testing.T) {
+func TestFetch_Success(t *testing.T) {
 	traj := agentic.Trajectory{
 		LoopID:    "loop-abc",
 		StartTime: time.Now(),
@@ -39,27 +40,27 @@ func TestFetchTrajectory_Success(t *testing.T) {
 	body, _ := json.Marshal(&traj)
 	stub := &stubRequester{resp: body}
 
-	got, err := fetchTrajectory(context.Background(), stub, "loop-abc", 0)
+	got, err := Fetch(context.Background(), stub, "loop-abc", 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if got.LoopID != "loop-abc" || len(got.Steps) != 1 {
 		t.Errorf("unexpected trajectory: %+v", got)
 	}
-	if stub.gotSubject != trajectorySubject {
-		t.Errorf("subject = %q, want %q", stub.gotSubject, trajectorySubject)
+	if stub.gotSubject != Subject {
+		t.Errorf("subject = %q, want %q", stub.gotSubject, Subject)
 	}
-	if stub.gotTimeout != trajectoryRequestTimeout {
-		t.Errorf("timeout = %v, want %v", stub.gotTimeout, trajectoryRequestTimeout)
+	if stub.gotTimeout != DefaultTimeout {
+		t.Errorf("timeout = %v, want %v", stub.gotTimeout, DefaultTimeout)
 	}
 }
 
-func TestFetchTrajectory_RequestEncoding(t *testing.T) {
+func TestFetch_RequestEncoding(t *testing.T) {
 	traj := agentic.Trajectory{LoopID: "x", Steps: []agentic.TrajectoryStep{}}
 	body, _ := json.Marshal(&traj)
 	stub := &stubRequester{resp: body}
 
-	if _, err := fetchTrajectory(context.Background(), stub, "x", 25); err != nil {
+	if _, err := Fetch(context.Background(), stub, "x", 25); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -75,54 +76,54 @@ func TestFetchTrajectory_RequestEncoding(t *testing.T) {
 	}
 }
 
-func TestFetchTrajectory_NotFound(t *testing.T) {
+func TestFetch_NotFound(t *testing.T) {
 	stub := &stubRequester{err: errors.New("trajectory not found: missing")}
 
-	_, err := fetchTrajectory(context.Background(), stub, "loop-x", 0)
-	if !errors.Is(err, ErrTrajectoryNotFound) {
-		t.Errorf("expected ErrTrajectoryNotFound, got %v", err)
+	_, err := Fetch(context.Background(), stub, "loop-x", 0)
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
 	}
 }
 
-func TestFetchTrajectory_TransportError(t *testing.T) {
+func TestFetch_TransportError(t *testing.T) {
 	stub := &stubRequester{err: errors.New("nats: timeout")}
 
-	_, err := fetchTrajectory(context.Background(), stub, "loop-x", 0)
+	_, err := Fetch(context.Background(), stub, "loop-x", 0)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if errors.Is(err, ErrTrajectoryNotFound) {
-		t.Error("transport error should not classify as ErrTrajectoryNotFound")
+	if errors.Is(err, ErrNotFound) {
+		t.Error("transport error should not classify as ErrNotFound")
 	}
 }
 
-func TestFetchTrajectory_NilClient(t *testing.T) {
-	if _, err := fetchTrajectory(context.Background(), nil, "loop-x", 0); err == nil {
+func TestFetch_NilClient(t *testing.T) {
+	if _, err := Fetch(context.Background(), nil, "loop-x", 0); err == nil {
 		t.Fatal("expected error for nil client")
 	}
 }
 
-func TestFetchTrajectory_EmptyLoopID(t *testing.T) {
+func TestFetch_EmptyLoopID(t *testing.T) {
 	stub := &stubRequester{}
-	if _, err := fetchTrajectory(context.Background(), stub, "", 0); err == nil {
+	if _, err := Fetch(context.Background(), stub, "", 0); err == nil {
 		t.Fatal("expected error for empty loop id")
 	}
 }
 
-func TestFetchTrajectory_EmptyResponseLoopID(t *testing.T) {
+func TestFetch_EmptyResponseLoopID(t *testing.T) {
 	// Defensive: agentic-loop responder is expected to return either an
 	// error or a populated Trajectory. A blank Trajectory{} on the wire is
-	// treated as a wire-format failure so the decomposer doesn't try to
-	// build a lesson from nothing.
+	// treated as a wire-format failure so callers don't try to build
+	// anything from nothing.
 	stub := &stubRequester{resp: []byte(`{}`)}
-	if _, err := fetchTrajectory(context.Background(), stub, "x", 0); err == nil {
+	if _, err := Fetch(context.Background(), stub, "x", 0); err == nil {
 		t.Fatal("expected error for empty response")
 	}
 }
 
-func TestFetchTrajectory_MalformedResponse(t *testing.T) {
+func TestFetch_MalformedResponse(t *testing.T) {
 	stub := &stubRequester{resp: []byte(`not json`)}
-	if _, err := fetchTrajectory(context.Background(), stub, "x", 0); err == nil {
+	if _, err := Fetch(context.Background(), stub, "x", 0); err == nil {
 		t.Fatal("expected error for malformed response")
 	}
 }
@@ -134,8 +135,8 @@ func TestSummarizeStep_ToolCallSuccess(t *testing.T) {
 		ToolResult: "package main\nimport \"fmt\"\nfunc main(){\n" +
 			"  fmt.Println(\"hello world this is a long result that should be clipped\")\n}\n",
 	}
-	got := summarizeStep(step, 200)
-	if !strContains(got, "tool_call(read_file)") {
+	got := SummarizeStep(step, 200)
+	if !strings.Contains(got, "tool_call(read_file)") {
 		t.Errorf("missing tool name in summary: %q", got)
 	}
 }
@@ -147,24 +148,24 @@ func TestSummarizeStep_ToolCallFailed(t *testing.T) {
 		ToolStatus:   "failed",
 		ErrorMessage: "exit code 2",
 	}
-	got := summarizeStep(step, 200)
-	if !strContains(got, "FAILED") || !strContains(got, "exit code 2") {
+	got := SummarizeStep(step, 200)
+	if !strings.Contains(got, "FAILED") || !strings.Contains(got, "exit code 2") {
 		t.Errorf("expected FAILED + error in summary, got %q", got)
 	}
 }
 
 func TestSummarizeStep_ModelCall(t *testing.T) {
 	step := agentic.TrajectoryStep{StepType: "model_call", Model: "qwen3-coder:14b"}
-	got := summarizeStep(step, 200)
-	if !strContains(got, "model_call(qwen3-coder:14b)") {
+	got := SummarizeStep(step, 200)
+	if !strings.Contains(got, "model_call(qwen3-coder:14b)") {
 		t.Errorf("unexpected summary: %q", got)
 	}
 }
 
 func TestSummarizeStep_Compaction(t *testing.T) {
 	step := agentic.TrajectoryStep{StepType: "context_compaction", Utilization: 0.85}
-	got := summarizeStep(step, 200)
-	if !strContains(got, "context_compaction") {
+	got := SummarizeStep(step, 200)
+	if !strings.Contains(got, "context_compaction") {
 		t.Errorf("unexpected summary: %q", got)
 	}
 }

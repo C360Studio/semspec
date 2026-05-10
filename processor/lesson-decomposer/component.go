@@ -33,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/c360studio/semspec/agentgraph"
+	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -813,7 +814,7 @@ func (c *Component) fetchSteps(ctx context.Context, loopID, label string) []prom
 	if loopID == "" {
 		return nil
 	}
-	traj, err := fetchTrajectory(ctx, c.natsClient, loopID, trajectoryStepLimit)
+	traj, err := trajectory.Fetch(ctx, c.natsClient, loopID, trajectoryStepLimit)
 	if err != nil {
 		c.logger.Warn("Trajectory fetch failed",
 			"loop_id", loopID, "label", label, "error", err)
@@ -823,7 +824,7 @@ func (c *Component) fetchSteps(ctx context.Context, loopID, label string) []prom
 	for i, step := range traj.Steps {
 		out = append(out, prompt.TrajectoryStepSummary{
 			Index:   i,
-			Summary: summarizeStep(step, 200),
+			Summary: trajectory.SummarizeStep(step, 200),
 		})
 	}
 	return out
