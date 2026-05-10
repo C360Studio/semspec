@@ -16,4 +16,10 @@ const (
 	// and matched in the AGENT_LOOPS watcher so the decomposer only acts
 	// on its own loop completions.
 	WorkflowSlugLessonDecomposition = "semspec-lesson-decomposition"
+
+	// WorkflowSlugWedgeRecovery identifies recovery-agent agent TaskMessages
+	// (ADR-037 stage 1). Set on the dispatched TaskMessage and matched in
+	// the AGENT_LOOPS watcher so the recovery-agent only acts on its own
+	// loop completions.
+	WorkflowSlugWedgeRecovery = "semspec-wedge-recovery"
 )

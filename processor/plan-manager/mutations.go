@@ -10,6 +10,8 @@ import (
 	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/message"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -652,7 +654,49 @@ func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *w
 		"iteration", plan.ReviewIteration,
 		"max", maxIterations)
 
+	c.publishRecoveryRequested(ctx, &payloads.RecoveryRequested{
+		RecoveryID:          uuid.New().String(),
+		Layer:               payloads.RecoveryLayerPhaseLocal,
+		Slug:                req.Slug,
+		EscalationReason:    plan.LastError,
+		LastFailureFeedback: plan.ReviewFormattedFindings,
+		TraceID:             req.TraceID,
+	})
+
 	return MutationResponse{Success: true}
+}
+
+// publishRecoveryRequested fires an ADR-037 stage-1 phase-local recovery
+// request on recovery.requested.<slug>. Best-effort: a publish failure does
+// not roll back the escalation (the plan is already StatusRejected/rejected
+// in KV). The recovery-agent component consumes these and, on submit_work,
+// emits RecoveryComplete on recovery.complete.<slug> for the watcher to
+// reconcile.
+func (c *Component) publishRecoveryRequested(ctx context.Context, req *payloads.RecoveryRequested) {
+	if c.natsClient == nil {
+		return
+	}
+	if err := req.Validate(); err != nil {
+		c.logger.Warn("Recovery request failed local validation; skipping publish",
+			"slug", req.Slug, "error", err)
+		return
+	}
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Warn("Failed to marshal RecoveryRequested", "slug", req.Slug, "error", err)
+		return
+	}
+	subject := payloads.RecoveryRequestedSubjectPrefix + req.Slug
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Warn("Failed to publish RecoveryRequested",
+			"slug", req.Slug, "subject", subject, "error", err)
+		return
+	}
+	c.logger.Info("Recovery requested (phase-local)",
+		"slug", req.Slug,
+		"recovery_id", req.RecoveryID,
+		"reason", req.EscalationReason)
 }
 
 // formatReviewFindings attempts to format raw findings JSON into human-readable text.

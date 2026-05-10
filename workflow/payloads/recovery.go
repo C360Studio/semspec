@@ -107,11 +107,14 @@ type RecoveryRequested struct {
 	// plan-phase wedges.
 	TaskID string `json:"task_id,omitempty"`
 
-	// LoopID is the agentic-loop ID of the wedged agent — required so the
-	// recovery agent can fetch the full trajectory via internal/trajectory.
-	// For execution-phase wedges this is typically exec.DeveloperLoopID;
-	// for plan-phase wedges this is the planner's loop.
-	LoopID string `json:"loop_id"`
+	// LoopID is the agentic-loop ID of the wedged agent. Strongly recommended
+	// — the recovery agent fetches the full trajectory via internal/trajectory
+	// when set, which is the load-bearing input per ADR-037 design lock #2.
+	// Optional because plan-phase wedges don't yet plumb the wedged generator's
+	// loop ID through RevisionMutationRequest (TODO: track on workflow.Plan).
+	// When empty, the recovery agent falls back to feedback + findings only.
+	// For execution-phase wedges this is exec.DeveloperLoopID (always set).
+	LoopID string `json:"loop_id,omitempty"`
 
 	// EscalationReason is the human-readable reason the escalating component
 	// recorded (e.g. "fixable rejections exceeded TDD cycle budget", "plan
@@ -152,9 +155,6 @@ func (r *RecoveryRequested) Validate() error {
 	}
 	if r.Slug == "" {
 		return fmt.Errorf("slug is required")
-	}
-	if r.LoopID == "" {
-		return fmt.Errorf("loop_id is required (recovery cannot diagnose without trajectory)")
 	}
 	if r.EscalationReason == "" {
 		return fmt.Errorf("escalation_reason is required")

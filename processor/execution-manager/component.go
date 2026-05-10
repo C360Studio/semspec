@@ -296,7 +296,8 @@ func (c *Component) Start(ctx context.Context) error {
 	// - AGENT_LOOPS: TDD pipeline loop completions (from agentic-dispatch)
 	// - EXECUTION_STATES task.>: pending task executions (KV self-trigger)
 	// - EXECUTION_STATES req.>: requirement termination → cancel orphan children
-	c.wg.Add(3)
+	// - recovery.complete.>: ADR-037 stage-1 recovery decisions
+	c.wg.Add(4)
 	go func() {
 		defer c.wg.Done()
 		c.watchLoopCompletions(ctx)
@@ -308,6 +309,10 @@ func (c *Component) Start(ctx context.Context) error {
 	go func() {
 		defer c.wg.Done()
 		c.watchRequirementTermination(ctx)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.startRecoveryCompleteWatcher(ctx)
 	}()
 
 	c.mu.Lock()
@@ -1056,10 +1061,56 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 	)
 	trajectory.LogSummary(ctx, c.logger, c.natsClient, exec.DeveloperLoopID, "tdd-escalated", 0)
 
+	c.publishRecoveryRequested(ctx, &payloads.RecoveryRequested{
+		RecoveryID:          uuid.New().String(),
+		Layer:               payloads.RecoveryLayerPhaseLocal,
+		Slug:                exec.Slug,
+		RequirementID:       exec.RequirementID,
+		TaskID:              exec.TaskID,
+		LoopID:              exec.DeveloperLoopID,
+		EscalationReason:    reason,
+		LastFailureFeedback: exec.Feedback,
+		TraceID:             exec.TraceID,
+	})
+
 	// Notify callers that the TDD pipeline escalated (treated as failure).
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseEscalated).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
+}
+
+// publishRecoveryRequested fires an ADR-037 stage-1 phase-local recovery
+// request on recovery.requested.<slug>. Best-effort: failure does not roll
+// back the escalation (the task is already phaseEscalated). The recovery-
+// agent component consumes these and, on submit_work, emits RecoveryComplete
+// on recovery.complete.<slug> for the watcher to reconcile.
+func (c *Component) publishRecoveryRequested(ctx context.Context, req *payloads.RecoveryRequested) {
+	if c.natsClient == nil {
+		return
+	}
+	if err := req.Validate(); err != nil {
+		c.logger.Warn("Recovery request failed local validation; skipping publish",
+			"slug", req.Slug, "task_id", req.TaskID, "error", err)
+		return
+	}
+	baseMsg := message.NewBaseMessage(req.Schema(), req, componentName)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Warn("Failed to marshal RecoveryRequested",
+			"slug", req.Slug, "task_id", req.TaskID, "error", err)
+		return
+	}
+	subject := payloads.RecoveryRequestedSubjectPrefix + req.Slug
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Warn("Failed to publish RecoveryRequested",
+			"slug", req.Slug, "subject", subject, "error", err)
+		return
+	}
+	c.logger.Info("Recovery requested (phase-local)",
+		"slug", req.Slug,
+		"task_id", req.TaskID,
+		"recovery_id", req.RecoveryID,
+		"reason", req.EscalationReason)
 }
 
 // markErrorLocked transitions to the error terminal state.

@@ -691,6 +691,18 @@
         "min_age_before_retire": "168h"
       }
     },
+    "recovery-agent": {
+      "name": "recovery-agent",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "stream_name": "WORKFLOW",
+        "consumer_name": "recovery-agent",
+        "filter_subject": "recovery.requested.>",
+        "trajectory_step_limit": 80
+      }
+    },
     "graph-clustering": {
       "name": "graph-clustering",
       "type": "processor",
@@ -828,7 +840,9 @@
         "approve.request.>",
         "archive.request.>",
         "github.request.>",
-        "scenario.orchestrate.>"
+        "scenario.orchestrate.>",
+        "recovery.requested.>",
+        "recovery.complete.>"
       ],
       "max_age": "24h",
       "storage": "memory",

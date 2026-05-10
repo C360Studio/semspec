@@ -114,6 +114,33 @@
         "fallback": [
           "mock-reviewer"
         ]
+      },
+      "plan_wedge_recovery": {
+        "description": "ADR-037 stage 1 plan-phase wedge recovery (mock: returns canned escalate_human RecoveryAction)",
+        "preferred": [
+          "mock-recovery-agent"
+        ],
+        "fallback": [
+          "mock-reviewer"
+        ]
+      },
+      "execution_wedge_recovery": {
+        "description": "ADR-037 stage 1 execution-phase wedge recovery (mock: returns canned escalate_human RecoveryAction)",
+        "preferred": [
+          "mock-recovery-agent"
+        ],
+        "fallback": [
+          "mock-reviewer"
+        ]
+      },
+      "coordinator_recovery": {
+        "description": "ADR-037 stage 2 cross-phase recovery (mock: returns canned escalate_human RecoveryAction)",
+        "preferred": [
+          "mock-recovery-agent"
+        ],
+        "fallback": [
+          "mock-reviewer"
+        ]
       }
     },
     "endpoints": {
@@ -199,6 +226,14 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-lesson-decomposer",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
+      },
+      "mock-recovery-agent": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-recovery-agent",
         "max_tokens": 32768,
         "supports_tools": true,
         "tool_format": "openai"
@@ -653,6 +688,18 @@
         "idle_threshold": "720h",
         "min_age_before_retire": "168h"
       }
+    },
+    "recovery-agent": {
+      "name": "recovery-agent",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "stream_name": "WORKFLOW",
+        "consumer_name": "recovery-agent",
+        "filter_subject": "recovery.requested.>",
+        "trajectory_step_limit": 80
+      }
     }
   },
   "streams": {
@@ -731,7 +778,9 @@
         "approve.request.>",
         "archive.request.>",
         "github.request.>",
-        "scenario.orchestrate.>"
+        "scenario.orchestrate.>",
+        "recovery.requested.>",
+        "recovery.complete.>"
       ],
       "max_age": "24h",
       "storage": "memory",

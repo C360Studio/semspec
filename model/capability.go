@@ -51,6 +51,24 @@ const (
 	// generation; deployments typically point this at the same endpoint
 	// as CapabilityPlanning.
 	CapabilityTaskDecomposition Capability = "task_decomposition"
+
+	// CapabilityPlanWedgeRecovery is the ADR-037 stage-1 phase-local
+	// recovery for plan-manager escalations (review revision cap reached).
+	// A manager-role agent reads the wedged plan + last feedback +
+	// trajectory and picks a bounded RecoveryAction.
+	CapabilityPlanWedgeRecovery Capability = "plan_wedge_recovery"
+
+	// CapabilityExecutionWedgeRecovery is the ADR-037 stage-1 phase-local
+	// recovery for execution-manager escalations (TDD cycle exhaustion,
+	// iter=N tool loops). Same shape as plan-wedge-recovery, scoped to
+	// the developer's trajectory + reviewer feedback.
+	CapabilityExecutionWedgeRecovery Capability = "execution_wedge_recovery"
+
+	// CapabilityCoordinatorRecovery is the ADR-037 stage-2 cross-phase
+	// recovery handled by the (not-yet-built) coordinator component.
+	// Reserved here so capability resolution doesn't surprise stage-2
+	// when it lands.
+	CapabilityCoordinatorRecovery Capability = "coordinator_recovery"
 )
 
 // RoleCapabilities maps workflow roles to their default capability.
@@ -73,6 +91,7 @@ var RoleCapabilities = map[string]Capability{
 	"writer":                CapabilityWriting,
 	"lesson-decomposer":     CapabilityLessonDecomposition,
 	"task-decomposer":       CapabilityTaskDecomposition,
+	"recovery-agent":        CapabilityExecutionWedgeRecovery, // overridden per-dispatch by recovery-agent based on layer
 }
 
 // CapabilityForRole returns the default capability for a given role.
@@ -90,7 +109,8 @@ func (c Capability) IsValid() bool {
 	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing,
 		CapabilityPlanReview, CapabilityArchitecture, CapabilityRequirementGeneration,
 		CapabilityScenarioGeneration, CapabilityQA, CapabilityFast,
-		CapabilityLessonDecomposition, CapabilityTaskDecomposition:
+		CapabilityLessonDecomposition, CapabilityTaskDecomposition,
+		CapabilityPlanWedgeRecovery, CapabilityExecutionWedgeRecovery, CapabilityCoordinatorRecovery:
 		return true
 	}
 	return false

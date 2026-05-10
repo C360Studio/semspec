@@ -93,6 +93,28 @@ const (
 	EscalationReason = "workflow.review.escalation_reason"
 )
 
+// Recovery-specific predicates (ADR-037 stage 1).
+// Recorded on the wedged entity (plan or task execution) once the
+// recovery-agent publishes RecoveryComplete. Surfaced through the SKG
+// so the UI and lessons pipeline can read the recovery decision without
+// reaching into RECOVERY_STATES KV directly.
+const (
+	// RecoveryID echoes the UUID assigned at escalation time. Lets the
+	// SKG join a wedged entity back to its full attempt record in
+	// RECOVERY_STATES KV.
+	RecoveryID = "workflow.recovery.id"
+
+	// RecoveryAction names the recovery-agent's chosen action from the
+	// closed set: refine_prompt|narrow_scope|split_req|escalate_human|
+	// mark_unrecoverable.
+	RecoveryAction = "workflow.recovery.action"
+
+	// RecoveryDiagnosis is the recovery-agent's analysis of the wedge —
+	// the deliverable for every action including escalate_human and
+	// mark_unrecoverable.
+	RecoveryDiagnosis = "workflow.recovery.diagnosis"
+)
+
 // Task-execution-specific predicates.
 // These predicates track the inputs, outputs, and feedback for task execution loops.
 const (

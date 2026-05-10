@@ -34,7 +34,6 @@ func TestRecoveryRequestedValidate(t *testing.T) {
 		{"missing layer", func(r *RecoveryRequested) { r.Layer = "" }, "layer"},
 		{"invalid layer", func(r *RecoveryRequested) { r.Layer = "wrong" }, "phase_local or coordinator"},
 		{"missing slug", func(r *RecoveryRequested) { r.Slug = "" }, "slug"},
-		{"missing loop_id", func(r *RecoveryRequested) { r.LoopID = "" }, "loop_id"},
 		{"missing escalation_reason", func(r *RecoveryRequested) { r.EscalationReason = "" }, "escalation_reason"},
 	}
 	for _, tc := range cases {
@@ -50,6 +49,19 @@ func TestRecoveryRequestedValidate(t *testing.T) {
 			}
 		})
 	}
+
+	// Plan-phase wedges may not have a canonical wedged loop in scope yet
+	// (e.g. round-2 revision exhaustion where the wedged work was spread
+	// across multiple generators). Validate must accept LoopID="" so those
+	// paths can publish RecoveryRequested; the recovery agent falls back to
+	// feedback + findings when no trajectory is fetchable.
+	t.Run("missing loop_id is allowed", func(t *testing.T) {
+		r := base()
+		r.LoopID = ""
+		if err := r.Validate(); err != nil {
+			t.Errorf("LoopID is optional; validate should pass, got %v", err)
+		}
+	})
 }
 
 // TestRecoveryCompleteValidate pins the closed action set + per-action

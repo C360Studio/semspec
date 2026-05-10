@@ -25,6 +25,7 @@ import (
 	lessondecomposer "github.com/c360studio/semspec/processor/lesson-decomposer"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
+	recoveryagent "github.com/c360studio/semspec/processor/recovery-agent"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
@@ -84,6 +85,11 @@ var componentRegistry = map[string]struct {
 	"lesson-curator": {
 		ConfigType:  reflect.TypeOf(lessoncurator.Config{}),
 		Description: "ADR-033 Phase 5: retires stale lessons via periodic sweep over the lessons graph",
+		Domain:      "semspec",
+	},
+	"recovery-agent": {
+		ConfigType:  reflect.TypeOf(recoveryagent.Config{}),
+		Description: "ADR-037 stage 1: dispatches manager-role wedge recovery agents, publishes RecoveryComplete with bounded RecoveryAction",
 		Domain:      "semspec",
 	},
 }

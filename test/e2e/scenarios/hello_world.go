@@ -1465,6 +1465,11 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 			stageDefinition{"trigger-execution", s.stageTriggerExecution, t(15, 10)},
 			stageDefinition{"wait-for-stall", s.stageWaitForIterationStall, t(300, 120)},
 			stageDefinition{"verify-stall-state", s.stageVerifyIterationStallState, t(15, 10)},
+			// ADR-037 stage 1: markEscalatedLocked fires RecoveryRequested →
+			// recovery-agent dispatches mock LLM → RecoveryComplete persisted
+			// to RECOVERY_STATES KV. Validates the full async dispatch wire
+			// without depending on real-LLM behavior.
+			stageDefinition{"verify-recovery-dispatch", s.stageVerifyRecoveryDispatch, t(60, 30)},
 			stageDefinition{"retry-failed", s.stageRetryAfterExhaustion, t(15, 10)},
 			stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
 			stageDefinition{"generate-report", s.stageGenerateReport, t(10, 5)},
@@ -1815,4 +1820,93 @@ func (s *HelloWorldScenario) stageVerifyQuestionFlow(ctx context.Context, result
 	}
 
 	return nil
+}
+
+// recoveryStateRecord mirrors the wrapper persisted by recovery-agent into
+// RECOVERY_STATES. Kept local to the scenario so it stays decoupled from
+// recovery-agent's internal record shape — tests pin the wire contract.
+type recoveryStateRecord struct {
+	Requested struct {
+		RecoveryID       string `json:"recovery_id"`
+		Layer            string `json:"layer"`
+		Slug             string `json:"slug"`
+		TaskID           string `json:"task_id"`
+		LoopID           string `json:"loop_id"`
+		EscalationReason string `json:"escalation_reason"`
+	} `json:"requested"`
+	Complete struct {
+		RecoveryID          string `json:"recovery_id"`
+		Slug                string `json:"slug"`
+		Action              string `json:"action"`
+		Diagnosis           string `json:"diagnosis"`
+		RecoverySucceeded   bool   `json:"recovery_succeeded"`
+		RecoveryAgentLoopID string `json:"recovery_agent_loop_id"`
+	} `json:"complete"`
+}
+
+// stageVerifyRecoveryDispatch confirms the ADR-037 stage-1 recovery wire
+// fired end-to-end after iteration exhaustion: RecoveryRequested published
+// → recovery-agent dispatched → mock-llm returned an escalate_human action
+// → RecoveryComplete persisted to RECOVERY_STATES KV.
+//
+// Polls RECOVERY_STATES for an entry matching the wedged plan slug. The
+// canned mock fixture returns Action=escalate_human / RecoverySucceeded=false;
+// asserting against those exact values pins both wire shape and the parse
+// path against the recovery-agent component.
+func (s *HelloWorldScenario) stageVerifyRecoveryDispatch(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("RECOVERY_STATES entry never appeared for slug=%s: %w", slug, ctx.Err())
+		case <-ticker.C:
+			kvResp, err := s.http.GetKVEntries(ctx, "RECOVERY_STATES")
+			if err != nil {
+				continue // bucket may not exist yet
+			}
+			for _, entry := range kvResp.Entries {
+				var rec recoveryStateRecord
+				if err := json.Unmarshal(entry.Value, &rec); err != nil {
+					continue
+				}
+				if rec.Complete.Slug != slug {
+					continue
+				}
+				// Found the recovery record for our slug. Validate the
+				// dispatch path produced exactly the canned fixture output.
+				if rec.Complete.Action != "escalate_human" {
+					return fmt.Errorf("RecoveryComplete.Action = %q, want %q (mock fixture should produce escalate_human)",
+						rec.Complete.Action, "escalate_human")
+				}
+				if rec.Complete.RecoverySucceeded {
+					return fmt.Errorf("RecoveryComplete.RecoverySucceeded = true, want false for escalate_human")
+				}
+				if rec.Complete.Diagnosis == "" {
+					return fmt.Errorf("RecoveryComplete.Diagnosis is empty; escalate_human requires diagnosis as the deliverable")
+				}
+				if rec.Complete.RecoveryAgentLoopID == "" {
+					return fmt.Errorf("RecoveryComplete.RecoveryAgentLoopID is empty; lessons pipeline keys off it")
+				}
+				if rec.Requested.RecoveryID == "" || rec.Requested.RecoveryID != rec.Complete.RecoveryID {
+					return fmt.Errorf("recovery_id mismatch: requested=%q complete=%q",
+						rec.Requested.RecoveryID, rec.Complete.RecoveryID)
+				}
+				if rec.Requested.Layer != "phase_local" {
+					return fmt.Errorf("RecoveryRequested.Layer = %q, want phase_local (execution-manager always dispatches phase_local)",
+						rec.Requested.Layer)
+				}
+				if rec.Requested.TaskID == "" {
+					return fmt.Errorf("RecoveryRequested.TaskID is empty; execution-phase wedge must carry task_id")
+				}
+				result.SetDetail("recovery_id", rec.Complete.RecoveryID)
+				result.SetDetail("recovery_action", rec.Complete.Action)
+				result.SetDetail("recovery_agent_loop_id", rec.Complete.RecoveryAgentLoopID)
+				result.SetDetail("recovery_layer", rec.Requested.Layer)
+				return nil
+			}
+		}
+	}
 }

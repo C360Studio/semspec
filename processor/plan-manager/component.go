@@ -15,6 +15,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -47,6 +48,11 @@ type Component struct {
 	// that case the plan-level merge step is skipped and the plan completes
 	// without a PlanBranch, which is the pre-B1 behavior.
 	sandbox *sandbox.Client
+
+	// decoder unwraps BaseMessage envelopes for typed payloads on the
+	// recovery.complete.> subject family (ADR-037 stage 1). Set in
+	// NewComponent from deps.PayloadRegistry; nil-safe when missing.
+	decoder *message.Decoder
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -170,6 +176,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     logger,
 		workspace:  newWorkspaceProxy(config.SandboxURL),
 		sandbox:    sandbox.NewClient(config.SandboxURL),
+		decoder:    message.NewDecoder(deps.PayloadRegistry),
 	}, nil
 }
 
@@ -243,6 +250,11 @@ func (c *Component) Start(ctx context.Context) error {
 
 	// Watch EXECUTION_STATES for requirement completions → plan completion transition.
 	go c.watchExecutionCompletions(childCtx)
+
+	// Watch recovery.complete.> for ADR-037 stage-1 recovery decisions on
+	// plan-phase wedges. Execution-phase wedges are reconciled in
+	// execution-manager's own watcher.
+	go c.startRecoveryCompleteWatcher(childCtx)
 
 	// Transition to running
 	c.state.Store(stateRunning)

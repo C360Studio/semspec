@@ -1,0 +1,34 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "recovery-agent.v1.json",
+  "type": "object",
+  "title": "recovery-agent Configuration",
+  "description": "ADR-037 stage 1: dispatches manager-role wedge recovery agents, publishes RecoveryComplete with bounded RecoveryAction",
+  "properties": {
+    "consumer_name": {
+      "type": "string",
+      "description": "Durable consumer name",
+      "default": "recovery-agent",
+      "category": "basic"
+    },
+    "filter_subject": {
+      "type": "string",
+      "description": "NATS subject pattern for recovery requests",
+      "default": "recovery.requested.\u003e",
+      "category": "basic"
+    },
+    "stream_name": {
+      "type": "string",
+      "description": "JetStream stream for recovery requests",
+      "default": "WORKFLOW",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "recovery-agent",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

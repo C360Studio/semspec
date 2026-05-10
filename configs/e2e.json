@@ -516,7 +516,9 @@
         "approve.request.>",
         "archive.request.>",
         "github.request.>",
-        "scenario.orchestrate.>"
+        "scenario.orchestrate.>",
+        "recovery.requested.>",
+        "recovery.complete.>"
       ],
       "max_age": "24h",
       "storage": "memory",

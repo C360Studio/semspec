@@ -40,6 +40,7 @@ import (
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
 	qareviewer "github.com/c360studio/semspec/processor/qa-reviewer"
 	questionmanager "github.com/c360studio/semspec/processor/question-manager"
+	recoveryagent "github.com/c360studio/semspec/processor/recovery-agent"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
@@ -285,6 +286,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return changeproposalhandler.Register(componentRegistry) },
 		func() error { return lessondecomposer.Register(componentRegistry) },
 		func() error { return lessoncurator.Register(componentRegistry) },
+		func() error { return recoveryagent.Register(componentRegistry) },
 		// GitHub integration (ADR-031) — disabled by default, opt-in via config.
 		func() error { return githubwatcher.Register(componentRegistry) },
 		func() error { return githubsubmitter.Register(componentRegistry) },
