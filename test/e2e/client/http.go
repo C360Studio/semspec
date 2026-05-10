@@ -981,6 +981,11 @@ type IterationCalls struct {
 // CreatePlanRequest is the request body for creating a plan.
 type CreatePlanRequest struct {
 	Title string `json:"title"`
+	// AutoRejectOnExhaustion optionally overrides the plan-manager component
+	// config's AutoRejectOnExhaustion for this specific plan. nil (omitted)
+	// keeps the existing fail-fast e2e behaviour. Used by autonomous
+	// scenarios (iteration-exhaustion) that want the production stall path.
+	AutoRejectOnExhaustion *bool `json:"auto_reject_on_exhaustion,omitempty"`
 }
 
 // CreatePlanResponse is the response from creating a plan.
@@ -996,7 +1001,13 @@ type CreatePlanResponse struct {
 // CreatePlan creates a new plan via the plan-manager.
 // POST /plan-manager/plans {"description": "..."}
 func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*CreatePlanResponse, error) {
-	reqBody := CreatePlanRequest{Title: description}
+	return c.CreatePlanWithOptions(ctx, CreatePlanRequest{Title: description})
+}
+
+// CreatePlanWithOptions creates a plan with full request control. Used by
+// scenarios that need to set the AutoRejectOnExhaustion override or other
+// optional fields beyond title.
+func (c *HTTPClient) CreatePlanWithOptions(ctx context.Context, reqBody CreatePlanRequest) (*CreatePlanResponse, error) {
 	data, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)

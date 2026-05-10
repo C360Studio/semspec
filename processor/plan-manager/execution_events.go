@@ -330,11 +330,15 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 	// reject. The savePlanCached bump nudges the SSE watcher so the UI can
 	// render the stall signal from ExecutionSummary.
 	//
-	// Autonomous mode (config.AutoRejectOnExhaustion=true): no human to
-	// decide, so auto-transition to rejected. Set in E2E configs so
-	// Playwright fails fast on real escalation rather than blocking the
-	// test budget on the same wedge for 30+ minutes. Caught take 23.
-	if c.config.AutoRejectOnExhaustion {
+	// Autonomous mode (config.AutoRejectOnExhaustion=true OR per-plan
+	// AutoRejectOnExhaustion=true): no human to decide, so auto-transition
+	// to rejected. Set in E2E configs so Playwright fails fast on real
+	// escalation rather than blocking the test budget on the same wedge
+	// for 30+ minutes (caught take 23). Per-plan override lets specific
+	// plans opt back into the production stall path even in fail-fast
+	// fleets — used by iteration-exhaustion test scenarios that need to
+	// verify the stall-and-retry recovery flow.
+	if resolveAutoRejectOnExhaustion(plan, c.config) {
 		summary := fmt.Sprintf("autonomous mode: %d/%d requirements failed; auto-rejecting (production mode would await human decision)",
 			failedCount, totalRequired)
 		c.logger.Warn("Auto-rejecting plan on requirement-failure convergence (AutoRejectOnExhaustion)",

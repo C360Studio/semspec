@@ -1010,7 +1010,7 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 		return MutationResponse{Success: true}
 	}
 
-	plan, err := ps.create(ctx, slug, req.Title, c.resolveProjectQALevel())
+	plan, err := ps.create(ctx, slug, req.Title, c.resolveProjectQALevel(), nil)
 	if err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("create plan: %v", err)}
 	}

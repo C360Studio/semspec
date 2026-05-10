@@ -17,6 +17,12 @@
       "default": true,
       "category": "basic"
     },
+    "auto_reject_on_exhaustion": {
+      "type": "boolean",
+      "description": "Auto-reject plan when all requirements terminal with any failure (autonomous mode; default false preserves human-in-loop)",
+      "default": false,
+      "category": "basic"
+    },
     "default_capability": {
       "type": "string",
       "description": "Default model capability for coordination",

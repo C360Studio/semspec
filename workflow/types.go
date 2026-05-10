@@ -516,6 +516,21 @@ type Plan struct {
 	// This is intentional — it bounds total LLM review cost per plan.
 	ReviewIteration int `json:"review_iteration,omitempty"`
 
+	// AutoRejectOnExhaustion overrides plan-manager's component-level
+	// AutoRejectOnExhaustion config for this specific plan. nil (the default)
+	// means "use the component config" — production callers don't need to
+	// set this. An explicit value lets autonomous test scenarios opt back
+	// into the production stall-and-await-operator path even when the
+	// component config defaults to fail-fast for the rest of the test run
+	// (mock e2e configs set component-level AutoRejectOnExhaustion=true so
+	// most scenarios fail fast on real escalation; iteration-exhaustion
+	// scenarios specifically want to verify the stall path and override
+	// this to false). The mechanism is a generalisation, not a test hack:
+	// production operators can also use it to pin specific plans (critical
+	// infra repairs, autonomous flows) to one mode regardless of fleet-wide
+	// component config.
+	AutoRejectOnExhaustion *bool `json:"auto_reject_on_exhaustion,omitempty"`
+
 	// LastError is the most recent error from a workflow step for this plan.
 	// Set when user.signal.error fires — annotation only, does NOT change status.
 	LastError string `json:"last_error,omitempty"`

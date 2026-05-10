@@ -552,7 +552,20 @@ func (s *HelloWorldScenario) stageVerifyGraphReady(ctx context.Context, result *
 
 // stageCreatePlan creates a plan via the REST API.
 func (s *HelloWorldScenario) stageCreatePlan(ctx context.Context, result *Result) error {
-	resp, err := s.http.CreatePlan(ctx, "add a /goodbye endpoint that returns a goodbye message and display it in the UI")
+	req := client.CreatePlanRequest{
+		Title: "add a /goodbye endpoint that returns a goodbye message and display it in the UI",
+	}
+	// Iteration-exhaustion variant verifies the production stall-and-retry
+	// recovery path (operator decides retry / complete-partial / reject).
+	// Mock e2e configs default to AutoRejectOnExhaustion=true (fail-fast),
+	// which short-circuits the stall before the scenario can observe it.
+	// Per-plan override flips this one plan back to the production semantics
+	// while leaving the rest of the test fleet on fail-fast.
+	if s.variant.ExpectIterationExhaustion {
+		stallPath := false
+		req.AutoRejectOnExhaustion = &stallPath
+	}
+	resp, err := s.http.CreatePlanWithOptions(ctx, req)
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
 	}

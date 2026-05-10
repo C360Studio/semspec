@@ -377,6 +377,13 @@ type CreatePlanRequest struct {
 	Title string `json:"title"`
 	// Description is an optional longer description (defaults to title if empty).
 	Description string `json:"description"`
+	// AutoRejectOnExhaustion optionally overrides the plan-manager component
+	// config's AutoRejectOnExhaustion for this specific plan. nil (omitted)
+	// means "use component config", which is the production default and
+	// matches existing client behaviour. Used by autonomous test scenarios
+	// that need the production stall path (iteration-exhaustion recovery,
+	// retry-after-stall) while the rest of the test run keeps fail-fast.
+	AutoRejectOnExhaustion *bool `json:"auto_reject_on_exhaustion,omitempty"`
 }
 
 // CreatePlanResponse is the response body for POST /plans.
@@ -643,7 +650,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Create new plan — snapshot the project's current QA level onto the plan
 	// so its policy is immutable under project-config changes.
-	plan, err := ps.create(ctx, slug, title, c.resolveProjectQALevel())
+	plan, err := ps.create(ctx, slug, title, c.resolveProjectQALevel(), req.AutoRejectOnExhaustion)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)

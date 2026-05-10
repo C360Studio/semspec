@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 )
 
@@ -97,6 +98,21 @@ func (c *Config) IsAutoApproveReview() bool {
 		return true
 	}
 	return *c.AutoApproveReview
+}
+
+// resolveAutoRejectOnExhaustion returns the effective AutoRejectOnExhaustion
+// value for a given plan. A non-nil per-plan override wins; otherwise we
+// fall back to the component config. Production callers don't set the
+// per-plan override, so production behaviour is unchanged when nil.
+//
+// Used at convergence-with-failures (execution_events.go) to decide whether
+// to auto-transition the plan to rejected (autonomous mode) or stay in
+// implementing for human-operator decision (production default).
+func resolveAutoRejectOnExhaustion(plan *workflow.Plan, cfg Config) bool {
+	if plan != nil && plan.AutoRejectOnExhaustion != nil {
+		return *plan.AutoRejectOnExhaustion
+	}
+	return cfg.AutoRejectOnExhaustion
 }
 
 // DefaultConfig returns sensible default configuration.

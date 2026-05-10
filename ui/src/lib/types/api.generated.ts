@@ -2400,6 +2400,7 @@ export interface components {
             qa_test_command?: string | null;
         };
         CreatePlanRequest: {
+            auto_reject_on_exhaustion?: boolean | null;
             description: string;
             title: string;
         };
@@ -2753,6 +2754,7 @@ export interface components {
             } | null;
             assembled_branch?: string;
             assembled_merge_commit?: string;
+            auto_reject_on_exhaustion?: boolean | null;
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2839,7 +2841,7 @@ export interface components {
                 files_owned?: string[];
                 id: string;
                 plan_id: string;
-                status: string;
+                status?: string;
                 title: string;
                 /** Format: date-time */
                 updated_at: string;
@@ -2858,13 +2860,14 @@ export interface components {
                 given: string;
                 id: string;
                 requirement_id: string;
-                status: string;
+                status?: string;
                 then: string[];
                 /** Format: date-time */
                 updated_at: string;
                 when: string;
             }[];
             scope?: {
+                create?: string[];
                 do_not_touch?: string[];
                 exclude?: string[];
                 include?: string[];
@@ -2930,6 +2933,7 @@ export interface components {
             } | null;
             assembled_branch?: string;
             assembled_merge_commit?: string;
+            auto_reject_on_exhaustion?: boolean | null;
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -3022,7 +3026,7 @@ export interface components {
                 files_owned?: string[];
                 id: string;
                 plan_id: string;
-                status: string;
+                status?: string;
                 title: string;
                 /** Format: date-time */
                 updated_at: string;
@@ -3041,13 +3045,14 @@ export interface components {
                 given: string;
                 id: string;
                 requirement_id: string;
-                status: string;
+                status?: string;
                 then: string[];
                 /** Format: date-time */
                 updated_at: string;
                 when: string;
             }[];
             scope?: {
+                create?: string[];
                 do_not_touch?: string[];
                 exclude?: string[];
                 include?: string[];
@@ -3193,6 +3198,7 @@ export interface components {
             semspec_dir: string;
         };
         Scope: {
+            create?: string[];
             do_not_touch?: string[];
             exclude?: string[];
             include?: string[];

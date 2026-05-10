@@ -159,7 +159,12 @@ func (s *planStore) exists(slug string) bool {
 // qaLevel parameter is snapshotted onto the plan so its QA policy is
 // immutable under project-level config changes. Pass QALevelSynthesis (or
 // empty) for the safe default.
-func (s *planStore) create(ctx context.Context, slug, title string, qaLevel workflow.QALevel) (*workflow.Plan, error) {
+// autoRejectOverride is an optional per-plan override for component config's
+// AutoRejectOnExhaustion. nil (the default) means "use component config",
+// preserving existing production behaviour. Plumbed through create() so the
+// field is set on the in-memory plan before its first KV write — avoids a
+// double-write on the create path.
+func (s *planStore) create(ctx context.Context, slug, title string, qaLevel workflow.QALevel, autoRejectOverride *bool) (*workflow.Plan, error) {
 	if err := workflow.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -198,7 +203,8 @@ func (s *planStore) create(ctx context.Context, slug, title string, qaLevel work
 			Exclude:    []string{},
 			DoNotTouch: []string{},
 		},
-		QALevel: qaLevel,
+		QALevel:                qaLevel,
+		AutoRejectOnExhaustion: autoRejectOverride,
 	}
 
 	if err := s.save(ctx, plan); err != nil {
