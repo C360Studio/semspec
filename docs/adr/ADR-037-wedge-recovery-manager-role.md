@@ -66,20 +66,21 @@ Both phase-local and coordinator recovery use **capability-resolved manager-role
 - `execution_wedge_recovery` capability — for execution-manager's escalation path. Failure class: TDD cycle exhaustion, iter=N bash loops, hallucinated paths/coords.
 - `coordinator_recovery` capability — for the new coordinator. Failure class: QA fails, cross-phase wedges where plan-side and execution-side recovery both ran.
 
-Capability defaults are **the same model class as the wedged agent**, not a forced upgrade. The leverage is the manager role + trajectory access + fresh context — not a smarter model. Per-environment override (the existing pattern) lets us A/B model choices for recovery without touching manager code; bumping to a higher tier becomes one of the bounded actions a recovery agent can choose, not a prerequisite for invoking recovery in the first place.
+Capability defaults are a **setup-time human decision**: pick a smarter model or a model that reasons better about the failure class for the wedge layer. Semspec already asks more of humans during configuration than vibes-tools do; this is consistent with that posture. The human chooses recovery models thoughtfully at setup, and the recovery agent operates within that choice. Per-environment override (the existing capability-resolve pattern) lets us A/B those model choices in config, not in code.
+
+The recovery agent itself does **not** have authority to swap models at runtime — that's runtime config mutation, which sister project semteams is taking on via its site coordinator. Semspec deliberately defers that direction. The leverage that makes recovery work is the manager *role* (fresh context, sees the trajectory, isn't anchored on the wedged agent's prior reasoning) plus the model strength the human chose for the recovery capability — not the recovery agent reaching for a different model mid-flight.
 
 ### Bounded recovery action set
 
 A recovery agent's submit_work must select from a closed set, not produce arbitrary mutations:
 
 - `refine_prompt` — rewrite the task prompt with explicit context the wedged agent missed (e.g., "graph_search showed `[project] org.sensorhub`; use that").
-- `bump_model` — retry with a higher-tier model on the same task. *This* is where smarter models enter the design — as one option among several, chosen by the manager when warranted.
 - `narrow_scope` — reduce the task's scope (split a multi-file change into one file at a time).
 - `split_req` — decompose the requirement into smaller requirements.
 - `escalate_human` — analysis written, no further automation; surfaces in the UI with the recovery agent's diagnosis.
 - `mark_unrecoverable` — recovery agent has determined this cannot succeed from current state (e.g., upstream artifact doesn't exist); plan continues with reduced scope or fails cleanly with diagnostic.
 
-Closed action set keeps the recovery agent inside an approved blast radius. New actions require ADR addendum + payload registration.
+Closed action set keeps the recovery agent inside an approved blast radius. Notably absent: any "bump to a smarter model" action. Runtime model swap is sister-project semteams' direction; semspec keeps model choice as a setup-time human decision so recovery operates within a known cost/capability envelope. New actions require ADR addendum + payload registration.
 
 ### Three guardrails
 
@@ -94,7 +95,7 @@ The audit reduced this list substantially. What's actually new:
 1. **`RECOVERY_STATES` KV bucket** — durable record of recovery attempts (which layer ran, what action chosen, outcome). Reconciled on startup like other manager state.
 2. **`recovery.>` JetStream subject family** — recovery requests/responses/escalations. Mirrors existing `agent.> / workflow.>` patterns.
 3. **`RecoveryAction` payload type** — registered via `component.RegisterPayload`. Carries the closed action-set choice + supporting fields (refined prompt, target model, scope changes, diagnosis text).
-4. **Recovery model registry entries** — three new capabilities need defaults in every E2E config that aspires to ship recovery (e2e-gemini.json, e2e-openrouter.json, e2e-claude.json, semspec.json). Defaults same-class as wedged agent.
+4. **Recovery model registry entries** — three new capabilities need defaults in every E2E config that aspires to ship recovery (e2e-gemini.json, e2e-openrouter.json, e2e-claude.json, semspec.json). Recommendation: pick a model that reasons better about the failure class than the wedged agent — humans choose this at setup, and a thoughtful default catches more wedges than coddling the cheapest tier.
 5. **Coordinator component** — new processor under `processor/coordinator/`. Watches `recovery.escalation.>` from plan-manager + execution-manager + qa-reviewer. Reuses CQRS twofer pattern (cache + KV + triples).
 
 What's **not** new (audit confirmed):
@@ -142,16 +143,18 @@ Stages may ship as separate ADR addenda + OpenSpec changes. Stage 0 in particula
 - **Short-loop + long-loop learning compose.** When recovery and lesson-decomposition fire on the same wedge events, the immediate run benefits from the recovery action AND future runs benefit from the persisted lesson. The two patterns are complementary, not competing.
 
 **Negative:**
-- New paid LLM calls on every escalation. Same model class by default keeps cost in line with the wedged agent's call, but volume goes up by one call per escalation.
+- New paid LLM calls on every escalation. If humans configure recovery capabilities to a stronger model (recommended), per-call cost is higher than the wedged agent's call.
 - Three new capabilities × N providers = matrix of model defaults to maintain.
+- More setup burden on humans. Recovery models are another decision the operator has to make thoughtfully — semspec leans into this, but it's a real cost compared to "any model works."
 - Recovery agent itself can wedge — guardrails (no nested, hard timeout, one attempt) cap the damage but don't eliminate it.
 - Coordinator is another component to design, test, ship. Not free.
 - "Escalate to human" path needs UI work to show recovery diagnosis usefully.
+- No runtime model-swap means a wedge that genuinely needs a different model class will always escalate to human (semteams handles this via site-coordinator runtime config; we accept the gap as the cost of avoiding runtime config mutation).
 
 **Risks worth tracking:**
 - Goodhart on the recovery layer itself — if recovery actions are easy to log as "tried," but no real diagnosis happens, we'll get green metrics with no real recovery. Mitigation: pin specific recovery patterns with real-LLM regression tests (same shape as `TestSoftwareGraphErrorEscapeHatches`).
 - Recovery becoming a crutch for poor phase-local checks — if rejection-then-recovery becomes the happy path, the underlying gates rot. Mitigation: track recovery-rate per gate; sustained high recovery on a specific gate is a signal the gate itself needs improvement.
-- `bump_model` becoming the default action — if recovery agents reach for the smarter-model action without trying refine/narrow first, we lose the manager-role-leverage thesis. Mitigation: track action distribution per recovery; bump_model dominance is a signal the manager role isn't being used as designed.
+- Pressure to add `bump_model` to the action set as wedge classes accumulate that need a stronger model than the human picked. If this pressure becomes load-bearing, that's the signal to revisit the runtime-config-mutation deferral and follow semteams' site-coordinator path. Until then, `escalate_human` with a clear "need stronger recovery model" diagnosis is the relief valve.
 
 ## Open questions
 
