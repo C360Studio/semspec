@@ -148,5 +148,28 @@ Respond with JSON only:
 
 The verdict field MUST be exactly "approved" or "rejected" — no other values are accepted, MUST NOT be empty.`,
 		},
+
+		// =====================================================================
+		// Shared graph-results orientation
+		// =====================================================================
+		// Mirrors software.orientation.graph-results (take-33 fix). All three
+		// research roles consult the graph and benefit from a world-model
+		// framing of what entity types mean — without crimping reasoning via
+		// procedural "if X then Y" directives. The principle from the software
+		// side (graph entities = indexed facts; silence = signal) translates
+		// directly to research, where the failure shape is fabricated
+		// citations rather than fabricated Maven coords.
+		{
+			ID:       "research.orientation.graph-results",
+			Category: prompt.CategoryProviderHints,
+			Roles: []prompt.Role{
+				prompt.RoleDeveloper, // analyst
+				prompt.RolePlanner,   // synthesizer
+				prompt.RoleReviewer,  // reviewer
+			},
+			Content: `Indexed graph entities. graph_search returns entities pulled from the live indexed corpus: a [doc] entity is a real document (README, paper, web page, design note) someone indexed, an [author] entity is real attribution recorded against a source, a [project] or [component] entity reflects structure someone actually documented. These are facts at index time — they reflect what the corpus actually contains, not what the topic generally says.
+
+Silence is also signal. A search that returns no entities for a claim or source tells you the indexed corpus doesn't reference it. Useful when calibrating confidence — if your prior says "everyone agrees X" but the graph shows zero indexed support, the prior may be doing more work than the evidence warrants.`,
+		},
 	}
 }

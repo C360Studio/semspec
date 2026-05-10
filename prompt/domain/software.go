@@ -1481,6 +1481,27 @@ Use the right tool for the question: graph for indexing, relationships, and prio
 Two failed graph calls of the same shape is the signal to switch tools, not to try a third variant. Bash can read files directly when the graph isn't cooperating.`,
 		},
 		{
+			// Reading graph search results well. Take 33 (gemini @hard 2026-05-10)
+			// hallucinated Maven coordinates ("org.opensensorhub:opensensorhub-core:0.2.0-SNAPSHOT"
+			// — fictional) for a pom.xml after graph_search returned a list
+			// of [project]/[doc] entities including the correct hint
+			// "org.sensorhub [project]". The agent never followed up with
+			// graph_query to read a doc body and instead synthesized coords
+			// from the GitHub repo slug. This fragment shares the world-model
+			// (graph entities = indexed facts, not strings) so the agent's
+			// own reasoning weighs them against its training prior, rather
+			// than directing a procedural "if X then Y" lookup that would
+			// crimp judgment in different contexts.
+			ID:       "software.orientation.graph-results",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 1 && ctx.HasTool("graph_summary")
+			},
+			Content: `Indexed graph entities. graph_search returns entities pulled from the live source repos: a [project] entity is the groupId/artifactId someone wrote in their pom.xml, a [dependency] entity is a coord declared in a real package manifest, a [doc] entity is a real README or docs page. These are facts at index time — they reflect snapshot versions, internal artifacts, and recent publishes that aren't in pretraining.
+
+Silence is also signal. A search that returns no [project]/[dependency] for an external library tells you the indexed repos don't reference it. Useful when calibrating confidence in your own prior.`,
+		},
+		{
 			// Fallback orientation for personas whose tool allowlist excludes
 			// the graph tools (some narrow roles). Preserves the prior
 			// "orient briefly" guidance without the graph-first directive.

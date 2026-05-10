@@ -421,6 +421,71 @@ func TestSoftwareGraphErrorEscapeHatches(t *testing.T) {
 	}
 }
 
+// TestSoftwareGraphResultOrientation pins the take-33 fix (gemini @hard
+// 2026-05-10): graph-equipped personas must see the world-model framing for
+// graph search results — entities tagged [project]/[dependency]/[doc] are
+// indexed facts from real source repos, not strings; an empty result is
+// itself signal about what the indexed repos do or don't reference. The
+// goal is to enrich the agent's reasoning about graph evidence vs its
+// training prior, NOT to direct procedural behavior ("if X then do Y" was
+// rejected as crimping reasoning). Take 33 burned 5 TDD cycles fabricating
+// fictional Maven coords ("org.opensensorhub:opensensorhub-core:0.2.0-SNAPSHOT")
+// after graph_search surfaced the correct hint "org.sensorhub [project]"
+// and the agent ignored it.
+func TestSoftwareGraphResultOrientation(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	withGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "graph_summary", "graph_search", "graph_query"},
+	})
+
+	mustContain := []string{
+		"Indexed graph entities",
+		"[project]",
+		"[dependency]",
+		"[doc]",
+		"facts at index time",
+		"aren't in pretraining",
+		"Silence is also signal",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(withGraph.SystemMessage, want) {
+			t.Errorf("graph-results orientation missing %q from developer persona", want)
+		}
+	}
+
+	// Goodhart guard: this orientation must NOT carry procedural directives
+	// that would crimp the agent's reasoning. If a future edit reintroduces
+	// MUST/before-X-do-Y framing, this test fails so the regression is
+	// surfaced at PR time. The whole point of this fragment is enrichment,
+	// not compliance.
+	mustNotContain := []string{
+		"You MUST call graph_query",
+		"Before writing external coordinates",
+		"Before you write coordinates",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(withGraph.SystemMessage, banned) {
+			t.Errorf("graph-results orientation reintroduced procedural directive %q (Goodhart guard)", banned)
+		}
+	}
+
+	// Personas without graph tools must NOT receive this stanza — it
+	// references tools they don't have and would be dead weight.
+	withoutGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if strings.Contains(withoutGraph.SystemMessage, "Indexed graph entities") {
+		t.Errorf("non-graph persona must not receive graph-results orientation")
+	}
+}
+
 // TestSoftwareRequirementGeneratorFilesOwned pins the dial-#1 prompt landing
 // in the right persona. The first attempt edited workflow/prompts/
 // requirement_generator.go which was dead code and never reached Gemini —
