@@ -372,6 +372,63 @@ Your workspace contains files from a previous attempt at this task.
 		},
 
 		// =====================================================================
+		// Code-reviewer retry directive — prior-cycle feedback awareness
+		// =====================================================================
+		// Symmetric to software.developer.retry-directive. The developer's
+		// retry prompt surfaces "previous reviewer feedback" so they can
+		// respond to it; the reviewer's retry prompt surfaces "previous
+		// reviewer feedback YOU gave" so they don't flip verdict types
+		// between cycles without acknowledging their own prior call.
+		//
+		// Without this fragment, cycle-N reviewer judges the developer's
+		// submission as a fresh review with no memory of cycle-(N-1)'s
+		// feedback. Real-LLM @hard 2026-05-10 take 2 caught the wedge: a
+		// gemini-pro reviewer rejected cycle 0 as "fixable", the developer
+		// dutifully addressed the feedback in cycle 1, and the same
+		// reviewer (zero memory of cycle 0) flipped to "restructure" on
+		// cycle 1 — restructure escalates IMMEDIATELY and bypasses the
+		// remaining TDD budget. Task terminal-failed with no path forward.
+		//
+		// The data was always in scope (buildAssemblyContext wires
+		// TaskContext.Feedback + IsRetry for the reviewer too); the
+		// fragment library just had a coverage gap. Commit ee9972e fixed
+		// the same wedge class for plan-reviewer; this is the symmetric
+		// fix for the TDD code-reviewer.
+		{
+			ID:       "software.reviewer.retry-directive",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 1,
+			Roles:    []prompt.Role{prompt.RoleReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil &&
+					ctx.TaskContext.IsRetry &&
+					ctx.TaskContext.Feedback != ""
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				return fmt.Sprintf(`PRIOR REVIEW CONTEXT — this is TDD cycle %d of %d (a retry, not a fresh review):
+
+You reviewed this task on the previous cycle and rejected with this feedback:
+
+%s
+
+The developer's current submission is their response to YOUR prior feedback. Read it as a retry, not a fresh review.
+
+Before deciding the new verdict:
+
+1. Did the developer address what you asked for? If yes, APPROVE. Don't manufacture new objections to a submission that addresses your stated concerns.
+
+2. If you now want something different than you asked for last cycle, your prior feedback was wrong. Say so transparently in your new feedback, and use rejection_type=fixable with the corrected guidance. Do NOT use restructure to paper over a reviewer flip-flop.
+
+3. rejection_type=restructure escalates the task IMMEDIATELY and bypasses the remaining TDD cycle budget. Use it ONLY when the developer's approach is fundamentally incompatible with the requirement — for example, wrong architecture, wrong language, wrong file scope. NOT because you reconsidered last cycle's call.
+
+4. If the developer's prior-cycle work is unusable in your judgment, use rejection_type=fixable with explicit "rewrite X from scratch using approach Y" guidance. Restructure is for "this task as-decomposed cannot succeed" — a plan-level problem — not for "I want different code than I asked for."`,
+					ctx.TaskContext.Iteration,
+					ctx.TaskContext.MaxIterations,
+					ctx.TaskContext.Feedback)
+			},
+		},
+
+		// =====================================================================
 		// Planner fragments
 		// =====================================================================
 		{

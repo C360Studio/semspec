@@ -907,3 +907,159 @@ func TestSoftwareRetryFragment(t *testing.T) {
 		t.Error("expected feedback content in retry prompt")
 	}
 }
+
+// TestSoftwareReviewerRetryFragment pins the prior-cycle awareness fix that
+// closes the reviewer-flip-flop wedge from gemini @hard 2026-05-10 take 2.
+// Without this fragment, cycle-N reviewer evaluates the developer's
+// submission as a fresh review and can flip rejection_type=fixable on
+// cycle N-1 into rejection_type=restructure on cycle N — restructure
+// escalates IMMEDIATELY and bypasses the remaining TDD budget. The
+// developer dutifully addressed the prior cycle's feedback and the system
+// has no way to win against a reviewer that changes its mind.
+//
+// Symmetric to TestSoftwareRetryFragment (developer side) and the
+// plan-reviewer prior-round fix in commit ee9972e.
+func TestSoftwareReviewerRetryFragment(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	// Cycle 0 / no retry — the fragment must NOT fire. Cycle 0 has no prior
+	// feedback to reference, and rendering this stanza on a fresh review
+	// would confuse the model with an empty Feedback section.
+	cycle0 := a.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RoleReviewer,
+		Provider: prompt.ProviderOpenAI,
+		TaskContext: &prompt.TaskContext{
+			IsRetry:       false,
+			Feedback:      "",
+			Iteration:     1,
+			MaxIterations: 5,
+		},
+	})
+	if strings.Contains(cycle0.SystemMessage, "PRIOR REVIEW CONTEXT") {
+		t.Error("reviewer-retry directive must NOT appear on cycle 0 (fresh review)")
+	}
+
+	// Cycle 1+ with prior feedback — the fragment must fire, surface the
+	// prior cycle's feedback verbatim, and warn against flip-flopping
+	// verdict types.
+	priorFeedback := "Tests for read() are missing the timeout-zero branch."
+	cycle1 := a.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RoleReviewer,
+		Provider: prompt.ProviderOpenAI,
+		TaskContext: &prompt.TaskContext{
+			IsRetry:       true,
+			Feedback:      priorFeedback,
+			Iteration:     2,
+			MaxIterations: 5,
+		},
+	})
+
+	mustContain := []string{
+		// Frames the prompt as a retry, not a fresh review.
+		"PRIOR REVIEW CONTEXT",
+		"retry",
+		// Renders the prior feedback verbatim so reviewer can see what
+		// the developer was asked to address.
+		priorFeedback,
+		// Names the flip-flop wedge explicitly. Cycle-0 fixable →
+		// cycle-1 restructure is the exact shape that wedged take 2.
+		"restructure",
+		"flip-flop",
+		// The escalation cost — reviewer must know restructure
+		// bypasses the remaining TDD budget.
+		"bypasses the remaining TDD",
+		// The corrective path when the reviewer realises their prior
+		// call was wrong. Saying so transparently with fixable+corrected
+		// guidance is the right shape; flipping to restructure is not.
+		"fixable",
+		"transparently",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(cycle1.SystemMessage, want) {
+			t.Errorf("reviewer-retry directive missing %q on cycle 1\nfull system message:\n%s",
+				want, cycle1.SystemMessage)
+		}
+	}
+
+	// Goodhart guards: this fragment must NOT push the reviewer into
+	// over-correction. If a future edit weakens reviewer judgment with
+	// "always approve" language, this test catches it at PR time — the
+	// goal is to prevent FLIP-FLOPPING, not to neutralise the reviewer.
+	// Assert against the fragment content directly so legitimate
+	// "MUST submit_work" terminal directives in other fragments don't
+	// false-positive.
+	var fragContent string
+	for _, f := range Software() {
+		if f.ID == "software.reviewer.retry-directive" {
+			if f.ContentFunc == nil {
+				t.Fatal("software.reviewer.retry-directive is content-only; expected ContentFunc for Feedback templating")
+			}
+			fragContent = f.ContentFunc(&prompt.AssemblyContext{
+				TaskContext: &prompt.TaskContext{
+					IsRetry:       true,
+					Feedback:      priorFeedback,
+					Iteration:     2,
+					MaxIterations: 5,
+				},
+			})
+			break
+		}
+	}
+	if fragContent == "" {
+		t.Fatal("software.reviewer.retry-directive fragment not found")
+	}
+	mustNotContain := []string{
+		"always approve",
+		"You MUST approve",
+		"you must approve",
+		"never reject",
+		"do not reject",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(fragContent, banned) {
+			t.Errorf("reviewer-retry fragment carries over-correction language %q (Goodhart guard — fragment must prevent flip-flop, not neutralise judgment)",
+				banned)
+		}
+	}
+
+	// Cycle-1 retry with EMPTY prior feedback — the fragment must NOT fire.
+	// IsRetry true with Feedback empty means the prior cycle wasn't a
+	// review rejection (e.g. parse retry, infrastructure retry); rendering
+	// "you reviewed this last cycle and rejected with this feedback:"
+	// followed by nothing would be worse than nothing.
+	cycle1Empty := a.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RoleReviewer,
+		Provider: prompt.ProviderOpenAI,
+		TaskContext: &prompt.TaskContext{
+			IsRetry:       true,
+			Feedback:      "",
+			Iteration:     2,
+			MaxIterations: 5,
+		},
+	})
+	if strings.Contains(cycle1Empty.SystemMessage, "PRIOR REVIEW CONTEXT") {
+		t.Error("reviewer-retry directive must NOT appear when prior feedback is empty (would render a malformed stanza)")
+	}
+
+	// Cross-role check: this fragment is specifically for the TDD
+	// code-reviewer (RoleReviewer). plan-reviewer + scenario-reviewer
+	// have their own prior-round rendering (writePlanReviewerPriorRound
+	// + ScenarioReviewContext.RetryFeedback). If a future refactor
+	// accidentally bleeds this fragment to those roles, they'd carry
+	// duplicate prior-feedback stanzas — fix that here instead.
+	planReviewer := a.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RolePlanReviewer,
+		Provider: prompt.ProviderOpenAI,
+		TaskContext: &prompt.TaskContext{
+			IsRetry:       true,
+			Feedback:      priorFeedback,
+			Iteration:     2,
+			MaxIterations: 5,
+		},
+	})
+	if strings.Contains(planReviewer.SystemMessage, "PRIOR REVIEW CONTEXT") {
+		t.Error("plan-reviewer must use its own prior-round fragment, not the code-reviewer retry-directive")
+	}
+}
