@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -311,6 +312,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"round", round,
 			"outcome", loop.Outcome,
 			"error", errMsg)
+		trajectory.LogSummary(ctx, c.logger, c.natsClient, loop.ID, "plan-review-loop-failed", 0)
 		c.retryOrFail(ctx, slug, round, errMsg)
 		return
 	}
@@ -330,6 +332,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"error", err,
 			"result_len", len(loop.Result),
 			"result_preview", truncatePreview(loop.Result, 240))
+		trajectory.LogSummary(ctx, c.logger, c.natsClient, loop.ID, "plan-review-parse-failed", 0)
 		c.retryOrFail(ctx, slug, round, fmt.Sprintf("failed to parse review result: %v", err))
 		return
 	}

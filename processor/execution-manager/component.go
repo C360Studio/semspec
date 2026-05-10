@@ -35,6 +35,7 @@ import (
 
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 
+	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -1053,6 +1054,7 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 		"tdd_cycle", exec.TDDCycle,
 		"reason", reason,
 	)
+	trajectory.LogSummary(ctx, c.logger, c.natsClient, exec.DeveloperLoopID, "tdd-escalated", 0)
 
 	// Notify callers that the TDD pipeline escalated (treated as failure).
 

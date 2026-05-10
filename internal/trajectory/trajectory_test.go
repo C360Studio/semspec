@@ -1,9 +1,11 @@
 package trajectory
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -177,5 +179,99 @@ func TestClip(t *testing.T) {
 	got := clip("abcdefghij", 5)
 	if len([]rune(got)) != 5 || got[len(got)-len("…"):] != "…" {
 		t.Errorf("clip did not append ellipsis: %q", got)
+	}
+}
+
+// debugLogger returns a slog.Logger that writes JSON to a buffer at DEBUG
+// level — the trajectory log helper emits at DEBUG so the default INFO
+// handler would silently drop everything.
+func debugLogger() (*slog.Logger, *bytes.Buffer) {
+	var buf bytes.Buffer
+	h := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(h), &buf
+}
+
+func TestLogSummary_Success(t *testing.T) {
+	traj := agentic.Trajectory{
+		LoopID:    "loop-7",
+		StartTime: time.Now(),
+		Steps: []agentic.TrajectoryStep{
+			{StepType: "tool_call", ToolName: "bash", ToolStatus: "failed", ErrorMessage: "exit 1"},
+			{StepType: "model_call", Model: "qwen3:14b"},
+		},
+	}
+	body, _ := json.Marshal(&traj)
+	stub := &stubRequester{resp: body}
+	logger, buf := debugLogger()
+
+	LogSummary(context.Background(), logger, stub, "loop-7", "test-context", 0)
+
+	out := buf.String()
+	if !strings.Contains(out, `"msg":"Trajectory summary"`) {
+		t.Errorf("expected success message, got %s", out)
+	}
+	if !strings.Contains(out, `"loop_id":"loop-7"`) {
+		t.Errorf("expected loop_id field, got %s", out)
+	}
+	if !strings.Contains(out, `"context":"test-context"`) {
+		t.Errorf("expected context field, got %s", out)
+	}
+	if !strings.Contains(out, `"step_count":2`) {
+		t.Errorf("expected step_count=2, got %s", out)
+	}
+}
+
+func TestLogSummary_NotFound(t *testing.T) {
+	stub := &stubRequester{err: errors.New("trajectory not found: missing")}
+	logger, buf := debugLogger()
+
+	LogSummary(context.Background(), logger, stub, "loop-x", "test-context", 0)
+
+	out := buf.String()
+	if !strings.Contains(out, `"msg":"Trajectory not available"`) {
+		t.Errorf("expected not-available message, got %s", out)
+	}
+	if !strings.Contains(out, `"loop_id":"loop-x"`) {
+		t.Errorf("expected loop_id field, got %s", out)
+	}
+}
+
+func TestLogSummary_TransportError(t *testing.T) {
+	stub := &stubRequester{err: errors.New("nats: connection lost")}
+	logger, buf := debugLogger()
+
+	LogSummary(context.Background(), logger, stub, "loop-x", "test-context", 0)
+
+	out := buf.String()
+	if !strings.Contains(out, `"msg":"Trajectory fetch failed"`) {
+		t.Errorf("expected fetch-failed message, got %s", out)
+	}
+	if !strings.Contains(out, "connection lost") {
+		t.Errorf("expected error detail in log, got %s", out)
+	}
+}
+
+func TestLogSummary_EmptyLoopID(t *testing.T) {
+	// Empty loopID is a soft-no-op so callers don't need a guard.
+	stub := &stubRequester{}
+	logger, buf := debugLogger()
+
+	LogSummary(context.Background(), logger, stub, "", "test-context", 0)
+
+	if buf.Len() != 0 {
+		t.Errorf("expected no log output for empty loopID, got %s", buf.String())
+	}
+	if stub.gotSubject != "" {
+		t.Errorf("expected no NATS request for empty loopID, but got subject %q", stub.gotSubject)
+	}
+}
+
+func TestLogSummary_NilLogger(t *testing.T) {
+	// Nil logger is a soft-no-op so callers don't crash if they forgot to
+	// thread the logger through.
+	stub := &stubRequester{}
+	LogSummary(context.Background(), nil, stub, "loop-x", "test-context", 0)
+	if stub.gotSubject != "" {
+		t.Errorf("expected no NATS request when logger nil, got subject %q", stub.gotSubject)
 	}
 }

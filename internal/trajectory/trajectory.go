@@ -10,12 +10,68 @@ package trajectory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
 )
+
+// DefaultLogStepLimit is the default max number of trajectory steps emitted
+// by LogSummary. 80 mirrors lesson-decomposer's prompt-builder cap, which is
+// already proven to be enough context for diagnosing wedges without
+// flooding the log line.
+const DefaultLogStepLimit = 80
+
+// LogSummary fetches the trajectory for loopID and emits a single DEBUG log
+// line with one-line per-step summaries. Used by escalation/rejection event
+// handlers in execution-manager, plan-manager, qa-reviewer and friends per
+// ADR-037 Stage 0 — the operator gets the upstream agent's tail trajectory
+// inline with the rejection event, no separate trace lookup needed.
+//
+// Behaviour:
+//   - empty loopID         → no-op (callers don't need a guard)
+//   - successful fetch     → DEBUG "Trajectory summary" with step_count + steps
+//   - ErrNotFound          → DEBUG "Trajectory not available"
+//   - any other fetch err  → DEBUG "Trajectory fetch failed" with error
+//
+// Always DEBUG to keep INFO/WARN streams free of trajectory noise; the
+// existing escalation log lines stay at their current levels and operators
+// opt in to trajectories by raising verbosity for the affected component.
+//
+// stepLimit ≤ 0 means use DefaultLogStepLimit. label is a short context tag
+// (e.g. "qa-loop-failed", "tdd-cycle-exhausted") so multiple log sites in
+// one component remain distinguishable.
+func LogSummary(ctx context.Context, logger *slog.Logger, client Requester, loopID, label string, stepLimit int) {
+	if logger == nil || loopID == "" {
+		return
+	}
+	if stepLimit <= 0 {
+		stepLimit = DefaultLogStepLimit
+	}
+
+	traj, err := Fetch(ctx, client, loopID, stepLimit)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			logger.Debug("Trajectory not available", "loop_id", loopID, "context", label)
+			return
+		}
+		logger.Debug("Trajectory fetch failed", "loop_id", loopID, "context", label, "error", err)
+		return
+	}
+
+	steps := make([]string, 0, len(traj.Steps))
+	for i, step := range traj.Steps {
+		steps = append(steps, fmt.Sprintf("[%d] %s", i, SummarizeStep(step, 200)))
+	}
+	logger.Debug("Trajectory summary",
+		"loop_id", loopID,
+		"context", label,
+		"step_count", len(traj.Steps),
+		"steps", steps)
+}
 
 // Subject is the NATS request/reply subject the agentic-loop processor
 // handles. See semstreams agentic-loop component handleTrajectoryQuery.

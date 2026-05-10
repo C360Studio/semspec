@@ -24,6 +24,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -615,6 +616,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		}
 		c.logger.Error("QA reviewer agent loop failed",
 			"slug", slug, "loop_id", loop.ID, "outcome", loop.Outcome, "error", errMsg)
+		trajectory.LogSummary(ctx, c.logger, c.natsClient, loop.ID, "qa-loop-failed", 0)
 		c.retryOrFail(ctx, slug, errMsg)
 		return
 	}
@@ -633,6 +635,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"slug", slug, "loop_id", loop.ID, "error", err,
 			"result_len", len(loop.Result),
 			"result_preview", truncatePreview(loop.Result, 240))
+		trajectory.LogSummary(ctx, c.logger, c.natsClient, loop.ID, "qa-parse-failed", 0)
 		c.retryOrFail(ctx, slug, fmt.Sprintf("failed to parse qa-review result: %v", err))
 		return
 	}
