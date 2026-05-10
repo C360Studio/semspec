@@ -20,6 +20,17 @@
 #   docker compose -f ui/docker-compose.e2e.yml \
 #     -f ui/docker-compose.e2e-llm.yml \
 #     -f ui/docker-compose.e2e-epic.yml up -d --wait
+#
+# Shared semsource-clones volume (added 2026-05-10): the three external
+# semsources clone their repos into this volume; the sandbox mounts it
+# read-only at /sources. Closes the AST/docs lens gap — agent bash can
+# now read pom.xml, package.json, LICENSE, raw upstream source bodies
+# that graph_search/graph_query don't return as triples. Drove the
+# fix on take 1 (gemini @hard 2026-05-10 req.3) Maven coord fabrication.
+
+volumes:
+  semsource-clones:
+    driver: local
 
 services:
   # Workspace semsource: swap to Java project fixture.
@@ -29,9 +40,13 @@ services:
       - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace:ro
 
   # Sandbox: swap to Java project fixture.
+  # /sources is the read-only view of the shared semsource-clones volume —
+  # agent bash reads upstream files (pom.xml etc.) for ground-truth coords
+  # instead of fabricating them.
   sandbox:
     volumes:
       - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace
+      - semsource-clones:/sources:ro
 
   # External semsources are CHAINED on healthy = "seeding done" — chain
   # order is meshtastic (smallest) → ogc → osh (largest). Each one's
@@ -65,6 +80,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       # phase="ready" → all sources in this semsource finished seeding.
@@ -97,6 +113,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
@@ -124,6 +141,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
