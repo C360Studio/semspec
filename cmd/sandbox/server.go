@@ -2057,6 +2057,16 @@ func isValidPackageName(name string) bool {
 
 // resolveTaskPath resolves a relative path within a task's worktree to an
 // absolute path, guarding against directory traversal attacks.
+//
+// Boundary policy (load-bearing — do NOT relax for new endpoints):
+// the sandbox file APIs (read/write/list/search) are scoped to the agent's
+// per-task worktree. Reference mounts like /sources (semsource clones,
+// read-only) are intentionally bash-only — agents read upstream files via
+// bash for ground-truth (build coords, configs, licenses) but those files
+// are NOT part of the agent's work product and must not be exported through
+// HTTP file endpoints. Any new endpoint that returns or walks files MUST
+// route through resolveTaskPath (or an equivalent worktree-bounded
+// resolver) so /sources stays out of file-export surfaces.
 func (s *Server) resolveTaskPath(taskID, relPath string) (string, error) {
 	if !isValidID(taskID) {
 		return "", fmt.Errorf("invalid task_id")

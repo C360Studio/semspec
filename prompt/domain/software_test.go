@@ -510,6 +510,8 @@ func TestSoftwareUpstreamSourcesOrientation(t *testing.T) {
 		"read-only",
 		"pom.xml",
 		"AST/docs lens drops",
+		"reference material",
+		"Don't copy whole directories",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(withGraphAndBash.SystemMessage, want) {

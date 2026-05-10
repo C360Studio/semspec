@@ -1520,7 +1520,9 @@ Silence is also signal. A search that returns no [project]/[dependency] for an e
 
 Graph captures structure (Java types, function signatures, doc headings); the file contents the AST/docs lens drops are still on disk. pom.xml, package.json, Cargo.toml, LICENSE, Makefile, build configs, raw source bodies — for any of those, bash on /sources/<namespace>/ reads what graph can't return.
 
-Practical pattern: graph_search to find which entity (and which namespace) is relevant; then bash to /sources/<namespace>/ for the actual file when graph triples don't carry the answer (Maven coords, repository URLs, parent-pom inheritance, license terms). The mount is read-only so you observe upstream truth without affecting it.`,
+Practical pattern: graph_search to find which entity (and which namespace) is relevant; then bash to /sources/<namespace>/ for the actual file when graph triples don't carry the answer (Maven coords, repository URLs, parent-pom inheritance, license terms). The mount is read-only so you observe upstream truth without affecting it.
+
+/sources/ is reference material — not part of your worktree. Read it, copy specific values out (a coord, a snippet, a config block) into the files you write under your worktree. Don't copy whole directories from /sources/ into the worktree; that pollutes the diff with content you didn't author and licensing you don't own.`,
 		},
 		{
 			// Tool-error-loop escape. Take 1 (gemini @hard 2026-05-10 req.5)
