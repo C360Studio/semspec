@@ -594,6 +594,14 @@ func TestSoftwareToolErrorLoopEscapeHatch(t *testing.T) {
 		"obstacle summary",
 		"iteration budget",
 		"diagnostic",
+		// Generalisation markers (take 5 2026-05-10): the fragment must
+		// frame the wedge as tool-agnostic, not bash-specific. Take 5
+		// surfaced an http_request 404-chase wedge that the bash-only
+		// trigger missed entirely. If a future refactor narrows the
+		// fragment back to bash, these assertions catch it.
+		"any tool",
+		"HTTP non-2xx",
+		"across any tool",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(withTools.SystemMessage, want) {
@@ -641,6 +649,21 @@ func TestSoftwareToolErrorLoopEscapeHatch(t *testing.T) {
 	})
 	if !strings.Contains(reviewer.SystemMessage, "submit_work is the escape") {
 		t.Errorf("reviewer persona with bash+submit_work must receive tool-error-loop orientation")
+	}
+
+	// Generalised trigger (2026-05-10): an agent with submit_work but NO
+	// bash (e.g. a research agent with only graph + http_request +
+	// submit_work) SHOULD still receive the orientation — that's exactly
+	// the take-5 http_request 404-chase wedge surface. Verifies the
+	// trigger broadened correctly from "bash AND submit_work" to just
+	// "submit_work".
+	noBashWithSubmit := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RolePlanner,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"http_request", "graph_query", "submit_work"},
+	})
+	if !strings.Contains(noBashWithSubmit.SystemMessage, "submit_work is the escape") {
+		t.Errorf("agent with submit_work but no bash must receive tool-error-loop orientation (generalised trigger)")
 	}
 
 	// A persona without submit_work (e.g. a read-only role) must NOT receive

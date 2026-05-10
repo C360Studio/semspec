@@ -1536,16 +1536,28 @@ Practical pattern: graph_search to find which entity (and which namespace) is re
 			// that crimps judgment in different contexts. World-model only:
 			// repeated failures are signal about the obstacle, submit_work is
 			// always available, the iteration budget is finite.
+			//
+			// Generalised 2026-05-10 (take 5): the original fragment was
+			// bash-specific. Take 5 surfaced an http_request 404-chase wedge
+			// (agent probing dead-Bintray Maven URLs) that the bash trigger
+			// missed entirely. Tool-failure pattern is the same regardless of
+			// which tool — bash, http_request, graph_query, future tools.
+			// Trigger broadened from `HasTool("bash") && HasTool("submit_work")`
+			// to just `HasTool("submit_work")` so any agent that can submit_work
+			// gets the orientation. Wording broadened from "When bash exits
+			// non-zero…" to "When any tool returns the same error class…" with
+			// concrete examples spanning bash exit codes, HTTP non-2xx, graph
+			// errors, etc.
 			ID:       "software.orientation.tool-error-loop",
 			Category: prompt.CategoryProviderHints,
 			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.HasTool("bash") && ctx.HasTool("submit_work")
+				return ctx.HasTool("submit_work")
 			},
-			Content: `Tool failures are signal about the obstacle, not just noise to retry through. When bash exits non-zero three or more times on variants of the same command, the obstacle is usually structural — a missing dependency, an unresolvable coordinate, a misconfigured environment, a permission issue — and bash can't fix it from inside the loop. Successive micro-variants of the same command shape produce successive variants of the same error.
+			Content: `Tool failures are signal about the obstacle, not just noise to retry through. When any tool returns the same error class three or more times on variants of the same call — bash exit codes on micro-variants of the same command, HTTP non-2xx on URL probes against the same host, graph_query syntax errors, validator rejections naming the same missing field — the obstacle is usually structural. A missing dependency, an unresolvable coordinate, a dead artifact repository, a misconfigured environment, a permission issue, a schema-vs-prompt mismatch. The tool can't fix it from inside the loop. Successive micro-variants of the same call shape produce successive variants of the same error.
 
-submit_work is the escape. It's always available, including for "I'm blocked": a brief obstacle summary of what you tried, what failed, and what remains unknown gives the next reviewer or planner the diagnostic context to decide what changes — a fixture, a dependency, a scope adjustment. That's a more productive recovery than the 51st bash variant.
+submit_work is the escape. It's always available, including for "I'm blocked": a brief obstacle summary of what you tried, what failed, and what remains unknown gives the next reviewer or planner the diagnostic context to decide what changes — a fixture, a dependency, a scope adjustment, a different tool. That's a more productive recovery than the 51st variant of the same call.
 
-Per-cycle iteration budgets are finite. The worst outcome is exhausting the budget without surfacing the obstacle: the cycle escalates with empty context, no diagnostic, and the loop wedges silently. Recognizing repeated failures early and submitting an obstacle summary preserves the diagnostic so the next role can act on it.`,
+Per-cycle iteration budgets are finite. The worst outcome is exhausting the budget without surfacing the obstacle: the cycle escalates with empty context, no diagnostic, and the loop wedges silently. Recognizing repeated failures early — across any tool, not just bash — and submitting an obstacle summary preserves the diagnostic so the next role can act on it.`,
 		},
 		{
 			// Fallback orientation for personas whose tool allowlist excludes
