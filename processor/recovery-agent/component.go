@@ -659,12 +659,17 @@ func (c *Component) persistRecoveryState(ctx context.Context, req *payloads.Reco
 			"recovery_id", complete.RecoveryID, "error", err)
 		return
 	}
-	kv, err := js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
+	// CreateOrUpdateKeyValue (not CreateKeyValue) — idempotent on existing
+	// buckets. Bare CreateKeyValue errors with "bucket name already in use"
+	// when another component / probe pre-touched the bucket, silently
+	// skipping the write. Caught 2026-05-10 take 2 real-LLM @hard run: the
+	// e2e scenario's RECOVERY_STATES poller created the bucket at startup,
+	// so the recovery-agent's first persist attempt failed and the
+	// diagnosis never landed on disk.
+	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
 		Bucket: payloads.RecoveryStatesBucket,
 	})
 	if err != nil {
-		// CreateKeyValue is idempotent on existing buckets in current nats.go;
-		// any other error blocks the write.
 		c.logger.Warn("Cannot open RECOVERY_STATES bucket",
 			"recovery_id", complete.RecoveryID, "error", err)
 		return
