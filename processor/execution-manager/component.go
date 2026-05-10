@@ -1540,12 +1540,13 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 	timeout := 30 * time.Second
 
 	req := &payloads.ValidationRequest{
-		ExecutionID:   uuid.New().String(),
-		Slug:          exec.Slug,
-		FilesModified: exec.FilesModified,
-		WorktreePath:  exec.WorktreePath,
-		TaskID:        exec.TaskID,
-		TraceID:       exec.TraceID,
+		ExecutionID:     uuid.New().String(),
+		Slug:            exec.Slug,
+		FilesModified:   exec.FilesModified,
+		WorktreePath:    exec.WorktreePath,
+		TaskID:          exec.TaskID,
+		DeveloperLoopID: exec.DeveloperLoopID,
+		TraceID:         exec.TraceID,
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, componentName)

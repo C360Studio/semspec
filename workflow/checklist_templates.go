@@ -267,7 +267,24 @@ var rustBaseTemplates = []checkTemplate{
 // --- Java templates ----------------------------------------------------------
 
 // javaBaseTemplates are the minimum checks for a Maven project.
+//
+// mvn-validate runs first (dependency:resolve) so unresolvable coordinates
+// fail with a clear "Could not find artifact …" message before the test
+// suite swallows them in a compiler trace. Caught take 1 (gemini @hard
+// 2026-05-10): agent fabricated `org.opensensorhub:opensensorhub-core:
+// 0.2.0-SNAPSHOT` and the wedge surfaced as a 50-iteration `mvn compile`
+// retry loop. Deterministic dep-resolve at the structural-validator
+// boundary catches the failure mode before it consumes a TDD cycle.
 var javaMavenTemplates = []checkTemplate{
+	{
+		Name:        "mvn-validate",
+		Command:     "mvn dependency:resolve --batch-mode --quiet",
+		Trigger:     []string{"pom.xml"},
+		Category:    CheckCategoryCompile,
+		Required:    true,
+		Timeout:     "180s",
+		Description: "Resolve Maven dependencies (catches unresolvable coords)",
+	},
 	{
 		Name:        "mvn-test",
 		Command:     "mvn test",
@@ -280,7 +297,20 @@ var javaMavenTemplates = []checkTemplate{
 }
 
 // javaGradleTemplates are the minimum checks for a Gradle project.
+//
+// gradle-dependencies mirrors mvn-validate — resolves the dependency graph
+// before tests run so unresolvable coords fail with a clear error rather
+// than burying the failure in a downstream task.
 var javaGradleTemplates = []checkTemplate{
+	{
+		Name:        "gradle-dependencies",
+		Command:     "./gradlew dependencies --quiet",
+		Trigger:     []string{"build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"},
+		Category:    CheckCategoryCompile,
+		Required:    true,
+		Timeout:     "180s",
+		Description: "Resolve Gradle dependencies (catches unresolvable coords)",
+	},
 	{
 		Name:        "gradle-test",
 		Command:     "./gradlew test",

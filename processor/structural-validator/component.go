@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
@@ -292,6 +293,15 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"failed_checks", strings.Join(failedChecks, ","),
 		"first_failure_excerpt", firstExcerpt,
 		"warning", result.Warning)
+	// On rejection, surface the developer agent's trajectory alongside the
+	// failed_checks log line. The validator's verdict tells you WHAT broke
+	// (which checks failed); the trajectory tells you WHY — the path the
+	// developer took to that worktree. ADR-037 stage 0. Soft-no-op when
+	// DeveloperLoopID is empty (manual / E2E-triggered validations don't
+	// have a dispatching loop).
+	if !result.Passed {
+		trajectory.LogSummary(ctx, c.logger, c.natsClient, trigger.DeveloperLoopID, "structural-validation-failed", 0)
+	}
 }
 
 // transitionToFailure transitions the workflow to the validation-error phase.

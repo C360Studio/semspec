@@ -414,6 +414,16 @@ type ValidationRequest struct {
 	// the sandbox boundary.
 	TaskID string `json:"task_id,omitempty"`
 
+	// DeveloperLoopID is the agentic-loop ID of the developer dispatch that
+	// produced the worktree being validated. Stamped by execution-manager
+	// at dispatch time from exec.DeveloperLoopID. Optional — empty when the
+	// validator was triggered outside the TDD pipeline (manual validation,
+	// E2E tests). Used by structural-validator to surface a trajectory
+	// summary alongside the failed_checks log line on rejection (ADR-037
+	// stage 0): the failing checks are the validator's structural verdict,
+	// the trajectory is the developer agent's path to that worktree.
+	DeveloperLoopID string `json:"developer_loop_id,omitempty"`
+
 	// Trace context
 	TraceID string `json:"trace_id,omitempty"`
 }
