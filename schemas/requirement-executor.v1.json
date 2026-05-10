@@ -42,8 +42,7 @@
     },
     "model": {
       "type": "string",
-      "description": "Model endpoint name for agent tasks",
-      "default": "default",
+      "description": "Optional override propagated to req-executor dispatches (empty = use capability registry)",
       "category": "basic"
     },
     "ports": {

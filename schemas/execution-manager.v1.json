@@ -59,8 +59,7 @@
     },
     "model": {
       "type": "string",
-      "description": "Model endpoint name for agent tasks",
-      "default": "default",
+      "description": "Optional override for developer dispatch model (empty = use capability registry)",
       "category": "basic"
     },
     "ports": {

@@ -1328,6 +1328,81 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/loops/{id}/approval": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit human approval response for a gated tool call
+         * @description Drives the beta.19 approval flow over HTTP. The loop must be awaiting approval (see config.approval_required). Decision is one of approve, reject, modify; modified_arguments substitutes for the original tool call arguments when decision=modify. Identity comes from X-User-Id-aware middleware via ctx (preferred) or the body user_id field (fallback), defaulting to http-user.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Loop ID */
+                    id: unknown;
+                };
+                cookie?: never;
+            };
+            /** @description Approval decision and optional modifications */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ApprovalRequest"];
+                };
+            };
+            responses: {
+                /** @description Approval submitted */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Invalid request body or decision value */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Loop not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Loop exists but is not awaiting approval */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Failed to publish approval (NATS error) */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/loops/{id}/signal": {
         parameters: {
             query?: never;
@@ -2035,6 +2110,21 @@ export interface components {
             timestamp: string;
             type: string;
         };
+        ApprovalAcceptResponse: {
+            accepted: boolean;
+            decision: string;
+            loop_id: string;
+            message?: string;
+            timestamp: string;
+        };
+        ApprovalRequest: {
+            decision: string;
+            modified_arguments?: {
+                [key: string]: unknown;
+            };
+            reason?: string;
+            user_id?: string;
+        };
         ComponentType: {
             /** @description Component category */
             category?: string;
@@ -2146,7 +2236,19 @@ export interface components {
                 [key: string]: unknown;
             };
             outcome?: string;
+            pending_approval?: {
+                arguments?: {
+                    [key: string]: unknown;
+                };
+                call_id: string;
+                reason?: string;
+                /** Format: date-time */
+                requested_at: string;
+                tool_name: string;
+                trace_id?: string;
+            } | null;
             result?: string;
+            role?: string;
             state: string;
             task_id: string;
             user_id: string;
@@ -2338,6 +2440,8 @@ export interface components {
             steps: {
                 capability?: string;
                 duration: number;
+                error_category?: string;
+                error_message?: string;
                 messages?: {
                     content?: string;
                     is_error?: boolean;
@@ -2346,6 +2450,7 @@ export interface components {
                     role: string;
                     tool_call_id?: string;
                     tool_calls?: {
+                        approved_by?: string;
                         arguments?: {
                             [key: string]: unknown;
                         };
@@ -2373,6 +2478,7 @@ export interface components {
                     [key: string]: unknown;
                 };
                 tool_calls?: {
+                    approved_by?: string;
                     arguments?: {
                         [key: string]: unknown;
                     };
@@ -2386,6 +2492,7 @@ export interface components {
                 }[];
                 tool_name?: string;
                 tool_result?: string;
+                tool_status?: string;
                 utilization?: number;
             }[];
             total_tokens_in: number;
@@ -2435,6 +2542,8 @@ export interface components {
         TrajectoryStep: {
             capability?: string;
             duration: number;
+            error_category?: string;
+            error_message?: string;
             messages?: {
                 content?: string;
                 is_error?: boolean;
@@ -2443,6 +2552,7 @@ export interface components {
                 role: string;
                 tool_call_id?: string;
                 tool_calls?: {
+                    approved_by?: string;
                     arguments?: {
                         [key: string]: unknown;
                     };
@@ -2470,6 +2580,7 @@ export interface components {
                 [key: string]: unknown;
             };
             tool_calls?: {
+                approved_by?: string;
                 arguments?: {
                     [key: string]: unknown;
                 };
@@ -2483,6 +2594,7 @@ export interface components {
             }[];
             tool_name?: string;
             tool_result?: string;
+            tool_status?: string;
             utilization?: number;
         };
         /**
@@ -2549,11 +2661,23 @@ export interface components {
              * @default general
              */
             default_role: string;
+            /** @description Tool names granted to initial user-message tasks (resolved at dispatch; nil/empty falls back to global discovery) */
+            default_tools?: string[];
             /**
              * @description Delete durable consumers on Stop (use for tests only)
              * @default false
              */
             delete_consumer_on_stop: boolean;
+            /**
+             * @description Enable LLM-assisted intent classification for ambiguous messages
+             * @default false
+             */
+            enable_intent_classification: boolean;
+            /**
+             * @description Enable /onboard command for operating model interview
+             * @default false
+             */
+            enable_onboarding: boolean;
             /** @description Permission configuration */
             permissions?: {
                 /** @description approve */
@@ -2582,6 +2706,11 @@ export interface components {
         "agentic-governance.v1": {
             /** @description Consumer name suffix for uniqueness */
             consumer_name_suffix?: string;
+            /**
+             * @description Enable pre-execution governance filtering for tool calls
+             * @default false
+             */
+            enable_tool_governance: boolean;
             /** @description Filter chain configuration */
             filter_chain?: {
                 /** @description Ordered list of filters to apply */
@@ -2796,6 +2925,8 @@ export interface components {
          * @description Orchestrates agentic loops with tool calls, state management, and trajectory tracking
          */
         "agentic-loop.v1": {
+            /** @description Auto-reject pending approvals after this duration (e.g. 5m or 1h). Empty means wait indefinitely */
+            approval_timeout?: string;
             /**
              * @description Enable Boid-style agent coordination (position tracking and steering signals)
              * @default false
@@ -2806,6 +2937,24 @@ export interface components {
              * @default 30s
              */
             boid_signal_ttl: string;
+            /** @description JetStream consumer tuning for long-running ports (agent.task/agent.response/tool.result) */
+            consumer?: {
+                /**
+                 * @description AckWait duration for long-running consumers (e.g. 90s or 5m)
+                 * @default 90s
+                 */
+                ack_wait: string;
+                /**
+                 * @description InProgress heartbeat interval (e.g. 60s or 2m). Must be less than ack_wait
+                 * @default 60s
+                 */
+                heartbeat_interval: string;
+                /**
+                 * @description Maximum redelivery attempts for long-running consumers
+                 * @default 2
+                 */
+                max_deliver: number;
+            };
             /** @description Suffix for consumer names */
             consumer_name_suffix?: string;
             /**
@@ -2825,6 +2974,8 @@ export interface components {
                 headroom_ratio?: number;
                 /** @description Minimum token headroom floor — ratio-based headroom never goes below this value */
                 headroom_tokens?: number;
+                /** @description Inject operating model profile context into system prompt when available */
+                inject_profile_context?: boolean;
                 /** @description Hard token limit for context budget (overrides model limits when set) */
                 max_budget_tokens?: number;
                 /** @description Entity IDs to always keep in context during slicing */
@@ -2864,6 +3015,11 @@ export interface components {
              * @default 120s
              */
             timeout: string;
+            /**
+             * @description Maximum bytes for tool result content before truncation. 0 means no limit
+             * @default 32768
+             */
+            tool_result_max_bytes: number;
             /**
              * @description TTL for trajectory cache (e.g. 4h or 30m). Trajectories older than this are only available via graph queries
              * @default 4h
@@ -2929,8 +3085,8 @@ export interface components {
              */
             stream_name: string;
             /**
-             * @description Request timeout
-             * @default 120s
+             * @description Per-request LLM call timeout. Sized 10s below the agentic-model JetStream consumer AckWait (120s) so the LLM context.Done propagates and the call closes cleanly before NATS would otherwise redeliver. Operators raising this past ~115s should also raise the consumer AckWait in lockstep.
+             * @default 110s
              */
             timeout: string;
         };
@@ -2941,6 +3097,8 @@ export interface components {
         "agentic-tools.v1": {
             /** @description List of allowed tools (nil/empty allows all) */
             allowed_tools?: string[];
+            /** @description Tool names requiring human approval before execution */
+            approval_required?: string[];
             /** @description Suffix appended to consumer names for uniqueness */
             consumer_name_suffix?: string;
             /**
@@ -2948,6 +3106,16 @@ export interface components {
              * @default false
              */
             delete_consumer_on_stop: boolean;
+            /**
+             * @description Enable tool category filtering for role-based access
+             * @default false
+             */
+            enable_categories: boolean;
+            /**
+             * @description NATS KV bucket name holding agent loop state (for read_loop_result)
+             * @default AGENT_LOOPS
+             */
+            loops_bucket: string;
             /** @description Port configuration */
             ports?: string;
             /**
@@ -2960,6 +3128,8 @@ export interface components {
              * @default 60s
              */
             timeout: string;
+            /** @description Per-tool retry policy keyed by tool name (opt-in; tools without an entry do not retry) */
+            tool_retries?: Record<string, never>;
         };
         /**
          * directory-bridge Configuration
@@ -3599,10 +3769,89 @@ export interface components {
             entity_watch_patterns?: string[];
             /** @description Inline rule definitions (alternative to files) */
             inline_rules?: {
+                /** @description actions */
+                actions?: {
+                    /** @description action_allowlist */
+                    action_allowlist?: string[];
+                    /** @description boid_signal_type */
+                    boid_signal_type?: string;
+                    /** @description boid_strength */
+                    boid_strength?: number;
+                    /** @description bucket */
+                    bucket?: string;
+                    /** @description context_data */
+                    context_data?: Record<string, never>;
+                    /** @description id */
+                    id?: string;
+                    /** @description key */
+                    key?: string;
+                    /** @description max_iterations */
+                    max_iterations?: number;
+                    /** @description merge */
+                    merge?: boolean;
+                    /** @description model */
+                    model?: string;
+                    /** @description object */
+                    object?: string;
+                    /** @description payload */
+                    payload?: Record<string, never>;
+                    /** @description predicate */
+                    predicate?: string;
+                    /** @description prompt */
+                    prompt?: string;
+                    /** @description properties */
+                    properties?: Record<string, never>;
+                    /** @description reason */
+                    reason?: string;
+                    /** @description related_loops */
+                    related_loops?: Record<string, never>;
+                    /** @description response_format */
+                    response_format?: {
+                        /** @description name */
+                        name?: string;
+                        /** @description schema */
+                        schema?: Record<string, never>;
+                        /** @description strict */
+                        strict?: boolean;
+                        /** @description type */
+                        type?: string;
+                    };
+                    /** @description role */
+                    role?: string;
+                    /** @description subject */
+                    subject?: string;
+                    /** @description tools */
+                    tools?: string[];
+                    /** @description ttl */
+                    ttl?: string;
+                    /** @description type */
+                    type?: string;
+                    /** @description when */
+                    when?: {
+                        /** @description field */
+                        field?: string;
+                        /** @description from */
+                        from?: string;
+                        /** @description operator */
+                        operator?: string;
+                        /** @description required */
+                        required?: boolean;
+                        /** @description value */
+                        value?: string;
+                    }[];
+                    /** @description workflow_id */
+                    workflow_id?: string;
+                    /** @description workflow_slug */
+                    workflow_slug?: string;
+                    /** @description workflow_step */
+                    workflow_step?: string;
+                }[];
                 /** @description conditions */
                 conditions?: {
                     /** @description field */
                     field?: string;
+                    /** @description from */
+                    from?: string;
                     /** @description operator */
                     operator?: string;
                     /** @description required */
@@ -3623,6 +3872,8 @@ export interface components {
                     /** @description watch_buckets */
                     watch_buckets?: string[];
                 };
+                /** @description fire_every_n_events */
+                fire_every_n_events?: number;
                 /** @description id */
                 id?: string;
                 /** @description logic */
@@ -3635,26 +3886,57 @@ export interface components {
                 name?: string;
                 /** @description on_enter */
                 on_enter?: {
+                    /** @description action_allowlist */
+                    action_allowlist?: string[];
                     /** @description boid_signal_type */
                     boid_signal_type?: string;
                     /** @description boid_strength */
                     boid_strength?: number;
+                    /** @description bucket */
+                    bucket?: string;
                     /** @description context_data */
                     context_data?: Record<string, never>;
+                    /** @description id */
+                    id?: string;
+                    /** @description key */
+                    key?: string;
+                    /** @description max_iterations */
+                    max_iterations?: number;
+                    /** @description merge */
+                    merge?: boolean;
                     /** @description model */
                     model?: string;
                     /** @description object */
                     object?: string;
+                    /** @description payload */
+                    payload?: Record<string, never>;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
                     prompt?: string;
                     /** @description properties */
                     properties?: Record<string, never>;
+                    /** @description reason */
+                    reason?: string;
+                    /** @description related_loops */
+                    related_loops?: Record<string, never>;
+                    /** @description response_format */
+                    response_format?: {
+                        /** @description name */
+                        name?: string;
+                        /** @description schema */
+                        schema?: Record<string, never>;
+                        /** @description strict */
+                        strict?: boolean;
+                        /** @description type */
+                        type?: string;
+                    };
                     /** @description role */
                     role?: string;
                     /** @description subject */
                     subject?: string;
+                    /** @description tools */
+                    tools?: string[];
                     /** @description ttl */
                     ttl?: string;
                     /** @description type */
@@ -3663,6 +3945,8 @@ export interface components {
                     when?: {
                         /** @description field */
                         field?: string;
+                        /** @description from */
+                        from?: string;
                         /** @description operator */
                         operator?: string;
                         /** @description required */
@@ -3679,26 +3963,57 @@ export interface components {
                 }[];
                 /** @description on_exit */
                 on_exit?: {
+                    /** @description action_allowlist */
+                    action_allowlist?: string[];
                     /** @description boid_signal_type */
                     boid_signal_type?: string;
                     /** @description boid_strength */
                     boid_strength?: number;
+                    /** @description bucket */
+                    bucket?: string;
                     /** @description context_data */
                     context_data?: Record<string, never>;
+                    /** @description id */
+                    id?: string;
+                    /** @description key */
+                    key?: string;
+                    /** @description max_iterations */
+                    max_iterations?: number;
+                    /** @description merge */
+                    merge?: boolean;
                     /** @description model */
                     model?: string;
                     /** @description object */
                     object?: string;
+                    /** @description payload */
+                    payload?: Record<string, never>;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
                     prompt?: string;
                     /** @description properties */
                     properties?: Record<string, never>;
+                    /** @description reason */
+                    reason?: string;
+                    /** @description related_loops */
+                    related_loops?: Record<string, never>;
+                    /** @description response_format */
+                    response_format?: {
+                        /** @description name */
+                        name?: string;
+                        /** @description schema */
+                        schema?: Record<string, never>;
+                        /** @description strict */
+                        strict?: boolean;
+                        /** @description type */
+                        type?: string;
+                    };
                     /** @description role */
                     role?: string;
                     /** @description subject */
                     subject?: string;
+                    /** @description tools */
+                    tools?: string[];
                     /** @description ttl */
                     ttl?: string;
                     /** @description type */
@@ -3707,6 +4022,85 @@ export interface components {
                     when?: {
                         /** @description field */
                         field?: string;
+                        /** @description from */
+                        from?: string;
+                        /** @description operator */
+                        operator?: string;
+                        /** @description required */
+                        required?: boolean;
+                        /** @description value */
+                        value?: string;
+                    }[];
+                    /** @description workflow_id */
+                    workflow_id?: string;
+                    /** @description workflow_slug */
+                    workflow_slug?: string;
+                    /** @description workflow_step */
+                    workflow_step?: string;
+                }[];
+                /** @description on_recovery */
+                on_recovery?: {
+                    /** @description action_allowlist */
+                    action_allowlist?: string[];
+                    /** @description boid_signal_type */
+                    boid_signal_type?: string;
+                    /** @description boid_strength */
+                    boid_strength?: number;
+                    /** @description bucket */
+                    bucket?: string;
+                    /** @description context_data */
+                    context_data?: Record<string, never>;
+                    /** @description id */
+                    id?: string;
+                    /** @description key */
+                    key?: string;
+                    /** @description max_iterations */
+                    max_iterations?: number;
+                    /** @description merge */
+                    merge?: boolean;
+                    /** @description model */
+                    model?: string;
+                    /** @description object */
+                    object?: string;
+                    /** @description payload */
+                    payload?: Record<string, never>;
+                    /** @description predicate */
+                    predicate?: string;
+                    /** @description prompt */
+                    prompt?: string;
+                    /** @description properties */
+                    properties?: Record<string, never>;
+                    /** @description reason */
+                    reason?: string;
+                    /** @description related_loops */
+                    related_loops?: Record<string, never>;
+                    /** @description response_format */
+                    response_format?: {
+                        /** @description name */
+                        name?: string;
+                        /** @description schema */
+                        schema?: Record<string, never>;
+                        /** @description strict */
+                        strict?: boolean;
+                        /** @description type */
+                        type?: string;
+                    };
+                    /** @description role */
+                    role?: string;
+                    /** @description subject */
+                    subject?: string;
+                    /** @description tools */
+                    tools?: string[];
+                    /** @description ttl */
+                    ttl?: string;
+                    /** @description type */
+                    type?: string;
+                    /** @description when */
+                    when?: {
+                        /** @description field */
+                        field?: string;
+                        /** @description from */
+                        from?: string;
                         /** @description operator */
                         operator?: string;
                         /** @description required */
@@ -3723,30 +4117,65 @@ export interface components {
                 }[];
                 /** @description related_patterns */
                 related_patterns?: string[];
+                /** @description rerun_on_recovery */
+                rerun_on_recovery?: boolean;
+                /** @description schedule */
+                schedule?: string;
                 /** @description type */
                 type?: string;
                 /** @description while_true */
                 while_true?: {
+                    /** @description action_allowlist */
+                    action_allowlist?: string[];
                     /** @description boid_signal_type */
                     boid_signal_type?: string;
                     /** @description boid_strength */
                     boid_strength?: number;
+                    /** @description bucket */
+                    bucket?: string;
                     /** @description context_data */
                     context_data?: Record<string, never>;
+                    /** @description id */
+                    id?: string;
+                    /** @description key */
+                    key?: string;
+                    /** @description max_iterations */
+                    max_iterations?: number;
+                    /** @description merge */
+                    merge?: boolean;
                     /** @description model */
                     model?: string;
                     /** @description object */
                     object?: string;
+                    /** @description payload */
+                    payload?: Record<string, never>;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
                     prompt?: string;
                     /** @description properties */
                     properties?: Record<string, never>;
+                    /** @description reason */
+                    reason?: string;
+                    /** @description related_loops */
+                    related_loops?: Record<string, never>;
+                    /** @description response_format */
+                    response_format?: {
+                        /** @description name */
+                        name?: string;
+                        /** @description schema */
+                        schema?: Record<string, never>;
+                        /** @description strict */
+                        strict?: boolean;
+                        /** @description type */
+                        type?: string;
+                    };
                     /** @description role */
                     role?: string;
                     /** @description subject */
                     subject?: string;
+                    /** @description tools */
+                    tools?: string[];
                     /** @description ttl */
                     ttl?: string;
                     /** @description type */
@@ -3755,6 +4184,8 @@ export interface components {
                     when?: {
                         /** @description field */
                         field?: string;
+                        /** @description from */
+                        from?: string;
                         /** @description operator */
                         operator?: string;
                         /** @description required */
