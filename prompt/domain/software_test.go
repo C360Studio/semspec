@@ -486,6 +486,94 @@ func TestSoftwareGraphResultOrientation(t *testing.T) {
 	}
 }
 
+// TestSoftwareToolErrorLoopEscapeHatch pins the take-1 fix (gemini @hard
+// 2026-05-10 req.5): the developer agent burned all 50 iterations in a tight
+// bash-mvn loop, never calling submit_work to surface the obstacle. Mirrors
+// the shape of TestSoftwareGraphErrorEscapeHatches: world-model framing
+// (repeated failures = structural obstacle, submit_work is always available,
+// iteration budget is finite) anchored in the persona. The Goodhart guard
+// fails if a future edit reintroduces procedural directives like "MUST call
+// submit_work after 3 failures" — those crimp judgment in different contexts
+// and the whole point of the fragment is enrichment, not compliance.
+func TestSoftwareToolErrorLoopEscapeHatch(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	withTools := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "graph_summary", "graph_search", "graph_query"},
+	})
+
+	mustContain := []string{
+		"three or more times",
+		"structural",
+		"submit_work is the escape",
+		"obstacle summary",
+		"iteration budget",
+		"diagnostic",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(withTools.SystemMessage, want) {
+			t.Errorf("tool-error-loop escape hatch missing %q from developer persona", want)
+		}
+	}
+
+	// Goodhart guard: this orientation must NOT carry procedural directives
+	// that would crimp the agent's reasoning. World-model framing only — if
+	// a future edit reintroduces MUST/before-X-do-Y shapes, this test fails
+	// so the regression is surfaced at PR time. Asserts against the fragment
+	// content directly (not the full system message) because legitimate
+	// terminal directives in other fragments use "You MUST call submit_work
+	// when your task is complete" — that's a different concept (terminal
+	// completion, not loop-escape).
+	var loopFragment string
+	for _, f := range Software() {
+		if f.ID == "software.orientation.tool-error-loop" {
+			loopFragment = f.Content
+			break
+		}
+	}
+	if loopFragment == "" {
+		t.Fatal("software.orientation.tool-error-loop fragment not found")
+	}
+	mustNotContain := []string{
+		"You MUST",
+		"you must",
+		"After 3 failures",
+		"Before retrying",
+		"must immediately",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(loopFragment, banned) {
+			t.Errorf("tool-error-loop fragment reintroduced procedural directive %q (Goodhart guard)", banned)
+		}
+	}
+
+	// Reviewer persona also has bash + submit_work, so the fragment SHOULD
+	// reach reviewers — the wedge can recur in any TDD-loop role.
+	reviewer := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if !strings.Contains(reviewer.SystemMessage, "submit_work is the escape") {
+		t.Errorf("reviewer persona with bash+submit_work must receive tool-error-loop orientation")
+	}
+
+	// A persona without submit_work (e.g. a read-only role) must NOT receive
+	// this stanza — it would reference an escape the agent doesn't have.
+	noSubmit := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash"},
+	})
+	if strings.Contains(noSubmit.SystemMessage, "submit_work is the escape") {
+		t.Errorf("persona without submit_work must not receive tool-error-loop orientation")
+	}
+}
+
 // TestSoftwareRequirementGeneratorFilesOwned pins the dial-#1 prompt landing
 // in the right persona. The first attempt edited workflow/prompts/
 // requirement_generator.go which was dead code and never reached Gemini —

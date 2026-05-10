@@ -1502,6 +1502,29 @@ Two failed graph calls of the same shape is the signal to switch tools, not to t
 Silence is also signal. A search that returns no [project]/[dependency] for an external library tells you the indexed repos don't reference it. Useful when calibrating confidence in your own prior.`,
 		},
 		{
+			// Tool-error-loop escape. Take 1 (gemini @hard 2026-05-10 req.5)
+			// wedged at iter=50 in a tight bash-mvn loop: 50 calls all exited
+			// non-zero on micro-variants of the same `mvn compile` command, agent
+			// never calling submit_work to surface the obstacle. The watch CLI
+			// sidecar fired RepeatToolFailure correctly, but the developer-loop
+			// side ignored it. Mirrors the shape of software.orientation.graph-errors:
+			// pin the world-model framing in the persona where the agent is
+			// anchored. No procedural "MUST call submit_work after N failures" —
+			// that crimps judgment in different contexts. World-model only:
+			// repeated failures are signal about the obstacle, submit_work is
+			// always available, the iteration budget is finite.
+			ID:       "software.orientation.tool-error-loop",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.HasTool("bash") && ctx.HasTool("submit_work")
+			},
+			Content: `Tool failures are signal about the obstacle, not just noise to retry through. When bash exits non-zero three or more times on variants of the same command, the obstacle is usually structural — a missing dependency, an unresolvable coordinate, a misconfigured environment, a permission issue — and bash can't fix it from inside the loop. Successive micro-variants of the same command shape produce successive variants of the same error.
+
+submit_work is the escape. It's always available, including for "I'm blocked": a brief obstacle summary of what you tried, what failed, and what remains unknown gives the next reviewer or planner the diagnostic context to decide what changes — a fixture, a dependency, a scope adjustment. That's a more productive recovery than the 51st bash variant.
+
+Per-cycle iteration budgets are finite. The worst outcome is exhausting the budget without surfacing the obstacle: the cycle escalates with empty context, no diagnostic, and the loop wedges silently. Recognizing repeated failures early and submitting an obstacle summary preserves the diagnostic so the next role can act on it.`,
+		},
+		{
 			// Fallback orientation for personas whose tool allowlist excludes
 			// the graph tools (some narrow roles). Preserves the prior
 			// "orient briefly" guidance without the graph-first directive.
