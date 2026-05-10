@@ -567,6 +567,85 @@ func TestSoftwareUpstreamSourcesOrientation(t *testing.T) {
 	}
 }
 
+// TestSoftwareUrlGuessingOrientation pins the take-5 fix: an agent that
+// has both http_request and web_search must see the orientation framing
+// them as complementary tools (web_search discovers URLs, http_request
+// fetches from known URLs). Take 5's wedge was the agent probing Maven
+// repository URLs with constructed guesses (dead-Bintray pattern) and
+// hitting 3+ HTTP 404s — tool-error-loop detected the repeat pattern
+// but didn't point at the recovery (web_search). World-model framing
+// only — Goodhart guard.
+func TestSoftwareUrlGuessingOrientation(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	withBoth := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "http_request", "web_search", "graph_search", "graph_query", "graph_summary"},
+	})
+
+	mustContain := []string{
+		"URL discovery vs URL fetching",
+		"web_search is for finding URLs you don't already know",
+		"http_request is for fetching from URLs you do know",
+		"the URL was a guess",
+		"web_search produces the actual current URL",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(withBoth.SystemMessage, want) {
+			t.Errorf("url-guessing orientation missing %q from developer persona", want)
+		}
+	}
+
+	// Goodhart guard against procedural directives. Asserts against the
+	// fragment content directly so legitimate uses of similar phrases
+	// elsewhere don't false-positive.
+	var fragment string
+	for _, f := range Software() {
+		if f.ID == "software.orientation.url-guessing" {
+			fragment = f.Content
+			break
+		}
+	}
+	if fragment == "" {
+		t.Fatal("software.orientation.url-guessing fragment not found")
+	}
+	mustNotContain := []string{
+		"You MUST",
+		"you must",
+		"Always web_search",
+		"Before http_request",
+		"must immediately",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(fragment, banned) {
+			t.Errorf("url-guessing fragment reintroduced procedural directive %q (Goodhart guard)", banned)
+		}
+	}
+
+	// Scope: agent missing either http_request OR web_search must NOT
+	// receive the orientation — pairs of tools the agent doesn't have
+	// would be confusing dead weight.
+	noHTTP := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "web_search", "graph_summary"},
+	})
+	if strings.Contains(noHTTP.SystemMessage, "URL discovery vs URL fetching") {
+		t.Errorf("agent without http_request must not receive url-guessing orientation")
+	}
+	noWebSearch := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "http_request", "graph_summary"},
+	})
+	if strings.Contains(noWebSearch.SystemMessage, "URL discovery vs URL fetching") {
+		t.Errorf("agent without web_search must not receive url-guessing orientation")
+	}
+}
+
 // TestSoftwareToolErrorLoopEscapeHatch pins the take-1 fix (gemini @hard
 // 2026-05-10 req.5): the developer agent burned all 50 iterations in a tight
 // bash-mvn loop, never calling submit_work to surface the obstacle. Mirrors

@@ -1560,6 +1560,34 @@ submit_work is the escape. It's always available, including for "I'm blocked": a
 Per-cycle iteration budgets are finite. The worst outcome is exhausting the budget without surfacing the obstacle: the cycle escalates with empty context, no diagnostic, and the loop wedges silently. Recognizing repeated failures early — across any tool, not just bash — and submitting an obstacle summary preserves the diagnostic so the next role can act on it.`,
 		},
 		{
+			// http_request URL-guessing wedge. Take 5 (gemini @hard 2026-05-10)
+			// surfaced an agent probing Maven repository URLs with constructed
+			// guesses (Bintray-pattern URLs the agent assembled from upstream
+			// group/artifactId rather than reading from a real source). Each
+			// 404 produced a slightly different guess; tool-error-loop
+			// detected the repeat-class pattern but didn't tell the agent
+			// what the *correct* recovery is — only that the loop is wedged.
+			// World-model framing: web_search is the discovery tool, not
+			// http_request. http_request fetches from URLs you know;
+			// web_search finds URLs you don't. Same shape as
+			// software.orientation.upstream-sources (graph for structure,
+			// bash for file contents) — separate tools for separate jobs.
+			// No procedural directive — agents may have legitimate reasons
+			// to construct URLs (well-known patterns, API spec
+			// conventions); the orientation flags the failure mode where
+			// the construction was a guess, not a fact.
+			ID:       "software.orientation.url-guessing",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.HasTool("http_request") && ctx.HasTool("web_search")
+			},
+			Content: `URL discovery vs URL fetching. web_search is for finding URLs you don't already know (a project's actual snapshot repo, a vendor's current artifact host, a deprecated-and-relocated documentation page). http_request is for fetching from URLs you do know. They're complementary, not interchangeable.
+
+When http_request returns 404 (or any client error) on a URL you constructed by reasoning — pattern-matched from a similar project, assembled from groupId/artifactId conventions, recalled from training rather than read from a current source — the URL was a guess. The recovery is web_search for the real URL, not another http_request to a slightly-modified guess. Successive guesses produce successive 404s; web_search produces the actual current URL the project publishes today.
+
+Inverse direction matters too. If web_search has already surfaced a URL, http_request fetches from that URL — you don't re-search for it on every fetch.`,
+		},
+		{
 			// Fallback orientation for personas whose tool allowlist excludes
 			// the graph tools (some narrow roles). Preserves the prior
 			// "orient briefly" guidance without the graph-first directive.
