@@ -1502,6 +1502,27 @@ Two failed graph calls of the same shape is the signal to switch tools, not to t
 Silence is also signal. A search that returns no [project]/[dependency] for an external library tells you the indexed repos don't reference it. Useful when calibrating confidence in your own prior.`,
 		},
 		{
+			// Upstream-source bash access. Take 1 (gemini @hard 2026-05-10 req.3)
+			// fabricated Maven coords because graph indexing captures Java AST
+			// + markdown docs, not pom.xml content as queryable triples — the
+			// agent could see OSH class names but had nowhere to ground the
+			// build coords. semsource clones the indexed repos to disk; mounting
+			// those clones read-only into the sandbox at /sources/<namespace>/
+			// closes the gap. World-model framing, not procedural: graph for
+			// structure/relationships, bash for file contents. The agent's job
+			// is to know which lens fits the question.
+			ID:       "software.orientation.upstream-sources",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.HasTool("bash") && ctx.HasTool("graph_summary")
+			},
+			Content: `Indexed source on disk. When semsource indexes an upstream repo, it clones the tree first, then parses for graph entities. The clones stay on disk under /sources/<namespace>/ — bash readable. Names match the namespace in graph_summary's output.
+
+Graph captures structure (Java types, function signatures, doc headings); the file contents the AST/docs lens drops are still on disk. pom.xml, package.json, Cargo.toml, LICENSE, Makefile, build configs, raw source bodies — for any of those, bash on /sources/<namespace>/ reads what graph can't return.
+
+Practical pattern: graph_search to find which entity (and which namespace) is relevant; then bash to /sources/<namespace>/ for the actual file when graph triples don't carry the answer (Maven coords, repository URLs, parent-pom inheritance, license terms). The mount is read-only so you observe upstream truth without affecting it.`,
+		},
+		{
 			// Tool-error-loop escape. Take 1 (gemini @hard 2026-05-10 req.5)
 			// wedged at iter=50 in a tight bash-mvn loop: 50 calls all exited
 			// non-zero on micro-variants of the same `mvn compile` command, agent

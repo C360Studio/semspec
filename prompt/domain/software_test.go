@@ -486,6 +486,85 @@ func TestSoftwareGraphResultOrientation(t *testing.T) {
 	}
 }
 
+// TestSoftwareUpstreamSourcesOrientation pins the bash-on-/sources fragment
+// (gemini @hard 2026-05-10 take 1, req.3 Maven coord fabrication). semsource
+// indexes Java AST + markdown but not pom.xml as queryable triples; mounting
+// the semsource clone tree read-only into the sandbox at /sources/<namespace>/
+// closes the gap. World-model framing only — the fragment must teach the
+// agent that two lenses exist (graph for structure, bash for file contents)
+// without prescribing a procedural "if X then Y" lookup that crimps judgment.
+func TestSoftwareUpstreamSourcesOrientation(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	withGraphAndBash := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work", "graph_summary", "graph_search", "graph_query"},
+	})
+
+	mustContain := []string{
+		"/sources/<namespace>/",
+		"semsource",
+		"read-only",
+		"pom.xml",
+		"AST/docs lens drops",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(withGraphAndBash.SystemMessage, want) {
+			t.Errorf("upstream-sources orientation missing %q from developer persona", want)
+		}
+	}
+
+	// Goodhart guard: world-model framing only. Procedural "before X do Y"
+	// patterns would crimp the agent's reasoning across contexts. Asserts
+	// against the fragment content directly so legitimate uses of similar
+	// phrases in other fragments don't false-positive.
+	var fragment string
+	for _, f := range Software() {
+		if f.ID == "software.orientation.upstream-sources" {
+			fragment = f.Content
+			break
+		}
+	}
+	if fragment == "" {
+		t.Fatal("software.orientation.upstream-sources fragment not found")
+	}
+	mustNotContain := []string{
+		"You MUST",
+		"you must",
+		"Before writing",
+		"Before adding",
+		"Always cat",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(fragment, banned) {
+			t.Errorf("upstream-sources fragment reintroduced procedural directive %q (Goodhart guard)", banned)
+		}
+	}
+
+	// Personas without bash OR without graph tools should not receive this
+	// stanza — it references both lenses; missing either makes the framing
+	// dead weight.
+	noGraph := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+	})
+	if strings.Contains(noGraph.SystemMessage, "/sources/<namespace>/") {
+		t.Errorf("persona without graph tools must not receive upstream-sources orientation")
+	}
+	noBash := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleReviewer,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"submit_work", "graph_summary"},
+	})
+	if strings.Contains(noBash.SystemMessage, "/sources/<namespace>/") {
+		t.Errorf("persona without bash must not receive upstream-sources orientation")
+	}
+}
+
 // TestSoftwareToolErrorLoopEscapeHatch pins the take-1 fix (gemini @hard
 // 2026-05-10 req.5): the developer agent burned all 50 iterations in a tight
 // bash-mvn loop, never calling submit_work to surface the obstacle. Mirrors

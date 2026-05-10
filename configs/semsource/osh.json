@@ -1,6 +1,7 @@
 {
   "namespace": "osh",
   "mode": "headless",
+  "workspace_dir": "/shared/sources",
   "sources": [
     {
       "type": "git",
@@ -10,14 +11,14 @@
     },
     {
       "type": "ast",
-      "path": "/root/.semsource/repos/github-com-opensensorhub-osh-core/sensorhub-core",
+      "path": "/shared/sources/github-com-opensensorhub-osh-core/sensorhub-core",
       "language": "java",
       "watch": true
     },
     {
       "type": "docs",
       "paths": [
-        "/root/.semsource/repos/github-com-opensensorhub-osh-core"
+        "/shared/sources/github-com-opensensorhub-osh-core"
       ],
       "watch": true
     }

@@ -1,6 +1,7 @@
 {
   "namespace": "ogc",
   "mode": "headless",
+  "workspace_dir": "/shared/sources",
   "sources": [
     {
       "type": "git",
@@ -11,7 +12,7 @@
     {
       "type": "docs",
       "paths": [
-        "/root/.semsource/repos/github-com-opengeospatial-ogcapi-connected-systems"
+        "/shared/sources/github-com-opengeospatial-ogcapi-connected-systems"
       ],
       "watch": true
     }

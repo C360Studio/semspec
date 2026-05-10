@@ -13,6 +13,18 @@
 #   3. Adds semsource-ogc (OGC Connected Systems spec)
 #   4. Configures semspec with GRAPH_SOURCES pointing to all instances
 #   5. Adds semembed for vector embeddings (required for graph_search)
+#   6. Mounts a shared semsource-clones volume so the agent's sandbox can
+#      read upstream source files (pom.xml, LICENSE, build configs) that
+#      semsource clones but doesn't index as graph entities. Closes the
+#      "graph indexes structure but not file contents" gap that drove
+#      Maven-coord fabrication on take-1 (gemini @hard 2026-05-10): with
+#      /sources/<namespace>/ readable, the agent can `cat osh-core/pom.xml`
+#      to copy correct coords instead of inventing them. Mount is rw on
+#      the semsource side, ro on the sandbox side.
+
+volumes:
+  semsource-clones:
+    driver: local
 
 services:
   # External semsource: OpenSensorHub core (Java)
@@ -22,6 +34,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD", "semsource", "version"]
@@ -42,6 +55,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD", "semsource", "version"]
@@ -57,6 +71,7 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD", "semsource", "version"]
@@ -71,3 +86,11 @@ services:
     environment:
       - GRAPH_SOURCES=[{"name":"osh","url":"http://semsource-osh:8080","type":"semsource"},{"name":"meshtastic","url":"http://semsource-meshtastic:8080","type":"semsource"},{"name":"ogc","url":"http://semsource-ogc:8080","type":"semsource"}]
       - SEMSOURCE_READINESS_BUDGET=60s
+
+  # Sandbox override: read-only mount of the shared semsource-clones volume
+  # so agent bash can read upstream source the graph indexes (file contents
+  # the AST/docs lens drops — pom.xml, package.json, LICENSE, Makefile, etc.).
+  # ro is the security posture: agent observes upstream truth, can't poison it.
+  sandbox:
+    volumes:
+      - semsource-clones:/sources:ro

@@ -1,6 +1,7 @@
 {
   "namespace": "meshtastic",
   "mode": "headless",
+  "workspace_dir": "/shared/sources",
   "sources": [
     {
       "type": "git",
@@ -11,7 +12,7 @@
     {
       "type": "docs",
       "paths": [
-        "/root/.semsource/repos/github-com-meshtastic-meshtastic"
+        "/shared/sources/github-com-meshtastic-meshtastic"
       ],
       "watch": true
     }
