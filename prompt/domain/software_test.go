@@ -651,12 +651,21 @@ func TestSoftwareToolErrorLoopEscapeHatch(t *testing.T) {
 		t.Errorf("reviewer persona with bash+submit_work must receive tool-error-loop orientation")
 	}
 
-	// Generalised trigger (2026-05-10): an agent with submit_work but NO
-	// bash (e.g. a research agent with only graph + http_request +
-	// submit_work) SHOULD still receive the orientation — that's exactly
-	// the take-5 http_request 404-chase wedge surface. Verifies the
-	// trigger broadened correctly from "bash AND submit_work" to just
-	// "submit_work".
+	// Generalised trigger (2026-05-10): the fragment must reach any agent
+	// with submit_work, regardless of whether bash is in the toolset.
+	// Verifies the trigger broadened correctly from
+	//   HasTool("bash") && HasTool("submit_work")
+	// to just
+	//   HasTool("submit_work")
+	//
+	// The {http_request, graph_query, submit_work} combination below is
+	// synthetic — every role in tool_filter.DefaultToolFilters() currently
+	// includes bash, so no real production agent has this exact toolset.
+	// The role label is incidental; the assembler keys off AvailableTools.
+	// We construct a no-bash set explicitly to assert the trigger fires
+	// without bash present (which is the take-5 http_request-only wedge
+	// surface generalised — a future answerer/researcher-class agent
+	// without bash would benefit from the same orientation).
 	noBashWithSubmit := a.Assemble(&prompt.AssemblyContext{
 		Role:           prompt.RolePlanner,
 		Provider:       prompt.ProviderOpenAI,
