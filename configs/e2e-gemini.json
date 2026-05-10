@@ -116,8 +116,11 @@
         ]
       },
       "reviewing": {
-        "description": "Code review, quality analysis",
+        "description": "Code review, quality analysis. Take 6 (gemini @hard 2026-05-10) showed reviewer-loop wedges as the residual class after persona changes closed the URL-guessing wedge — flash had trouble holding the rubric over a non-trivial Java diff. Bumped to pro primary so reviewer reasoning matches the leverage of the gate (one wrong approval costs 30+ minutes of downstream work).",
         "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
           "gemini-flash"
         ]
       },
@@ -137,8 +140,11 @@
         ]
       },
       "plan_review": {
-        "description": "SOP-aware plan review",
+        "description": "SOP-aware plan review. Plan-reviewer is the gate before execution — a wrong approval costs ~75min of execution wallclock for @hard. Bumped to pro primary 2026-05-10 alongside reviewing/qa: the gate reasons over goal/context/scope/requirements/scenarios in one pass and flash's discrimination at that span was at the edge in take 1 (two rejections + iter-3 approval).",
         "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
           "gemini-flash"
         ]
       },
@@ -152,8 +158,11 @@
         ]
       },
       "qa": {
-        "description": "Rollup quality review",
+        "description": "Rollup quality review — release-readiness verdict over the assembled plan. Fires once per plan; a false approval ships broken work past the human-in-loop gate. Bumped to pro primary 2026-05-10: cheapest insurance of the three review gates because qa runs only once per plan, not three times like plan-review.",
         "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
           "gemini-flash"
         ]
       },
@@ -294,7 +303,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 50,
+        "max_iterations": 75,
         "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
@@ -622,7 +631,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_tdd_cycles": 5,
+        "max_tdd_cycles": 7,
         "timeout_seconds": 3600,
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
