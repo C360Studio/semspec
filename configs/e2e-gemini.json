@@ -230,6 +230,33 @@
         "fallback": [
           "gemini-flash"
         ]
+      },
+      "plan_wedge_recovery": {
+        "description": "ADR-037 stage 1 — manager-role recovery agent dispatched on plan-manager escalations (revision-cap exhaustion, plan-review wedges). Reasons over the wedged planner's full trajectory + plan state to pick a RecoveryAction (refine_prompt | narrow_scope | split_req | escalate_human | mark_unrecoverable). Per ADR-037 setup-time-human-decision: pro primary because the recovery agent must out-reason the wedged agent it's recovering, not match it.",
+        "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
+      },
+      "execution_wedge_recovery": {
+        "description": "ADR-037 stage 1 — manager-role recovery agent dispatched on execution-manager escalations (TDD-cycle exhaustion, iter=N tool-loop wedges, fixable-rejection cascades). Reads the wedged developer's full trajectory (capped 80 steps via internal/trajectory) plus reviewer feedback to diagnose and pick a RecoveryAction. Pro primary: same reasoning as plan_wedge_recovery — recovery must dominate the wedge.",
+        "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
+      },
+      "coordinator_recovery": {
+        "description": "ADR-037 stage 2 — coordinator-component recovery agent dispatched on QA failures and on cross-phase wedges where phase-local recovery already ran (Layer=coordinator). Reads the prior recovery record from RECOVERY_STATES so it doesn't repeat the same action shape. Pro primary; this is the last recovery layer before escalate_human.",
+        "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
       }
     },
     "defaults": {

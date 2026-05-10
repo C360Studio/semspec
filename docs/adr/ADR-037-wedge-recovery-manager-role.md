@@ -156,13 +156,46 @@ Stages may ship as separate ADR addenda + OpenSpec changes. Stage 0 in particula
 - Recovery becoming a crutch for poor phase-local checks — if rejection-then-recovery becomes the happy path, the underlying gates rot. Mitigation: track recovery-rate per gate; sustained high recovery on a specific gate is a signal the gate itself needs improvement.
 - Pressure to add `bump_model` to the action set as wedge classes accumulate that need a stronger model than the human picked. If this pressure becomes load-bearing, that's the signal to revisit the runtime-config-mutation deferral and follow semteams' site-coordinator path. Until then, `escalate_human` with a clear "need stronger recovery model" diagnosis is the relief valve.
 
-## Open questions
+## Open questions — resolved 2026-05-10 after take 7 baseline
 
-These need resolution before Stage 1 ships, not before this ADR is accepted. (Stage 0 has no open questions — it's a straight wiring fix.)
+The ADR's three open questions were locked before Stage 1 plumbing landed. Decisions and rationale:
 
-1. **Inline vs async dispatch.** Does plan-manager block on the recovery agent (simple, sequential), or emit `RecoveryRequested` and resume on `RecoveryComplete` (fits the rest of the KV-driven pipeline)? Lean async to match existing patterns, but inline is simpler for Stage 1.
-2. **What does the recovery agent see?** Full trajectory + plan + last-failure-feedback + relevant graph entities, or a summarized brief? Full is simpler to implement; summarized is cheaper per call. Lean full for Stage 1, optimize later.
-3. **Recovery-fail signal semantics.** When recovery's chosen action (e.g., `refine_prompt`) itself fails on retry, what gets logged where? Need a distinct outcome separate from the original wedge so the lessons pipeline (ADR-033) can learn from recovery patterns.
+### 1. Inline vs async dispatch — ASYNC
+
+**Decision:** Recovery uses the existing async KV/JetStream-driven pattern. The escalating component (plan-manager, execution-manager, qa-reviewer) emits a `RecoveryRequested` event on the `recovery.requested.>` subject family and continues. The coordinator (or phase-local recovery agent) consumes the event, runs the recovery, and emits `RecoveryComplete` (with the chosen `RecoveryAction`) on `recovery.complete.>`. The escalating component's existing watcher resumes via the standard reconciliation path.
+
+**Why:** Inline blocking was simpler-on-paper but inconsistent with everything else in the system. plan-manager and execution-manager are already KV-driven event consumers; they don't block on dispatched LLM agents anywhere else. Adding a synchronous wait specifically for recovery would mean a new pattern to maintain, double the failure modes (timeout-while-blocked vs the existing async-timeout-watcher), and a deadlock surface if recovery itself wedged. Async is the consistent shape.
+
+**Implementation cost:** RecoveryRequested + RecoveryComplete payloads, durable subjects, RECOVERY_STATES KV bucket for the in-flight record. All shape-compatible with existing manager-pattern plumbing — no new architecture.
+
+### 2. What does the recovery agent see — FULL TRAJECTORY (capped) for Stage 1, optimise later
+
+**Decision:** Recovery agent receives full trajectory steps via `internal/trajectory.Fetch` with a generous step limit (default 80, matching `lesson-decomposer.trajectoryStepLimit`), plus the plan/req state at escalation, plus the last failure feedback, plus the relevant graph entities the wedged agent's trajectory references.
+
+**Why:** Stage 1's job is to prove recovery diagnoses correctly. Summarised briefs add a layer of pre-processing whose quality we can't validate until we know what the recovery agent actually needs to see. Full data → measure → maybe summarise later if cost or context-window pressure shows up. Take 7's wedged trajectory was 80 steps for the bash-quoting failure — exactly the kind of pattern a coordinator needs the full sequence of to diagnose ("agent kept reaching for sed-edit-in-place"), not a summary of.
+
+**Caps:** the existing `internal/trajectory.DefaultLogStepLimit = 80` is the hard ceiling. Trajectories exceeding that get truncated with a note in the recovery prompt. If a wedge spans > 80 steps consistently, that's data for revisiting the cap, not a reason to summarise pre-emptively.
+
+### 3. Recovery-fail signal semantics — distinct `recovery_failed` outcome with action-record
+
+**Decision:** When a recovery agent's chosen action (e.g., `refine_prompt` → re-dispatch) itself fails to converge, the resulting escalation event carries `outcome=recovery_failed` (distinct from the original `outcome=failed`), plus the `RecoveryAction` record that was tried (which action, what diagnosis text, which model). RECOVERY_STATES KV holds the full attempt record; the failure event references it by `recovery_id`.
+
+**Why:**
+- **Lessons pipeline alignment.** ADR-033's lesson-decomposer needs to be able to subscribe to `recovery_failed` distinctly. A recovery that picked `refine_prompt` and still failed is a different lesson than the original wedge — "the refined prompt didn't help; the diagnosis was off" — and feeds back into recovery-prompt quality over time.
+- **Goodhart guard from the ADR's own Risks section.** Without a distinct outcome, recovery becomes invisible in metrics — every wedge looks like it "tried recovery" without us being able to tell whether recovery worked or just ran. Distinct outcome makes recovery success rate a measurable thing.
+- **Three-guardrails compatibility.** "One attempt per layer" requires the next layer to know the prior layer already tried. `outcome=recovery_failed` from layer N is the input layer N+1 keys off; a generic `failed` would make layer N+1 redundantly retry the same recovery shape.
+
+**Outcome enum extension:** the existing `agentic.OutcomeSuccess / OutcomeFailed / OutcomeCancelled / OutcomeTruncated` set gains `OutcomeRecoveryFailed` (or `OutcomeRecoveryUnsuccessful` — name to bikeshed in the payload-registration commit). Coordinator (Stage 2) keys off this when deciding whether the case escalates to human or qualifies for a different recovery shape.
+
+---
+
+## Locked decisions summary
+
+| Question | Decision |
+|----------|----------|
+| Dispatch | Async via `recovery.requested.>` / `recovery.complete.>` JetStream subjects |
+| Recovery-agent input | Full trajectory (cap 80 steps) + plan/req state + last-failure-feedback + referenced graph entities |
+| Recovery-fail signal | Distinct `outcome=recovery_failed` + `RecoveryAction` record in `RECOVERY_STATES` keyed by `recovery_id` |
 
 ## References
 
