@@ -21,7 +21,7 @@
       "gemini-flash": {
         "provider": "openai",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-3-flash-preview",
+        "model": "gemini-2.5-flash",
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": true,
@@ -43,7 +43,7 @@
       "gemini-pro": {
         "provider": "openai",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-3.1-pro-preview",
+        "model": "gemini-2.5-pro",
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": true,
