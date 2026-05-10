@@ -777,3 +777,104 @@ func TestRunGoTestsExist_SkipsWhenOnlyTestFileModified(t *testing.T) {
 		}
 	}
 }
+
+// TestSummarizeFailures_ReportsFailedRequiredCheckNames pins the P0 fix
+// (gemini @hard 2026-05-10): the structural-validator log was emitting
+// `passed=false checks_run=1 warning=""` with no detail on which check
+// failed or why. Operators tailing logs had zero diagnostic without
+// spelunking EXECUTION_STATES. SummarizeFailures must surface the names
+// of failing required checks so the log site can include them.
+func TestSummarizeFailures_ReportsFailedRequiredCheckNames(t *testing.T) {
+	results := []payloads.CheckResult{
+		{Name: "lint", Required: true, Passed: true},
+		{Name: "mvn-test", Required: true, Passed: false, Stderr: "BUILD FAILURE: cannot resolve org.foo:bar"},
+		{Name: "anti-mock", Required: false, Passed: false, Stdout: "advisory: mock-heavy"},
+		{Name: "go-tests-exist", Required: true, Passed: false, Stderr: "missing _test.go in pkg/foo"},
+	}
+
+	failed, excerpt := SummarizeFailures(results, 200)
+
+	if len(failed) != 2 {
+		t.Fatalf("expected 2 failed required checks, got %d: %v", len(failed), failed)
+	}
+	if failed[0] != "mvn-test" || failed[1] != "go-tests-exist" {
+		t.Errorf("expected [mvn-test go-tests-exist], got %v", failed)
+	}
+	// First-failure excerpt should come from mvn-test (first failed required),
+	// not from the advisory anti-mock check that ran in between.
+	if !strings.Contains(excerpt, "BUILD FAILURE") {
+		t.Errorf("expected excerpt from first failed required check (mvn-test), got %q", excerpt)
+	}
+	if strings.Contains(excerpt, "advisory") {
+		t.Errorf("excerpt must not include advisory-check output; got %q", excerpt)
+	}
+}
+
+// TestSummarizeFailures_ReturnsEmptyWhenAllPass confirms the helper stays
+// silent on the happy path so an all-pass run doesn't add noise to the
+// structured log.
+func TestSummarizeFailures_ReturnsEmptyWhenAllPass(t *testing.T) {
+	results := []payloads.CheckResult{
+		{Name: "lint", Required: true, Passed: true},
+		{Name: "mvn-test", Required: true, Passed: true},
+	}
+	failed, excerpt := SummarizeFailures(results, 200)
+	if len(failed) != 0 {
+		t.Errorf("expected no failed checks on all-pass, got %v", failed)
+	}
+	if excerpt != "" {
+		t.Errorf("expected empty excerpt on all-pass, got %q", excerpt)
+	}
+}
+
+// TestSummarizeFailures_FallsBackToStdoutWhenStderrEmpty handles tools
+// (e.g., some test runners) that report failures on stdout. Without
+// stdout fallback the operator would see the check name but no excerpt
+// — half the value of the fix.
+func TestSummarizeFailures_FallsBackToStdoutWhenStderrEmpty(t *testing.T) {
+	results := []payloads.CheckResult{
+		{Name: "go-test", Required: true, Passed: false, Stdout: "FAIL TestFoo (0.01s)", Stderr: ""},
+	}
+	failed, excerpt := SummarizeFailures(results, 200)
+	if len(failed) != 1 || failed[0] != "go-test" {
+		t.Fatalf("expected [go-test], got %v", failed)
+	}
+	if !strings.Contains(excerpt, "FAIL TestFoo") {
+		t.Errorf("expected stdout fallback excerpt, got %q", excerpt)
+	}
+}
+
+// TestSummarizeFailures_ClipsLongOutput keeps log lines bounded. mvn
+// build output can run thousands of lines; the log line must stay
+// readable while full output remains in EXECUTION_STATES feedback.
+func TestSummarizeFailures_ClipsLongOutput(t *testing.T) {
+	long := strings.Repeat("A", 1000)
+	results := []payloads.CheckResult{
+		{Name: "mvn-test", Required: true, Passed: false, Stderr: long},
+	}
+	_, excerpt := SummarizeFailures(results, 200)
+	if !strings.HasSuffix(excerpt, "…") {
+		t.Errorf("expected truncation marker, got %q", excerpt)
+	}
+	// 200 runes + "…" rune = 201 runes total
+	if got := len([]rune(excerpt)); got != 201 {
+		t.Errorf("expected 201 runes after clip+marker, got %d", got)
+	}
+}
+
+// TestSummarizeFailures_AdvisoryFailuresIgnored confirms only required
+// failures count. Advisory checks (anti-mock, hints) failing must not
+// dominate the log when the run actually passed.
+func TestSummarizeFailures_AdvisoryFailuresIgnored(t *testing.T) {
+	results := []payloads.CheckResult{
+		{Name: "lint", Required: true, Passed: true},
+		{Name: "anti-mock", Required: false, Passed: false, Stdout: "lots of mocks"},
+	}
+	failed, excerpt := SummarizeFailures(results, 200)
+	if len(failed) != 0 {
+		t.Errorf("advisory failures must not be reported as failed_checks; got %v", failed)
+	}
+	if excerpt != "" {
+		t.Errorf("advisory failures must not produce an excerpt; got %q", excerpt)
+	}
+}

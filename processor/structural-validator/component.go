@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +23,13 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+// validatorExcerptMaxRunes bounds the failure-excerpt length in log lines.
+// 200 runes is enough to surface the first compile error, dependency
+// resolution failure, or assertion message — the operator's "what failed"
+// signal — while keeping the log line readable. Full output remains in
+// EXECUTION_STATES feedback for forensic review.
+const validatorExcerptMaxRunes = 200
 
 // Component implements the structural-validator processor.
 type Component struct {
@@ -276,10 +284,13 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.logger.Warn("Failed to ACK message", "error", ackErr)
 	}
 
+	failedChecks, firstExcerpt := SummarizeFailures(result.CheckResults, validatorExcerptMaxRunes)
 	c.logger.Info("Structural validation completed",
 		"slug", trigger.Slug,
 		"passed", result.Passed,
 		"checks_run", result.ChecksRun,
+		"failed_checks", strings.Join(failedChecks, ","),
+		"first_failure_excerpt", firstExcerpt,
 		"warning", result.Warning)
 }
 
@@ -301,12 +312,15 @@ func (c *Component) updateWorkflowState(_ context.Context, trigger *payloads.Val
 			"slug", trigger.Slug)
 		return nil
 	}
+	failedChecks, firstExcerpt := SummarizeFailures(result.CheckResults, validatorExcerptMaxRunes)
 	c.logger.Info("Validation complete; state update pending migration",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
 		"phase", phases.TaskExecValidated,
 		"passed", result.Passed,
-		"checks_run", result.ChecksRun)
+		"checks_run", result.ChecksRun,
+		"failed_checks", strings.Join(failedChecks, ","),
+		"first_failure_excerpt", firstExcerpt)
 	return nil
 }
 

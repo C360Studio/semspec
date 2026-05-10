@@ -360,6 +360,49 @@ func allRequiredPassed(results []payloads.CheckResult) bool {
 	return true
 }
 
+// SummarizeFailures returns the names of required checks that failed and an
+// excerpt of the first failure's stderr/stdout. Used by the log site so an
+// operator tailing logs sees what failed without spelunking EXECUTION_STATES.
+// Returns empty values when nothing failed — callers can pass the results
+// straight to a structured logger and an all-pass run prints nothing extra.
+//
+// The excerpt prefers Stderr (where mvn/go put compile/test errors); falls
+// back to Stdout when Stderr is empty (some tools log to stdout). Clipped
+// to excerptMax runes with a trailing "…" marker so the log line stays
+// bounded — full output remains in EXECUTION_STATES feedback for forensic
+// review. Only required failures are summarized; advisory check failures
+// don't affect Passed and shouldn't dominate the failure log.
+func SummarizeFailures(results []payloads.CheckResult, excerptMax int) (failedNames []string, firstExcerpt string) {
+	for _, r := range results {
+		if !r.Required || r.Passed {
+			continue
+		}
+		failedNames = append(failedNames, r.Name)
+		if firstExcerpt == "" {
+			src := strings.TrimSpace(r.Stderr)
+			if src == "" {
+				src = strings.TrimSpace(r.Stdout)
+			}
+			firstExcerpt = clipExcerpt(src, excerptMax)
+		}
+	}
+	return failedNames, firstExcerpt
+}
+
+// clipExcerpt clips s to maxRunes runes, appending "…" if truncation
+// occurred. Operates on runes (not bytes) so multi-byte characters in
+// upstream tool output don't get split mid-glyph.
+func clipExcerpt(s string, maxRunes int) string {
+	if maxRunes <= 0 || s == "" {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "…"
+}
+
 // DeriveGoTestPackages returns the deduplicated list of Go package paths
 // (relative to repoPath, in "./pkg/path" form) that should be tested given a
 // list of modified files. Only files ending in ".go" are considered. Files
