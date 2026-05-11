@@ -170,11 +170,24 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 	// dispatches can hold a plan across iterations. Requires NATS (graph
 	// mutations) and a non-zero Platform (loop entity ID resolution);
 	// skipped silently if either is missing.
+	//
+	// scratchpad — agent-private one-shot reasoning channel persisted as
+	// graph triples on the calling loop's entity (semstreams beta.62,
+	// originally semspec's 2026-05-12 ask). Distinct from write_todos:
+	// no IDs, no status enum, no list semantics — single text dump per
+	// call. Intended as a "think before commit" runway for generator
+	// roles where decomposition cognitive load was crimping output
+	// quality. Persona-side guidance is prescriptive (see prompt/tools.go).
 	if deps.NATSClient != nil && deps.Platform.Org != "" && deps.Platform.Platform != "" {
 		todoWriter := agentictools.NewNATSTodoWriter(deps.NATSClient)
 		todoExec := agentictools.NewWriteTodosExecutor(todoWriter, deps.Platform)
 		todoExec.SetLogger(slog.Default())
 		errs = append(errs, reg.RegisterTool(agentictools.WriteTodosToolName, todoExec))
+
+		scratchPub := agentictools.NewNATSTriplePublisher(deps.NATSClient)
+		scratchExec := agentictools.NewScratchpadExecutor(scratchPub, deps.Platform)
+		scratchExec.SetLogger(slog.Default())
+		errs = append(errs, reg.RegisterTool(agentictools.ScratchpadToolName, scratchExec))
 	}
 
 	if joined := errors.Join(errs...); joined != nil {

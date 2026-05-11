@@ -30,6 +30,36 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "submit_work", Order: 1, Guidance: "Submit completed work. Call ONLY after finishing your task — not on your first turn. See output format for required fields."},
 		{Name: "ask_question", Order: 2, Guidance: "Ask when blocked and cannot proceed. Default to reasonable assumptions — only ask when truly ambiguous."},
 
+		// Internal reasoning tools — these are YOUR private memory. They are
+		// NOT optional and they are NOT under Goodhart audit. The framework
+		// does not score you on whether you call them, but you SHOULD call
+		// them whenever they fit, because they directly improve the work you
+		// produce. They write to the trajectory and are visible to your
+		// next iteration, to the recovery agent if you wedge, and to a
+		// human reviewing your work later — but never to a reviewer who
+		// is scoring your output. Use them freely.
+		//
+		// write_todos: maintain your working task list ACROSS iterations.
+		// Use this VERY frequently — almost any task with more than one
+		// step benefits. Submit the entire current list each call;
+		// previous list is replaced. Mark items completed in the SAME
+		// iteration the work happened — never batch at the end. Without
+		// this, context compaction will evict your plan and you will
+		// repeat work or lose track of what is left.
+		{Name: "write_todos", Order: 3, Guidance: "Track your work-in-progress across iterations. Use VERY frequently — any multi-step task benefits. Submit the entire current list each call (full replacement). Mark items completed in the SAME iteration the work happened, never batch at the end. This is YOUR memory across iterations — use it freely; the framework does not score you on it."},
+
+		// scratchpad: free-form reasoning channel for a SINGLE dispatch.
+		// Use this BEFORE you call your strict commit tool (submit_work
+		// for most roles) whenever the work involves decomposition,
+		// planning multiple changes, or weighing constraints. Text is
+		// unconstrained — write plain prose explaining your approach,
+		// listing things you considered, noting edge cases. The
+		// framework does not interpret it; it lands in the trajectory
+		// for your own next-iteration use and for the recovery agent if
+		// you wedge. Strict tool-args on submit_work are easier to
+		// produce correctly AFTER you have laid out your thinking here.
+		{Name: "scratchpad", Order: 4, Guidance: "Think before you commit. Call this BEFORE submit_work whenever the task involves decomposition, multi-step planning, or weighing constraints. Write plain prose — your approach, things you considered, edge cases. The framework does not interpret or score the content; it is YOUR reasoning space and the strict commit goes more cleanly after you have used it."},
+
 		// Graph tools — summary first so agents know what to query
 		{Name: "graph_summary", Order: 10, Guidance: "Knowledge graph overview. Call ONCE first to see what entity types and domains are indexed before deciding to search."},
 		{Name: "graph_search", Order: 11, Guidance: "Ask a natural language question about the codebase (e.g. \"how does authentication work\", \"health endpoint handler\"). Returns a synthesized answer. Try FIRST for project lookups. If empty, FALL BACK to web_search — do NOT retry rephrased."},

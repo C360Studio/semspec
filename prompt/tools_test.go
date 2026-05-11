@@ -38,7 +38,8 @@ func TestFilterTools_Developer(t *testing.T) {
 // LessonDecomposer have multi-step / multi-iteration work where
 // cross-iteration memory pays off. Generators (planner / req-gen /
 // scen-gen) do single-shot dispatches and write_todos misfits their
-// shape — they get the scratchpad tool when semstreams ships it.
+// shape — they get scratchpad instead (see
+// TestFilterTools_Scratchpad_RoleScope).
 func TestFilterTools_WriteTodos_RoleScope(t *testing.T) {
 	allTools := []string{"bash", "submit_work", "write_todos"}
 
@@ -59,6 +60,39 @@ func TestFilterTools_WriteTodos_RoleScope(t *testing.T) {
 		if slices.Contains(got, "write_todos") {
 			t.Errorf("role %q should NOT have write_todos; got %v", role, got)
 		}
+	}
+}
+
+// TestFilterTools_Scratchpad_RoleScope pins broad scratchpad availability.
+// Per the user's 2026-05-12 direction, scratchpad is an INTERNAL tool —
+// not Goodhart-relevant — and should be available to any role that
+// might need a "think before commit" runway. The semstreams ask plus
+// the in-codebase persona guidance say generators are the highest-value
+// users; we also expose it to reviewers and Builder so the runway is
+// available when those roles need it (the trajectory cost is a single
+// tool call). Reflects 2026-05-12 wiring decision.
+func TestFilterTools_Scratchpad_RoleScope(t *testing.T) {
+	allTools := []string{"bash", "submit_work", "scratchpad"}
+
+	hasScratchpad := []Role{
+		RoleDeveloper, RoleArchitect, RoleLessonDecomposer,
+		RolePlanner, RoleRequirementGenerator, RoleScenarioGenerator,
+		RoleTaskGenerator, RolePlanReviewer, RoleTaskReviewer,
+		RoleScenarioReviewer, RolePlanQAReviewer, RoleReviewer,
+	}
+	for _, role := range hasScratchpad {
+		got := FilterTools(allTools, role)
+		if !slices.Contains(got, "scratchpad") {
+			t.Errorf("role %q should have scratchpad; got %v", role, got)
+		}
+	}
+
+	// RoleValidator stays narrow — it runs the structural checklist
+	// against the worktree and submits a verdict. No reasoning runway
+	// expected.
+	got := FilterTools(allTools, RoleValidator)
+	if slices.Contains(got, "scratchpad") {
+		t.Errorf("validator should NOT have scratchpad; got %v", got)
 	}
 }
 
