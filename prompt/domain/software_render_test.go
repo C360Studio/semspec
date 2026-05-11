@@ -683,3 +683,101 @@ func TestRenderScenarioGeneratorPrompt_PlanContextRendered(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderTaskDecomposerPrompt_IncludesCompletenessSignal pins the
+// take-11 fix: the renderer surfaces requirement title, description,
+// scope, prereqs, and the scenario-coverage rule. The completeness rule
+// itself is in the persona fragment (system-base), not the user prompt;
+// this test focuses on the per-dispatch context bake-in.
+func TestRenderTaskDecomposerPrompt_IncludesCoreContext(t *testing.T) {
+	out := renderTaskDecomposerPrompt(&prompt.DecomposerPromptContext{
+		RequirementTitle:       "Implement Meshtastic driver",
+		RequirementDescription: "OSH driver that bridges Meshtastic frames to the CS-API",
+		ScopeInclude:           []string{"src/main/java/io/opensensorhub/drivers/meshtastic", "build.gradle"},
+		ScopeDoNotTouch:        []string{"main.go"},
+		Scenarios: []prompt.DecomposerScenario{
+			{ID: "sc-frame-parse", Given: "a Meshtastic frame fixture", When: "ingested", Then: []string{"one CS-API message emitted"}},
+		},
+	})
+	mustContain := []string{
+		"Implement Meshtastic driver",
+		"OSH driver",
+		"src/main/java/io/opensensorhub/drivers/meshtastic",
+		"sc-frame-parse",
+		"scenario_ids array",
+		"Do not touch",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(out, want) {
+			t.Errorf("renderTaskDecomposerPrompt missing %q\nfull:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderTaskDecomposerPrompt_RetryFeedbackOnFirstLine(t *testing.T) {
+	out := renderTaskDecomposerPrompt(&prompt.DecomposerPromptContext{
+		RequirementTitle: "Try again",
+		RetryFeedback:    "previous attempt emitted empty nodes array",
+	})
+	// Retry feedback should appear before the requirement section so the
+	// LLM sees the prior failure first.
+	if !strings.HasPrefix(out, "RETRY") {
+		t.Errorf("retry feedback should prefix prompt; got first 80 chars: %s", clip(out, 80))
+	}
+	if !strings.Contains(out, "previous attempt emitted empty nodes array") {
+		t.Errorf("renderTaskDecomposerPrompt missing retry-feedback content\nfull:\n%s", out)
+	}
+}
+
+// TestRenderRecoveryAgentPrompt_IncludesEvidence covers the user prompt
+// for RoleRecoveryAgent. Ported from the legacy
+// processor/recovery-agent/result_test.go::TestBuildUserPromptIncludesContext
+// when the recovery-agent dispatch was wired through the assembler
+// 2026-05-11.
+func TestRenderRecoveryAgentPrompt_IncludesEvidence(t *testing.T) {
+	out := renderRecoveryAgentPrompt(&prompt.RecoveryPromptContext{
+		Layer:               "phase_local",
+		Slug:                "my-plan",
+		TaskID:              "task-42",
+		LoopID:              "loop-xyz",
+		EscalationReason:    "fixable rejections exceeded TDD cycle budget",
+		LastFailureFeedback: "Test failure: NullPointerException at line 17",
+		TrajectorySteps:     []string{"model_call(planner)", "tool_call(bash) → ls", "tool_call(graph_search) → no hits"},
+	})
+
+	mustContain := []string{
+		"phase_local",
+		"my-plan",
+		"task-42",
+		"loop-xyz",
+		"fixable rejections exceeded TDD cycle budget",
+		"NullPointerException",
+		"tool_call(bash)",
+		"submit_work",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected prompt to contain %q\nfull prompt:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderRecoveryAgentPrompt_EmptyTrajectoryFallback(t *testing.T) {
+	out := renderRecoveryAgentPrompt(&prompt.RecoveryPromptContext{
+		Layer:            "phase_local",
+		Slug:             "no-traj",
+		EscalationReason: "iter=50 budget exhausted",
+	})
+	if !strings.Contains(out, "no trajectory available") {
+		t.Errorf("expected fallback notice when trajectory is empty\nfull prompt:\n%s", out)
+	}
+}
+
+// clip is a local helper for test diagnostics — keeps error messages
+// bounded when the rendered output is multi-KB.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}

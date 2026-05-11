@@ -2204,46 +2204,32 @@ func TestParseReactivePayload_EmptyPayload_ReturnsError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// buildDecomposerPrompt tests
+// buildDecomposerPromptContext tests
+//
+// The hand-rolled buildDecomposerPrompt was deleted 2026-05-11 when the
+// decomposer dispatch was wired through the assembler. These tests cover the
+// projection from requirementExecution to prompt.DecomposerPromptContext.
+// The rendering of that context into the user message lives in
+// prompt/domain/software_render.go and is covered by tests in that package.
 // ---------------------------------------------------------------------------
 
-func TestBuildDecomposerPrompt_UsesExplicitPromptWhenSet(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		RequirementID: "req-1",
-		Title:         "Add auth",
-		Description:   "Add authentication",
-		Prompt:        "explicit custom prompt",
-	}
-
-	got := c.buildDecomposerPrompt(exec, "")
-	if got != "explicit custom prompt" {
-		t.Errorf("buildDecomposerPrompt() = %q, want explicit prompt", got)
-	}
-}
-
-func TestBuildDecomposerPrompt_BuildsFromContext(t *testing.T) {
-	c := newTestComponent(t)
-
+func TestBuildDecomposerPromptContext_TitleAndDescription(t *testing.T) {
 	exec := &requirementExecution{
 		RequirementID: "req-1",
 		Title:         "Add user authentication",
 		Description:   "Implement JWT-based auth",
 	}
 
-	got := c.buildDecomposerPrompt(exec, "")
-	if !strings.Contains(got, "Add user authentication") {
-		t.Errorf("prompt should contain title, got: %s", got)
+	got := buildDecomposerPromptContext(exec, "")
+	if got.RequirementTitle != "Add user authentication" {
+		t.Errorf("RequirementTitle = %q, want title", got.RequirementTitle)
 	}
-	if !strings.Contains(got, "JWT-based auth") {
-		t.Errorf("prompt should contain description, got: %s", got)
+	if got.RequirementDescription != "Implement JWT-based auth" {
+		t.Errorf("RequirementDescription = %q, want description", got.RequirementDescription)
 	}
 }
 
-func TestBuildDecomposerPrompt_IncludesPrerequisites(t *testing.T) {
-	c := newTestComponent(t)
-
+func TestBuildDecomposerPromptContext_IncludesPrerequisites(t *testing.T) {
 	exec := &requirementExecution{
 		RequirementID: "req-2",
 		Title:         "Add OAuth",
@@ -2258,15 +2244,30 @@ func TestBuildDecomposerPrompt_IncludesPrerequisites(t *testing.T) {
 		},
 	}
 
-	got := c.buildDecomposerPrompt(exec, "")
-	if !strings.Contains(got, "Prerequisite Requirements") {
-		t.Errorf("prompt should mention prerequisites, got: %s", got)
+	got := buildDecomposerPromptContext(exec, "")
+	if len(got.DependsOn) != 1 {
+		t.Fatalf("DependsOn length = %d, want 1", len(got.DependsOn))
 	}
-	if !strings.Contains(got, "Add JWT auth") {
-		t.Errorf("prompt should include prereq title, got: %s", got)
+	pre := got.DependsOn[0]
+	if pre.Title != "Add JWT auth" {
+		t.Errorf("prereq Title = %q, want %q", pre.Title, "Add JWT auth")
 	}
-	if !strings.Contains(got, "auth/jwt.go") {
-		t.Errorf("prompt should include prereq files modified, got: %s", got)
+	if len(pre.FilesModified) != 1 || pre.FilesModified[0] != "auth/jwt.go" {
+		t.Errorf("prereq FilesModified = %v, want [auth/jwt.go]", pre.FilesModified)
+	}
+	if pre.Summary != "Implemented JWT tokens" {
+		t.Errorf("prereq Summary = %q, want summary", pre.Summary)
+	}
+}
+
+func TestBuildDecomposerPromptContext_RetryFeedbackThreaded(t *testing.T) {
+	exec := &requirementExecution{
+		RequirementID: "req-3",
+		Title:         "Try again",
+	}
+	got := buildDecomposerPromptContext(exec, "previous attempt produced empty nodes array")
+	if got.RetryFeedback != "previous attempt produced empty nodes array" {
+		t.Errorf("RetryFeedback = %q, want previous attempt error", got.RetryFeedback)
 	}
 }
 
@@ -2517,11 +2518,10 @@ func TestHandleDecomposerCompleteLocked_FullCoverage_PopulatesDAG(t *testing.T) 
 }
 
 // Prompt must surface scenario IDs explicitly — without them the LLM has no
-// way to populate node.scenario_ids correctly. This test locks in the "id="
-// marker and the coverage contract sentence.
-func TestBuildDecomposerPrompt_EmitsScenarioIDs(t *testing.T) {
-	c := newTestComponent(t)
-
+// way to populate node.scenario_ids correctly. This test locks in the
+// context projection — the renderer's "id=" marker emission is covered
+// in prompt/domain.
+func TestBuildDecomposerPromptContext_EmitsScenarios(t *testing.T) {
 	exec := &requirementExecution{
 		RequirementID: "req-scenarios",
 		Title:         "Add auth",
@@ -2530,16 +2530,23 @@ func TestBuildDecomposerPrompt_EmitsScenarioIDs(t *testing.T) {
 			{ID: "sc-logout", Given: "a user", When: "they log out", Then: []string{"ok"}},
 		},
 	}
-	got := c.buildDecomposerPrompt(exec, "")
+	got := buildDecomposerPromptContext(exec, "")
 
-	for _, id := range []string{"sc-login", "sc-logout"} {
-		want := fmt.Sprintf("[id=%s]", id)
-		if !strings.Contains(got, want) {
-			t.Errorf("prompt missing scenario id marker %q; got: %s", want, got)
-		}
+	if len(got.Scenarios) != 2 {
+		t.Fatalf("Scenarios length = %d, want 2", len(got.Scenarios))
 	}
-	if !strings.Contains(got, "scenario_ids") {
-		t.Errorf("prompt should explain the scenario_ids contract; got: %s", got)
+	ids := []string{got.Scenarios[0].ID, got.Scenarios[1].ID}
+	for _, want := range []string{"sc-login", "sc-logout"} {
+		found := false
+		for _, id := range ids {
+			if id == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("scenario id %q missing from projected context; got %v", want, ids)
+		}
 	}
 }
 

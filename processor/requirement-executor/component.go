@@ -979,34 +979,62 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 	// dispatchDeveloperLocked / dispatchCodeReviewer.
 	decomposerModel := model.ResolveModel(c.modelRegistry, c.config.DecomposerModel, model.CapabilityTaskDecomposition)
 
-	// Decomposer's wire palette is exactly {decompose_task}. ToolChoice
-	// already forces this on the first turn, but without an explicit Tools
-	// field the agentic-loop falls back to the registry's full palette —
-	// which means after the forced first call returns, the model could
-	// pick wrong-role terminals (bash, submit_work, etc.) on subsequent
-	// turns. Explicit single-tool palette closes that gap and matches the
-	// take-11 fix shape applied to the other dispatch sites.
-	var decomposerEndpoint *ssmodel.EndpointConfig
+	var (
+		decomposerEndpoint *ssmodel.EndpointConfig
+		maxTokens          int
+	)
 	if c.modelRegistry != nil {
-		decomposerEndpoint = c.modelRegistry.GetEndpoint(decomposerModel)
+		if ep := c.modelRegistry.GetEndpoint(decomposerModel); ep != nil {
+			decomposerEndpoint = ep
+			maxTokens = ep.MaxTokens
+		}
+	}
+
+	// Assemble system + user prompts through the persona pipeline. The
+	// decomposer is RoleTaskGenerator; its fragments cover identity,
+	// completeness rules, the decompose_task tool directive, and the
+	// expected output shape. The user-prompt fragment reads from
+	// AssemblyContext.Decomposer and templates the requirement context.
+	// Replaces the hand-rolled buildDecomposerPrompt that bypassed the
+	// persona system — 2026-05-11 take 11 wedge surfaced the gap
+	// (decomposer emitted placeholder-only DAGs because no system prompt
+	// pushed it toward real implementation).
+	asmCtx := &prompt.AssemblyContext{
+		Role:              prompt.RoleTaskGenerator,
+		Provider:          resolveProvider(decomposerModel),
+		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(decomposerEndpoint, nil),
+		Domain:            "software",
+		AvailableTools:    prompt.FilterTools(availableToolNames(), prompt.RoleTaskGenerator),
+		SupportsTools:     true,
+		MaxTokens:         maxTokens,
+		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleTaskGenerator),
+		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		Decomposer:        buildDecomposerPromptContext(exec, exec.DecomposerLastError),
+	}
+
+	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("assemble decomposer prompt failed: %v", assembled.RenderError))
+		return
 	}
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        decomposerModel,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", decomposerEndpoint, "decompose_task"),
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", decomposerEndpoint, asmCtx.AvailableTools...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
-		Prompt:       c.buildDecomposerPrompt(exec, exec.DecomposerLastError),
-		ToolChoice:   &agentic.ToolChoice{Mode: "function", FunctionName: "decompose_task"},
+		Prompt:       assembled.UserMessage,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		ToolChoice: &agentic.ToolChoice{Mode: "function", FunctionName: "decompose_task"},
 		Metadata: map[string]any{
 			"requirement_id": exec.RequirementID,
 			"plan_slug":      exec.Slug,
 			// role + model for SKG tool.recovery.incident partitioning.
-			// "task-decomposer" isn't in prompt.Role* yet; canonicalize
-			// when a second consumer needs it.
-			"role":  "task-decomposer",
+			"role":  string(prompt.RoleTaskGenerator),
 			"model": decomposerModel,
 		},
 	}
@@ -1023,6 +1051,47 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		"max_attempts", c.config.MaxDecomposerRetries+1,
 	)
 	exec.DecomposerAttempt++
+}
+
+// buildDecomposerPromptContext projects a requirementExecution into the
+// prompt.DecomposerPromptContext the assembler's user-prompt fragment
+// consumes. Replaces the legacy hand-rolled buildDecomposerPrompt that
+// returned a complete string — see dispatchDecomposerLocked for the
+// wire-up rationale.
+func buildDecomposerPromptContext(exec *requirementExecution, previousError string) *prompt.DecomposerPromptContext {
+	ctx := &prompt.DecomposerPromptContext{
+		RequirementTitle:       exec.Title,
+		RequirementDescription: exec.Description,
+		RetryFeedback:          previousError,
+	}
+	if exec.Scope != nil {
+		ctx.ScopeInclude = exec.Scope.Include
+		ctx.ScopeExclude = exec.Scope.Exclude
+		ctx.ScopeDoNotTouch = exec.Scope.DoNotTouch
+	}
+	if len(exec.DependsOn) > 0 {
+		ctx.DependsOn = make([]prompt.DecomposerPrereqContext, 0, len(exec.DependsOn))
+		for _, prereq := range exec.DependsOn {
+			ctx.DependsOn = append(ctx.DependsOn, prompt.DecomposerPrereqContext{
+				Title:         prereq.Title,
+				Description:   prereq.Description,
+				FilesModified: prereq.FilesModified,
+				Summary:       prereq.Summary,
+			})
+		}
+	}
+	if len(exec.Scenarios) > 0 {
+		ctx.Scenarios = make([]prompt.DecomposerScenario, 0, len(exec.Scenarios))
+		for _, sc := range exec.Scenarios {
+			ctx.Scenarios = append(ctx.Scenarios, prompt.DecomposerScenario{
+				ID:    sc.ID,
+				Given: sc.Given,
+				When:  sc.When,
+				Then:  sc.Then,
+			})
+		}
+	}
+	return ctx
 }
 
 // retryOrFailDecomposerLocked re-dispatches the decomposer with the previous
@@ -1138,73 +1207,6 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 			}
 			sb.WriteString("\n")
 		}
-	}
-
-	return sb.String()
-}
-
-func (c *Component) buildDecomposerPrompt(exec *requirementExecution, previousError string) string {
-	// Use the explicit prompt if provided (e.g. from legacy trigger).
-	if exec.Prompt != "" {
-		return exec.Prompt
-	}
-
-	var sb strings.Builder
-
-	// Retry feedback: prepend prior failure before the requirement text so the
-	// LLM sees it first and is primed to correct the specific problem.
-	if previousError != "" {
-		sb.WriteString("RETRY — your previous attempt failed with: ")
-		sb.WriteString(previousError)
-		sb.WriteString("\nYou MUST call the decompose_task function with a non-empty nodes array. Each node needs id, prompt (with concrete file paths), role, and file_scope. Do NOT return text; use the tool call.\n\n")
-	}
-
-	sb.WriteString("Requirement: ")
-	sb.WriteString(exec.Title)
-	sb.WriteString("\n")
-
-	if exec.Description != "" {
-		sb.WriteString("Description: ")
-		sb.WriteString(exec.Description)
-		sb.WriteString("\n")
-	}
-
-	if len(exec.DependsOn) > 0 {
-		sb.WriteString("\nPrerequisite Requirements (already completed — reference their work):\n")
-		for i, prereq := range exec.DependsOn {
-			sb.WriteString(fmt.Sprintf("%d. %q — %s\n", i+1, prereq.Title, prereq.Description))
-			if len(prereq.FilesModified) > 0 {
-				sb.WriteString(fmt.Sprintf("   Files modified: %s\n", strings.Join(prereq.FilesModified, ", ")))
-			}
-			if prereq.Summary != "" {
-				sb.WriteString(fmt.Sprintf("   Summary: %s\n", prereq.Summary))
-			}
-		}
-	}
-
-	if exec.Scope != nil {
-		sb.WriteString("\nProject File Scope:\n")
-		if len(exec.Scope.Include) > 0 {
-			sb.WriteString("  Include: " + strings.Join(exec.Scope.Include, ", ") + "\n")
-		}
-		if len(exec.Scope.Exclude) > 0 {
-			sb.WriteString("  Exclude: " + strings.Join(exec.Scope.Exclude, ", ") + "\n")
-		}
-		if len(exec.Scope.DoNotTouch) > 0 {
-			sb.WriteString("  Do not touch: " + strings.Join(exec.Scope.DoNotTouch, ", ") + "\n")
-		}
-	}
-
-	if len(exec.Scenarios) > 0 {
-		sb.WriteString("\nAcceptance Criteria (scenarios to satisfy):\n")
-		for i, sc := range exec.Scenarios {
-			thenParts := strings.Join(sc.Then, ", ")
-			sb.WriteString(fmt.Sprintf("%d. [id=%s] Given %s, When %s, Then %s\n",
-				i+1, sc.ID, sc.Given, sc.When, thenParts))
-		}
-		sb.WriteString("\nEvery scenario ID above MUST appear in at least one node's scenario_ids array. ")
-		sb.WriteString("This is how failed-scenario retries route back to the right node. ")
-		sb.WriteString("A DAG that leaves any scenario ID uncovered will be rejected and you will re-run.\n")
 	}
 
 	return sb.String()
@@ -1857,10 +1859,17 @@ func availableToolNames() []string {
 	// terminal that was deleted; dropped 2026-05-08 take-14 follow-up.
 	// No executor implements it, presence here just bloated the wire
 	// palette and risked small-model wrong-tool selection.
+	//
+	// decompose_task + scratchpad + write_todos surfaced 2026-05-11 when
+	// the decomposer dispatch was wired through the assembler. The
+	// per-role tool filter (prompt.FilterTools) keeps the decomposer's
+	// wire palette narrow (decompose_task + scratchpad + write_todos);
+	// other roles inherit the same FilterTools narrowing.
 	return []string{
 		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
+		"decompose_task", "scratchpad", "write_todos",
 	}
 }
 

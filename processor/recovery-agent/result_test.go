@@ -97,41 +97,9 @@ func TestParseRecoveryResult(t *testing.T) {
 	}
 }
 
-func TestBuildUserPromptIncludesContext(t *testing.T) {
-	out := buildUserPrompt(recoveryPromptInput{
-		Layer:               "phase_local",
-		Slug:                "my-plan",
-		TaskID:              "task-42",
-		LoopID:              "loop-xyz",
-		EscalationReason:    "fixable rejections exceeded TDD cycle budget",
-		LastFailureFeedback: "Test failure: NullPointerException at line 17",
-		TrajectorySteps:     []string{"model_call(planner)", "tool_call(bash) → ls", "tool_call(graph_search) → no hits"},
-	})
-
-	mustContain := []string{
-		"phase_local",
-		"my-plan",
-		"task-42",
-		"loop-xyz",
-		"fixable rejections exceeded TDD cycle budget",
-		"NullPointerException",
-		"tool_call(bash)",
-		"submit_work",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(out, want) {
-			t.Errorf("expected prompt to contain %q\nfull prompt:\n%s", want, out)
-		}
-	}
-}
-
-func TestBuildUserPromptHandlesEmptyTrajectory(t *testing.T) {
-	out := buildUserPrompt(recoveryPromptInput{
-		Layer:            "phase_local",
-		Slug:             "no-traj",
-		EscalationReason: "iter=50 budget exhausted",
-	})
-	if !strings.Contains(out, "no trajectory available") {
-		t.Errorf("expected fallback notice when trajectory is empty\nfull prompt:\n%s", out)
-	}
-}
+// Note: the user-prompt content tests previously here (TestBuildUserPrompt*)
+// moved to prompt/domain/software_render_test.go when the recovery-agent
+// dispatch was wired through the assembler — 2026-05-11. The renderer
+// lives in prompt/domain now; testing it in the package that owns it is
+// the natural shape and removes the recovery-agent test file's dependency
+// on internal prompt construction.

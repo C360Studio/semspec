@@ -755,3 +755,122 @@ const planReviewerCompletenessR2 = "## Completeness Criteria (Round 2 — Requir
 	"7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Requirements involving external systems should map to declared integration points. Requirements triggered by user actions should map to declared actors. Flag requirements that conflict with architectural decisions. (phase: \"requirements\", target_id: the conflicting requirement ID)\n" +
 	"8. **Scenario-actor coverage** — Scenarios should reference the actors declared in the architecture. If the architecture declares an actor (e.g., a \"scheduler\" or \"event\" type) but no scenario has a Given/When involving that actor's triggers, flag as a warning — the plan may have blind spots for that actor's behavior. (phase: \"scenarios\")\n" +
 	"9. **Scenario-integration coverage** — Scenarios should exercise the integration points declared in the architecture. If the architecture declares an integration (e.g., an outbound HTTP API or a database) but no scenario verifies that integration's behavior or error handling, flag as a warning — untested integration boundaries are a common source of production failures. (phase: \"scenarios\")\n\n"
+
+// renderTaskDecomposerPrompt produces the user message for the task-decomposer
+// dispatch from req-executor. Replaces the legacy hand-rolled buildDecomposerPrompt
+// in processor/requirement-executor/component.go (deleted 2026-05-11 take 11
+// fix). Wires the decomposer through the assembler pipeline so it picks up
+// system-base + tool-directive + output-format + lessons-learned + tool
+// guidance like every other generator role.
+func renderTaskDecomposerPrompt(d *prompt.DecomposerPromptContext) string {
+	var sb strings.Builder
+
+	// Retry feedback first so the LLM sees prior failure before reading the
+	// task. Mirrors the position used by other retry-aware renderers.
+	if d.RetryFeedback != "" {
+		sb.WriteString("RETRY — your previous attempt failed with: ")
+		sb.WriteString(d.RetryFeedback)
+		sb.WriteString("\nYou MUST call the decompose_task function with a non-empty nodes array. Each node needs id, prompt (with concrete file paths), role, and file_scope. Do NOT return text; use the tool call.\n\n")
+	}
+
+	sb.WriteString("## Requirement\n\n")
+	if d.RequirementTitle != "" {
+		fmt.Fprintf(&sb, "**Title**: %s\n\n", d.RequirementTitle)
+	}
+	if d.RequirementDescription != "" {
+		fmt.Fprintf(&sb, "**Description**: %s\n\n", d.RequirementDescription)
+	}
+
+	if len(d.DependsOn) > 0 {
+		sb.WriteString("## Prerequisite Requirements (already completed — reference their work, do not re-emit)\n\n")
+		for i, prereq := range d.DependsOn {
+			fmt.Fprintf(&sb, "%d. %q — %s\n", i+1, prereq.Title, prereq.Description)
+			if len(prereq.FilesModified) > 0 {
+				fmt.Fprintf(&sb, "   Files modified: %s\n", strings.Join(prereq.FilesModified, ", "))
+			}
+			if prereq.Summary != "" {
+				fmt.Fprintf(&sb, "   Summary: %s\n", prereq.Summary)
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(d.ScopeInclude) > 0 || len(d.ScopeExclude) > 0 || len(d.ScopeDoNotTouch) > 0 {
+		sb.WriteString("## Project File Scope\n\n")
+		if len(d.ScopeInclude) > 0 {
+			fmt.Fprintf(&sb, "**Include**: %s\n", strings.Join(d.ScopeInclude, ", "))
+		}
+		if len(d.ScopeExclude) > 0 {
+			fmt.Fprintf(&sb, "**Exclude**: %s\n", strings.Join(d.ScopeExclude, ", "))
+		}
+		if len(d.ScopeDoNotTouch) > 0 {
+			fmt.Fprintf(&sb, "**Do not touch**: %s\n", strings.Join(d.ScopeDoNotTouch, ", "))
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(d.Scenarios) > 0 {
+		sb.WriteString("## Acceptance Criteria (scenarios to satisfy)\n\n")
+		for i, sc := range d.Scenarios {
+			thenParts := strings.Join(sc.Then, ", ")
+			fmt.Fprintf(&sb, "%d. [id=%s] Given %s, When %s, Then %s\n",
+				i+1, sc.ID, sc.Given, sc.When, thenParts)
+		}
+		sb.WriteString("\nEvery scenario ID above MUST appear in at least one node's scenario_ids array. ")
+		sb.WriteString("This is how failed-scenario retries route back to the right node. ")
+		sb.WriteString("A DAG that leaves any scenario ID uncovered will be rejected and you will re-run.\n")
+	}
+
+	return sb.String()
+}
+
+// renderRecoveryAgentPrompt produces the user message for the recovery-agent
+// dispatch. Replaces the legacy hand-rolled buildUserPrompt in
+// processor/recovery-agent/prompt.go (deleted 2026-05-11). The recovery
+// agent's diagnostic context — escalation reason, last failure feedback,
+// trajectory steps — is rendered here so it sits alongside the persona
+// fragments (system-base + closed-action-set + rules) that come from the
+// fragment registry.
+func renderRecoveryAgentPrompt(r *prompt.RecoveryPromptContext) string {
+	var sb strings.Builder
+
+	sb.WriteString("# RECOVERY REQUEST\n\n")
+	if r.Layer != "" {
+		fmt.Fprintf(&sb, "**Layer**: %s\n", r.Layer)
+	}
+	fmt.Fprintf(&sb, "**Plan slug**: %s\n", r.Slug)
+	if r.RequirementID != "" {
+		fmt.Fprintf(&sb, "**Requirement ID**: %s\n", r.RequirementID)
+	}
+	if r.TaskID != "" {
+		fmt.Fprintf(&sb, "**Task ID**: %s\n", r.TaskID)
+	}
+	if r.LoopID != "" {
+		fmt.Fprintf(&sb, "**Wedged agent loop ID**: %s\n", r.LoopID)
+	}
+	if r.PriorRecoveryID != "" {
+		fmt.Fprintf(&sb, "**Prior recovery attempt**: %s (this is a coordinator-layer retry — pick a different action shape than the prior layer)\n", r.PriorRecoveryID)
+	}
+
+	sb.WriteString("\n## Escalation Reason\n\n")
+	sb.WriteString(r.EscalationReason)
+	sb.WriteString("\n")
+
+	if r.LastFailureFeedback != "" {
+		sb.WriteString("\n## Last Failure Feedback (what the wedged agent was responding to before escalation)\n\n")
+		sb.WriteString(r.LastFailureFeedback)
+		sb.WriteString("\n")
+	}
+
+	if len(r.TrajectorySteps) == 0 {
+		sb.WriteString("\n## Trajectory\n\n(no trajectory available — work from the escalation reason and last failure feedback)\n")
+	} else {
+		fmt.Fprintf(&sb, "\n## Trajectory (%d steps, may be capped)\n\n", len(r.TrajectorySteps))
+		for i, summary := range r.TrajectorySteps {
+			fmt.Fprintf(&sb, "  [%d] %s\n", i, summary)
+		}
+	}
+
+	sb.WriteString("\n---\nDiagnose the wedge from the evidence above and call submit_work with your chosen RecoveryAction. Do not call any other tool except scratchpad (which is for your own reasoning before you commit).")
+	return sb.String()
+}

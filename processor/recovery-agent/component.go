@@ -12,6 +12,9 @@ import (
 
 	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
@@ -62,7 +65,15 @@ type Component struct {
 
 	// Dispatch + watcher dependencies.
 	modelRegistry ssmodel.RegistryReader
+	toolRegistry  component.ToolRegistryReader
 	decoder       *message.Decoder
+
+	// assembler builds the recovery-agent's system + user message from
+	// persona fragments (RoleRecoveryAgent in prompt/domain/software.go).
+	// Replaces the legacy hand-rolled systemPrompt + buildUserPrompt
+	// strings in prompt.go that bypassed the persona pipeline entirely.
+	// Wired 2026-05-11 take 11 cleanup.
+	assembler *prompt.Assembler
 
 	// inFlight maps dispatched TaskID → originating request. Populated
 	// when handleMessage publishes the LLM task; consumed by the
@@ -128,14 +139,25 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	logger := deps.GetLogger()
+
+	// Build the persona-fragment registry the recovery-agent dispatches
+	// through. Same shape as planner/qa-reviewer/etc — domain fragments
+	// + tool-guidance + manifest helpers. RoleRecoveryAgent fragments
+	// live in promptdomain.Software().
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+
 	c := &Component{
 		name:          componentName,
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: deps.ModelRegistry,
+		toolRegistry:  deps.ToolRegistry,
 		decoder:       message.NewDecoder(deps.PayloadRegistry),
 		inFlight:      make(map[string]*inFlightDispatch),
+		assembler:     prompt.NewAssembler(registry),
 	}
 	return c, nil
 }
@@ -415,7 +437,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 	}
 
 	steps := c.fetchTrajectorySteps(ctx, req)
-	userPrompt := buildUserPrompt(recoveryPromptInput{
+	recCtx := &prompt.RecoveryPromptContext{
 		Layer:               string(req.Layer),
 		Slug:                req.Slug,
 		RequirementID:       req.RequirementID,
@@ -425,18 +447,52 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		EscalationReason:    req.EscalationReason,
 		LastFailureFeedback: req.LastFailureFeedback,
 		TrajectorySteps:     steps,
-	})
+	}
+
+	var (
+		endpoint  *ssmodel.EndpointConfig
+		maxTokens int
+	)
+	if c.modelRegistry != nil {
+		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+			endpoint = ep
+			maxTokens = ep.MaxTokens
+		}
+	}
+
+	availableTools := prompt.FilterTools(recoveryAvailableToolNames(), prompt.RoleRecoveryAgent)
+	asmCtx := &prompt.AssemblyContext{
+		Role:              prompt.RoleRecoveryAgent,
+		Provider:          resolveProvider(modelName),
+		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, nil),
+		Domain:            "software",
+		AvailableTools:    availableTools,
+		SupportsTools:     true,
+		MaxTokens:         maxTokens,
+		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleRecoveryAgent),
+		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		Recovery:          recCtx,
+	}
+
+	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		c.logger.Error("recovery-agent prompt render failed",
+			"slug", req.Slug, "recovery_id", req.RecoveryID, "error", assembled.RenderError)
+		return fmt.Errorf("assemble recovery prompt: %w", assembled.RenderError)
+	}
 
 	taskID := fmt.Sprintf("recover-%s-%s", req.Slug, uuid.New().String())
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
-		Prompt:       userPrompt,
+		Prompt:       assembled.UserMessage,
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", endpoint, availableTools...),
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleRecoveryAgent, availableTools),
 		WorkflowSlug: workflow.WorkflowSlugWedgeRecovery,
 		WorkflowStep: stepRecover,
 		Context: &agentic.ConstructedContext{
-			Content: systemPrompt,
+			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
 			"plan_slug":      req.Slug,
@@ -447,7 +503,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 			"loop_id":        req.LoopID,
 			"capability":     string(cap),
 			"model":          modelName,
-			"role":           "recovery-agent",
+			"role":           string(prompt.RoleRecoveryAgent),
 		},
 	}
 
@@ -471,7 +527,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		"capability", cap,
 		"model", modelName,
 		"trajectory_steps", len(steps),
-		"prompt_chars", len(userPrompt),
+		"prompt_chars", len(assembled.UserMessage),
 	)
 	return nil
 }
@@ -797,4 +853,27 @@ func clip(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// recoveryAvailableToolNames returns the full tool set the recovery agent
+// knows about; FilterTools(role=RoleRecoveryAgent) narrows to the actual
+// wire palette (submit_work + scratchpad — see prompt/tool_filter.go).
+func recoveryAvailableToolNames() []string {
+	return []string{"submit_work", "scratchpad"}
+}
+
+// resolveProvider maps a model string to a prompt.Provider. Mirrors the
+// same helper in requirement-executor; small enough to duplicate rather
+// than pull into prompt/.
+func resolveProvider(modelStr string) prompt.Provider {
+	switch {
+	case strings.Contains(modelStr, "claude"):
+		return prompt.ProviderAnthropic
+	case strings.Contains(modelStr, "gpt"),
+		strings.Contains(modelStr, "o1"),
+		strings.Contains(modelStr, "o3"):
+		return prompt.ProviderOpenAI
+	default:
+		return prompt.ProviderOllama
+	}
 }

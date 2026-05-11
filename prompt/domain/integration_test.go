@@ -77,7 +77,11 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 		},
 		{
 			prompt.RoleTaskGenerator, prompt.ProviderOllama,
-			[]string{"task decomposer breaking", "## Identity"},
+			// New persona language as of 2026-05-11 take-11 rewire: the
+			// decomposer's identity sentence ("You are a task decomposer.
+			// Your ONLY job is to partition a single requirement…") plus the
+			// "## Identity" header from the cross-role identity fragment.
+			[]string{"task decomposer", "## Identity"},
 			[]string{"code reviewer"},
 		},
 	}

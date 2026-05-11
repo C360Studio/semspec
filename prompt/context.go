@@ -104,6 +104,18 @@ type AssemblyContext struct {
 	// prompt. Set by the lesson-decomposer component before assembly
 	// (ADR-033 Phase 2b); nil for any other role.
 	LessonDecomposerPrompt *LessonDecomposerPromptContext
+
+	// Decomposer carries data for the task-decomposer (RoleTaskGenerator)
+	// user prompt. Set by the requirement-executor component before
+	// assembly. Note: this is DISTINCT from LessonDecomposerPrompt above —
+	// the LessonDecomposer is the ADR-033 trajectory→lesson synthesiser;
+	// this Decomposer is the requirement-→-TaskDAG partitioner.
+	Decomposer *DecomposerPromptContext
+
+	// Recovery carries data for the recovery-agent (RoleRecoveryAgent) user
+	// prompt. Set by the recovery-agent component before assembly. nil for
+	// every other role.
+	Recovery *RecoveryPromptContext
 }
 
 // TaskContext carries data for developer task prompts.
