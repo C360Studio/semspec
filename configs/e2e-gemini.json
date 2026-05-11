@@ -637,7 +637,10 @@
         "timeout_seconds": 3600,
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2,
-        "max_decomposer_retries": 2
+        "max_decomposer_retries": 2,
+        "defer_terminal_on_recovery": true,
+        "recovery_timeout_seconds": 60,
+        "max_recovery_restarts": 1
       }
     },
     "structural-validator": {

@@ -168,6 +168,30 @@ type requirementExecution struct {
 	// --- Timeout ---
 
 	timeoutTimer *timeoutHandle
+
+	// --- ADR-037 race-closure (phaseAwaitingRecovery) ---
+
+	// awaitingRecovery is true while this execution has been deferred from
+	// terminal-failure pending a recovery PlanDecision accept (or timeout).
+	// When true, terminated MUST be false — the exec is paused, not closed.
+	awaitingRecovery bool
+
+	// recoveryTimer fires after Config.RecoveryTimeoutSeconds with no accept;
+	// it terminal-fails the exec via markFailedLocked using recoveryReason.
+	// Separate from timeoutTimer (per-execution wall clock) so the two
+	// timeouts can be reasoned about independently.
+	recoveryTimer *timeoutHandle
+
+	// recoveryReason is the original failure reason captured at defer time.
+	// Used as the markFailedLocked argument when recoveryTimer expires.
+	recoveryReason string
+
+	// recoveryRestarts is the count of resumeFromRecoveryLocked invocations.
+	// Bounded by Config.MaxRecoveryRestarts so a recovery loop can't burn
+	// budget indefinitely. Separate counter from RetryCount because recovery
+	// restarts are out-of-band — they fire AFTER the normal retry budget is
+	// already exhausted.
+	recoveryRestarts int
 }
 
 // ScenarioVerdict carries a per-scenario pass/fail from the requirement reviewer.

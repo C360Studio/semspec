@@ -64,12 +64,13 @@ const (
 	stageRequirementReview = "requirement-review"
 
 	// Phase values written to entity triples.
-	phaseDecomposing = "decomposing"
-	phaseExecuting   = "executing"
-	phaseCompleted   = "completed"
-	phaseFailed      = "failed"
-	phaseError       = "error"
-	phaseReviewing   = "reviewing"
+	phaseDecomposing      = "decomposing"
+	phaseExecuting        = "executing"
+	phaseCompleted        = "completed"
+	phaseFailed           = "failed"
+	phaseError            = "error"
+	phaseReviewing        = "reviewing"
+	phaseAwaitingRecovery = "awaiting-recovery" // ADR-037 race-closure interim state — not terminal
 
 	// NATS subjects.
 	subjectDecomposer = "agent.task.development"
@@ -253,6 +254,18 @@ func (c *Component) Start(ctx context.Context) error {
 		c.resumeInterruptedExecutions(ctx)
 	}()
 
+	// ADR-037 race closure: subscribe to plan-decision-accepted events so
+	// awaiting-recovery execs can be resumed when their recovery
+	// PlanDecision lands accepted. Best-effort: a startup failure here
+	// disables the resume path but does not stop the component — the
+	// recovery timer remains as the terminal-fail fallback.
+	if c.recoveryDeferEnabled() {
+		if err := c.startPlanDecisionAcceptedConsumer(ctx); err != nil {
+			c.logger.Warn("Failed to start plan-decision-accepted consumer; recovery resume disabled",
+				"error", err)
+		}
+	}
+
 	c.mu.Lock()
 	c.running = true
 	c.mu.Unlock()
@@ -305,6 +318,9 @@ func (c *Component) Stop(timeout time.Duration) error {
 		if exec.timeoutTimer != nil {
 			exec.timeoutTimer.stop()
 		}
+		if exec.recoveryTimer != nil {
+			exec.recoveryTimer.stop()
+		}
 		exec.mu.Unlock()
 	}
 
@@ -344,7 +360,21 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 	for entityID, triples := range entities {
 		phase := triples[wf.Phase]
 		// Skip terminal phases — no recovery needed.
+		// phaseAwaitingRecovery is NON-terminal; we leave it alone here. The
+		// recovery accept/reject/timeout path either resumes the exec (next
+		// dispatch happens through resumeFromRecoveryLocked) or terminal-fails
+		// it. Reconcile-on-restart would not have the recoveryTimer in flight,
+		// so an awaiting-recovery exec recovered from graph state is effectively
+		// orphaned; surfacing it as failed is the safer reconcile shape.
 		if phase == phaseCompleted || phase == phaseFailed || phase == phaseError {
+			continue
+		}
+		if phase == phaseAwaitingRecovery {
+			// Recovered from graph with no timer — treat as failed reconcile,
+			// since we don't have the original failure reason or the deadline.
+			// The recovery PlanDecision is durable; if it lands, the cascade
+			// will dirty-mark and a fresh req execution will spawn. Better to
+			// release than to hold an exec with no completion path.
 			continue
 		}
 
@@ -805,6 +835,14 @@ func (c *Component) handleNodeFailureLocked(ctx context.Context, event *agentic.
 			"entity_id", exec.EntityID,
 			"node_id", nodeID,
 			"escalation_reason", failurePayload.EscalationReason)
+		// ADR-037 race closure: execution-manager.publishRecoveryRequested
+		// fires synchronously alongside the task-level escalation that drives
+		// us here. Defer terminal-failure so the in-flight recovery's
+		// accepted PlanDecision can revive this exec instead of dirty-marking
+		// a graveyard.
+		if c.deferToAwaitingRecoveryLocked(ctx, exec, failureReason) {
+			return
+		}
 	}
 	c.markFailedLocked(ctx, exec, failureReason)
 }
@@ -1512,7 +1550,15 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		// surfaces it via the attention banner + retry picker. The decision is
 		// an additional signal, not the primary resolution path.
 		c.emitExhaustionDecision(ctx, exec, result.Verdict, result.Feedback)
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement rejected (retries exhausted): %s", result.Feedback))
+		failureReason := fmt.Sprintf("requirement rejected (retries exhausted): %s", result.Feedback)
+		// ADR-037 race closure: emitExhaustionDecision publishes
+		// RecoveryRequested. Defer terminal-failure so an accepted recovery
+		// PlanDecision can revive this exec instead of arriving after the req
+		// has already terminal-failed.
+		if c.deferToAwaitingRecoveryLocked(ctx, exec, failureReason) {
+			return
+		}
+		c.markFailedLocked(ctx, exec, failureReason)
 		return
 	}
 
@@ -2140,6 +2186,10 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *requirementExecut
 func (c *Component) cleanupExecutionLocked(exec *requirementExecution, success bool) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
+	}
+	if exec.recoveryTimer != nil {
+		exec.recoveryTimer.stop()
+		exec.recoveryTimer = nil
 	}
 
 	if c.sandbox != nil {

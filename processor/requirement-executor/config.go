@@ -68,6 +68,40 @@ type Config struct {
 	// are updated to cite runtime-generated scenario IDs.
 	EnforceScenarioCoverage *bool `json:"enforce_scenario_coverage,omitempty" schema:"type:bool,description:Reject decomposer output that leaves input scenarios uncovered,category:advanced,default:true"`
 
+	// DeferTerminalOnRecovery opts the requirement-executor into ADR-037's
+	// race-closure path. When true, exhaustion call sites that just
+	// published RecoveryRequested transition to phaseAwaitingRecovery and
+	// arm a timer instead of immediately calling markFailedLocked. The
+	// awaiting exec is resumed by the accepted-PlanDecision watcher
+	// (workflow.events.plan-decision.accepted) or terminal-failed on
+	// timeout. Operationally meaningful only when plan-decision-handler
+	// has AutoAcceptRecovery=true — otherwise every recovery would burn
+	// the full timeout. Default false to preserve existing behavior;
+	// production gemini @hard runs set this true alongside auto-accept.
+	DeferTerminalOnRecovery bool `json:"defer_terminal_on_recovery" schema:"type:boolean,description:Defer terminal markFailed when recovery is in flight (ADR-037 stage-2 race closure),category:advanced,default:false"`
+
+	// RecoveryTimeoutSeconds bounds the phaseAwaitingRecovery wait. Real-LLM
+	// recovery diagnosis on gemini-pro lands in 10-20s, so 60s gives a
+	// comfortable margin without blocking too long when recovery silently
+	// fails. Only used when DeferTerminalOnRecovery is true.
+	RecoveryTimeoutSeconds int `json:"recovery_timeout_seconds" schema:"type:int,description:Seconds to wait in phaseAwaitingRecovery before terminal-failing,category:advanced,default:60,min:5,max:600"`
+
+	// PlanDecisionAcceptedSubject is the JetStream subject on which
+	// plan-decision-handler publishes accepted-PlanDecision events. Must
+	// match the AcceptedSubject configured on plan-decision-handler. Real
+	// configs override the Go default to a legacy subject name; keep
+	// the default in sync with prevailing real config files so the
+	// race-closure path works without per-operator wire-up.
+	PlanDecisionAcceptedSubject string `json:"plan_decision_accepted_subject" schema:"type:string,description:Subject for accepted-PlanDecision events (must match plan-decision-handler.accepted_subject),category:advanced,default:workflow.events.change-proposal.accepted"`
+
+	// MaxRecoveryRestarts bounds how many times an exec can be resumed from
+	// awaiting-recovery in its lifetime. Goodhart guard: prevents a recovery
+	// agent from looping a wedge by repeatedly emitting accepted
+	// PlanDecisions. Default 1 — one restart out-of-band of the normal
+	// retry budget. 0 disables resumption entirely (recovery would still
+	// defer, but every defer would resolve via timer-fail).
+	MaxRecoveryRestarts int `json:"max_recovery_restarts" schema:"type:int,description:Max times an exec can be resumed from awaiting-recovery,category:advanced,default:1,min:0,max:5"`
+
 	// RequireCommitObservation gates markCompletedLocked on every NodeResult
 	// that claimed FilesModified having a non-empty CommitSHA. Sibling guard
 	// to execution-manager's claim/observation cross-check (bug #9): even if a
@@ -169,6 +203,20 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxReviewRetries == 0 {
 		c.MaxReviewRetries = 3
+	}
+	if c.RecoveryTimeoutSeconds == 0 {
+		c.RecoveryTimeoutSeconds = 60
+	}
+	if c.PlanDecisionAcceptedSubject == "" {
+		c.PlanDecisionAcceptedSubject = "workflow.events.change-proposal.accepted"
+	}
+	// MaxRecoveryRestarts: 0 is a valid "disable resumption" value, so
+	// only default when the JSON omitted it. Reflect via JSON-default
+	// rules: an absent field arrives as 0, but operators who explicitly
+	// pass 0 also get 0 — accept the small ambiguity since 0 is the
+	// safest behavior either way.
+	if c.MaxRecoveryRestarts == 0 {
+		c.MaxRecoveryRestarts = 1
 	}
 	if c.Ports == nil {
 		c.Ports = d.Ports
