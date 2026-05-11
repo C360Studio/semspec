@@ -26,6 +26,17 @@ type Config struct {
 	// UserStreamName is the JetStream stream for user signals (escalation, errors).
 	UserStreamName string `json:"user_stream_name" schema:"type:string,description:JetStream stream for user signals,category:basic,default:USER"`
 
+	// CascadeTriggerSubject is the JetStream subject on which this component
+	// publishes PlanDecisionCascadeRequest messages after a proposal is
+	// accepted (HTTP or mutation path). Must match
+	// plan-decision-handler.trigger_subject. Default mirrors the consumer
+	// default and the previously-hardcoded value at both publisher sites.
+	// Surfaced as a config field 2026-05-11 after a real-LLM run wedged on
+	// a publisher-vs-consumer subject drift that had been silently dropping
+	// cascade messages on every real-LLM run since the change-proposal →
+	// plan-decision rename.
+	CascadeTriggerSubject string `json:"cascade_trigger_subject" schema:"type:string,description:Subject for cascade trigger messages published on accept (must match plan-decision-handler.trigger_subject),category:advanced,default:workflow.trigger.plan-decision-cascade"`
+
 	// SandboxURL is the base URL of the sandbox server for workspace browsing.
 	// When empty, workspace endpoints return 503.
 	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox server URL for workspace browser (empty=disabled),category:advanced"`
@@ -123,6 +134,7 @@ func DefaultConfig() Config {
 		PlanStateBucket:       "PLAN_STATES",
 		EventStreamName:       "WORKFLOW",
 		UserStreamName:        "USER",
+		CascadeTriggerSubject: "workflow.trigger.plan-decision-cascade",
 		MaxConcurrentPlanners: 3,
 		TimeoutSeconds:        1800,
 		MaxReviewIterations:   3,

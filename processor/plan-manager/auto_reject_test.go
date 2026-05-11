@@ -19,6 +19,62 @@ func TestDefaultConfig_AutoRejectOnExhaustionFalse(t *testing.T) {
 	}
 }
 
+// TestDefaultConfig_CascadeTriggerSubject pins the default subject for
+// the cascade publish path. Must stay in lockstep with
+// plan-decision-handler.TriggerSubject default — both reflect the
+// post-rename "plan-decision" canonical name. A real-LLM run on
+// 2026-05-11 (take 9) wedged on the legacy "change-proposal" name
+// because every e2e config overrode the consumer to legacy while the
+// publisher was hardcoded to the new name. This test pins the new
+// name and the next test pins the legacy-name-as-explicit-config path
+// so operators can still override if they need to.
+func TestDefaultConfig_CascadeTriggerSubject(t *testing.T) {
+	cfg := DefaultConfig()
+	const want = "workflow.trigger.plan-decision-cascade"
+	if cfg.CascadeTriggerSubject != want {
+		t.Errorf("DefaultConfig.CascadeTriggerSubject = %q, want %q", cfg.CascadeTriggerSubject, want)
+	}
+}
+
+// TestConfigUnmarshal_CascadeTriggerSubject confirms the JSON tag and
+// the empty-string fallback. Unmarshaling a config with the field
+// unset leaves it empty; the component constructor then merges the
+// DefaultConfig value. Both shapes are observable here.
+func TestConfigUnmarshal_CascadeTriggerSubject(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want string
+	}{
+		{
+			name: "explicit override (operator opts to legacy name)",
+			json: `{"execution_bucket_name":"X","event_stream_name":"Y","cascade_trigger_subject":"workflow.trigger.change-proposal-cascade"}`,
+			want: "workflow.trigger.change-proposal-cascade",
+		},
+		{
+			name: "explicit new name",
+			json: `{"execution_bucket_name":"X","event_stream_name":"Y","cascade_trigger_subject":"workflow.trigger.plan-decision-cascade"}`,
+			want: "workflow.trigger.plan-decision-cascade",
+		},
+		{
+			name: "unset (empty — defaults applied by constructor, not here)",
+			json: `{"execution_bucket_name":"X","event_stream_name":"Y"}`,
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cfg Config
+			if err := json.Unmarshal([]byte(tt.json), &cfg); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if cfg.CascadeTriggerSubject != tt.want {
+				t.Errorf("CascadeTriggerSubject = %q, want %q", cfg.CascadeTriggerSubject, tt.want)
+			}
+		})
+	}
+}
+
 // TestConfigUnmarshal_AutoRejectOnExhaustion confirms the JSON field name
 // matches what the e2e configs set. Renaming the JSON tag would silently
 // disable the autonomous-fail-fast behavior in every E2E run — they'd

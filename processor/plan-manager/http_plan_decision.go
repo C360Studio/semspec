@@ -526,10 +526,10 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 		} else {
 			pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 			defer pubCancel()
-			if err := c.natsClient.PublishToStream(pubCtx, "workflow.trigger.plan-decision-cascade", cascadeData); err != nil {
-				c.logger.Error("Failed to publish cascade request", "proposal_id", proposalID, "error", err)
+			if err := c.natsClient.PublishToStream(pubCtx, c.config.CascadeTriggerSubject, cascadeData); err != nil {
+				c.logger.Error("Failed to publish cascade request", "proposal_id", proposalID, "subject", c.config.CascadeTriggerSubject, "error", err)
 			} else {
-				c.logger.Info("Published cascade request", "slug", slug, "proposal_id", proposalID)
+				c.logger.Info("Published cascade request", "slug", slug, "proposal_id", proposalID, "subject", c.config.CascadeTriggerSubject)
 			}
 		}
 	}

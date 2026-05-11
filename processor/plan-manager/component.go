@@ -157,6 +157,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.UserStreamName == "" {
 		config.UserStreamName = defaults.UserStreamName
 	}
+	if config.CascadeTriggerSubject == "" {
+		config.CascadeTriggerSubject = defaults.CascadeTriggerSubject
+	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)

@@ -1576,12 +1576,12 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 		} else {
 			pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer pubCancel()
-			if err := c.natsClient.PublishToStream(pubCtx, "workflow.trigger.plan-decision-cascade", cascadeData); err != nil {
+			if err := c.natsClient.PublishToStream(pubCtx, c.config.CascadeTriggerSubject, cascadeData); err != nil {
 				c.logger.Error("Failed to publish cascade request after auto-accept",
-					"proposal_id", req.ProposalID, "error", err)
+					"proposal_id", req.ProposalID, "subject", c.config.CascadeTriggerSubject, "error", err)
 			} else {
 				c.logger.Info("Published cascade request (auto-accept)",
-					"slug", req.Slug, "proposal_id", req.ProposalID)
+					"slug", req.Slug, "proposal_id", req.ProposalID, "subject", c.config.CascadeTriggerSubject)
 			}
 		}
 	}
