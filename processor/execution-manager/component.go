@@ -938,12 +938,44 @@ func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecuti
 	// Classify feedback into error categories for guidance enrichment.
 	matchedCategories := c.classifyFeedback(result.Feedback)
 
+	// (b1) Capture this cycle's snapshot before routing the retry. Next-
+	// cycle dispatchDeveloperLocked reads exec.PriorCycles to compose
+	// the "PRIOR ATTEMPTS" prompt block — pattern recognition over the
+	// cycle sequence (gemini-pro recovery agent's analytical value made
+	// deterministic and inline). Append even on restructure rejections;
+	// the escalation path doesn't render history but the snapshot is
+	// useful for downstream lesson-decomposer + recovery diagnoses.
+	appendCycleSnapshot(exec, result)
+
 	switch result.RejectionType {
 	case rejectionTypeRestructure:
 		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("restructure rejection: %s", result.RejectionType))
 	default:
 		enrichedFeedback := c.enrichFeedbackWithGuidance(result.Feedback, matchedCategories)
 		c.routeFixableRejection(ctx, exec, enrichedFeedback)
+	}
+}
+
+// appendCycleSnapshot adds the current cycle's outcome to exec.PriorCycles,
+// capping the slice at priorCyclesCap and clipping per-cycle feedback at
+// snapshotFeedbackCap. Caller must hold exec.mu.
+func appendCycleSnapshot(exec *taskExecution, result payloads.TaskCodeReviewResult) {
+	feedback := result.Feedback
+	if len(feedback) > snapshotFeedbackCap {
+		feedback = feedback[:snapshotFeedbackCap] + "…"
+	}
+	snap := cycleSnapshot{
+		Cycle:         exec.TDDCycle,
+		LoopID:        exec.DeveloperLoopID,
+		Verdict:       result.Verdict,
+		RejectionType: result.RejectionType,
+		Feedback:      feedback,
+		FilesModified: append([]string(nil), exec.FilesModified...),
+	}
+	exec.PriorCycles = append(exec.PriorCycles, snap)
+	if len(exec.PriorCycles) > priorCyclesCap {
+		// Drop oldest, keep the most-recent priorCyclesCap entries.
+		exec.PriorCycles = exec.PriorCycles[len(exec.PriorCycles)-priorCyclesCap:]
 	}
 }
 
@@ -1479,6 +1511,16 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	userPrompt := exec.Prompt
 	if exec.TDDCycle > 0 && exec.Feedback != "" {
 		userPrompt += "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
+	}
+	// (b2/b3): when the dev is on cycle N>0, render prior cycles'
+	// outcomes + reviewer feedback as a structured "PRIOR ATTEMPTS"
+	// block. Pattern recognition over the cycle sequence — the
+	// deterministic equivalent of what gemini-pro recovery agent
+	// would write up. Cheap (no LLM call), tier-agnostic (works on
+	// flat model registries), Goodhart-safe (information not
+	// safety net).
+	if history := summarizeCycleHistory(exec.PriorCycles); history != "" {
+		userPrompt += "\n\n---\n\n" + history
 	}
 	// ADR-037 stage-1 (a3): if a recovery PlanDecision was accepted on the
 	// req between cycles, plan-decision-handler.applyRecoveryHint wrote the

@@ -51,9 +51,52 @@ type taskExecution struct {
 	// so we don't need to survive a process restart here.
 	DeveloperLoopID string
 
+	// PriorCycles is the append-only history of completed TDD cycles for
+	// this task. Each entry captures what the dev did + what the reviewer
+	// said, so cycle-N retries see prior-cycle context (not just the
+	// most-recent feedback in exec.Feedback). Built by handleRejectionLocked
+	// before routing the retry; consumed by dispatchDeveloperLocked when
+	// composing the retry prompt. Runtime-only.
+	//
+	// Caps at 10 entries (the most recent N) — long-running tasks shouldn't
+	// blow the prompt budget with stale cycle history. The prompt assembler
+	// further truncates per-cycle text via clip().
+	PriorCycles []cycleSnapshot
+
 	// Timeout management.
 	timeoutTimer *timeoutHandle
 }
+
+// cycleSnapshot captures the per-cycle context a developer sees on
+// retry: which loop produced the work, what the reviewer's verdict
+// was, the reviewer's feedback excerpt, and the files modified that
+// cycle. Building blocks for the deterministic "PRIOR ATTEMPTS" block
+// the dispatchDeveloperLocked path prepends on cycle N>0.
+//
+// Runtime-only — not persisted to KV. A process restart loses the
+// in-memory history, which is acceptable: the post-restart reconcile
+// will pick up exec from EXECUTION_STATES with PriorCycles=nil and
+// the dev sees only the latest exec.Feedback (current behavior).
+type cycleSnapshot struct {
+	Cycle         int      // 0-indexed cycle number this snapshot is FROM
+	LoopID        string   // dev loop that produced the rejected work
+	Verdict       string   // "approved" | "rejected"
+	RejectionType string   // "fixable" | "restructure" | "" (when approved)
+	Feedback      string   // reviewer's feedback text (capped at append time)
+	FilesModified []string // workspace-relative paths changed in this cycle
+}
+
+// priorCyclesCap bounds the PriorCycles slice. Long-running tasks
+// can hit max_tdd_cycles=7+; capping at 10 leaves headroom while
+// preventing unbounded prompt growth on pathological retry loops.
+const priorCyclesCap = 10
+
+// snapshotFeedbackCap bounds per-cycle feedback text inside a
+// cycleSnapshot. The prompt assembler will further clip when
+// rendering, but this cap prevents pathologically long reviewer
+// feedback (truncated graph_search dumps, etc) from sitting in
+// memory across retries.
+const snapshotFeedbackCap = 1500
 
 // timeoutHandle wraps a timer reference so it can be stopped on completion.
 type timeoutHandle struct {
