@@ -60,23 +60,29 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		},
 
 		// Developer: TDD agent — bash for code, graph + web for discovery, http_request for local API testing.
+		// write_todos: per-iteration TDD memory (ADR-036) — natural fit
+		// for multi-cycle dispatches where context compaction may evict
+		// the plan; persona instructs use across TDD iterations.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "write_todos"},
 		},
 
 		// Architect: technology choices, component boundaries, data flow.
 		// Read-only exploration via bash + graph; web/http for tech docs.
 		// No decompose_task / review_scenario — those are other-role
 		// terminals that confused take 11's developer.
+		// write_todos: multi-step technology exploration before commit.
 		RoleArchitect: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "write_todos"},
 		},
 
 		// Lesson decomposer: reads trajectory + reviewer verdict, emits one
 		// audited lesson via submit_work. Bash for cited-evidence file
 		// reads, graph_query for trajectory pull. ADR-033 Phase 2b.
+		// write_todos: track per-iteration synthesis steps when the
+		// trajectory analysis spans multiple cycles.
 		RoleLessonDecomposer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "write_todos"},
 		},
 	}
 }

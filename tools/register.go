@@ -28,6 +28,7 @@ import (
 	wf "github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -54,6 +55,12 @@ type AgenticToolDeps struct {
 
 	// Timeouts overrides default tool execution timeouts. Zero values use builtin defaults.
 	Timeouts ToolTimeouts
+
+	// Platform identifies this semspec instance. Required to wire the
+	// write_todos tool (ADR-036) — the executor uses Org+Platform to
+	// resolve the loop entity ID on which todos are stored as triples.
+	// Zero value disables write_todos registration without erroring.
+	Platform component.PlatformMeta
 }
 
 // RegisterAgenticTools registers all agent tools onto the supplied registry.
@@ -154,6 +161,20 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 
 		answerExec := question.NewAnswerExecutor(questionStore, nil)
 		errs = append(errs, reg.RegisterTool("answer_question", answerExec))
+	}
+
+	// write_todos — agent-private cross-iteration todo list persisted as
+	// graph triples on the calling loop's entity (semstreams ADR-036).
+	// Available to Builder + Architect + LessonDecomposer via the
+	// per-role tool filter; survives context compaction so multi-step
+	// dispatches can hold a plan across iterations. Requires NATS (graph
+	// mutations) and a non-zero Platform (loop entity ID resolution);
+	// skipped silently if either is missing.
+	if deps.NATSClient != nil && deps.Platform.Org != "" && deps.Platform.Platform != "" {
+		todoWriter := agentictools.NewNATSTodoWriter(deps.NATSClient)
+		todoExec := agentictools.NewWriteTodosExecutor(todoWriter, deps.Platform)
+		todoExec.SetLogger(slog.Default())
+		errs = append(errs, reg.RegisterTool(agentictools.WriteTodosToolName, todoExec))
 	}
 
 	if joined := errors.Join(errs...); joined != nil {

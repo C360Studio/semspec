@@ -394,10 +394,13 @@ func setupInfrastructure(
 
 	// Build the shared agentic-tools registry up front so it can be plumbed
 	// through service.Dependencies.ToolRegistry into every component. beta.16
-	// removed the package-level singleton (ADR-029 Pattern A).
+	// removed the package-level singleton (ADR-029 Pattern A). PlatformMeta
+	// is resolved here so write_todos (ADR-036) can use it to construct
+	// the per-loop entity ID at registration time.
 	toolRegistry := agentictools.NewExecutorRegistry()
 	answererRegistry := loadAnswererRegistry(absRepoPath)
-	if err := registerAgenticTools(ctx, toolRegistry, natsClient, answererRegistry); err != nil {
+	platformMeta := extractPlatformMeta(cfg)
+	if err := registerAgenticTools(ctx, toolRegistry, natsClient, answererRegistry, platformMeta); err != nil {
 		natsClient.Close(ctx)
 		return nil, nil, nil, fmt.Errorf("register agentic tools: %w", err)
 	}
@@ -419,7 +422,7 @@ func setupInfrastructure(
 		return nil, nil, nil, err
 	}
 
-	platform := extractPlatformMeta(cfg)
+	platform := platformMeta
 
 	configManager, err := startConfigManager(ctx, cfg, natsClient, logger, platform)
 	if err != nil {
@@ -957,12 +960,15 @@ func createServiceIfEnabled(
 
 // registerAgenticTools registers all agentic tools onto the shared executor
 // registry. The registry is owned by main and plumbed through
-// service.Dependencies.ToolRegistry to every component.
-func registerAgenticTools(ctx context.Context, reg *agentictools.ExecutorRegistry, natsClient *natsclient.Client, answererReg *answerer.Registry) error {
+// service.Dependencies.ToolRegistry to every component. Platform identifies
+// this semspec instance for tools that resolve per-loop entity IDs
+// (write_todos, ADR-036).
+func registerAgenticTools(ctx context.Context, reg *agentictools.ExecutorRegistry, natsClient *natsclient.Client, answererReg *answerer.Registry, platform types.PlatformMeta) error {
 	return tools.RegisterAgenticToolsWithContext(ctx, reg, tools.AgenticToolDeps{
 		NATSClient:       natsClient,
 		AnswererRegistry: answererReg,
 		Timeouts:         parseToolTimeouts(),
+		Platform:         platform,
 	})
 }
 

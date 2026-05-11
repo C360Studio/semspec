@@ -12,12 +12,14 @@ func TestFilterTools_Developer(t *testing.T) {
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
+		"write_todos",
 	}
 
 	tools := FilterTools(allTools, RoleDeveloper)
 
-	// Developer gets bash, submit_work, graph + web tools — NOT ask_question/decompose_task/spawn_agent
-	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"}
+	// Developer gets bash, submit_work, graph + web tools, write_todos
+	// — NOT ask_question/decompose_task/spawn_agent
+	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "write_todos"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("developer should have %q", w)
@@ -27,6 +29,35 @@ func TestFilterTools_Developer(t *testing.T) {
 	for _, u := range unwant {
 		if slices.Contains(tools, u) {
 			t.Errorf("developer should NOT have %q", u)
+		}
+	}
+}
+
+// TestFilterTools_WriteTodos_RoleScope pins which roles get write_todos
+// per docs/structured-output-levels.md role map. Builder + Architect +
+// LessonDecomposer have multi-step / multi-iteration work where
+// cross-iteration memory pays off. Generators (planner / req-gen /
+// scen-gen) do single-shot dispatches and write_todos misfits their
+// shape — they get the scratchpad tool when semstreams ships it.
+func TestFilterTools_WriteTodos_RoleScope(t *testing.T) {
+	allTools := []string{"bash", "submit_work", "write_todos"}
+
+	hasWriteTodos := []Role{RoleDeveloper, RoleArchitect, RoleLessonDecomposer}
+	for _, role := range hasWriteTodos {
+		got := FilterTools(allTools, role)
+		if !slices.Contains(got, "write_todos") {
+			t.Errorf("role %q should have write_todos; got %v", role, got)
+		}
+	}
+
+	missingWriteTodos := []Role{
+		RolePlanner, RoleRequirementGenerator, RoleScenarioGenerator,
+		RolePlanReviewer, RoleReviewer, RoleValidator,
+	}
+	for _, role := range missingWriteTodos {
+		got := FilterTools(allTools, role)
+		if slices.Contains(got, "write_todos") {
+			t.Errorf("role %q should NOT have write_todos; got %v", role, got)
 		}
 	}
 }
