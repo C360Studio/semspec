@@ -76,8 +76,10 @@ func registerRequestPayloads(reg *payloadregistry.Registry) error {
 		// Lesson decomposition (ADR-033 Phase 2+)
 		{LessonDecomposeRequestedType, "Reviewer rejection signalled to lesson-decomposer for evidence-cited lesson production", func() any { return &LessonDecomposeRequested{} }},
 		// Wedge recovery (ADR-037 stage 1)
+		// Recovery output is emitted as a workflow.PlanDecision via the
+		// existing plan.mutation.plan_decision.add wire (qa-reviewer +
+		// req-executor's pattern). No separate RecoveryComplete payload.
 		{RecoveryRequestedType, "Recovery requested by an escalating component; consumed by recovery-agent (phase-local) or coordinator (cross-phase)", func() any { return &RecoveryRequested{} }},
-		{RecoveryCompleteType, "Recovery agent's chosen RecoveryAction + diagnosis; consumed by the escalating component to reconcile state", func() any { return &RecoveryComplete{} }},
 	}
 
 	var errs []error

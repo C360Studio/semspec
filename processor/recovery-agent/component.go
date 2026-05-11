@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -34,6 +35,12 @@ const (
 	// stepRecover is the WorkflowStep stamped on the dispatched TaskMessage
 	// and matched in the AGENT_LOOPS watcher. One step per request today.
 	stepRecover = "recover"
+
+	// planDecisionAddSubject is plan-manager's request/reply mutation for
+	// adding a PlanDecision to a plan. Same wire shape qa-reviewer +
+	// req-executor use to surface their proposals to humans + change-
+	// proposal-handler.
+	planDecisionAddSubject = "plan.mutation.plan_decision.add"
 )
 
 // Component implements the recovery-agent processor.
@@ -258,11 +265,11 @@ func (c *Component) OutputPorts() []component.Port {
 			Config:      component.NATSPort{Subject: agentTaskSubject},
 		},
 		{
-			Name:        "recovery-complete",
+			Name:        "recovery-plan-decision",
 			Direction:   component.DirectionOutput,
 			Required:    false,
-			Description: "Publishes RecoveryComplete with the chosen action + diagnosis",
-			Config:      component.NATSPort{Subject: payloads.RecoveryCompleteSubjectPrefix + "*"},
+			Description: "Emits a workflow.PlanDecision (kind=requirement_change|execution_exhausted) carrying the recovery agent's chosen action + diagnosis. Routes through plan.mutation.plan_decision.add — same wire qa-reviewer + req-executor use.",
+			Config:      component.NATSPort{Subject: planDecisionAddSubject},
 		},
 	}
 }
@@ -552,10 +559,25 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 	}
 }
 
-// handleLoopCompletion parses the recovery agent's submit_work output,
-// persists the attempt in RECOVERY_STATES KV, and publishes
-// RecoveryComplete on recovery.complete.<slug>. Best-effort: a KV-write
-// or publish failure logs but doesn't block the next recovery.
+// handleLoopCompletion parses the recovery agent's submit_work output and
+// emits a PlanDecision via the standard plan.mutation.plan_decision.add
+// wire (same shape qa-reviewer + req-executor use). The PlanDecision
+// carries the diagnosis as Rationale and routes to change-proposal-handler
+// for human-or-auto-accept review and cascade re-run.
+//
+// Action → PlanDecision kind mapping:
+//
+//	refine_prompt | narrow_scope | split_req → kind=requirement_change
+//	  (cascade dirty-marks the req; on accept the affected scenarios
+//	  re-run, and the recovery rationale is available as the dev's
+//	  supplementary feedback on retry — wired in (a3))
+//	escalate_human | mark_unrecoverable → kind=execution_exhausted
+//	  (terminal record; req-executor may have already emitted one for
+//	  retry-budget exhaustion — recovery's adds the diagnostic enrichment)
+//
+// Default-failure paths (loop crashed, parse failed, no action picked)
+// emit a kind=execution_exhausted PlanDecision with diagnostic rationale —
+// the human still gets a record of the recovery attempt and its outcome.
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity) {
 	disp := c.untrackInFlight(loop.TaskID)
 	if disp == nil {
@@ -563,62 +585,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 	c.updateLastActivity()
 
-	// Build the wire payload with what the dispatcher always sets.
-	complete := &payloads.RecoveryComplete{
-		RecoveryID:          disp.Req.RecoveryID,
-		Layer:               disp.Req.Layer,
-		Slug:                disp.Req.Slug,
-		RecoveryAgentLoopID: loop.ID,
-		TraceID:             disp.Req.TraceID,
-	}
+	action, diagnosis, succeeded := c.deriveDecision(loop, disp.Req.EscalationReason)
 
-	// Default-failure path: loop didn't reach OutcomeSuccess, or result
-	// parsing rejected the output. Both produce a marker RecoveryComplete
-	// so the escalating component's watcher still reconciles (with
-	// recovery_succeeded=false), per ADR-037 design lock #3 — a distinct
-	// recovery_failed signal beats silent drop.
-	if loop.Outcome != agentic.OutcomeSuccess {
-		c.completedFailed.Add(1)
-		complete.Action = payloads.RecoveryActionEscalateHuman
-		complete.Diagnosis = fmt.Sprintf("Recovery agent loop did not succeed (outcome=%s, error=%q). Original wedge: %s.",
-			loop.Outcome, loop.Error, disp.Req.EscalationReason)
-		complete.RecoverySucceeded = false
-		c.logger.Warn("Recovery agent loop did not succeed",
-			"slug", disp.Req.Slug,
-			"recovery_id", disp.Req.RecoveryID,
-			"task_id", loop.TaskID,
-			"loop_id", loop.ID,
-			"outcome", loop.Outcome,
-			"error", loop.Error)
-		c.persistAndPublish(ctx, disp.Req, complete)
-		return
-	}
-
-	parsed, err := parseRecoveryResult(loop.Result)
-	if err != nil {
-		c.resultParseErrors.Add(1)
-		complete.Action = payloads.RecoveryActionEscalateHuman
-		complete.Diagnosis = fmt.Sprintf("Recovery agent returned an unparseable result (%v). Original wedge: %s.",
-			err, disp.Req.EscalationReason)
-		complete.RecoverySucceeded = false
-		c.logger.Warn("Recovery result failed to parse",
-			"slug", disp.Req.Slug,
-			"recovery_id", disp.Req.RecoveryID,
-			"task_id", loop.TaskID,
-			"loop_id", loop.ID,
-			"error", err,
-			"raw_head", clip(loop.Result, 512))
-		c.persistAndPublish(ctx, disp.Req, complete)
-		return
-	}
-
-	// Success: copy parsed fields onto the wire payload.
-	complete.Action = parsed.Action
-	complete.Diagnosis = parsed.Diagnosis
-	complete.RefinedPrompt = parsed.RefinedPrompt
-	complete.ScopeChanges = parsed.ScopeChanges
-	complete.RecoverySucceeded = parsed.RecoverySucceeded
-	c.completedSuccess.Add(1)
 	c.logger.Info("Recovery agent decision",
 		"slug", disp.Req.Slug,
 		"recovery_id", disp.Req.RecoveryID,
@@ -626,95 +594,181 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"loop_id", loop.ID,
 		"capability", disp.Capability,
 		"model", disp.Model,
-		"action", complete.Action,
-		"recovery_succeeded", complete.RecoverySucceeded)
-	c.persistAndPublish(ctx, disp.Req, complete)
+		"action", action,
+		"recovery_succeeded", succeeded)
+
+	c.emitPlanDecision(ctx, disp.Req, loop, action, diagnosis, succeeded)
 }
 
-// persistAndPublish writes the recovery record to RECOVERY_STATES KV and
-// publishes RecoveryComplete on recovery.complete.<slug>. Best-effort —
-// either operation failing logs but does not block the other.
-func (c *Component) persistAndPublish(ctx context.Context, req *payloads.RecoveryRequested, complete *payloads.RecoveryComplete) {
-	if err := complete.Validate(); err != nil {
-		c.logger.Warn("RecoveryComplete failed local validation; publishing anyway as failure marker",
-			"slug", complete.Slug,
-			"recovery_id", complete.RecoveryID,
-			"error", err)
+// deriveDecision collapses the loop outcome + parse result into the action
+// + diagnosis + succeeded triple the PlanDecision uses. Three branches:
+// loop-didn't-succeed (outcome != success) → escalate_human marker;
+// parse failed → escalate_human marker; success → parsed values.
+//
+// Returns escalate_human as the safe default for failure paths so the
+// PlanDecision lifecycle still reconciles (per ADR-037 stage-1 design
+// lock #3 — distinct failure signal beats silent drop).
+func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason string) (payloads.RecoveryActionKind, string, bool) {
+	if loop.Outcome != agentic.OutcomeSuccess {
+		c.completedFailed.Add(1)
+		c.logger.Warn("Recovery agent loop did not succeed",
+			"task_id", loop.TaskID,
+			"loop_id", loop.ID,
+			"outcome", loop.Outcome,
+			"error", loop.Error)
+		return payloads.RecoveryActionEscalateHuman,
+			fmt.Sprintf("Recovery agent loop did not succeed (outcome=%s, error=%q). Original wedge: %s.",
+				loop.Outcome, loop.Error, escalationReason),
+			false
 	}
-	c.persistRecoveryState(ctx, req, complete)
-	c.publishRecoveryComplete(ctx, complete)
+
+	parsed, err := parseRecoveryResult(loop.Result)
+	if err != nil {
+		c.resultParseErrors.Add(1)
+		c.logger.Warn("Recovery result failed to parse",
+			"task_id", loop.TaskID,
+			"loop_id", loop.ID,
+			"error", err,
+			"raw_head", clip(loop.Result, 512))
+		return payloads.RecoveryActionEscalateHuman,
+			fmt.Sprintf("Recovery agent returned an unparseable result (%v). Original wedge: %s.",
+				err, escalationReason),
+			false
+	}
+
+	c.completedSuccess.Add(1)
+	return parsed.Action, parsed.Diagnosis, parsed.RecoverySucceeded
 }
 
-// persistRecoveryState writes a single RECOVERY_STATES entry keyed by
-// recovery_id. The value is a JSON blob containing both the requested
-// and complete payloads — the watcher reading it has the full attempt
-// record in one read.
-func (c *Component) persistRecoveryState(ctx context.Context, req *payloads.RecoveryRequested, complete *payloads.RecoveryComplete) {
+// recoveryActionToPlanDecisionKind maps a RecoveryAction to the
+// PlanDecision kind that drives the cascade. Recoverable actions go
+// through requirement_change so the cascade dirty-marks the req for
+// re-run; terminal actions go through execution_exhausted so plan-manager
+// auto-archives when the subject req reaches a non-failed terminal state.
+func recoveryActionToPlanDecisionKind(action payloads.RecoveryActionKind) workflow.PlanDecisionKind {
+	switch action {
+	case payloads.RecoveryActionRefinePrompt,
+		payloads.RecoveryActionNarrowScope,
+		payloads.RecoveryActionSplitReq:
+		return workflow.PlanDecisionKindRequirementChange
+	case payloads.RecoveryActionEscalateHuman, payloads.RecoveryActionMarkUnrecoverable:
+		return workflow.PlanDecisionKindExecutionExhausted
+	default:
+		// Defensive — should be impossible after parseRecoveryResult's closed-set
+		// validation. Fall back to terminal so an unknown action doesn't trigger
+		// an unintended cascade.
+		return workflow.PlanDecisionKindExecutionExhausted
+	}
+}
+
+// emitPlanDecision sends a workflow.PlanDecision via plan.mutation.
+// plan_decision.add (same wire shape used by qa-reviewer + req-executor).
+// Best-effort: failure logs but does not block subsequent recovery work.
+func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool) {
 	if c.natsClient == nil {
 		return
 	}
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		c.logger.Warn("Cannot persist recovery state: no JetStream",
-			"recovery_id", complete.RecoveryID, "error", err)
-		return
-	}
-	// CreateOrUpdateKeyValue (not CreateKeyValue) — idempotent on existing
-	// buckets. Bare CreateKeyValue errors with "bucket name already in use"
-	// when another component / probe pre-touched the bucket, silently
-	// skipping the write. Caught 2026-05-10 take 2 real-LLM @hard run: the
-	// e2e scenario's RECOVERY_STATES poller created the bucket at startup,
-	// so the recovery-agent's first persist attempt failed and the
-	// diagnosis never landed on disk.
-	kv, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
-		Bucket: payloads.RecoveryStatesBucket,
-	})
-	if err != nil {
-		c.logger.Warn("Cannot open RECOVERY_STATES bucket",
-			"recovery_id", complete.RecoveryID, "error", err)
-		return
-	}
-	record := struct {
-		Requested *payloads.RecoveryRequested `json:"requested"`
-		Complete  *payloads.RecoveryComplete  `json:"complete"`
-		WrittenAt time.Time                   `json:"written_at"`
-	}{Requested: req, Complete: complete, WrittenAt: time.Now()}
-	data, err := json.Marshal(record)
-	if err != nil {
-		c.logger.Warn("Failed to marshal recovery state record",
-			"recovery_id", complete.RecoveryID, "error", err)
-		return
-	}
-	if _, err := kv.Put(ctx, complete.RecoveryID, data); err != nil {
-		c.logger.Warn("Failed to write RECOVERY_STATES entry",
-			"recovery_id", complete.RecoveryID, "error", err)
-	}
-}
 
-// publishRecoveryComplete fires RecoveryComplete on recovery.complete.<slug>.
-func (c *Component) publishRecoveryComplete(ctx context.Context, complete *payloads.RecoveryComplete) {
-	baseMsg := message.NewBaseMessage(complete.Schema(), complete, componentName)
-	data, err := json.Marshal(baseMsg)
+	now := time.Now()
+	kind := recoveryActionToPlanDecisionKind(action)
+
+	title := fmt.Sprintf("Recovery: %s", action)
+	if req.RequirementID != "" {
+		title = fmt.Sprintf("Recovery for %s: %s", req.RequirementID, action)
+	}
+
+	rationale := buildRecoveryRationale(req, loop, action, diagnosis, succeeded)
+
+	var affectedReqs []string
+	if req.RequirementID != "" {
+		affectedReqs = []string{req.RequirementID}
+	}
+
+	decisionID := fmt.Sprintf("plan-decision.%s.recovery.%s", req.Slug, req.RecoveryID[:8])
+
+	decision := workflow.PlanDecision{
+		ID:             decisionID,
+		PlanID:         workflow.PlanEntityID(req.Slug),
+		Kind:           kind,
+		Title:          title,
+		Rationale:      rationale,
+		Status:         workflow.PlanDecisionStatusProposed,
+		ProposedBy:     componentName,
+		AffectedReqIDs: affectedReqs,
+		CreatedAt:      now,
+	}
+
+	addReq := struct {
+		Slug     string                `json:"slug"`
+		Decision workflow.PlanDecision `json:"decision"`
+	}{Slug: req.Slug, Decision: decision}
+
+	data, err := json.Marshal(addReq)
 	if err != nil {
-		c.logger.Warn("Failed to marshal RecoveryComplete",
-			"recovery_id", complete.RecoveryID, "error", err)
+		c.logger.Warn("Failed to marshal PlanDecision add request",
+			"recovery_id", req.RecoveryID, "error", err)
 		return
 	}
-	subject := payloads.RecoveryCompleteSubjectPrefix + complete.Slug
-	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		c.logger.Warn("Failed to publish RecoveryComplete",
-			"recovery_id", complete.RecoveryID,
-			"subject", subject,
+
+	respData, err := c.natsClient.RequestWithRetry(ctx, planDecisionAddSubject, data, 5*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		c.logger.Warn("Failed to publish recovery PlanDecision",
+			"recovery_id", req.RecoveryID,
+			"subject", planDecisionAddSubject,
 			"error", err)
 		return
 	}
-	c.logger.Info("Published RecoveryComplete",
-		"slug", complete.Slug,
-		"recovery_id", complete.RecoveryID,
-		"action", complete.Action,
-		"recovery_succeeded", complete.RecoverySucceeded,
-		"subject", subject)
+
+	var resp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(respData, &resp); err != nil || !resp.Success {
+		c.logger.Warn("plan-manager rejected recovery PlanDecision",
+			"recovery_id", req.RecoveryID,
+			"error", resp.Error,
+			"unmarshal_err", err)
+		return
+	}
+
+	c.logger.Info("Emitted recovery PlanDecision",
+		"slug", req.Slug,
+		"recovery_id", req.RecoveryID,
+		"decision_id", decisionID,
+		"kind", kind,
+		"action", action,
+		"affected_reqs", affectedReqs)
 }
+
+// buildRecoveryRationale assembles the PlanDecision Rationale text. The
+// rationale is what humans (and future change-proposal-handler apply
+// logic in (a3)) read to decide accept/reject. Structured-but-prose so
+// both consumers can extract what they need:
+//
+//   - Action: <kind> — what the recovery agent recommended
+//   - Recovery succeeded: <bool> — agent's confidence the action will help
+//   - Diagnosis: <multi-line text> — the actual analysis
+//   - Original wedge: <reason> — what triggered recovery in the first place
+//   - Recovery agent loop: <id> — for trajectory deep-link in UI
+func buildRecoveryRationale(req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool) string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Recommended action: %s\n", action)
+	fmt.Fprintf(&sb, "Recovery agent confidence: recovery_succeeded=%t\n", succeeded)
+	if req.EscalationReason != "" {
+		fmt.Fprintf(&sb, "Original wedge: %s\n", req.EscalationReason)
+	}
+	if loop != nil && loop.ID != "" {
+		fmt.Fprintf(&sb, "Recovery agent trajectory: %s\n", loop.ID)
+	}
+	if req.LoopID != "" {
+		fmt.Fprintf(&sb, "Wedged agent trajectory: %s\n", req.LoopID)
+	}
+	sb.WriteString("\nDiagnosis:\n")
+	sb.WriteString(diagnosis)
+	return sb.String()
+}
+
+
 
 // ackOrWarn acks the JetStream message and warns on failure.
 func (c *Component) ackOrWarn(msg jetstream.Msg, disposition string) {

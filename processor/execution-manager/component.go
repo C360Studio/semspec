@@ -296,8 +296,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// - AGENT_LOOPS: TDD pipeline loop completions (from agentic-dispatch)
 	// - EXECUTION_STATES task.>: pending task executions (KV self-trigger)
 	// - EXECUTION_STATES req.>: requirement termination → cancel orphan children
-	// - recovery.complete.>: ADR-037 stage-1 recovery decisions
-	c.wg.Add(4)
+	c.wg.Add(3)
 	go func() {
 		defer c.wg.Done()
 		c.watchLoopCompletions(ctx)
@@ -309,10 +308,6 @@ func (c *Component) Start(ctx context.Context) error {
 	go func() {
 		defer c.wg.Done()
 		c.watchRequirementTermination(ctx)
-	}()
-	go func() {
-		defer c.wg.Done()
-		c.startRecoveryCompleteWatcher(ctx)
 	}()
 
 	c.mu.Lock()

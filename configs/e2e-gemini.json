@@ -893,8 +893,7 @@
         "archive.request.>",
         "github.request.>",
         "scenario.orchestrate.>",
-        "recovery.requested.>",
-        "recovery.complete.>"
+        "recovery.requested.>"
       ],
       "max_age": "24h",
       "storage": "memory",

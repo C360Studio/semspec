@@ -174,130 +174,17 @@ func (r *RecoveryRequested) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// RecoveryCompleteType is emitted on recovery.complete.<slug> when a
-// recovery agent finishes a recovery attempt (regardless of outcome).
-// Carries the chosen RecoveryAction so the original escalating component's
-// watcher can reconcile state and either re-dispatch (refine_prompt /
-// narrow_scope / split_req) or terminate cleanly (escalate_human /
-// mark_unrecoverable).
-var RecoveryCompleteType = message.Type{
-	Domain:   "workflow",
-	Category: "recovery-complete",
-	Version:  "v1",
-}
-
-// RecoveryComplete is the recovery agent's submit_work output translated to
-// the wire. Per ADR-037 stage-1 design lock #3: distinct outcome semantics
-// for recovery success vs failure, with the action record persisted in
-// RECOVERY_STATES KV under recovery_id.
-type RecoveryComplete struct {
-	// RecoveryID echoes the matching RecoveryRequested.RecoveryID.
-	RecoveryID string `json:"recovery_id"`
-
-	// Layer echoes the matching RecoveryRequested.Layer.
-	Layer RecoveryLayer `json:"layer"`
-
-	// Slug echoes the matching RecoveryRequested.Slug — routing key.
-	Slug string `json:"slug"`
-
-	// Action is the recovery agent's chosen action from the closed set.
-	// Required.
-	Action RecoveryActionKind `json:"action"`
-
-	// Diagnosis is the recovery agent's analysis of the wedge — required
-	// for every action including escalate_human and mark_unrecoverable.
-	// This is what surfaces in the UI for human-attention paths and what
-	// the lessons pipeline (ADR-033) consumes for long-loop learning.
-	Diagnosis string `json:"diagnosis"`
-
-	// RefinedPrompt is set when Action is refine_prompt — the new prompt
-	// the recovery agent wants the wedged agent to retry with. Required
-	// when Action == refine_prompt; empty otherwise.
-	RefinedPrompt string `json:"refined_prompt,omitempty"`
-
-	// ScopeChanges captures structured scope adjustments for narrow_scope
-	// and split_req actions. Free-form JSON to keep the payload schema
-	// stable while the action handlers evolve. Empty for actions that
-	// don't mutate scope.
-	ScopeChanges json.RawMessage `json:"scope_changes,omitempty"`
-
-	// RecoverySucceeded is the recovery agent's own assessment. False
-	// when Action is escalate_human or mark_unrecoverable, OR when the
-	// recovery agent's submit_work itself failed (loop crashed, parse
-	// error, etc.). The escalating component's watcher uses this to
-	// distinguish outcome=recovery_failed from outcome=recovered.
-	RecoverySucceeded bool `json:"recovery_succeeded"`
-
-	// RecoveryAgentLoopID is the agentic-loop ID of the recovery agent
-	// itself. Carried so the lessons pipeline can pull the recovery
-	// trajectory when learning from recovery patterns (per ADR-037 stage-1
-	// design lock #3 — recovery_failed is itself a learnable event).
-	RecoveryAgentLoopID string `json:"recovery_agent_loop_id"`
-
-	// TraceID for end-to-end correlation.
-	TraceID string `json:"trace_id,omitempty"`
-}
-
-// Schema implements message.Payload.
-func (r *RecoveryComplete) Schema() message.Type { return RecoveryCompleteType }
-
-// Validate implements message.Payload.
-func (r *RecoveryComplete) Validate() error {
-	if r.RecoveryID == "" {
-		return fmt.Errorf("recovery_id is required")
-	}
-	if r.Slug == "" {
-		return fmt.Errorf("slug is required")
-	}
-	if r.Action == "" {
-		return fmt.Errorf("action is required")
-	}
-	switch r.Action {
-	case RecoveryActionRefinePrompt,
-		RecoveryActionNarrowScope,
-		RecoveryActionSplitReq,
-		RecoveryActionEscalateHuman,
-		RecoveryActionMarkUnrecoverable:
-		// valid
-	default:
-		return fmt.Errorf("action must be one of refine_prompt|narrow_scope|split_req|escalate_human|mark_unrecoverable, got %q", r.Action)
-	}
-	if r.Action == RecoveryActionRefinePrompt && r.RefinedPrompt == "" {
-		return fmt.Errorf("refined_prompt is required when action is refine_prompt")
-	}
-	if r.Diagnosis == "" {
-		return fmt.Errorf("diagnosis is required (every action including escalate_human/mark_unrecoverable needs analysis)")
-	}
-	if r.RecoveryAgentLoopID == "" {
-		return fmt.Errorf("recovery_agent_loop_id is required (lessons pipeline keys off it)")
-	}
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler.
-func (r *RecoveryComplete) MarshalJSON() ([]byte, error) {
-	type Alias RecoveryComplete
-	return json.Marshal((*Alias)(r))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (r *RecoveryComplete) UnmarshalJSON(data []byte) error {
-	type Alias RecoveryComplete
-	return json.Unmarshal(data, (*Alias)(r))
-}
-
-// RecoveryStatesBucket is the JetStream KV bucket name that holds the
-// durable record of recovery attempts (which layer ran, what action was
-// chosen, outcome). Reconciled on plan-manager + execution-manager startup
-// like other manager-pattern state. Per ADR-037 stage-1 plumbing item #1.
-const RecoveryStatesBucket = "RECOVERY_STATES"
-
-// Recovery NATS subject family. The escalating component publishes
-// RecoveryRequested on RecoveryRequestedSubjectPrefix + slug; the recovery
-// agent (phase-local or coordinator) consumes the request and emits
-// RecoveryComplete on RecoveryCompleteSubjectPrefix + slug. The escalating
-// component's watcher subscribes to the complete subject for reconciliation.
-const (
-	RecoveryRequestedSubjectPrefix = "recovery.requested."
-	RecoveryCompleteSubjectPrefix  = "recovery.complete."
-)
+// RecoveryRequestedSubjectPrefix is the NATS subject the escalating
+// component publishes RecoveryRequested on. Recovery-agent consumes,
+// dispatches a manager-role agent, and surfaces the result via a
+// PlanDecision through the standard plan.mutation.plan_decision.add
+// wire (qa-reviewer + req-executor use the same shape).
+//
+// History — original ADR-037 stage 1 had a parallel recovery.complete.<slug>
+// subject family + RECOVERY_STATES KV for recovery results. That parallel
+// pipeline was retired in favour of unifying recovery output with the
+// existing PlanDecision lifecycle (qa-reviewer's pattern). Cascade,
+// auto-accept config, history, audit, UI surface — all reuse the
+// change-proposal-handler infrastructure rather than maintain a parallel
+// stack. See project_recovery_to_plan_decision_unification memory entry.
+const RecoveryRequestedSubjectPrefix = "recovery.requested."

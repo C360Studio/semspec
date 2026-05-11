@@ -926,6 +926,11 @@ type Plan struct {
 
 	// LLM call history for drill-down from loop iterations to full artifacts
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
+
+	// PlanDecisions exposes proposed/accepted/rejected change proposals on
+	// the plan. Surfaced for ADR-037 stage-1 recovery validation: scenario
+	// asserts proposed_by="recovery-agent" entries appear after a wedge.
+	PlanDecisions []PlanDecision `json:"plan_decisions,omitempty"`
 }
 
 // ExecutionSummary tracks requirement completion counts for stall detection.
@@ -2057,8 +2062,12 @@ func (c *HTTPClient) DeleteScenario(ctx context.Context, slug, scenarioID string
 
 // PlanDecision represents a workflow.PlanDecision as returned by the HTTP API.
 type PlanDecision struct {
-	ID             string     `json:"id"`
-	PlanID         string     `json:"plan_id"`
+	ID     string `json:"id"`
+	PlanID string `json:"plan_id"`
+	// Kind narrows the intent: requirement_change (cascade re-runs) or
+	// execution_exhausted (terminal record). Recovery-agent emits both
+	// shapes depending on the chosen RecoveryAction.
+	Kind           string     `json:"kind,omitempty"`
 	Title          string     `json:"title"`
 	Rationale      string     `json:"rationale,omitempty"`
 	Status         string     `json:"status"`

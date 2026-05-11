@@ -1,7 +1,8 @@
 // Package recoveryagent implements ADR-037 stage 1: a JetStream processor
 // that consumes RecoveryRequested events, dispatches a manager-role
-// recovery agent via the agentic-loop, and publishes the chosen
-// RecoveryAction on recovery.complete.<slug>.
+// recovery agent via the agentic-loop, and emits the chosen RecoveryAction
+// as a workflow.PlanDecision through the standard plan.mutation.plan_decision.add
+// wire (qa-reviewer + req-executor's pattern).
 package recoveryagent
 
 import (
@@ -16,13 +17,27 @@ import (
 
 // rawRecoveryResult is what the recovery agent's submit_work tool delivers.
 // JSON-unmarshalled then validated against the closed action set + per-
-// action required fields before being mapped into a RecoveryComplete.
+// action required fields. The dispatcher consumes this struct directly
+// (it doesn't survive past handleLoopCompletion); the wire output is the
+// PlanDecision built in emitPlanDecision.
 type rawRecoveryResult struct {
 	Action            string          `json:"action"`
 	Diagnosis         string          `json:"diagnosis"`
 	RefinedPrompt     string          `json:"refined_prompt,omitempty"`
 	ScopeChanges      json.RawMessage `json:"scope_changes,omitempty"`
 	RecoverySucceeded bool            `json:"recovery_succeeded"`
+}
+
+// parsedRecoveryResult is the local typed view of a successful recovery
+// agent submit_work output. Distinct from the wire payload (the wire
+// output is workflow.PlanDecision); this struct carries just the fields
+// the dispatcher needs to build the PlanDecision.
+type parsedRecoveryResult struct {
+	Action            payloads.RecoveryActionKind
+	Diagnosis         string
+	RefinedPrompt     string
+	ScopeChanges      json.RawMessage
+	RecoverySucceeded bool
 }
 
 var (
@@ -34,15 +49,14 @@ var (
 )
 
 // parseRecoveryResult turns the agent's loop.Result blob into a typed
-// RecoveryComplete (minus the wire fields the dispatcher fills in:
-// RecoveryID, Layer, Slug, RecoveryAgentLoopID, TraceID).
+// parsedRecoveryResult.
 //
 // Returns an error when the result is empty, missing required fields,
 // or names an action outside the closed set per ADR-037. The dispatcher
-// translates the error into RecoverySucceeded=false on the wire so the
-// escalating component can distinguish recovery-agent-loop-success from
-// recovery-actually-recovered (per ADR-037 stage-1 design lock #3).
-func parseRecoveryResult(raw string) (*payloads.RecoveryComplete, error) {
+// translates the error into a PlanDecision with kind=execution_exhausted
+// + escalate_human-shaped rationale (per ADR-037 stage-1 design lock #3 —
+// distinct failure signal beats silent drop).
+func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, errResultEmpty
@@ -55,10 +69,7 @@ func parseRecoveryResult(raw string) (*payloads.RecoveryComplete, error) {
 	// Caught 2026-05-10 take 6: gemini-pro returned a fenced result and
 	// json.Unmarshal failed with `invalid character '\`'` → recovery
 	// fell back to the parse-failure marker and the original diagnosis
-	// was lost. ExtractJSON returns the cleaned body or empty on no
-	// match; on empty, retain the raw input so the unmarshal error names
-	// the actual quirk shape (the operator can grep raw_head in the
-	// fallback log line).
+	// was lost.
 	if cleaned := jsonutil.ExtractJSON(raw); cleaned != "" {
 		raw = cleaned
 	}
@@ -88,7 +99,7 @@ func parseRecoveryResult(raw string) (*payloads.RecoveryComplete, error) {
 		return nil, errResultRefineNeedsPrmt
 	}
 
-	return &payloads.RecoveryComplete{
+	return &parsedRecoveryResult{
 		Action:            action,
 		Diagnosis:         rr.Diagnosis,
 		RefinedPrompt:     rr.RefinedPrompt,

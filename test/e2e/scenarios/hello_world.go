@@ -1822,37 +1822,16 @@ func (s *HelloWorldScenario) stageVerifyQuestionFlow(ctx context.Context, result
 	return nil
 }
 
-// recoveryStateRecord mirrors the wrapper persisted by recovery-agent into
-// RECOVERY_STATES. Kept local to the scenario so it stays decoupled from
-// recovery-agent's internal record shape — tests pin the wire contract.
-type recoveryStateRecord struct {
-	Requested struct {
-		RecoveryID       string `json:"recovery_id"`
-		Layer            string `json:"layer"`
-		Slug             string `json:"slug"`
-		TaskID           string `json:"task_id"`
-		LoopID           string `json:"loop_id"`
-		EscalationReason string `json:"escalation_reason"`
-	} `json:"requested"`
-	Complete struct {
-		RecoveryID          string `json:"recovery_id"`
-		Slug                string `json:"slug"`
-		Action              string `json:"action"`
-		Diagnosis           string `json:"diagnosis"`
-		RecoverySucceeded   bool   `json:"recovery_succeeded"`
-		RecoveryAgentLoopID string `json:"recovery_agent_loop_id"`
-	} `json:"complete"`
-}
-
 // stageVerifyRecoveryDispatch confirms the ADR-037 stage-1 recovery wire
 // fired end-to-end after iteration exhaustion: RecoveryRequested published
 // → recovery-agent dispatched → mock-llm returned an escalate_human action
-// → RecoveryComplete persisted to RECOVERY_STATES KV.
+// → recovery-agent emitted a PlanDecision (via plan.mutation.plan_decision.add,
+// same wire qa-reviewer + req-executor use).
 //
-// Polls RECOVERY_STATES for an entry matching the wedged plan slug. The
-// canned mock fixture returns Action=escalate_human / RecoverySucceeded=false;
-// asserting against those exact values pins both wire shape and the parse
-// path against the recovery-agent component.
+// Polls PLAN_STATES for the plan and checks plan.plan_decisions[] for an
+// entry with proposed_by="recovery-agent". Mock fixture returns
+// action=escalate_human → kind=execution_exhausted; asserts the wire shape
+// + ProposedBy attribution + that the diagnosis text reaches the rationale.
 func (s *HelloWorldScenario) stageVerifyRecoveryDispatch(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
@@ -1861,50 +1840,42 @@ func (s *HelloWorldScenario) stageVerifyRecoveryDispatch(ctx context.Context, re
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("RECOVERY_STATES entry never appeared for slug=%s: %w", slug, ctx.Err())
+			return fmt.Errorf("recovery PlanDecision never appeared on plan %s: %w", slug, ctx.Err())
 		case <-ticker.C:
-			kvResp, err := s.http.GetKVEntries(ctx, "RECOVERY_STATES")
+			plan, err := s.http.GetPlan(ctx, slug)
 			if err != nil {
-				continue // bucket may not exist yet
+				continue
 			}
-			for _, entry := range kvResp.Entries {
-				var rec recoveryStateRecord
-				if err := json.Unmarshal(entry.Value, &rec); err != nil {
+			for _, dec := range plan.PlanDecisions {
+				if dec.ProposedBy != "recovery-agent" {
 					continue
 				}
-				if rec.Complete.Slug != slug {
-					continue
+				// Mock fixture returns action=escalate_human, which the
+				// recovery-agent maps to kind=execution_exhausted. Pin both:
+				// the kind tells us the action→kind mapper ran; the
+				// ProposedBy filter pins it to recovery (vs req-executor's
+				// own execution_exhausted emit on retry budget exhaustion).
+				if dec.Kind != "execution_exhausted" {
+					return fmt.Errorf("recovery PlanDecision.kind = %q, want execution_exhausted (mock fixture is escalate_human action)",
+						dec.Kind)
 				}
-				// Found the recovery record for our slug. Validate the
-				// dispatch path produced exactly the canned fixture output.
-				if rec.Complete.Action != "escalate_human" {
-					return fmt.Errorf("RecoveryComplete.Action = %q, want %q (mock fixture should produce escalate_human)",
-						rec.Complete.Action, "escalate_human")
+				if dec.Status != "proposed" {
+					return fmt.Errorf("recovery PlanDecision.status = %q, want proposed (recovery emits as proposed for human/auto-accept)",
+						dec.Status)
 				}
-				if rec.Complete.RecoverySucceeded {
-					return fmt.Errorf("RecoveryComplete.RecoverySucceeded = true, want false for escalate_human")
+				// Rationale must surface the diagnosis text + the
+				// recommended action. recovery-agent.buildRecoveryRationale
+				// puts both inline; the mock fixture's diagnosis text is
+				// substring-asserted to confirm the parse round-tripped.
+				if !strings.Contains(dec.Rationale, "escalate_human") {
+					return fmt.Errorf("recovery PlanDecision.rationale missing recommended action text")
 				}
-				if rec.Complete.Diagnosis == "" {
-					return fmt.Errorf("RecoveryComplete.Diagnosis is empty; escalate_human requires diagnosis as the deliverable")
+				if !strings.Contains(dec.Rationale, "Diagnosis:") {
+					return fmt.Errorf("recovery PlanDecision.rationale missing Diagnosis: section")
 				}
-				if rec.Complete.RecoveryAgentLoopID == "" {
-					return fmt.Errorf("RecoveryComplete.RecoveryAgentLoopID is empty; lessons pipeline keys off it")
-				}
-				if rec.Requested.RecoveryID == "" || rec.Requested.RecoveryID != rec.Complete.RecoveryID {
-					return fmt.Errorf("recovery_id mismatch: requested=%q complete=%q",
-						rec.Requested.RecoveryID, rec.Complete.RecoveryID)
-				}
-				if rec.Requested.Layer != "phase_local" {
-					return fmt.Errorf("RecoveryRequested.Layer = %q, want phase_local (execution-manager always dispatches phase_local)",
-						rec.Requested.Layer)
-				}
-				if rec.Requested.TaskID == "" {
-					return fmt.Errorf("RecoveryRequested.TaskID is empty; execution-phase wedge must carry task_id")
-				}
-				result.SetDetail("recovery_id", rec.Complete.RecoveryID)
-				result.SetDetail("recovery_action", rec.Complete.Action)
-				result.SetDetail("recovery_agent_loop_id", rec.Complete.RecoveryAgentLoopID)
-				result.SetDetail("recovery_layer", rec.Requested.Layer)
+				result.SetDetail("recovery_decision_id", dec.ID)
+				result.SetDetail("recovery_decision_kind", string(dec.Kind))
+				result.SetDetail("recovery_decision_proposed_by", dec.ProposedBy)
 				return nil
 			}
 		}

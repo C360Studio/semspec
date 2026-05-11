@@ -64,116 +64,44 @@ func TestRecoveryRequestedValidate(t *testing.T) {
 	})
 }
 
-// TestRecoveryCompleteValidate pins the closed action set + per-action
-// required fields. The recovery agent's submit_work output gets validated
-// here before mutation; an invalid action or missing required field
-// surfaces at the parse boundary, not deep in the reconciliation path.
-func TestRecoveryCompleteValidate(t *testing.T) {
-	base := func() *RecoveryComplete {
-		return &RecoveryComplete{
-			RecoveryID:          "rec-123",
-			Layer:               RecoveryLayerPhaseLocal,
-			Slug:                "my-plan",
-			Action:              RecoveryActionEscalateHuman,
-			Diagnosis:           "Wedged agent kept trying to patch with sed; correct path is heredoc rewrite",
-			RecoverySucceeded:   false,
-			RecoveryAgentLoopID: "rec-loop-xyz",
+// TestRecoveryActionKindClosedSet pins the action constants. Recovery
+// agent output is parsed against this set in
+// processor/recovery-agent/result.go; renaming or removing a constant
+// requires a coordinated change with that parser + the prompt fragment
+// that lists the actions.
+func TestRecoveryActionKindClosedSet(t *testing.T) {
+	want := []RecoveryActionKind{
+		RecoveryActionRefinePrompt,
+		RecoveryActionNarrowScope,
+		RecoveryActionSplitReq,
+		RecoveryActionEscalateHuman,
+		RecoveryActionMarkUnrecoverable,
+	}
+	got := map[RecoveryActionKind]string{
+		"refine_prompt":      "RecoveryActionRefinePrompt",
+		"narrow_scope":       "RecoveryActionNarrowScope",
+		"split_req":          "RecoveryActionSplitReq",
+		"escalate_human":     "RecoveryActionEscalateHuman",
+		"mark_unrecoverable": "RecoveryActionMarkUnrecoverable",
+	}
+	if len(want) != len(got) {
+		t.Fatalf("closed action set size changed: const list has %d, expected map has %d", len(want), len(got))
+	}
+	for _, a := range want {
+		if _, ok := got[a]; !ok {
+			t.Errorf("RecoveryActionKind %q not in expected wire-string map (renamed const?)", a)
 		}
 	}
-
-	if err := base().Validate(); err != nil {
-		t.Fatalf("base happy-path (escalate_human) failed validate: %v", err)
-	}
-
-	t.Run("refine_prompt requires refined_prompt", func(t *testing.T) {
-		r := base()
-		r.Action = RecoveryActionRefinePrompt
-		r.RefinedPrompt = ""
-		err := r.Validate()
-		if err == nil || !strings.Contains(err.Error(), "refined_prompt") {
-			t.Errorf("expected refined_prompt-required error, got %v", err)
-		}
-		r.RefinedPrompt = "Use a heredoc instead of sed"
-		if err := r.Validate(); err != nil {
-			t.Errorf("refine_prompt with refined_prompt populated should validate: %v", err)
-		}
-	})
-
-	t.Run("invalid action rejected", func(t *testing.T) {
-		r := base()
-		r.Action = "bump_model" // explicitly out of the closed set per ADR-037
-		err := r.Validate()
-		if err == nil {
-			t.Fatal("expected error for invalid action, got nil")
-		}
-		if !strings.Contains(err.Error(), "action must be one of") {
-			t.Errorf("expected closed-set error, got %v", err)
-		}
-	})
-
-	t.Run("each closed-set action is accepted", func(t *testing.T) {
-		actions := []RecoveryActionKind{
-			RecoveryActionRefinePrompt,
-			RecoveryActionNarrowScope,
-			RecoveryActionSplitReq,
-			RecoveryActionEscalateHuman,
-			RecoveryActionMarkUnrecoverable,
-		}
-		for _, a := range actions {
-			r := base()
-			r.Action = a
-			if a == RecoveryActionRefinePrompt {
-				r.RefinedPrompt = "rewritten task prompt"
-			}
-			if err := r.Validate(); err != nil {
-				t.Errorf("action %q should validate: %v", a, err)
-			}
-		}
-	})
-
-	t.Run("diagnosis required for every action", func(t *testing.T) {
-		// Per ADR-037: diagnosis is the deliverable for escalate_human and
-		// mark_unrecoverable too — those aren't "no analysis" outcomes,
-		// they're "analysis says no programmatic action fits."
-		for _, a := range []RecoveryActionKind{
-			RecoveryActionEscalateHuman,
-			RecoveryActionMarkUnrecoverable,
-			RecoveryActionRefinePrompt,
-		} {
-			r := base()
-			r.Action = a
-			r.Diagnosis = ""
-			if a == RecoveryActionRefinePrompt {
-				r.RefinedPrompt = "rewritten"
-			}
-			err := r.Validate()
-			if err == nil || !strings.Contains(err.Error(), "diagnosis") {
-				t.Errorf("action %q without diagnosis should fail validate, got %v", a, err)
-			}
-		}
-	})
-
-	t.Run("recovery_agent_loop_id required", func(t *testing.T) {
-		r := base()
-		r.RecoveryAgentLoopID = ""
-		err := r.Validate()
-		if err == nil || !strings.Contains(err.Error(), "recovery_agent_loop_id") {
-			t.Errorf("missing recovery_agent_loop_id should fail validate, got %v", err)
-		}
-	})
 }
 
-// TestRecoverySubjectPrefixes pins the wire convention. Subject prefixes
-// are load-bearing across producer + consumer; renaming requires a
-// coordinated change. This test locks the strings at PR time.
-func TestRecoverySubjectPrefixes(t *testing.T) {
+// TestRecoverySubjectPrefix pins the wire convention. The subject prefix
+// is load-bearing across publishers (plan-manager, execution-manager,
+// requirement-executor) + the recovery-agent consumer.
+func TestRecoverySubjectPrefix(t *testing.T) {
 	if RecoveryRequestedSubjectPrefix != "recovery.requested." {
 		t.Errorf("RecoveryRequestedSubjectPrefix changed; producers + consumers must update together")
 	}
-	if RecoveryCompleteSubjectPrefix != "recovery.complete." {
-		t.Errorf("RecoveryCompleteSubjectPrefix changed; producers + consumers must update together")
-	}
-	if RecoveryStatesBucket != "RECOVERY_STATES" {
-		t.Errorf("RecoveryStatesBucket changed; KV reconciliation paths must update together")
-	}
 }
+
+// _ keeps the strings import live across the file (used by other tests).
+var _ = strings.Contains
