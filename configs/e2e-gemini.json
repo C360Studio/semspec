@@ -684,6 +684,7 @@
         "trigger_subject": "workflow.trigger.change-proposal-cascade",
         "accepted_subject": "workflow.events.change-proposal.accepted",
         "timeout_seconds": 120,
+        "auto_accept_recovery": true,
         "ports": {
           "inputs": [
             {

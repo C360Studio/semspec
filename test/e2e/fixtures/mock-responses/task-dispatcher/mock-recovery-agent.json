@@ -1,12 +1,12 @@
 {
-  "content": "Reviewed the wedge trajectory and reached an escalate_human verdict.",
+  "content": "Reviewed the wedge trajectory and recommending a refined task prompt.",
   "tool_calls": [
     {
       "id": "call_recovery_1",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"action\":\"escalate_human\",\"diagnosis\":\"Developer agent burned its TDD cycle budget repeating the same approach without inspecting the failing test output. No programmatic refinement is obviously correct from the trajectory alone; surfacing for human review with the prior feedback intact.\",\"recovery_succeeded\":false}"
+        "arguments": "{\"action\":\"refine_prompt\",\"diagnosis\":\"Developer burned its TDD cycle budget repeating the same approach without inspecting the failing test output. Pattern: the trajectory shows 3+ identical bash invocations with the same sed expression, all failing. Refining the prompt to point at heredoc rewrites would let the agent step out of the loop.\",\"refined_prompt\":\"Re-read the failing test output before editing again. Use a heredoc-style write (cat > file <<EOF), not in-place sed — the prior trajectory shows the sed approach failing identically 3 times. Address ONLY the specific failure named in the prior feedback; do not refactor adjacent code.\",\"recovery_succeeded\":true}"
       }
     }
   ],

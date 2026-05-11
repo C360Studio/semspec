@@ -28,6 +28,23 @@ type Config struct {
 	// TimeoutSeconds is the maximum seconds allowed for a single cascade run.
 	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Cascade timeout in seconds,category:advanced,default:120,min:10,max:600"`
 
+	// AutoAcceptRecovery enables programmatic acceptance of proposed
+	// PlanDecisions emitted by the recovery-agent. ADR-037 stage-1 design
+	// note: recovery diagnoses are useful even without auto-action; this
+	// knob unlocks the full apply→cascade→retry loop when operators have
+	// validated the recovery agent's behaviour for their deployment.
+	//
+	// Gate is narrow: only PlanDecisions with ProposedBy="recovery-agent",
+	// Status="proposed", Kind="requirement_change", and non-empty
+	// AffectedReqIDs are auto-accepted. qa-reviewer + req-executor + human
+	// proposals always require explicit human accept.
+	//
+	// Default false (Goodhart guard): operators opt into the safety-net
+	// shortcut, they don't get it by default. Mock e2e flips this on so
+	// the full apply path is exercised; production semspec.json leaves it
+	// off so recovery stays diagnosis-only until the operator decides.
+	AutoAcceptRecovery bool `json:"auto_accept_recovery" schema:"type:boolean,description:Auto-accept PlanDecisions from recovery-agent (ADR-037 stage-2 apply path),category:advanced,default:false"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

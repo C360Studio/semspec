@@ -36,6 +36,7 @@ const (
 	mutationGitHubPRFeedback      = "plan.mutation.github.pr_feedback"
 	mutationGitHubPRMetadata      = "plan.mutation.github.pr_metadata"
 	mutationPlanDecisionAdd       = "plan.mutation.plan_decision.add"
+	mutationPlanDecisionAccept    = "plan.mutation.plan_decision.accept"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -158,6 +159,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationGitHubPRFeedback, c.handleGitHubPRFeedbackMutation},
 		{mutationGitHubPRMetadata, c.handleGitHubPRMetadataMutation},
 		{mutationPlanDecisionAdd, c.handlePlanDecisionAddMutation},
+		{mutationPlanDecisionAccept, c.handlePlanDecisionAcceptMutation},
 	}
 
 	for _, s := range subjects {
@@ -1475,6 +1477,114 @@ func (c *Component) handlePlanDecisionAddMutation(ctx context.Context, data []by
 		"kind", req.Decision.Kind,
 		"affected", req.Decision.AffectedReqIDs,
 	)
+	return MutationResponse{Success: true}
+}
+
+// planDecisionAcceptRequest is the NATS-side counterpart of the HTTP
+// accept endpoint. Decoupling lets plan-decision-handler's auto-accept
+// watcher invoke the same logic without a synthetic HTTP request.
+type planDecisionAcceptRequest struct {
+	Slug       string `json:"slug"`
+	ProposalID string `json:"proposal_id"`
+	// AcceptedBy identifies the caller — "user" (HTTP), "auto:recovery"
+	// (auto-accept watcher). Surfaces in logs so operators can tell who
+	// closed the decision without having to cross-reference timestamps.
+	AcceptedBy string `json:"accepted_by,omitempty"`
+}
+
+// handlePlanDecisionAcceptMutation accepts a proposed PlanDecision in
+// the plan, applies any recovery-agent-shaped side effects (req
+// RecoveryHint via applyRecoveryHint), saves, and publishes a cascade
+// trigger. Same logical contract as the HTTP handleAcceptPlanDecision
+// — both must stay in sync; future apply logic should land here so
+// the HTTP path inherits it.
+//
+// Returns ok=true when the proposal transitions to accepted; returns
+// ok=false with an error message when the proposal is missing or in a
+// status that can't transition to accepted.
+func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data []byte) MutationResponse {
+	var req planDecisionAcceptRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" || req.ProposalID == "" {
+		return MutationResponse{Success: false, Error: "slug and proposal_id are required"}
+	}
+	acceptedBy := req.AcceptedBy
+	if acceptedBy == "" {
+		acceptedBy = "auto"
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+	if ps == nil {
+		return MutationResponse{Success: false, Error: "plan store not ready"}
+	}
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	proposal, idx := plan.FindPlanDecision(req.ProposalID)
+	if idx == -1 || proposal == nil {
+		return MutationResponse{Success: false, Error: "plan_decision not found"}
+	}
+	if !proposal.Status.CanTransitionTo(workflow.PlanDecisionStatusAccepted) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("cannot accept in status %q", proposal.Status)}
+	}
+
+	now := time.Now()
+	proposal.Status = workflow.PlanDecisionStatusAccepted
+	proposal.DecidedAt = &now
+
+	// Mirror HTTP path: apply recovery hint when proposed_by=recovery-agent.
+	// Gate stays on ProposedBy + non-empty Rationale; future apply shapes
+	// for other proposer roles land in this same branch.
+	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
+		applyRecoveryHint(plan, proposal)
+	}
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan after auto-accepting plan_decision",
+			"slug", req.Slug, "proposal_id", req.ProposalID, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan decision accepted via mutation",
+		"slug", req.Slug,
+		"proposal_id", req.ProposalID,
+		"accepted_by", acceptedBy,
+		"proposed_by", proposal.ProposedBy,
+		"kind", proposal.Kind,
+	)
+
+	// Publish cascade trigger. Detach from request context so the
+	// publish completes even if the caller's deadline expires; the
+	// proposal status mutation has already landed and we want the
+	// cascade to follow regardless.
+	if c.natsClient != nil {
+		cascadeReq := &payloads.PlanDecisionCascadeRequest{
+			ProposalID: req.ProposalID,
+			Slug:       req.Slug,
+		}
+		baseMsg := message.NewBaseMessage(cascadeReq.Schema(), cascadeReq, "plan-manager")
+		cascadeData, err := json.Marshal(baseMsg)
+		if err != nil {
+			c.logger.Error("Failed to marshal cascade request",
+				"proposal_id", req.ProposalID, "error", err)
+		} else {
+			pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer pubCancel()
+			if err := c.natsClient.PublishToStream(pubCtx, "workflow.trigger.plan-decision-cascade", cascadeData); err != nil {
+				c.logger.Error("Failed to publish cascade request after auto-accept",
+					"proposal_id", req.ProposalID, "error", err)
+			} else {
+				c.logger.Info("Published cascade request (auto-accept)",
+					"slug", req.Slug, "proposal_id", req.ProposalID)
+			}
+		}
+	}
 	return MutationResponse{Success: true}
 }
 

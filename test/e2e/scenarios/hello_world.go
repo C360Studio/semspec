@@ -1470,6 +1470,12 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 			// to RECOVERY_STATES KV. Validates the full async dispatch wire
 			// without depending on real-LLM behavior.
 			stageDefinition{"verify-recovery-dispatch", s.stageVerifyRecoveryDispatch, t(60, 30)},
+			// ADR-037 (a3 apply path): plan-decision-handler's auto-accept
+			// watcher (gated by config.auto_accept_recovery, ON in
+			// e2e-mock.json) transitions the PlanDecision to accepted +
+			// runs applyRecoveryHint. This stage verifies the accept
+			// landed and the rationale reached the wedged req.
+			stageDefinition{"verify-recovery-applied", s.stageVerifyRecoveryApplied, t(60, 30)},
 			stageDefinition{"retry-failed", s.stageRetryAfterExhaustion, t(15, 10)},
 			stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
 			stageDefinition{"generate-report", s.stageGenerateReport, t(10, 5)},
@@ -1850,24 +1856,29 @@ func (s *HelloWorldScenario) stageVerifyRecoveryDispatch(ctx context.Context, re
 				if dec.ProposedBy != "recovery-agent" {
 					continue
 				}
-				// Mock fixture returns action=escalate_human, which the
-				// recovery-agent maps to kind=execution_exhausted. Pin both:
-				// the kind tells us the action→kind mapper ran; the
-				// ProposedBy filter pins it to recovery (vs req-executor's
-				// own execution_exhausted emit on retry budget exhaustion).
-				if dec.Kind != "execution_exhausted" {
-					return fmt.Errorf("recovery PlanDecision.kind = %q, want execution_exhausted (mock fixture is escalate_human action)",
+				// Mock fixture returns action=refine_prompt → kind=
+				// requirement_change. Pin both: the kind tells us the
+				// action→kind mapper ran; the ProposedBy filter pins it
+				// to recovery (vs qa-reviewer or req-executor's own
+				// proposals on the same wire).
+				if dec.Kind != "requirement_change" {
+					return fmt.Errorf("recovery PlanDecision.kind = %q, want requirement_change (mock fixture is refine_prompt action)",
 						dec.Kind)
 				}
-				if dec.Status != "proposed" {
-					return fmt.Errorf("recovery PlanDecision.status = %q, want proposed (recovery emits as proposed for human/auto-accept)",
+				// Status MAY be "accepted" already if the auto-accept
+				// watcher ran fast enough (race between "verify-recovery-
+				// dispatch" tick and the watcher's KV-subscribe latency).
+				// Accept both proposed + accepted; the apply-path stage
+				// below pins the accepted transition.
+				if dec.Status != "proposed" && dec.Status != "accepted" {
+					return fmt.Errorf("recovery PlanDecision.status = %q, want proposed or accepted",
 						dec.Status)
 				}
 				// Rationale must surface the diagnosis text + the
 				// recommended action. recovery-agent.buildRecoveryRationale
 				// puts both inline; the mock fixture's diagnosis text is
 				// substring-asserted to confirm the parse round-tripped.
-				if !strings.Contains(dec.Rationale, "escalate_human") {
+				if !strings.Contains(dec.Rationale, "refine_prompt") {
 					return fmt.Errorf("recovery PlanDecision.rationale missing recommended action text")
 				}
 				if !strings.Contains(dec.Rationale, "Diagnosis:") {
@@ -1888,8 +1899,121 @@ func (s *HelloWorldScenario) stageVerifyRecoveryDispatch(ctx context.Context, re
 				result.SetDetail("recovery_decision_kind", string(dec.Kind))
 				result.SetDetail("recovery_decision_proposed_by", dec.ProposedBy)
 				result.SetDetail("recovery_decision_affected_reqs", strings.Join(dec.AffectedReqIDs, ","))
+				result.SetDetail("recovery_decision_affected_first", dec.AffectedReqIDs[0])
 				return nil
 			}
 		}
 	}
+}
+
+// stageVerifyRecoveryApplied closes the (a3) apply-path validation.
+// After the recovery-agent emits a refine_prompt PlanDecision, plan-
+// decision-handler's auto-accept watcher (gated by
+// config.auto_accept_recovery) transitions the PlanDecision to accepted
+// and runs applyRecoveryHint — writing the rationale onto the affected
+// req's RecoveryHint field. Execution-manager reads that on next
+// developer dispatch.
+//
+// This stage polls for:
+//  1. The PlanDecision transitioning from proposed → accepted
+//  2. The affected requirement's RecoveryHint becoming non-empty
+//
+// Without (a3) wired, this stage would time out — the proposed
+// PlanDecision sits forever. With auto-accept enabled but applyRecoveryHint
+// broken, the status flips but the req stays unhinted. Both failure
+// modes surface here as a clear test failure.
+func (s *HelloWorldScenario) stageVerifyRecoveryApplied(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	affectedReqID, _ := result.GetDetailString("recovery_decision_affected_first")
+	decisionID, _ := result.GetDetailString("recovery_decision_id")
+	if slug == "" || affectedReqID == "" || decisionID == "" {
+		return fmt.Errorf("missing prior-stage detail: slug=%q decision_id=%q affected_req=%q (verify-recovery-dispatch must run first)",
+			slug, decisionID, affectedReqID)
+	}
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("recovery apply never landed (decision_id=%s, req=%s): %w",
+				decisionID, affectedReqID, ctx.Err())
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+			// Step 1: PlanDecision must have transitioned to accepted.
+			var decision *client.PlanDecision
+			for i := range plan.PlanDecisions {
+				if plan.PlanDecisions[i].ID == decisionID {
+					decision = &plan.PlanDecisions[i]
+					break
+				}
+			}
+			if decision == nil {
+				return fmt.Errorf("recovery PlanDecision %q disappeared from plan", decisionID)
+			}
+			if decision.Status != "accepted" {
+				continue // still proposed — auto-accept hasn't fired yet
+			}
+			// Step 2: req.RecoveryHint must be populated. The Plan
+			// type's Requirements field surfaces what we need.
+			// Re-fetch via a direct plan-shape JSON since the test
+			// client.Plan doesn't expose Requirements yet — use the
+			// KV endpoint as a fallback structured read.
+			hint, err := s.fetchRecoveryHint(ctx, slug, affectedReqID)
+			if err != nil {
+				return fmt.Errorf("fetch RecoveryHint: %w", err)
+			}
+			if hint == "" {
+				return fmt.Errorf("decision %q accepted but req %q has empty RecoveryHint — applyRecoveryHint didn't fire or didn't target this req",
+					decisionID, affectedReqID)
+			}
+			// Substring guard: the rationale text emitted by recovery-
+			// agent.buildRecoveryRationale always contains "Diagnosis:".
+			// If the hint somehow contains something else, applyRecoveryHint
+			// wrote a wrong source.
+			if !strings.Contains(hint, "Diagnosis:") {
+				return fmt.Errorf("req %q RecoveryHint does not contain Diagnosis: section (was applyRecoveryHint fed the right rationale?):\n%s",
+					affectedReqID, hint)
+			}
+			result.SetDetail("recovery_applied_hint_chars", len(hint))
+			result.SetDetail("recovery_applied_status", string(decision.Status))
+			return nil
+		}
+	}
+}
+
+// fetchRecoveryHint reads PLAN_STATES KV directly for the plan and
+// extracts the named requirement's RecoveryHint field. The Plan
+// client type used by other scenario stages doesn't expose Requirements,
+// and adding it would balloon scope; the KV endpoint serves the raw
+// JSON which we partially-decode here.
+func (s *HelloWorldScenario) fetchRecoveryHint(ctx context.Context, slug, requirementID string) (string, error) {
+	kvResp, err := s.http.GetKVEntries(ctx, "PLAN_STATES")
+	if err != nil {
+		return "", err
+	}
+	for _, entry := range kvResp.Entries {
+		if entry.Key != slug {
+			continue
+		}
+		var planView struct {
+			Requirements []struct {
+				ID           string `json:"id"`
+				RecoveryHint string `json:"recovery_hint,omitempty"`
+			} `json:"requirements"`
+		}
+		if err := json.Unmarshal(entry.Value, &planView); err != nil {
+			return "", fmt.Errorf("unmarshal plan view: %w", err)
+		}
+		for _, req := range planView.Requirements {
+			if req.ID == requirementID {
+				return req.RecoveryHint, nil
+			}
+		}
+		return "", fmt.Errorf("requirement %q not found on plan %s", requirementID, slug)
+	}
+	return "", fmt.Errorf("plan %s not found in PLAN_STATES KV", slug)
 }

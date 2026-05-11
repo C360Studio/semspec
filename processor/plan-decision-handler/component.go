@@ -156,10 +156,19 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("consume cascade triggers: %w", err)
 	}
 
+	// ADR-037 stage-2 (a3 apply path): when AutoAcceptRecovery is set,
+	// watch PLAN_STATES KV for new proposed_by="recovery-agent"
+	// PlanDecisions and accept them via the plan.mutation.plan_decision.
+	// accept mutation. Default off (Goodhart guard); operators opt in.
+	if c.config.AutoAcceptRecovery {
+		go c.watchRecoveryProposals(subCtx)
+	}
+
 	c.logger.Info("plan-decision-handler started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
-		"subject", c.config.TriggerSubject)
+		"subject", c.config.TriggerSubject,
+		"auto_accept_recovery", c.config.AutoAcceptRecovery)
 
 	return nil
 }
