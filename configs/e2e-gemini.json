@@ -49,8 +49,8 @@
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
-        "reasoning_effort": "low",
-        "request_timeout": "180s"
+        "reasoning_effort": "medium",
+        "request_timeout": "300s"
       },
       "semembed": {
         "provider": "openai",
@@ -110,8 +110,11 @@
         ]
       },
       "coding": {
-        "description": "Code generation, implementation",
+        "description": "Code generation, implementation. Bumped to pro 2026-05-11 take 12: gemini-flash invented dep coords (io.opensensorhub vs org.sensorhub) despite a clear comment hint + readable /sources/osh/ mount. The developer is doing the hardest single task (write code that compiles AND satisfies scenarios AND respects scope AND doesn't fabricate); flash had insufficient comprehension budget for the @hard fixture. Cost rises ~3-5x per dev dispatch but @hard is testing reliability, not cost.",
         "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
           "gemini-flash"
         ]
       },

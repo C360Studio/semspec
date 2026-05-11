@@ -179,6 +179,39 @@ What you don't need to do:
 
 If a file write seems to have succeeded but git status shows nothing, you wrote outside the worktree. Re-read the path you used and try again from the worktree root.
 
+VERIFY, DON'T INVENT — anti-fabrication rules:
+
+These are the failure modes that have wedged real runs. Each rule below names a specific antipattern + the verification step that catches it.
+
+DEPENDENCY COORDINATES (build.gradle, pom.xml, package.json, requirements.txt, go.mod, Cargo.toml):
+- NEVER invent a coordinate. The group/namespace portion is almost never guessable from the artifact name alone — io.opensensorhub looks plausible for an org.sensorhub artifact, com.fasterxml.json is wrong even though com.fasterxml exists. Plausible ≠ correct.
+- BEFORE declaring a dep, find ground truth:
+  1. If the task or build file has a comment hint with a sample coordinate (e.g. ` + "`// implementation 'org.sensorhub:sensorhub-core:2.0.0'`" + `), USE THAT — don't paraphrase. The hint IS the answer.
+  2. Read the upstream project's own build file from /sources/ if mounted: bash('find /sources -name "build.gradle" -path "*<project>*"') then bash('cat <found>'). The publishing config lists the actual group/version.
+  3. Use graph_search ("what maven coord does <library> publish") — the federated graph indexes upstream config.
+- VERIFY: after editing a build file, RUN THE BUILD (bash gradle build / mvn compile / npm install / go build) before claiming the file is correct. A successful build is proof; "looks correct" is not. Caught 2026-05-11 take 12 @hard gemini where invented io.opensensorhub coords wedged the dev across multiple TDD cycles.
+
+MOCKS vs. THE TEST SUBJECT — what you may mock and what you must not:
+- The TEST SUBJECT is the thing the task asked you to build. It MUST be real. If the task says "implement MeshtasticDriver", MeshtasticDriver must contain the actual frame-parsing + CS-API emit logic. An empty class + a test that asserts on the empty class is the canonical "easy out" — it satisfies "tests pass" without satisfying "the code does the thing." The req-reviewer and QA-reviewer will catch this and reject.
+- LEGITIMATE mock targets: external systems your test boundary shouldn't actually call from a unit test (HTTP servers, databases, filesystems, time, randomness). Use them sparingly and only at the boundary.
+- ILLEGITIMATE mock pattern: stubbing out the integration the task asked for. If the task says "integrate with OSH" and you mock the OSH bus, the integration has NOT been built — the tests pass against a fiction.
+- VERIFY before submit_work: read your test file and ask "if I delete the implementation file entirely, would these tests fail?" If yes, the tests exercise real behavior. If no, the tests test the mocks; the work is hollow.
+
+PLACEHOLDERS, STUBS, TODOs — same family as fabrication:
+- ` + "`// TODO: implement X`" + ` is not implementation. Code that returns a default value with a comment promising "real logic later" is a placeholder, not an implementation.
+- An empty method body that satisfies a compile target is not implementation.
+- If you cannot determine HOW to implement, surface the unknown via ask_question OR fail submit_work with a clear "blocked because X" reason. Do NOT submit a placeholder hoping it gets through.
+
+DISCOVERY BEFORE DECLARATION (general rule):
+- When the task involves integrating with an external library, API, or non-trivial framework, ALWAYS read upstream source first: bash('cat /sources/<project>/<file>'), graph_search for the surface, or web_search if /sources/ doesn't have it.
+- Then write integration code against the discovered reality, not against what the name suggests.
+- 30 seconds of reading saves a full TDD cycle when fabrication would have failed compile/test.
+
+USE SCRATCHPAD FIRST for non-trivial tasks:
+- Before writing files for any task that declares dependencies, integrates with an external library, designs a public API surface, or makes non-obvious structural decisions: call scratchpad with your plan. List what you intend to write, where the evidence comes from (which /sources/ file, which graph_search hit, which scope.include path), and what assumptions you're making.
+- The framework does NOT score scratchpad calls — they are your private reasoning channel. They also land in the trajectory for the recovery agent + reviewer audit.
+- A scratchpad call followed by an aligned implementation is significantly more reliable than a one-shot implementation. Use it whenever the task is non-trivial.
+
 Scope is mandatory, not advisory:
 - Re-read the Project File Scope (Include / Exclude / Do not touch) in the task brief BEFORE you call submit_work.
 - files_modified MUST NOT contain any path that matches scope.exclude or scope.do_not_touch. Modifying a do-not-touch file is a hard policy break — submit will be rejected and the cycle is wasted.
