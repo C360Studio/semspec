@@ -492,6 +492,18 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 	proposal.Status = workflow.PlanDecisionStatusAccepted
 	proposal.DecidedAt = &now
 
+	// ADR-037 stage-1 (a3): when accepting a recovery PlanDecision, apply
+	// the rationale as supplementary feedback on the affected req(s) via
+	// req.RecoveryHint. Execution-manager prepends this onto exec.Feedback
+	// at next-cycle developer dispatch so the manager-role agent's
+	// recommendation reaches the wedged role through the existing
+	// retry-feedback channel. No new prompt fragment, no new wire shape.
+	// Gated by ProposedBy="recovery-agent" so qa-reviewer + req-executor
+	// proposals (which use the same wire) don't get hint application.
+	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
+		applyRecoveryHint(plan, proposal)
+	}
+
 	if err := c.plans.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to save plan after accepting change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to accept change proposal", http.StatusInternalServerError)
@@ -571,5 +583,36 @@ func (c *Component) handleRejectPlanDecision(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(proposal); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// applyRecoveryHint writes the recovery agent's diagnosis onto each
+// affected requirement's RecoveryHint field. Execution-manager reads
+// req.RecoveryHint at developer dispatch time and prepends it to
+// exec.Feedback so the agent sees the manager-role recommendation in
+// the same channel as prior reviewer feedback.
+//
+// Idempotent: repeated accepts of the same proposal overwrite the hint
+// with the same content. The hint is cleared on req completion (the next
+// cycle of a different req doesn't carry stale recovery context).
+//
+// Best-effort: a missing affected req (deleted between propose + accept)
+// is logged and skipped, not an error — the cascade re-run will surface
+// the missing-req case through the existing dirty-mark machinery.
+func applyRecoveryHint(plan *workflow.Plan, proposal *workflow.PlanDecision) {
+	if proposal == nil || proposal.Rationale == "" {
+		return
+	}
+	affected := make(map[string]bool, len(proposal.AffectedReqIDs))
+	for _, id := range proposal.AffectedReqIDs {
+		affected[id] = true
+	}
+	now := time.Now()
+	for i := range plan.Requirements {
+		if !affected[plan.Requirements[i].ID] {
+			continue
+		}
+		plan.Requirements[i].RecoveryHint = proposal.Rationale
+		plan.Requirements[i].UpdatedAt = now
 	}
 }

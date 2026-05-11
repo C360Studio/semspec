@@ -902,8 +902,17 @@ type Requirement struct {
 	Status     RequirementStatus `json:"status,omitempty"`
 	DependsOn  []string          `json:"depends_on,omitempty"`  // IDs of prerequisite requirements
 	FilesOwned []string          `json:"files_owned,omitempty"` // workspace-relative paths this requirement owns; two requirements that both list the same path must have a DependsOn edge between them or the plan-level merge will conflict
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	// RecoveryHint is supplementary feedback applied by ADR-037 stage-1
+	// recovery when a recovery PlanDecision is accepted (cascade re-runs
+	// the affected req). When non-empty, execution-manager prepends it
+	// onto the developer's exec.Feedback at dispatch time on the next
+	// cycle so the dev sees the manager-role agent's recommendation in
+	// the same channel as prior reviewer feedback. Cleared on req
+	// completion. Set by plan-decision-handler when accepting a
+	// proposed_by="recovery-agent" PlanDecision.
+	RecoveryHint string    `json:"recovery_hint,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // ScenarioStatus represents the verification state of a scenario.

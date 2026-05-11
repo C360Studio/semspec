@@ -439,6 +439,36 @@ func (c *Component) readPlanTestSurface(ctx context.Context, slug string) *workf
 	return plan.Architecture.TestSurface
 }
 
+// lookupRecoveryHint returns the req.RecoveryHint string for the given
+// (slug, requirementID) pair, or "" when unavailable. ADR-037 stage-1
+// (a3): plan-decision-handler.applyRecoveryHint writes the recovery
+// agent's diagnosis onto req.RecoveryHint when accepting a
+// proposed_by="recovery-agent" PlanDecision; this lookup surfaces it
+// to the next developer dispatch as supplementary feedback.
+//
+// Returns "" silently for any failure path (bucket missing, plan
+// missing, req missing, no hint set) — recovery hints are advisory,
+// not load-bearing. Best-effort.
+func (c *Component) lookupRecoveryHint(ctx context.Context, slug, requirementID string) string {
+	if c.planBucket == nil || slug == "" || requirementID == "" {
+		return ""
+	}
+	entry, err := c.planBucket.Get(ctx, slug)
+	if err != nil {
+		return ""
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return ""
+	}
+	for _, req := range plan.Requirements {
+		if req.ID == requirementID {
+			return req.RecoveryHint
+		}
+	}
+	return ""
+}
+
 func (c *Component) initLessonsAndConfig() {
 	// Lesson writer uses TripleWriter (NATS request-reply to graph-ingest).
 	// No direct KV bucket access — no startup race.
@@ -1449,6 +1479,14 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	userPrompt := exec.Prompt
 	if exec.TDDCycle > 0 && exec.Feedback != "" {
 		userPrompt += "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
+	}
+	// ADR-037 stage-1 (a3): if a recovery PlanDecision was accepted on the
+	// req between cycles, plan-decision-handler.applyRecoveryHint wrote the
+	// recovery agent's diagnosis onto req.RecoveryHint. Surface it to the
+	// dev in the same channel as reviewer feedback so the manager-role
+	// recommendation reaches the wedged agent. Cleared on req completion.
+	if hint := c.lookupRecoveryHint(ctx, exec.Slug, exec.RequirementID); hint != "" {
+		userPrompt += "\n\n---\n\nMANAGER RECOVERY GUIDANCE (from a manager-role analysis of your prior cycle's wedge — apply this BEFORE re-attempting the same approach):\n\n" + hint
 	}
 
 	var endpoint *ssmodel.EndpointConfig
