@@ -85,9 +85,20 @@ func (c *Component) handleTaskPending(ctx context.Context, entry jetstream.KeyVa
 	exec := &taskExecution{
 		key: key,
 		TaskExecution: &workflow.TaskExecution{
-			EntityID:       entityID,
-			Slug:           taskExec.Slug,
-			TaskID:         taskExec.TaskID,
+			EntityID: entityID,
+			Slug:     taskExec.Slug,
+			TaskID:   taskExec.TaskID,
+			// RequirementID was missing from this struct literal; the watcher's
+			// claim-then-rebuild path dropped it, then syncToStore re-persisted
+			// the in-memory exec without it, leaving every task in
+			// EXECUTION_STATES KV with requirement_id="". Caught 2026-05-11
+			// mock e2e reproduction of the gemini @hard take 7 finding: recovery
+			// PlanDecision's affected_req_ids was empty because the wedged task's
+			// requirement_id had been silently stripped here. Every downstream
+			// path that keyed off exec.RequirementID (recovery dispatch capability
+			// routing, parent-req termination check, requirement-executor scope
+			// queries) was operating on empty.
+			RequirementID:  taskExec.RequirementID,
 			Stage:          phaseDeveloping,
 			TDDCycle:       0,
 			MaxTDDCycles:   taskExec.MaxTDDCycles,

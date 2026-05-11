@@ -1873,9 +1873,21 @@ func (s *HelloWorldScenario) stageVerifyRecoveryDispatch(ctx context.Context, re
 				if !strings.Contains(dec.Rationale, "Diagnosis:") {
 					return fmt.Errorf("recovery PlanDecision.rationale missing Diagnosis: section")
 				}
+				// (a3 apply-path guard): the PlanDecision must carry the
+				// wedged requirement_id so plan-decision-handler's accept
+				// branch can apply the recovery hint to the right req and
+				// the cascade can dirty-mark the right scenarios for re-run.
+				// Empty AffectedReqIDs makes the whole apply pathway a no-op.
+				// Caught 2026-05-11 task_watcher.go:85 dropping requirement_id
+				// on KV claim — without this assertion the mock e2e passed
+				// silently while real-LLM runs surfaced the wedge cause.
+				if len(dec.AffectedReqIDs) == 0 {
+					return fmt.Errorf("recovery PlanDecision.affected_requirement_ids is empty — apply path can't target a req; check task_watcher's claim-then-rebuild for dropped fields")
+				}
 				result.SetDetail("recovery_decision_id", dec.ID)
 				result.SetDetail("recovery_decision_kind", string(dec.Kind))
 				result.SetDetail("recovery_decision_proposed_by", dec.ProposedBy)
+				result.SetDetail("recovery_decision_affected_reqs", strings.Join(dec.AffectedReqIDs, ","))
 				return nil
 			}
 		}

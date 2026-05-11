@@ -245,11 +245,6 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		"key", key,
 		"slug", req.Slug,
 		"task_id", req.TaskID,
-		// Logging requirement_id explicitly so a downstream
-		// recovery-agent PlanDecision's affected_req_ids gap (caught
-		// 2026-05-11 take 7 — empty affected_reqs blocks cascade
-		// dirty-mark on accept) can be traced back to whichever wire
-		// hop dropped the field.
 		"requirement_id", req.RequirementID,
 	)
 	return ExecMutationResponse{Success: true, Key: key}
