@@ -88,11 +88,14 @@ type Config struct {
 
 	// PlanDecisionAcceptedSubject is the JetStream subject on which
 	// plan-decision-handler publishes accepted-PlanDecision events. Must
-	// match the AcceptedSubject configured on plan-decision-handler. Real
-	// configs override the Go default to a legacy subject name; keep
-	// the default in sync with prevailing real config files so the
-	// race-closure path works without per-operator wire-up.
-	PlanDecisionAcceptedSubject string `json:"plan_decision_accepted_subject" schema:"type:string,description:Subject for accepted-PlanDecision events (must match plan-decision-handler.accepted_subject),category:advanced,default:workflow.events.change-proposal.accepted"`
+	// match the AcceptedSubject configured on plan-decision-handler.
+	// Default mirrors plan-decision-handler's default and the publisher's
+	// hardcoded cascade trigger. The legacy "change-proposal" subject
+	// names were retired 2026-05-11 after a real-LLM run surfaced a
+	// publisher-vs-consumer subject mismatch (publishers hardcoded the
+	// new name; configs overrode consumers to the legacy name; cascade
+	// messages silently dropped).
+	PlanDecisionAcceptedSubject string `json:"plan_decision_accepted_subject" schema:"type:string,description:Subject for accepted-PlanDecision events (must match plan-decision-handler.accepted_subject),category:advanced,default:workflow.events.plan-decision.accepted"`
 
 	// MaxRecoveryRestarts bounds how many times an exec can be resumed from
 	// awaiting-recovery in its lifetime. Goodhart guard: prevents a recovery
@@ -208,7 +211,7 @@ func (c Config) withDefaults() Config {
 		c.RecoveryTimeoutSeconds = 60
 	}
 	if c.PlanDecisionAcceptedSubject == "" {
-		c.PlanDecisionAcceptedSubject = "workflow.events.change-proposal.accepted"
+		c.PlanDecisionAcceptedSubject = "workflow.events.plan-decision.accepted"
 	}
 	// MaxRecoveryRestarts: 0 is a valid "disable resumption" value, so
 	// only default when the JSON omitted it. Reflect via JSON-default
