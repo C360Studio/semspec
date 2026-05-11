@@ -37,6 +37,40 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 	})
 
+	// Markdown-fence stripping — LLMs commonly return ```json ... ```. Caught
+	// 2026-05-10 take 6 gemini @hard: the recovery agent's gemini-pro response
+	// landed fence-wrapped, json.Unmarshal failed with `invalid character '\`'`,
+	// recovery fell back to the parse-failure marker and the diagnosis was lost.
+	// jsonutil.ExtractJSON handles this; the test pins that integration.
+	t.Run("strips markdown json fence", func(t *testing.T) {
+		raw := "```json\n" +
+			`{"action":"escalate_human","diagnosis":"agent thrashing in bash quoting loop; refined prompt would not help here.","recovery_succeeded":false}` +
+			"\n```"
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected fence to be stripped, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionEscalateHuman {
+			t.Errorf("Action: got %q, want escalate_human", got.Action)
+		}
+		if !strings.Contains(got.Diagnosis, "thrashing") {
+			t.Errorf("diagnosis content lost across fence strip: %q", got.Diagnosis)
+		}
+	})
+
+	t.Run("strips bare-fence wrapper", func(t *testing.T) {
+		raw := "```\n" +
+			`{"action":"mark_unrecoverable","diagnosis":"upstream artifact does not exist on Maven Central or any configured mirror.","recovery_succeeded":false}` +
+			"\n```"
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected bare fence to be stripped, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionMarkUnrecoverable {
+			t.Errorf("Action: got %q, want mark_unrecoverable", got.Action)
+		}
+	})
+
 	cases := []struct {
 		name string
 		raw  string

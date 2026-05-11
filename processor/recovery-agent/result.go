@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
@@ -45,6 +46,21 @@ func parseRecoveryResult(raw string) (*payloads.RecoveryComplete, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil, errResultEmpty
+	}
+
+	// LLM responses commonly arrive wrapped in markdown code fences
+	// (```json ... ```), prose preambles, or trailing commentary. Strip
+	// these via the shared jsonutil helper before unmarshaling — same
+	// pattern the rest of the codebase uses for LLM JSON output.
+	// Caught 2026-05-10 take 6: gemini-pro returned a fenced result and
+	// json.Unmarshal failed with `invalid character '\`'` → recovery
+	// fell back to the parse-failure marker and the original diagnosis
+	// was lost. ExtractJSON returns the cleaned body or empty on no
+	// match; on empty, retain the raw input so the unmarshal error names
+	// the actual quirk shape (the operator can grep raw_head in the
+	// fallback log line).
+	if cleaned := jsonutil.ExtractJSON(raw); cleaned != "" {
+		raw = cleaned
 	}
 
 	var rr rawRecoveryResult
