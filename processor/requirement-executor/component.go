@@ -1290,7 +1290,12 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		return
 	}
 
+	// (debug 2026-05-11): include requirement_id explicitly so we can
+	// confirm the field is non-empty on the wire — take 7 surfaced a
+	// downstream gap where EXECUTION_STATES showed requirement_id=None
+	// despite this dispatch claiming to send it.
 	c.logger.Info("Dispatched node",
+		"sent_requirement_id", exec.RequirementID,
 		"entity_id", exec.EntityID,
 		"node_id", nodeID,
 		"node_index", exec.CurrentNodeIdx,
