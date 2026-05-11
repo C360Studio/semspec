@@ -596,7 +596,8 @@
       "enabled": true,
       "config": {
         "max_generation_retries": 3,
-        "sandbox_url": "http://sandbox:8090"
+        "sandbox_url": "http://sandbox:8090",
+        "attach_response_format": false
       }
     },
     "requirement-generator": {
@@ -606,7 +607,8 @@
       "config": {
         "default_capability": "requirement_generation",
         "max_generation_retries": 3,
-        "sandbox_url": "http://sandbox:8090"
+        "sandbox_url": "http://sandbox:8090",
+        "attach_response_format": false
       }
     },
     "scenario-generator": {
@@ -615,7 +617,8 @@
       "enabled": true,
       "config": {
         "default_capability": "scenario_generation",
-        "max_generation_retries": 3
+        "max_generation_retries": 3,
+        "attach_response_format": false
       }
     },
     "architecture-generator": {
@@ -624,7 +627,8 @@
       "enabled": true,
       "config": {
         "default_capability": "architecture",
-        "max_generation_retries": 3
+        "max_generation_retries": 3,
+        "attach_response_format": false
       }
     },
     "plan-manager": {

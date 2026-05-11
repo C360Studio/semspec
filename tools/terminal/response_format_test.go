@@ -153,3 +153,68 @@ func TestResponseFormatForEndpoint(t *testing.T) {
 		}
 	})
 }
+
+// Per-component opt-out (the L2-drop A/B knob). nil means "use endpoint
+// default" — preserves existing behavior. Explicit false drops the wire
+// constraint regardless of endpoint support so the prompt-side hint
+// and the wire attach stay in lockstep.
+func TestEndpointSupportsResponseFormatGated(t *testing.T) {
+	supportedEp := &ssmodel.EndpointConfig{Provider: "openrouter", URL: "https://openrouter.ai/api/v1"}
+	unsupportedEp := &ssmodel.EndpointConfig{Provider: "anthropic"}
+	t.Run("nil attach + supported endpoint returns true", func(t *testing.T) {
+		if got := EndpointSupportsResponseFormatGated(supportedEp, nil); !got {
+			t.Error("nil attach should pass through to endpoint default (true here)")
+		}
+	})
+	t.Run("nil attach + unsupported endpoint returns false", func(t *testing.T) {
+		if got := EndpointSupportsResponseFormatGated(unsupportedEp, nil); got {
+			t.Error("nil attach with unsupported endpoint should return false")
+		}
+	})
+	t.Run("explicit true + supported endpoint returns true", func(t *testing.T) {
+		yes := true
+		if got := EndpointSupportsResponseFormatGated(supportedEp, &yes); !got {
+			t.Error("explicit true + supported endpoint should return true")
+		}
+	})
+	t.Run("explicit false drops regardless of endpoint", func(t *testing.T) {
+		no := false
+		if got := EndpointSupportsResponseFormatGated(supportedEp, &no); got {
+			t.Error("explicit false should drop even when endpoint supports it")
+		}
+	})
+}
+
+func TestResponseFormatForEndpointGated(t *testing.T) {
+	supportedEp := &ssmodel.EndpointConfig{Provider: "openrouter", URL: "https://openrouter.ai/api/v1"}
+
+	t.Run("nil attach preserves existing attach behavior", func(t *testing.T) {
+		rf := ResponseFormatForEndpointGated(supportedEp, "plan", nil)
+		if rf == nil {
+			t.Fatal("nil attach + supported endpoint should still attach schema")
+		}
+		if rf.Name != "plan_args" {
+			t.Errorf("Name = %q, want plan_args", rf.Name)
+		}
+	})
+
+	t.Run("explicit false drops response_format even on supported endpoint", func(t *testing.T) {
+		no := false
+		if rf := ResponseFormatForEndpointGated(supportedEp, "plan", &no); rf != nil {
+			t.Errorf("explicit false should drop response_format; got %+v", rf)
+		}
+	})
+
+	t.Run("gate and hint stay in lockstep when attach=false", func(t *testing.T) {
+		// The HasResponseFormat hint flowing through to AssemblyContext
+		// MUST agree with the wire attach so prompt assembly re-includes
+		// schema prose exactly when the wire constraint drops. Pin both
+		// in one assertion to prevent drift if either signature changes.
+		no := false
+		hint := EndpointSupportsResponseFormatGated(supportedEp, &no)
+		wire := ResponseFormatForEndpointGated(supportedEp, "plan", &no)
+		if hint || wire != nil {
+			t.Errorf("hint=%v wire=%+v; both must be falsy together", hint, wire)
+		}
+	})
+}

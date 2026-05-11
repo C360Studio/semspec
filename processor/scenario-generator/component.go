@@ -322,7 +322,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	asmCtx := &prompt.AssemblyContext{
 		Role:                    prompt.RoleScenarioGenerator,
 		Provider:                provider,
-		HasResponseFormat:       terminal.EndpointSupportsResponseFormat(endpoint),
+		HasResponseFormat:       terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
 		Domain:                  "software",
 		AvailableTools:          prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
 		SupportsTools:           true,
@@ -381,7 +381,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 			"role":  string(prompt.RoleScenarioGenerator),
 			"model": modelName,
 		},
-		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "scenarios"),
+		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "scenarios", c.config.AttachResponseFormat),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-scenario-generator")

@@ -566,7 +566,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	asmCtx := &prompt.AssemblyContext{
 		Role:              prompt.RolePlanner,
 		Provider:          provider,
-		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
+		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
 		Domain:            "software",
 		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
 		SupportsTools:     true,
@@ -628,7 +628,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 			"role":  string(prompt.RolePlanner),
 			"model": modelName,
 		},
-		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "plan"),
+		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "plan", c.config.AttachResponseFormat),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-planner")

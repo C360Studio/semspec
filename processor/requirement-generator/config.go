@@ -37,6 +37,16 @@ type Config struct {
 	// silently. Same shape as plan-reviewer/planner sandbox_url.
 	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox URL for project file tree snapshot,category:advanced"`
 
+	// AttachResponseFormat gates whether dispatches attach the strict
+	// response_format JSON-schema wrapper. nil (omitted) preserves existing
+	// behavior — attach where the endpoint supports it. Explicit false
+	// drops the L2 wire constraint so the model can emit free-form pre-tool
+	// reasoning text before the strict tool-args call (L3-only, see
+	// docs/structured-output-levels.md). Flows through to
+	// AssemblyContext.HasResponseFormat so prompt assembly re-injects
+	// schema prose when the wire constraint is off.
+	AttachResponseFormat *bool `json:"attach_response_format,omitempty" schema:"type:bool,description:Attach strict response_format to dispatches (L2). nil=endpoint default; false=drop to L3-only.,category:advanced"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

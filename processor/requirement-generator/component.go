@@ -306,7 +306,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 	asmCtx := &prompt.AssemblyContext{
 		Role:                 prompt.RoleRequirementGenerator,
 		Provider:             provider,
-		HasResponseFormat:    terminal.EndpointSupportsResponseFormat(endpoint),
+		HasResponseFormat:    terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
 		Domain:               "software",
 		AvailableTools:       prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
 		SupportsTools:        true,
@@ -369,7 +369,7 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 			"role":  string(prompt.RoleRequirementGenerator),
 			"model": modelName,
 		},
-		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "requirements"),
+		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "requirements", c.config.AttachResponseFormat),
 	}
 
 	// Track the dispatch context for retry and completion lookup. Track is

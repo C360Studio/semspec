@@ -366,7 +366,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	asmCtx := &prompt.AssemblyContext{
 		Role:              prompt.RoleArchitect,
 		Provider:          provider,
-		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
+		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
 		Domain:            "software",
 		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
 		SupportsTools:     true,
@@ -424,7 +424,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 			"role":  string(prompt.RoleArchitect),
 			"model": modelName,
 		},
-		ResponseFormat: terminal.ResponseFormatForEndpoint(endpoint, "architecture"),
+		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "architecture", c.config.AttachResponseFormat),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-architecture-generator")
