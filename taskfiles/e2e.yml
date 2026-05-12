@@ -492,12 +492,18 @@ tasks:
       TIER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
-      # Hard tier uses the Meshtastic/OSH Java fixture + 3 external semsources.
-      # Other tiers use the default go-project fixture.
+      # Hard tier uses the Meshtastic/OSH Java fixture. Pre-cloned external
+      # semsources (e2e-epic.yml) are now opt-in: set WITH_EPIC=1 to mount
+      # /sources/ with the 3 upstream repos (osh/meshtastic/ogc). Default
+      # off — take-17 (2026-05-12) showed sonnet over-explores 7k+ entities
+      # under /sources/ until iter=80, burning the dev budget on reads.
+      # Architect now uses web_search + http_request as the default
+      # reference-discovery path; bring epic back when you specifically
+      # want the cached upstream tree.
       FIXTURE_DIR:
         sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
       EPIC_OVERLAY:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
@@ -506,7 +512,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Debug=${DEBUG:-off}"
+      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Debug=${DEBUG:-off}"
       - echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
       - task: reset-fixtures
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
@@ -558,8 +564,10 @@ tasks:
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
       FIXTURE_DIR:
         sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
+      # Pre-cloned external semsources are opt-in via WITH_EPIC=1. See
+      # the test:llm task above for rationale (take-17 over-exploration).
       EPIC_OVERLAY:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
       RUN_TS:
         sh: date +%Y%m%d-%H%M%S
       OUT_DIR: "/tmp/semspec-watch-{{.PROVIDER}}-{{.TIER}}-{{.RUN_TS}}"
@@ -580,7 +588,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}}"
+      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}}"
       - mkdir -p {{.OUT_DIR}}
       - echo "[WATCH:LLM] Artifacts will land in {{.OUT_DIR}}"
       # Build the host-side semspec binary that runs the watch sidecar.

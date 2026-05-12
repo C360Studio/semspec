@@ -30,35 +30,30 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "submit_work", Order: 1, Guidance: "Submit completed work. Call ONLY after finishing your task — not on your first turn. See output format for required fields."},
 		{Name: "ask_question", Order: 2, Guidance: "Ask when blocked and cannot proceed. Default to reasonable assumptions — only ask when truly ambiguous."},
 
-		// Internal reasoning tools — these are YOUR private memory. They are
-		// NOT optional and they are NOT under Goodhart audit. The framework
-		// does not score you on whether you call them, but you SHOULD call
-		// them whenever they fit, because they directly improve the work you
-		// produce. They write to the trajectory and are visible to your
-		// next iteration, to the recovery agent if you wedge, and to a
-		// human reviewing your work later — but never to a reviewer who
-		// is scoring your output. Use them freely.
+		// Internal reasoning tools — these are YOUR private memory. They
+		// are REQUIRED for multi-step work, not optional. They write to
+		// the trajectory and are visible to your next iteration, to the
+		// recovery agent if you wedge, and to a human reviewing your
+		// work later. Take-17 (2026-05-12) ran two sonnet developers on
+		// the same task in parallel; the one that skipped write_todos +
+		// scratchpad burned 90 bash reads on /sources/ exploration and
+		// never wrote a line, while the one that paced itself shipped
+		// real code. Suggestive language ("use freely") did not land —
+		// the language below is prescriptive on purpose.
 		//
-		// write_todos: maintain your working task list ACROSS iterations.
-		// Use this VERY frequently — almost any task with more than one
-		// step benefits. Submit the entire current list each call;
-		// previous list is replaced. Mark items completed in the SAME
-		// iteration the work happened — never batch at the end. Without
-		// this, context compaction will evict your plan and you will
-		// repeat work or lose track of what is left.
-		{Name: "write_todos", Order: 3, Guidance: "Track your work-in-progress across iterations. Use VERY frequently — any multi-step task benefits. Submit the entire current list each call (full replacement). Mark items completed in the SAME iteration the work happened, never batch at the end. This is YOUR memory across iterations — use it freely; the framework does not score you on it."},
+		// write_todos: your working task list ACROSS iterations. Without
+		// this, context compaction evicts your plan and you repeat work
+		// or lose track of what is left.
+		{Name: "write_todos", Order: 3, Guidance: "REQUIRED on iter 0-1 for any task with more than one step. Lay out your initial plan as a todo list on your first or second iteration. Update after every meaningful step — mark items completed in the SAME iteration the work happened, never batch at the end. Submit the entire current list each call (full replacement). Skipping write_todos on multi-step work routinely exhausts the iteration budget on re-discovery; if you find yourself thinking 'what was I working on?' mid-task, write_todos is the fix."},
 
 		// scratchpad: free-form reasoning channel for a SINGLE dispatch.
-		// Use this BEFORE you call your strict commit tool (submit_work
-		// for most roles) whenever the work involves decomposition,
-		// planning multiple changes, or weighing constraints. Text is
-		// unconstrained — write plain prose explaining your approach,
-		// listing things you considered, noting edge cases. The
-		// framework does not interpret it; it lands in the trajectory
-		// for your own next-iteration use and for the recovery agent if
-		// you wedge. Strict tool-args on submit_work are easier to
-		// produce correctly AFTER you have laid out your thinking here.
-		{Name: "scratchpad", Order: 4, Guidance: "Think before you commit. Call this BEFORE submit_work whenever the task involves decomposition, multi-step planning, or weighing constraints. Write plain prose — your approach, things you considered, edge cases. The framework does not interpret or score the content; it is YOUR reasoning space and the strict commit goes more cleanly after you have used it."},
+		// Use this BEFORE submit_work whenever the work involves
+		// decomposition, planning multiple changes, or weighing
+		// constraints. Text is unconstrained — plain prose explaining
+		// your approach, listing things you considered, noting edge
+		// cases. Strict tool-args on submit_work are easier to produce
+		// correctly AFTER you have laid out your thinking here.
+		{Name: "scratchpad", Order: 4, Guidance: "REQUIRED before submit_work when the task involves decomposition, multi-step planning, or weighing constraints between approaches. Write plain prose — your approach, things you considered, edge cases. Strict commits go more cleanly after you have laid out your thinking; skipping scratchpad on non-trivial work routinely produces submit_work calls with missing files, wrong scope, or hallucinated paths."},
 
 		// Graph tools removed from agent palettes 2026-05-12 — see
 		// prompt/tool_filter.go header comment. Tools remain registered
