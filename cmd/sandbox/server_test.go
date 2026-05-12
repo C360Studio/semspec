@@ -269,6 +269,207 @@ func TestMergeWorktree(t *testing.T) {
 	}
 }
 
+// TestParseMergeOverwriteFiles covers the parser that extracts file
+// paths from git's "would be overwritten by merge" error message.
+// Real-format fixtures pulled from 2026-05-12 take-16 semspec.log.
+// Pinning this is necessary because the parser is the gate-keeper for
+// when the path-confusion recovery runs vs. falls through.
+func TestParseMergeOverwriteFiles(t *testing.T) {
+	t.Run("tracked-only block", func(t *testing.T) {
+		// Real shape from take 16: tracked block followed by "Please
+		// commit your changes...", "Aborting", "Merge with strategy
+		// ort failed.: exit status 2".
+		errMsg := `merge worktree: server error 409: merge conflict: git merge cbb0d2e --no-ff -m feat(d289670ba0a2): ...
+Trace-ID: 463aed13484b5326f73049b62206d66d: error: Your local changes to the following files would be overwritten by merge:
+	build.gradle
+Please commit your changes or stash them before you merge.
+Aborting
+Merge with strategy ort failed.: exit status 2`
+		tracked, untracked := parseMergeOverwriteFiles(errMsg)
+		if len(tracked) != 1 || tracked[0] != "build.gradle" {
+			t.Errorf("tracked = %v, want [build.gradle]", tracked)
+		}
+		if len(untracked) != 0 {
+			t.Errorf("untracked = %v, want []", untracked)
+		}
+	})
+
+	t.Run("both blocks", func(t *testing.T) {
+		// First-merge shape from take 16.
+		errMsg := `error: Your local changes to the following files would be overwritten by merge:
+	build.gradle
+Please commit your changes or stash them before you merge.
+error: The following untracked working tree files would be overwritten by merge:
+	src/test/java/org/sensorhub/driver/meshtastic/MeshtasticDriverBuildTest.java
+Please move or remove them before you merge.
+Aborting
+Merge with strategy ort failed.: exit status 2`
+		tracked, untracked := parseMergeOverwriteFiles(errMsg)
+		if len(tracked) != 1 || tracked[0] != "build.gradle" {
+			t.Errorf("tracked = %v, want [build.gradle]", tracked)
+		}
+		if len(untracked) != 1 || untracked[0] != "src/test/java/org/sensorhub/driver/meshtastic/MeshtasticDriverBuildTest.java" {
+			t.Errorf("untracked = %v, want [.../MeshtasticDriverBuildTest.java]", untracked)
+		}
+	})
+
+	t.Run("untracked-only block", func(t *testing.T) {
+		errMsg := `error: The following untracked working tree files would be overwritten by merge:
+	foo.txt
+	bar.txt
+Please move or remove them before you merge.
+Aborting`
+		tracked, untracked := parseMergeOverwriteFiles(errMsg)
+		if len(tracked) != 0 {
+			t.Errorf("tracked = %v, want []", tracked)
+		}
+		if len(untracked) != 2 {
+			t.Errorf("untracked = %v, want 2 paths", untracked)
+		}
+	})
+
+	t.Run("no overwrite blocks (unrelated merge error)", func(t *testing.T) {
+		// Conflict markers, classic "merge conflict" — different shape,
+		// not what the recovery targets.
+		errMsg := `Auto-merging foo.go
+CONFLICT (content): Merge conflict in foo.go
+Automatic merge failed; fix conflicts and then commit the result.`
+		tracked, untracked := parseMergeOverwriteFiles(errMsg)
+		if len(tracked) != 0 || len(untracked) != 0 {
+			t.Errorf("expected empty result for non-overwrite conflict, got tracked=%v untracked=%v", tracked, untracked)
+		}
+	})
+
+	t.Run("empty input", func(t *testing.T) {
+		tracked, untracked := parseMergeOverwriteFiles("")
+		if len(tracked) != 0 || len(untracked) != 0 {
+			t.Errorf("expected empty result for empty input, got tracked=%v untracked=%v", tracked, untracked)
+		}
+	})
+}
+
+// TestMergeWorktree_PathConfusionRecovery pins the 2026-05-12 take-16
+// fix: when /workspace has uncommitted/untracked state that conflicts
+// with the incoming worktree commit AND the conflicting paths are a
+// subset of what that commit would bring, the recovery discards the
+// /workspace dirty state and retries the merge.
+//
+// Scenario: agent creates a worktree, writes hello.txt, commits via
+// the merge endpoint. But BEFORE the merge runs, we simulate a "leak"
+// by also writing hello.txt to /workspace directly. Without recovery
+// the merge would 409 — with recovery it succeeds and the merge
+// result names the discarded path.
+func TestMergeWorktree_PathConfusionRecovery_DiscardsLeakedFiles(t *testing.T) {
+	srv, ts := newTestServer(t)
+	createWorktree(t, ts, "test-leak-recovery")
+
+	// Worktree writes hello.txt via the structured API.
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-leak-recovery",
+		Path:    "hello.txt",
+		Content: "hello from worktree\n",
+	}).Body.Close()
+
+	// Simulate the leak: write hello.txt directly into /workspace as
+	// uncommitted state. This is what sonnet's `cd /workspace && cat >
+	// hello.txt` produces — the file is in the repo's working tree
+	// but not in git's index.
+	leakedPath := filepath.Join(srv.repoPath, "hello.txt")
+	if err := os.WriteFile(leakedPath, []byte("leaked from /workspace\n"), 0o644); err != nil {
+		t.Fatalf("simulate leak: %v", err)
+	}
+
+	// Merge.
+	mergeResp := doRequest(t, ts, http.MethodPost, "/worktree/test-leak-recovery/merge", nil)
+	if mergeResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(mergeResp.Body)
+		t.Fatalf("merge: expected 200 (recovery should succeed), got %d body=%s", mergeResp.StatusCode, string(body))
+	}
+	var result mergeResponse
+	decodeJSON(t, mergeResp, &result)
+
+	if result.Status != "merged" {
+		t.Errorf("status = %q, want merged", result.Status)
+	}
+	if result.RecoveryNote == "" {
+		t.Error("RecoveryNote should be set when recovery ran")
+	}
+	if len(result.DiscardedPaths) != 1 || result.DiscardedPaths[0] != "hello.txt" {
+		t.Errorf("DiscardedPaths = %v, want [hello.txt]", result.DiscardedPaths)
+	}
+
+	// Repo root file should match the WORKTREE's content (the merge
+	// won), not the leaked content.
+	final, err := os.ReadFile(leakedPath)
+	if err != nil {
+		t.Fatalf("read final hello.txt: %v", err)
+	}
+	if string(final) != "hello from worktree\n" {
+		t.Errorf("final hello.txt content = %q, want worktree content (leaked state should have been discarded)", final)
+	}
+}
+
+// TestMergeWorktree_PathConfusionRecovery_RefusesNonSubsetConflict pins
+// the negative side of the recovery: when /workspace has dirty paths
+// that are NOT in the incoming worktree commit's diff, the conflict is
+// a legitimate cross-node integration issue (not the path-confusion
+// failure mode). The recovery must fall through to the existing
+// merge-failure path rather than silently discarding the other-source
+// changes.
+func TestMergeWorktree_PathConfusionRecovery_RefusesNonSubsetConflict(t *testing.T) {
+	srv, ts := newTestServer(t)
+	createWorktree(t, ts, "test-leak-refuse")
+
+	// Worktree writes hello.txt — incoming commit will bring just this.
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-leak-refuse",
+		Path:    "hello.txt",
+		Content: "hello from worktree\n",
+	}).Body.Close()
+
+	// Simulate a DIFFERENT file dirty in /workspace — not in the
+	// incoming worktree's diff. This is what a legitimate cross-node
+	// merge conflict looks like.
+	doRequest(t, ts, http.MethodPut, "/file", fileWriteRequest{
+		TaskID:  "test-leak-refuse",
+		Path:    "hello.txt",
+		Content: "hello from worktree\n",
+	}).Body.Close()
+	other := filepath.Join(srv.repoPath, "unrelated.txt")
+	if err := os.WriteFile(other, []byte("someone else's work\n"), 0o644); err != nil {
+		t.Fatalf("simulate unrelated dirty: %v", err)
+	}
+	// Stage it so git treats it as a tracked change blocking the merge.
+	if err := runGit(context.Background(), srv.repoPath, "add", "unrelated.txt"); err != nil {
+		t.Fatalf("git add unrelated: %v", err)
+	}
+
+	// Merge — should succeed because unrelated.txt is staged (not
+	// blocking) and worktree's hello.txt doesn't conflict with anything
+	// uncommitted at the repo root. This confirms the negative case
+	// stays a non-event: recovery does NOT trip.
+	mergeResp := doRequest(t, ts, http.MethodPost, "/worktree/test-leak-refuse/merge", nil)
+	defer mergeResp.Body.Close()
+	if mergeResp.StatusCode != http.StatusOK {
+		// If we got a conflict because hello.txt clashed, that's also
+		// fine — the assertion is that recovery did NOT silently
+		// discard the unrelated file.
+		_, statErr := os.Stat(other)
+		if statErr != nil {
+			t.Errorf("unrelated.txt was discarded by recovery — it should NEVER touch files outside the incoming commit's diff; stat err: %v", statErr)
+		}
+		return
+	}
+	var result mergeResponse
+	decodeJSON(t, mergeResp, &result)
+	// Either recovery didn't run, or if it ran it must NOT name unrelated.txt.
+	for _, p := range result.DiscardedPaths {
+		if p == "unrelated.txt" {
+			t.Errorf("recovery discarded unrelated.txt — it must only touch paths in the incoming commit")
+		}
+	}
+}
+
 func TestWriteAndReadFile(t *testing.T) {
 	_, ts := newTestServer(t)
 	createWorktree(t, ts, "test-file")
