@@ -65,6 +65,8 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/payloadbuiltins"
 	"github.com/c360studio/semstreams/payloadregistry"
+	agenticgovernance "github.com/c360studio/semstreams/processor/agentic-governance"
+	agenticloop "github.com/c360studio/semstreams/processor/agentic-loop"
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
@@ -177,6 +179,14 @@ func run(configPath, repoPath, logLevel string) error {
 	// Setup signal handling
 	signalCtx, signalCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer signalCancel()
+
+	// Wire pre-execution tool-call governance into the agentic-loop's
+	// MessageHandler. MUST happen between component instantiation
+	// (NewComponentManager.Initialize) and Start — the handler's filter slot
+	// is unsynchronized once Start spawns consumer goroutines, and runtime
+	// hot-swap is unsupported in beta.68. No-op when either component is
+	// disabled in config.
+	wireToolCallGovernance(manager)
 
 	// Start all services (includes HTTP server with health endpoints)
 	slog.Info("Starting all services")
@@ -970,6 +980,57 @@ func registerAgenticTools(ctx context.Context, reg *agentictools.ExecutorRegistr
 		Timeouts:         parseToolTimeouts(),
 		Platform:         platform,
 	})
+}
+
+// wireToolCallGovernance installs the agentic-governance ToolCallFilter onto
+// the agentic-loop's MessageHandler. The wiring is config-gated: if either
+// component is missing from the registry (e.g., agentic-governance disabled),
+// the function returns without effect. The ordering invariant from
+// semstreams beta.68 requires this call to happen AFTER component
+// instantiation (NewComponentManager.Initialize, which runs during
+// CreateService) and BEFORE Start (manager.StartAll) — the filter slot
+// on MessageHandler is not synchronized once consumer goroutines spin up.
+func wireToolCallGovernance(manager *service.Manager) {
+	svc, ok := manager.GetService("component-manager")
+	if !ok {
+		slog.Debug("tool-call governance: component-manager service not registered, skipping")
+		return
+	}
+	cm, ok := svc.(*service.ComponentManager)
+	if !ok {
+		slog.Warn("tool-call governance: component-manager service is unexpected type", "type", fmt.Sprintf("%T", svc))
+		return
+	}
+
+	govInst := cm.Component("agentic-governance")
+	if govInst == nil {
+		slog.Debug("tool-call governance: agentic-governance component not instantiated, skipping")
+		return
+	}
+	gov, ok := govInst.(*agenticgovernance.Component)
+	if !ok {
+		slog.Warn("tool-call governance: agentic-governance instance is unexpected type", "type", fmt.Sprintf("%T", govInst))
+		return
+	}
+
+	loopInst := cm.Component("agentic-loop")
+	if loopInst == nil {
+		slog.Debug("tool-call governance: agentic-loop component not instantiated, skipping")
+		return
+	}
+	loop, ok := loopInst.(*agenticloop.Component)
+	if !ok {
+		slog.Warn("tool-call governance: agentic-loop instance is unexpected type", "type", fmt.Sprintf("%T", loopInst))
+		return
+	}
+
+	filter := gov.ToolCallFilter()
+	if filter == nil {
+		slog.Info("tool-call governance: governance component has no tool_call_governance filter configured, skipping")
+		return
+	}
+	loop.SetToolCallFilter(filter)
+	slog.Info("tool-call governance: filter installed on agentic-loop handler")
 }
 
 // loadAnswererRegistry loads the answerers.json route table from the repo

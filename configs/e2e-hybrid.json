@@ -360,6 +360,32 @@
         "timeout": "180s"
       }
     },
+    "agentic-governance": {
+      "name": "agentic-governance",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enable_tool_governance": true,
+        "filter_chain": {
+          "policy": "fail_fast",
+          "filters": [
+            {
+              "name": "tool_call_governance",
+              "enabled": true,
+              "tool_call_config": {
+                "blocked_command_patterns": [
+                  "cd /workspace ",
+                  "cd /workspace\n",
+                  "> /workspace/",
+                  ">> /workspace/",
+                  "tee /workspace/"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
     "graph-ingest": {
       "name": "graph-ingest",
       "type": "processor",
