@@ -60,13 +60,14 @@ func DefaultToolGuidance() []ToolGuidance {
 		// produce correctly AFTER you have laid out your thinking here.
 		{Name: "scratchpad", Order: 4, Guidance: "Think before you commit. Call this BEFORE submit_work whenever the task involves decomposition, multi-step planning, or weighing constraints. Write plain prose — your approach, things you considered, edge cases. The framework does not interpret or score the content; it is YOUR reasoning space and the strict commit goes more cleanly after you have used it."},
 
-		// Graph tools — summary first so agents know what to query
-		{Name: "graph_summary", Order: 10, Guidance: "Knowledge graph overview. Call ONCE first to see what entity types and domains are indexed before deciding to search."},
-		{Name: "graph_search", Order: 11, Guidance: "Ask a natural language question about the codebase (e.g. \"how does authentication work\", \"health endpoint handler\"). Returns a synthesized answer. Try FIRST for project lookups. If empty, FALL BACK to web_search — do NOT retry rephrased."},
-		{Name: "graph_query", Order: 12, Guidance: "GraphQL for specific lookups. Pass introspect:true first to see the schema, then write targeted queries. Supports entity(id), entitiesByPrefix, entitiesByPredicate, traverse, globalSearch. For general questions, use graph_search instead."},
+		// Graph tools removed from agent palettes 2026-05-12 — see
+		// prompt/tool_filter.go header comment. Tools remain registered
+		// in tools/workflow/register.go but no role surfaces them, so
+		// guidance entries are not needed. Re-add per-role + per-tool
+		// guidance IF a future role demonstrably needs graph access.
 
 		// Web tools
-		{Name: "web_search", Order: 20, Guidance: "Search the web for reference materials, external APIs, or libraries. Use AFTER graph_search if graph doesn't have what you need. Always use this BEFORE http_request to find the right URL — never guess URLs."},
+		{Name: "web_search", Order: 20, Guidance: "Search the web for reference materials, external APIs, or libraries. Always use this BEFORE http_request to find the right URL — never guess URLs."},
 		{Name: "http_request", Order: 21, Guidance: "Fetch a URL or test a local API endpoint. For web research: use web_search FIRST to find URLs — NEVER guess or fabricate URLs. For local API testing: use with localhost/sandbox URLs you built yourself."},
 
 		// Agentic tools

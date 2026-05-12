@@ -23,7 +23,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
 
 		// --- Planning roles ---
@@ -32,12 +32,23 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// runway) but NOT write_todos — single-dispatch work has no
 		// cross-iteration list to maintain. See
 		// docs/structured-output-levels.md role map.
+		//
+		// Graph tools removed 2026-05-12: across 4+ tracked real-LLM @hard
+		// runs (take 10, take 16, hybrid 2026-05-04, hybrid 2026-05-06)
+		// agents called graph_* zero or near-zero times. On the rare call,
+		// empty results or EOF errors caused agents to bail to bash+curl.
+		// ADR-036 captured the operational gap. Keeping the tool surface
+		// exposed adds prompt bloat + tool-selection ambiguity for no
+		// measurable benefit. Graph stays as harness substrate (context
+		// pre-injection via assembly fragments); agents do not query it.
+		// Re-add per-role IF a paid run shows graph would have moved a
+		// decision forward.
 
 		RolePlanner: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "ask_question", "submit_work", "scratchpad"},
+			AllowExact: []string{"bash", "web_search", "http_request", "ask_question", "submit_work", "scratchpad"},
 		},
 		RoleRequirementGenerator: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "submit_work", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
 		RoleScenarioGenerator: {
 			AllowExact: []string{"bash", "submit_work", "scratchpad"},
@@ -62,7 +73,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"submit_work", "scratchpad"},
 		},
 		RolePlanReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
 		RoleTaskReviewer: {
 			AllowExact: []string{"bash", "scratchpad"},
@@ -71,16 +82,17 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Scenario-level review ---
 
 		RoleScenarioReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
 
 		// --- Plan-level QA reviewer (release-readiness verdict, read-only) ---
 
 		RolePlanQAReviewer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
 
-		// Developer: TDD agent — bash for code, graph + web for discovery, http_request for local API testing.
+		// Developer: TDD agent — bash for code, web for external reference,
+		// http_request for local API testing.
 		// write_todos: per-iteration TDD memory (ADR-036) — natural fit
 		// for multi-cycle dispatches where context compaction may evict
 		// the plan; persona instructs use across TDD iterations.
@@ -88,26 +100,28 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// runway, also useful between cycles when the prior reviewer
 		// feedback needs digesting.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "write_todos", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "web_search", "http_request", "write_todos", "scratchpad"},
 		},
 
 		// Architect: technology choices, component boundaries, data flow.
-		// Read-only exploration via bash + graph; web/http for tech docs.
+		// Read-only exploration via bash; web/http for tech docs.
 		// No decompose_task / review_scenario — those are other-role
 		// terminals that confused take 11's developer.
 		// write_todos + scratchpad: multi-step technology exploration
 		// before commit.
 		RoleArchitect: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "write_todos", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "web_search", "http_request", "write_todos", "scratchpad"},
 		},
 
 		// Lesson decomposer: reads trajectory + reviewer verdict, emits one
 		// audited lesson via submit_work. Bash for cited-evidence file
-		// reads, graph_query for trajectory pull. ADR-033 Phase 2b.
+		// reads. Trajectory pull goes through NATS request
+		// agentic.query.trajectory via internal/trajectory.LogSummary —
+		// not the graph_query tool. ADR-033 Phase 2b.
 		// write_todos + scratchpad: track per-iteration synthesis steps
 		// when the trajectory analysis spans multiple cycles.
 		RoleLessonDecomposer: {
-			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "write_todos", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "write_todos", "scratchpad"},
 		},
 	}
 }

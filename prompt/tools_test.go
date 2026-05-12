@@ -17,15 +17,16 @@ func TestFilterTools_Developer(t *testing.T) {
 
 	tools := FilterTools(allTools, RoleDeveloper)
 
-	// Developer gets bash, submit_work, graph + web tools, write_todos
-	// — NOT ask_question/decompose_task/spawn_agent
-	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "write_todos"}
+	// Developer gets bash, submit_work, web tools, write_todos.
+	// Graph tools removed 2026-05-12 — see tool_filter.go header
+	// comment. NOT ask_question/decompose_task/spawn_agent either.
+	want := []string{"bash", "submit_work", "web_search", "http_request", "write_todos"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("developer should have %q", w)
 		}
 	}
-	unwant := []string{"ask_question", "decompose_task", "spawn_agent"}
+	unwant := []string{"ask_question", "decompose_task", "spawn_agent", "graph_search", "graph_query", "graph_summary"}
 	for _, u := range unwant {
 		if slices.Contains(tools, u) {
 			t.Errorf("developer should NOT have %q", u)
@@ -105,14 +106,15 @@ func TestFilterTools_Reviewer(t *testing.T) {
 
 	tools := FilterTools(allTools, RoleReviewer)
 
-	want := []string{"bash", "submit_work", "graph_search", "graph_query"}
+	want := []string{"bash", "submit_work"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("reviewer should have %q", w)
 		}
 	}
 
-	deny := []string{"ask_question", "review_scenario", "decompose_task"}
+	// Graph tools removed 2026-05-12 — see tool_filter.go header.
+	deny := []string{"ask_question", "review_scenario", "decompose_task", "graph_search", "graph_query"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("reviewer should NOT have %q", d)
@@ -130,17 +132,44 @@ func TestFilterTools_Planner(t *testing.T) {
 
 	tools := FilterTools(allTools, RolePlanner)
 
-	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"}
+	want := []string{"bash", "submit_work", "web_search", "http_request"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("planner should have %q", w)
 		}
 	}
 
-	deny := []string{"decompose_task", "spawn_agent"}
+	// Graph tools removed 2026-05-12 — see tool_filter.go header.
+	deny := []string{"decompose_task", "spawn_agent", "graph_search", "graph_query", "graph_summary"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("planner should NOT have %q", d)
+		}
+	}
+}
+
+// TestFilterTools_NoRoleGetsGraphTools pins the 2026-05-12 decision to
+// remove graph_search/graph_query/graph_summary from every role's
+// AllowExact. Across 4+ tracked real-LLM @hard runs, agents used these
+// zero or near-zero times and bailed to bash on errors (ADR-036). The
+// tools stay registered in tools/workflow/register.go for future use,
+// but no role surfaces them. Regression guard if a future PR re-adds
+// them without revisiting the decision.
+func TestFilterTools_NoRoleGetsGraphTools(t *testing.T) {
+	allTools := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary"}
+
+	rolesWithAllowlist := []Role{
+		RolePlanner, RoleDeveloper, RoleArchitect, RoleValidator,
+		RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleTaskGenerator,
+		RoleRequirementGenerator, RoleScenarioGenerator, RoleScenarioReviewer,
+		RolePlanQAReviewer, RoleLessonDecomposer, RoleRecoveryAgent,
+	}
+	for _, role := range rolesWithAllowlist {
+		got := FilterTools(allTools, role)
+		for _, tool := range []string{"graph_search", "graph_query", "graph_summary"} {
+			if slices.Contains(got, tool) {
+				t.Errorf("role %q must not receive %q from FilterTools (removed 2026-05-12); got %v", role, tool, got)
+			}
 		}
 	}
 }
