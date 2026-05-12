@@ -1253,6 +1253,164 @@ func TestHandleDeveloperComplete_HallucinatedClaim_RoutesToRetry(t *testing.T) {
 	}
 }
 
+// TestHandleDeveloperComplete_LeakedToWorkspace_RoutesPathConfusion pins the
+// 2026-05-12 take-16 finding: sonnet's `cd /workspace && cat > build.gradle`
+// produced a clean worktree (writes landed in the parent fixture root). The
+// gate must distinguish this from genuine fabrication and route a path-
+// confusion feedback instead. Regression guard for the
+// .semspec/investigation-diff-gate-2026-05-12.md decision to add the
+// /workspace dirty-state check.
+func TestHandleDeveloperComplete_LeakedToWorkspace_RoutesPathConfusion(t *testing.T) {
+	c := newTestComponent(t)
+	// Worktree is clean (gate would fire) BUT /workspace shows the
+	// claimed files as dirty — the agent wrote to the wrong tree.
+	c.sandbox = &stubSandbox{
+		gitStatusByTask: map[string]string{
+			"task-dev-path-confusion": "",                                                 // worktree clean
+			"main":                    " M build.gradle\n?? src/test/java/org/sensorhub/\n", // /workspace dirty
+		},
+	}
+
+	exec := newTestExec("plan", "task-dev-path-confusion")
+	exec.Stage = phaseDeveloping
+	exec.DeveloperTaskID = "dev-path-confusion"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.DeveloperTaskID,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"summary": "Configured gradle build with test deps", "files_modified": ["build.gradle", "src/test/java/org/sensorhub/MeshtasticDriverBuildTest.java"]}`,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageDevelop,
+	}
+
+	exec.mu.Lock()
+	c.handleDeveloperCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	// Same outcome as the fabrication path — retry, not advance — but
+	// the feedback shape must be different.
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.Feedback == "" {
+		t.Fatal("exec.Feedback should carry path-confusion guidance")
+	}
+
+	// Path-confusion feedback must explain WHERE the writes went and
+	// what to do differently. The fabrication feedback's "cat >" idiom
+	// is NOT the right correction here — the agent already used cat>.
+	wantSubstrs := []string{
+		"/workspace",                  // names the wrong tree
+		"parent fixture",              // explains what /workspace is
+		"NOT your worktree",           // clarifies the boundary
+		"build.gradle",                // echoes back leaked file
+		"Do NOT `cd /workspace`",      // names the antipattern
+	}
+	for _, want := range wantSubstrs {
+		if !strings.Contains(exec.Feedback, want) {
+			t.Errorf("Path-confusion feedback missing %q; got: %s", want, exec.Feedback)
+		}
+	}
+
+	// The fabrication feedback's signature phrasing must NOT appear —
+	// would mis-train the model toward "I should call cat > again."
+	if strings.Contains(exec.Feedback, "Reading a file with `cat` is not modifying it") {
+		t.Error("Path-confusion feedback must NOT use fabrication-feedback phrasing — the agent DID write, just to the wrong place")
+	}
+}
+
+// TestDeveloperLeakedToWorkspace covers the helper directly across the
+// shapes the gate cares about.
+func TestDeveloperLeakedToWorkspace(t *testing.T) {
+	tests := []struct {
+		name             string
+		filesModified    []string
+		workspaceStatus  string
+		workspaceErr     error
+		wantLeakedExact  []string // exact match (order-insensitive)
+		nilSandbox       bool
+	}{
+		{
+			name:            "no claimed files (skip query)",
+			filesModified:   nil,
+			workspaceStatus: " M build.gradle\n",
+			wantLeakedExact: nil,
+		},
+		{
+			name:            "workspace clean (no leakage)",
+			filesModified:   []string{"build.gradle"},
+			workspaceStatus: "",
+			wantLeakedExact: nil,
+		},
+		{
+			name:            "exact modified match",
+			filesModified:   []string{"build.gradle"},
+			workspaceStatus: " M build.gradle\n",
+			wantLeakedExact: []string{"build.gradle"},
+		},
+		{
+			name:            "untracked-directory prefix match (claimed file under ?? dir)",
+			filesModified:   []string{"src/test/java/org/sensorhub/Foo.java"},
+			workspaceStatus: "?? src/test/java/org/sensorhub/\n",
+			wantLeakedExact: []string{"src/test/java/org/sensorhub/Foo.java"},
+		},
+		{
+			name:            "partial overlap — only some claimed files leaked",
+			filesModified:   []string{"build.gradle", "README.md", "src/foo.java"},
+			workspaceStatus: " M build.gradle\n?? src/foo.java\n",
+			wantLeakedExact: []string{"build.gradle", "src/foo.java"},
+		},
+		{
+			name:            "sandbox error returns nil (fall through to fabrication feedback)",
+			filesModified:   []string{"build.gradle"},
+			workspaceErr:    fmt.Errorf("server error 500"),
+			wantLeakedExact: nil,
+		},
+		{
+			name:            "nil sandbox returns nil",
+			filesModified:   []string{"build.gradle"},
+			nilSandbox:      true,
+			wantLeakedExact: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestComponent(t)
+			if !tt.nilSandbox {
+				stub := &stubSandbox{}
+				if tt.workspaceErr != nil {
+					stub.gitStatusErrByTask = map[string]error{"main": tt.workspaceErr}
+				} else {
+					stub.gitStatusByTask = map[string]string{"main": tt.workspaceStatus}
+				}
+				c.sandbox = stub
+			}
+			exec := newTestExec("plan", "task-leak-check")
+			exec.FilesModified = tt.filesModified
+
+			got := c.developerLeakedToWorkspace(testCtx(t), exec)
+
+			if len(got) != len(tt.wantLeakedExact) {
+				t.Fatalf("developerLeakedToWorkspace: got %v, want %v", got, tt.wantLeakedExact)
+			}
+			gotSet := make(map[string]bool, len(got))
+			for _, p := range got {
+				gotSet[p] = true
+			}
+			for _, want := range tt.wantLeakedExact {
+				if !gotSet[want] {
+					t.Errorf("missing expected leaked path %q in %v", want, got)
+				}
+			}
+		})
+	}
+}
+
 // TestDeveloperWorkClean covers the helper directly. The handler test above
 // exercises the empty-status path; this table covers the legitimate-work and
 // sandbox-error branches that should both bypass the gate (return false).

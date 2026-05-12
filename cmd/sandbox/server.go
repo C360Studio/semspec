@@ -1344,8 +1344,13 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
-	if _, err := os.Stat(worktreePath); err != nil {
+	// Use worktreeFor so task_id="main" resolves to the repo root.
+	// 2026-05-12: previous filepath.Join(s.worktreeRoot, req.TaskID) was
+	// inconsistent with handleExec which already uses worktreeFor —
+	// blocked execution-manager's pre-reviewer gate from checking the
+	// fixture root for leaked writes (see investigation-diff-gate-2026-05-12.md).
+	worktreePath := s.worktreeFor(req.TaskID)
+	if worktreePath == "" {
 		writeError(w, http.StatusNotFound, "worktree not found for task_id: "+req.TaskID)
 		return
 	}

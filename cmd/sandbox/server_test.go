@@ -417,6 +417,35 @@ func TestGitCommitAndStatus(t *testing.T) {
 	}
 }
 
+// TestGitStatusMainTaskID pins handleGitStatus's behavior when called
+// with the reserved task_id="main": it must resolve to the repo root
+// (s.repoPath) via s.worktreeFor, matching handleExec. The 2026-05-12
+// investigation-diff-gate finding showed handleGitStatus used a raw
+// filepath.Join that bypassed the "main" alias, blocking the
+// execution-manager pre-reviewer gate from checking the fixture root
+// for leaked writes. This test prevents the inconsistency from
+// recurring.
+func TestGitStatusMainTaskID(t *testing.T) {
+	srv, ts := newTestServer(t)
+
+	// Write a file directly into the repo root (not a worktree) so
+	// git status against "main" should observe it.
+	leakedPath := filepath.Join(srv.repoPath, "leaked.txt")
+	if err := os.WriteFile(leakedPath, []byte("leak\n"), 0o644); err != nil {
+		t.Fatalf("write leaked file: %v", err)
+	}
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/status", map[string]string{"task_id": "main"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST /git/status (main): expected 200, got %d", resp.StatusCode)
+	}
+	var result gitStatusResponse
+	decodeJSON(t, resp, &result)
+	if !strings.Contains(result.Output, "leaked.txt") {
+		t.Errorf("git status main = %q, expected to contain 'leaked.txt' (writes to repo root)", result.Output)
+	}
+}
+
 func TestGitCommitNothingToCommit(t *testing.T) {
 	_, ts := newTestServer(t)
 	createWorktree(t, ts, "test-nothing")

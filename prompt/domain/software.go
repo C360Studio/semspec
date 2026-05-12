@@ -158,13 +158,29 @@ These are not stylistic preferences. The compiler / interpreter / type checker e
 			// because it didn't understand that submit_work's claim is
 			// cross-checked against the worktree's actual diff. See
 			// project_dev_workspace_contract memory.
+			//
+			// Switched to ContentFunc 2026-05-12 so we can render the
+			// concrete WorktreePath (when execution-manager threads it
+			// through TaskContext) as an explicit "your worktree is at X;
+			// do NOT cd /workspace" banner at the head of the contract.
+			// Closes the path-confusion loop surfaced by hybrid @hard
+			// take 16 — see .semspec/investigation-diff-gate-2026-05-12.md.
+			// Empty WorktreePath (graceful fallback) → identical text to
+			// the pre-change version.
 			ID:       "software.developer.workspace-contract",
 			Category: prompt.CategoryRoleContext,
 			Priority: -1, // negative so the contract appears before other role-context fragments (default priority 0). Reading order: "here's where you are" → "here's what to do".
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `Workspace Contract:
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				var pathBanner string
+				if ctx.TaskContext != nil && ctx.TaskContext.WorktreePath != "" {
+					pathBanner = "Your worktree path: " + ctx.TaskContext.WorktreePath + "\n" +
+						"Your bash starts with cwd=this path. Use relative paths or absolute paths beginning with this prefix.\n\n" +
+						"DO NOT `cd /workspace` to write files. `/workspace` is the parent fixture root, NOT your worktree. Writes there land in the parent fixture and the diff gate will reject your submit as a path-confusion mismatch. Reading from `/workspace`, `/sources/`, `~/.m2` etc. is fine — write only inside your worktree.\n\n"
+				}
+				return `Workspace Contract:
 
-Your working directory is a git worktree. Every file you create, edit, or delete is observable to the system. You do NOT run git commands to commit your work — when you call submit_work, the system automatically stages and commits everything in the worktree as your task's contribution to the plan.
+` + pathBanner + `Your working directory is a git worktree. Every file you create, edit, or delete is observable to the system. You do NOT run git commands to commit your work — when you call submit_work, the system automatically stages and commits everything in the worktree as your task's contribution to the plan.
 
 Honest reporting is mandatory:
 - files_modified in your submit_work call MUST list every file you actually created or changed in this worktree, and MUST NOT list files you only intended to write or wrote to /tmp.
@@ -215,7 +231,8 @@ USE SCRATCHPAD FIRST for non-trivial tasks:
 Scope is mandatory, not advisory:
 - Re-read the Project File Scope (Include / Exclude / Do not touch) in the task brief BEFORE you call submit_work.
 - files_modified MUST NOT contain any path that matches scope.exclude or scope.do_not_touch. Modifying a do-not-touch file is a hard policy break — submit will be rejected and the cycle is wasted.
-- If your changes drifted to files outside scope.include (file you "had to" edit to make tests pass, helper you started writing), STOP and re-orient: either the scope was wrong (surface a question or fail the task with a clear reason), or you wandered off-target. Do not silently broaden the change set; the planner's scope is the contract. Caught 2026-05-03 on openrouter @easy /health where a developer pattern-matched into a scope-excluded auth file and submitted refresh-token code that no one asked for.`,
+- If your changes drifted to files outside scope.include (file you "had to" edit to make tests pass, helper you started writing), STOP and re-orient: either the scope was wrong (surface a question or fail the task with a clear reason), or you wandered off-target. Do not silently broaden the change set; the planner's scope is the contract. Caught 2026-05-03 on openrouter @easy /health where a developer pattern-matched into a scope-excluded auth file and submitted refresh-token code that no one asked for.`
+			},
 		},
 		{
 			ID:       "software.developer.test-surface",

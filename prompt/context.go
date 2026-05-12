@@ -157,6 +157,17 @@ type TaskContext struct {
 	// render this as "tests you must write" guidance. Phase 5 threads the
 	// struct + prompt; Phase 5.1 wires the value through execution-manager.
 	TestSurface *workflow.TestSurface
+
+	// WorktreePath is the absolute path to the per-task git worktree the
+	// agent's bash will use as cwd. When non-empty, developer prompts
+	// render an explicit "Your worktree path: X / DO NOT cd /workspace"
+	// banner so the agent's mental model aligns with where its writes
+	// actually land. Empty means "fall back to generic 'your working
+	// directory is a git worktree' language." Added 2026-05-12 after
+	// hybrid @hard take 16 surfaced the cd-/workspace-and-cat-write leak
+	// that bypasses the diff gate (see
+	// .semspec/investigation-diff-gate-2026-05-12.md).
+	WorktreePath string
 }
 
 // PlanContext carries data for planner prompts.
