@@ -24,7 +24,14 @@ services:
     volumes:
       - ../docker/semsource.json:/etc/semsource/semsource.json:ro
       - ../docker/semsource.gitconfig:/root/.gitconfig:ro
-      - ../test/e2e/fixtures/go-project:/workspace:ro
+      # Honor E2E_FIXTURE so @hard tier (osh-driver-meshtastic) gets the
+      # right workspace mount on the bare LLM stack. Without this, every
+      # run lands go-project regardless of tier — caught take-18
+      # 2026-05-13 where @hard WITH_EPIC=0 silently mounted go-project
+      # and the dev hit iter=80 reconciling "Meshtastic Java" brief with
+      # a Go workspace. Epic overlay overrides this for WITH_EPIC=1; this
+      # default keeps the bare overlay consistent with base e2e.yml.
+      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD", "semsource", "version"]
@@ -48,7 +55,11 @@ services:
         SANDBOX_GID: ${SANDBOX_GID:-1000}
     command: ["--addr", ":8090", "--repo", "/workspace"]
     volumes:
-      - ../test/e2e/fixtures/go-project:/workspace
+      # Mirrors the semsource workspace mount — see comment there. Both
+      # services MUST point at the same fixture or planner scope checks
+      # and worktree merges drift (semspec sees one tree, sandbox sees
+      # another).
+      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/workspace
     deploy:
       resources:
         limits:
