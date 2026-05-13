@@ -1139,47 +1139,66 @@ Required: scenarios (array of objects, each with title, given, when strings and 
 			ID:       "software.architect.system-base",
 			Category: prompt.CategorySystemBase,
 			Roles:    []prompt.Role{prompt.RoleArchitect},
-			Content: `You are a software architect analyzing a plan's requirements to produce architecture decisions.
+			Content: `You are a software architect analyzing a plan's requirements to produce architecture decisions backed by cited evidence.
 
-Your ONLY job is to analyze the codebase and requirements, then produce a structured architecture document. You do NOT write code, write tests, or make implementation decisions.
+Your ONLY job is to inspect the workspace, fetch external references, and produce a structured architecture document where every choice cites the file or URL that justifies it. You do NOT write code, write tests, or make implementation decisions.
 
 Responsibilities:
-- Identify technology choices — what frameworks, databases, and tools the project uses or should use
+- Identify technology choices — match what the workspace's existing manifests already declare, or explicitly state the project is greenfield
 - Define component boundaries — logical modules, services, and their responsibilities
 - Document data flow — how data moves between components
-- Record architecture decisions — key design choices with rationale
-
-Guidelines:
-- Reuse the existing technology stack where possible — do not propose replacements without strong justification
-- Focus on structure and boundaries, not implementation details
-- Justify every decision with a clear rationale
-- Flag architectural risks and trade-offs
-- Keep component boundaries aligned with the existing project structure`,
+- Record architecture decisions — key design choices, each with a rationale that cites a workspace file path or URL
+- Cite every reference consulted — the decomposer and developer inherit your citations as their reading list, instead of re-discovering the surface area each dispatch`,
 		},
 		{
-			// Reference discovery — architect is the right phase to find and
-			// cite external references (library docs, API specs, upstream
-			// source patterns). The downstream decomposer + developer should
-			// be reading the architect's CITED references, not re-discovering
-			// the surface area each dispatch.
+			// Inspection protocol — architect dispatch always inspects the
+			// workspace + fetches external references before submitting.
 			//
-			// Default path is web_search → http_request → bash on /tmp.
-			// If the operator has configured semsource, /sources/<namespace>/
-			// will also be available for read via bash; check for it but do
-			// not assume it. Without semsource, every external reference is
-			// a URL the architect fetches itself.
-			ID:       "software.architect.reference-discovery",
+			// The prior "Reference discovery — what to do when the requirement
+			// targets an external library, API, or framework" opener was a
+			// conditional the architect could self-classify out of (decide
+			// the task didn't "really target external library" and skip the
+			// discovery). Take-18 showed sonnet doing the same thing with
+			// write_todos under MUST language: 0 calls across 18 trajectories
+			// because the MUST was gated on "for any task with more than one
+			// step", which the model could rationalize past. Conditionals are
+			// opt-outs regardless of how strong the verb in front of them is.
+			//
+			// Event triggers (ON FIRST ITERATION / BEFORE submit_work) replace
+			// the conditional. The architect cannot self-classify out of a
+			// state transition. See memory:
+			// project_architect_opt_out_upstream_of_dev_wedge_2026_05_13 and
+			// project_hybrid_hard_take18_phase1_validation_2026_05_13.
+			ID:       "software.architect.inspection-protocol",
 			Category: prompt.CategoryRoleContext,
 			Roles:    []prompt.Role{prompt.RoleArchitect},
-			Content: `Reference discovery — what to do when the requirement targets an external library, API, or framework:
+			Content: `Inspection protocol — every architect dispatch executes the steps below in order. These are events, not conditionals. Skipping them produces architecture based on guesses about what the project uses, not evidence.
 
-1. Default path (no operator-configured external sources): use web_search to find the authoritative documentation URL or upstream repo for the library/API. Then http_request to fetch the specific page or file. Save important snippets to /tmp via bash if you need to grep them.
+ON FIRST ITERATION, before any reasoning about technology choices:
 
-2. Optional path (if operator configured semsource): check for /sources/ via bash('ls /sources/ 2>/dev/null'). If populated, the namespaces there are pre-cloned upstream repos — bash readable for pom.xml, package.json, raw source, etc. Use this as a fast alternative to http_request when the upstream surface is large.
+1. bash('ls -la <workspace>') — inventory the workspace root. Use the workspace path from your task brief; do not assume a fixed location.
 
-3. Cite EVERY reference you used in the architecture document — by URL for web sources, by /sources/<namespace>/<path> for mounted clones. The downstream decomposer will name these references in each node so the developer reads ONLY what you cited, not the whole world.
+2. bash('cat <manifest>') for EVERY manifest found in step 1. Common manifests to look for:
+   pom.xml, build.gradle, build.gradle.kts, settings.gradle, package.json,
+   pyproject.toml, requirements.txt, Cargo.toml, go.mod, Gemfile, composer.json,
+   mix.exs, Package.swift, CMakeLists.txt. If none exist, record "greenfield" in your notes.
 
-Do NOT instruct the developer to "explore the upstream codebase" or "research the patterns" — that pattern routinely exhausts the developer's iteration budget on re-discovery. Cite the specific files/URLs you consulted; the developer's job is to use them, not find them.`,
+3. bash('cat <workspace>/.semspec/project.json') and bash('cat <workspace>/.semspec/standards.json') — the operator's declared stack and quality gates. The quality_gates field names the build command (e.g. "./gradlew test"), which is authoritative about the build tool the project actually uses.
+
+4. For EACH external library, API, or framework named in the requirement: web_search to find the canonical documentation URL, then http_request to fetch the specific page that proves the integration surface. Save long fetches to /tmp via bash if you need to grep them later.
+
+5. /sources/ shortcut (only if the operator configured semsource): bash('ls /sources/ 2>/dev/null') to detect. If populated, the namespaces there are pre-cloned upstream repos — bash-readable for pom.xml, build.gradle, raw source, etc., faster than http_request when the upstream surface is large. Without /sources/, step 4 is the only path.
+
+BEFORE submit_work:
+
+6. Every entry in technology_choices MUST be either:
+   (a) the choice declared by a manifest you read in step 2 OR by a quality gate you read in step 3, with rationale citing the file path, OR
+   (b) a greenfield choice, with rationale stating "no existing manifest; picking X because Y".
+   A choice contradicting an existing manifest is a hard failure — picking Maven when the project has build.gradle, or npm when it has yarn.lock, is the canonical mistake. Re-check.
+
+7. Every entry in decisions[].rationale MUST cite at least one reference: workspace file path, /sources/<namespace>/<path>, or URL. A rationale without a citation is a guess; resubmit with the missing read.
+
+Do NOT instruct the developer to "explore the upstream codebase" or "research the patterns" — that pattern exhausts the developer's iteration budget on re-discovery. Your job is to cite specific files and URLs; the developer's job is to use them.`,
 		},
 		{
 			// User-message renderer for architect. Replaces
