@@ -537,7 +537,14 @@ tasks:
             # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
             # cap fired before sonnet could complete the dev pipeline (commit
             # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
-            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
+            #
+            # GOAL_TIMEOUT bumped to 15min for @hard — gemini-3.1-pro-preview
+            # under reasoning_effort=medium can take 5-10min per call when
+            # service is degraded (observed 2026-05-13 take-19d/e where curl
+            # to gemini-pro took 66s for a 10-token request). Default 5min
+            # was tight against gemini-pro's own 300s request_timeout. Goal
+            # timeout > request_timeout + fallback budget = ~15min.
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
@@ -682,7 +689,14 @@ tasks:
             # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
             # cap fired before sonnet could complete the dev pipeline (commit
             # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
-            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
+            #
+            # GOAL_TIMEOUT bumped to 15min for @hard — gemini-3.1-pro-preview
+            # under reasoning_effort=medium can take 5-10min per call when
+            # service is degraded (observed 2026-05-13 take-19d/e where curl
+            # to gemini-pro took 66s for a 10-token request). Default 5min
+            # was tight against gemini-pro's own 300s request_timeout. Goal
+            # timeout > request_timeout + fallback budget = ~15min.
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
