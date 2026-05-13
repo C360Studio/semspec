@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -517,21 +516,17 @@ func loadConfig(configPath, repoPath string) (*config.Config, error) {
 }
 
 // loadConfigWithEnvSubstitution reads a config file and expands environment
-// variables before parsing. Supports ONLY the ${VAR} / ${VAR:-default}
-// curly-braced form. The bare $VAR form is intentionally not expanded —
-// it collides with the rule-engine substitution namespaces ($message.X,
-// $entity.X, $state.X, $caller.X, $schedule.X) when inline rules
-// embedded in this config carry those tokens. semstreams beta.70's
-// config.ExpandEnvWithDefaults DOES match bare $VAR (its regex is
-// `\$([a-zA-Z_][a-zA-Z0-9_]*)`), so we shadow that helper here with a
-// curly-only version that leaves rule templates untouched.
+// variables before parsing. Supports ${VAR} / ${VAR:-default} and the bare
+// $VAR form (UPPERCASE only — lowercase prefixes are reserved for the rule
+// engine's substitution namespaces and pass through unchanged per semstreams
+// beta.71's POSIX-aligned env regex).
 func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
-	expanded := expandCurlyEnvOnly(string(data))
+	expanded := config.ExpandEnvWithDefaults(string(data))
 
 	// Validate model_registry from config if present.
 	// semspec/model.Validate enforces local invariants (e.g., dots in
@@ -556,28 +551,6 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 	// Load using semstreams loader (preserves defaults, validation, env overrides)
 	loader := config.NewLoader()
 	return loader.LoadFromBytes([]byte(expanded))
-}
-
-// curlyEnvRe matches only the ${VAR} and ${VAR:-default} forms. Bare $VAR is
-// intentionally excluded so rule-engine substitution tokens ($message.X,
-// $entity.X, $state.X, $caller.X, $schedule.X) survive config expansion
-// unchanged. See loadConfigWithEnvSubstitution for the why.
-var curlyEnvRe = regexp.MustCompile(`\$\{([^}:]+)(:-([^}]*))?\}`)
-
-// expandCurlyEnvOnly expands ${VAR} and ${VAR:-default} env-var references
-// in a string, ignoring the bare $VAR form.
-func expandCurlyEnvOnly(s string) string {
-	return curlyEnvRe.ReplaceAllStringFunc(s, func(match string) string {
-		sub := curlyEnvRe.FindStringSubmatch(match)
-		varName := sub[1]
-		if v := os.Getenv(varName); v != "" {
-			return v
-		}
-		if sub[2] != "" {
-			return sub[3]
-		}
-		return ""
-	})
 }
 
 // initGraphSources initializes the global graph source registry from environment.
