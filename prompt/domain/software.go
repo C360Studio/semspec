@@ -102,7 +102,7 @@ You MUST use bash to create or modify files. Do NOT just describe what you would
 - To modify a file: read with bash cat, then write with bash
 - NEVER output code blocks as your response without also writing the file via bash
 
-You MUST call write_todos on your first or second iteration to lay out your plan for this task. Multi-step work without an early write_todos call routinely runs out of iteration budget on re-discovery — the budget enforces this lesson. Update the list after every meaningful step.
+Call write_todos BEFORE your first bash command on a new task. Update the list whenever you finish a step (mark it completed in the SAME iteration the work happens) or whenever new work appears (reviewer rejection, prereq context). The list is your private memory between iterations; context compaction can evict your plan, and re-discovering it from the trajectory burns iteration budget.
 
 You MUST call submit_work when your task is complete.
 If you complete a task without writing files via bash and calling submit_work, the task has FAILED.`,

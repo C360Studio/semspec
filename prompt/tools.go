@@ -31,29 +31,48 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "ask_question", Order: 2, Guidance: "Ask when blocked and cannot proceed. Default to reasonable assumptions — only ask when truly ambiguous."},
 
 		// Internal reasoning tools — these are YOUR private memory. They
-		// are REQUIRED for multi-step work, not optional. They write to
-		// the trajectory and are visible to your next iteration, to the
-		// recovery agent if you wedge, and to a human reviewing your
-		// work later. Take-17 (2026-05-12) ran two sonnet developers on
-		// the same task in parallel; the one that skipped write_todos +
-		// scratchpad burned 90 bash reads on /sources/ exploration and
-		// never wrote a line, while the one that paced itself shipped
-		// real code. Suggestive language ("use freely") did not land —
-		// the language below is prescriptive on purpose.
+		// write to the trajectory and are visible to your next iteration,
+		// to the recovery agent if you wedge, and to a human reviewing
+		// your work later.
 		//
-		// write_todos: your working task list ACROSS iterations. Without
-		// this, context compaction evicts your plan and you repeat work
-		// or lose track of what is left.
-		{Name: "write_todos", Order: 3, Guidance: "REQUIRED on iter 0-1 for any task with more than one step. Lay out your initial plan as a todo list on your first or second iteration. Update after every meaningful step — mark items completed in the SAME iteration the work happened, never batch at the end. Submit the entire current list each call (full replacement). Skipping write_todos on multi-step work routinely exhausts the iteration budget on re-discovery; if you find yourself thinking 'what was I working on?' mid-task, write_todos is the fix."},
+		// Guidance uses Claude Code's TodoWrite scenario-list shape (event
+		// triggers, plus explicit "When NOT") instead of conditional
+		// "REQUIRED for X" language. Take-17 + take-18 (2026-05-12/13) ran
+		// sonnet developers under increasingly prescriptive MUST language
+		// — adoption stayed at zero across 18 trajectories on take-18.
+		// Conditionals like "for any task with more than one step" or
+		// "when the task involves decomposition" let the model self-classify
+		// out: it decides the task isn't "really multi-step", and the rule
+		// doesn't apply. Event triggers (BEFORE first bash, AFTER reviewer
+		// rejection) are state transitions the model can't argue past.
+
+		// write_todos: working task list ACROSS iterations. Context
+		// compaction can evict your plan; write_todos survives it.
+		{Name: "write_todos", Order: 3, Guidance: `Use write_todos proactively in these scenarios:
+- BEFORE your first bash command on a new task — capture the plan you read out of the task brief
+- AFTER prereq context tells you a previous attempt failed — capture what to do differently this time
+- AFTER a reviewer rejection — turn each finding in the feedback into a todo
+- WHEN you finish a step — mark it completed in the SAME call you do the work, never batch at the end
+
+When NOT to use write_todos:
+- A single deterministic bash command with no preconditions and no follow-up
+- Re-running the exact command from the last iteration after a transient failure
+
+Submit the entire current list each call (full replacement). The list is your private memory between iterations; without it, context compaction can drop your plan and you repeat work or lose track of what is left.`},
 
 		// scratchpad: free-form reasoning channel for a SINGLE dispatch.
-		// Use this BEFORE submit_work whenever the work involves
-		// decomposition, planning multiple changes, or weighing
-		// constraints. Text is unconstrained — plain prose explaining
-		// your approach, listing things you considered, noting edge
-		// cases. Strict tool-args on submit_work are easier to produce
-		// correctly AFTER you have laid out your thinking here.
-		{Name: "scratchpad", Order: 4, Guidance: "REQUIRED before submit_work when the task involves decomposition, multi-step planning, or weighing constraints between approaches. Write plain prose — your approach, things you considered, edge cases. Strict commits go more cleanly after you have laid out your thinking; skipping scratchpad on non-trivial work routinely produces submit_work calls with missing files, wrong scope, or hallucinated paths."},
+		// Strict tool-args on submit_work are easier to produce correctly
+		// AFTER you have laid out your thinking here.
+		{Name: "scratchpad", Order: 4, Guidance: `Use scratchpad proactively in these scenarios:
+- BEFORE submit_work when the work involved multi-file changes or weighing approaches — write the prose you used to decide
+- BEFORE writing a non-trivial new file — lay out the structure as plain prose first
+- AFTER reading reviewer feedback — write your understanding of what they want before changing code
+
+When NOT to use scratchpad:
+- A submit_work call reporting a single deterministic fix
+- Purely informational tasks with no decision points
+
+Text is unconstrained — plain prose explaining your approach, things you considered, edge cases. Strict commits go more cleanly after you have laid out your thinking; submit_work calls produced without this step routinely have missing files, wrong scope, or hallucinated paths.`},
 
 		// Graph tools removed from agent palettes 2026-05-12 — see
 		// prompt/tool_filter.go header comment. Tools remain registered
