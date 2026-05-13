@@ -314,7 +314,11 @@
         "timeout": "120s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "content_bucket": "AGENT_CONTENT"
+        "content_bucket": "AGENT_CONTENT",
+        "tool_call_governance": {
+          "mode": "audit",
+          "timeout": "1s"
+        }
       }
     },
     "agentic-model": {
@@ -333,6 +337,118 @@
       "config": {
         "stream_name": "AGENT",
         "consumer_name_suffix": "semspec-e2e"
+      }
+    },
+    "rule-processor": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "rule_toolcall_proposed_in",
+              "subject": "agent.toolcall.proposed.>",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "ADR-039 proposed tool calls awaiting governance verdict"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "toolcall_approved_out",
+              "subject": "agent.toolcall.approved.>",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "ADR-039 approve verdicts to agentic-loop (loop_id.call_id subject shape per migration doc)"
+            },
+            {
+              "name": "toolcall_rejected_out",
+              "subject": "agent.toolcall.rejected.>",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "ADR-039 reject verdicts to agentic-loop (loop_id.call_id subject shape per migration doc)"
+            }
+          ]
+        },
+        "inline_rules": [
+          {
+            "id": "block-bash-cd-workspace",
+            "type": "expression",
+            "name": "Block bash 'cd /workspace' (worktree leak)",
+            "description": "Audit-mode rejection of bash calls that change directory into /workspace.",
+            "enabled": true,
+            "conditions": [
+              {"field": "tool_name", "operator": "eq", "value": "bash", "required": true},
+              {"field": "command", "operator": "contains", "value": "cd /workspace", "required": true}
+            ],
+            "logic": "and",
+            "on_enter": [
+              {
+                "type": "publish",
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "loop_id": "$message.loop_id",
+                  "reason": "bash 'cd /workspace' blocked — stay in worktree"
+                }
+              },
+              {"type": "deny", "reason": "bash 'cd /workspace' blocked — stay in worktree"}
+            ],
+            "metadata": {"category": "governance", "tier": 0}
+          },
+          {
+            "id": "block-bash-redirect-workspace",
+            "type": "expression",
+            "name": "Block bash '> /workspace/' (worktree leak via redirect)",
+            "description": "Audit-mode rejection of bash redirects writing into /workspace/.",
+            "enabled": true,
+            "conditions": [
+              {"field": "tool_name", "operator": "eq", "value": "bash", "required": true},
+              {"field": "command", "operator": "contains", "value": "> /workspace/", "required": true}
+            ],
+            "logic": "and",
+            "on_enter": [
+              {
+                "type": "publish",
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "bash redirect into /workspace/ blocked — write to worktree path"
+                }
+              },
+              {"type": "deny", "reason": "bash redirect into /workspace/ blocked — write to worktree path"}
+            ],
+            "metadata": {"category": "governance", "tier": 0}
+          },
+          {
+            "id": "block-bash-tee-workspace",
+            "type": "expression",
+            "name": "Block bash 'tee /workspace/' (worktree leak via tee)",
+            "description": "Audit-mode rejection of bash 'tee /workspace/' writes.",
+            "enabled": true,
+            "conditions": [
+              {"field": "tool_name", "operator": "eq", "value": "bash", "required": true},
+              {"field": "command", "operator": "contains", "value": "tee /workspace/", "required": true}
+            ],
+            "logic": "and",
+            "on_enter": [
+              {
+                "type": "publish",
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "bash 'tee /workspace/' blocked — write to worktree path"
+                }
+              },
+              {"type": "deny", "reason": "bash 'tee /workspace/' blocked — write to worktree path"}
+            ],
+            "metadata": {"category": "governance", "tier": 0}
+          }
+        ]
       }
     },
     "graph-ingest": {
@@ -725,6 +841,9 @@
         "agent.created.>",
         "agent.failed.>",
         "agent.context.compaction.>",
+        "agent.toolcall.proposed.>",
+        "agent.toolcall.approved.>",
+        "agent.toolcall.rejected.>",
         "context.build.>",
         "context.built.>",
         "tool.execute.>",
