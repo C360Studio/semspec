@@ -118,8 +118,19 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 	test.describe.configure({ mode: 'serial' });
 	test.setTimeout(EXECUTION_TIMEOUT);
 
+	// Graph entity threshold for federated-graph readiness. With the epic
+	// overlay (WITH_EPIC=1) the 3 external semsources index OSH/Meshtastic/
+	// OGC and easily exceed 100 entities. Without it, only the workspace
+	// semsource runs against osh-driver-meshtastic — a much smaller surface
+	// that produces tens of entities, not hundreds. The threshold reflects
+	// what's actually plumbed in. This is a HARNESS check (semsource +
+	// graph-ingest plumbing), not an agentic-reasoning prerequisite —
+	// agents reach upstream via web_search + http_request, not /sources/
+	// or graph_search (graph tools removed from agent palettes 2026-05-12).
+	const GRAPH_ENTITY_MIN = process.env.WITH_EPIC === '1' ? 100 : 10;
+
 	test.beforeAll(async () => {
-		console.log('[hard] Waiting for federated graph readiness (>100 entities)...');
+		console.log(`[hard] Waiting for federated graph readiness (>${GRAPH_ENTITY_MIN} entities)...`);
 		const gStart = Date.now();
 		let lastTotal = 0;
 		while (Date.now() - gStart < GRAPH_READY_TIMEOUT) {
@@ -129,11 +140,11 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 				console.log(`[hard] Graph entities: ${total} (${((Date.now() - gStart) / 1000).toFixed(0)}s)`);
 				lastTotal = total;
 			}
-			if (total > 100) break;
+			if (total > GRAPH_ENTITY_MIN) break;
 			await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 		}
-		if (lastTotal <= 100) {
-			throw new Error(`Federated graph not ready after ${GRAPH_READY_TIMEOUT / 1000}s (only ${lastTotal} entities)`);
+		if (lastTotal <= GRAPH_ENTITY_MIN) {
+			throw new Error(`Federated graph not ready after ${GRAPH_READY_TIMEOUT / 1000}s (only ${lastTotal} entities, need >${GRAPH_ENTITY_MIN})`);
 		}
 
 		const plan = await createPlan(`${EPIC_PROMPT}\n\nTest run: ${Date.now()}`);
@@ -152,8 +163,8 @@ test.describe('@t2 @hard epic-meshtastic-llm', () => {
 	test('federated graph has sufficient entities', async () => {
 		const manifest = await fetchGraphManifest();
 		const total = totalEntities(manifest);
-		console.log(`[hard] Graph entity count: ${total}`);
-		expect(total).toBeGreaterThan(100);
+		console.log(`[hard] Graph entity count: ${total} (threshold: ${GRAPH_ENTITY_MIN})`);
+		expect(total).toBeGreaterThan(GRAPH_ENTITY_MIN);
 	});
 
 	// ── Stage 1: Plan goal synthesized ──────────────────────────────────
