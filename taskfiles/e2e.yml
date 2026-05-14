@@ -492,22 +492,18 @@ tasks:
       TIER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
-      # Hard tier uses the Meshtastic/OSH Java fixture. The fixture's
-      # README + .gitignore + build.gradle reference /sources/osh/... paths
-      # that only exist when the epic overlay (e2e-epic.yml) is mounted.
-      # Default ON for tier=hard. Take-17 (2026-05-12) found sonnet
-      # over-explored when epic was on; take-19 (2026-05-13) found sonnet
-      # fabricated 55-byte stub JARs when epic was off — the fixture's
-      # /sources/ instructions become broken pointers. The fixture and
-      # overlay are coupled; flipping epic OFF needs a different fixture.
-      # Set WITH_EPIC=0 to opt out (e.g. testing the architect's
-      # web_search-only reference discovery path).
+      # Hard tier uses the Meshtastic/OSH Java fixture. Pre-cloned external
+      # semsources (e2e-epic.yml) are opt-in via WITH_EPIC=1 — default OFF.
+      # The fixture itself is self-contained (no /sources/ refs) so the
+      # agent uses web_search + http_request for upstream discovery as a
+      # real capability test. WITH_EPIC=1 mounts /sources/ as an optional
+      # speedup for runs that want cached upstream artifacts instead.
       FIXTURE_DIR:
         sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
       EPIC_OVERLAY:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ] && [ "${WITH_EPIC:-1}" != "0" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
       EPIC_ON:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ] && [ "${WITH_EPIC:-1}" != "0" ]; then echo '1'; else echo '0'; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '1'; else echo '0'; fi
     # E2E_FIXTURE feeds docker-compose's ${E2E_FIXTURE:-go-project} workspace
     # mount substitution. WITH_EPIC is re-exported with the resolved default
     # so the Playwright spec (ui/e2e/epic-meshtastic-llm.spec.ts) sees the
@@ -583,19 +579,15 @@ tasks:
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
       FIXTURE_DIR:
         sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
-      # Epic overlay (e2e-epic.yml) defaults ON for tier=hard because the
-      # osh-driver-meshtastic fixture's README + .gitignore + build.gradle
-      # comments instruct the agent to read /sources/osh/... — paths that
-      # only exist when the overlay is mounted. Take-19 (2026-05-13) caught
-      # this: with epic OFF, sonnet ran 79 tool calls hunting for OSH JARs
-      # (Maven Central, sensiasoft, JitPack, GitHub Packages) and ultimately
-      # fabricated 55-byte stub JARs to satisfy Gradle. Set WITH_EPIC=0 to
-      # opt out (e.g. when testing the architect's web_search-only reference
-      # discovery path). See project_hybrid_hard_take19_stub_jar_fabrication.
+      # Epic overlay (e2e-epic.yml) is opt-in via WITH_EPIC=1 — default OFF.
+      # The fixture is self-contained (no /sources/ refs), so the agent's
+      # default behaviour is to discover upstream coordinates via web_search
+      # and http_request. Setting WITH_EPIC=1 mounts /sources/ with pre-cloned
+      # upstream repos as a speedup for runs that want cached artifacts.
       EPIC_OVERLAY:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ] && [ "${WITH_EPIC:-1}" != "0" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
       EPIC_ON:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ] && [ "${WITH_EPIC:-1}" != "0" ]; then echo '1'; else echo '0'; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '1'; else echo '0'; fi
       RUN_TS:
         sh: date +%Y%m%d-%H%M%S
       OUT_DIR: "/tmp/semspec-watch-{{.PROVIDER}}-{{.TIER}}-{{.RUN_TS}}"
