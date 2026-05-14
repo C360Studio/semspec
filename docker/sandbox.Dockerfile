@@ -1,5 +1,5 @@
 # Stage 1: Build sandbox binary from the semspec module.
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /build
 COPY go.mod go.sum ./
