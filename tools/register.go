@@ -22,6 +22,7 @@ import (
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/question"
+	"github.com/c360studio/semspec/tools/research"
 	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/tools/websearch"
 	"github.com/c360studio/semspec/tools/workflow"
@@ -161,6 +162,29 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 
 		answerExec := question.NewAnswerExecutor(questionStore, nil)
 		errs = append(errs, reg.RegisterTool("answer_question", answerExec))
+	}
+
+	// research — non-terminal dev tool that delegates upstream-API-surface
+	// investigation to a researcher sub-agent. Blocks on RESEARCH KV until
+	// the researcher submits via answer_research. The actual researcher
+	// dispatch (researcher-manager subscribing to agent.research.requested.>
+	// + spawning a researcher loop) lands in R3; R2 wires only the tool
+	// executors so the wire shape and arg validation are exercisable in
+	// unit + mock e2e tests before paying for the dispatch loop.
+	//
+	// answer_research — terminal tool for the researcher sub-agent. Validates
+	// answer size against workflow.MaxResearchAnswerBytes and citation shape
+	// before writing back to RESEARCH KV.
+	if deps.NATSClient != nil {
+		var researchStore *wf.ResearchStore
+		if store, storeErr := wf.NewResearchStore(deps.NATSClient); storeErr == nil {
+			researchStore = store
+		}
+		researchExec := research.NewExecutor(deps.NATSClient, researchStore, nil)
+		errs = append(errs, reg.RegisterTool("research", researchExec))
+
+		researchAnswerExec := research.NewAnswerExecutor(researchStore, nil)
+		errs = append(errs, reg.RegisterTool("answer_research", researchAnswerExec))
 	}
 
 	// write_todos — agent-private cross-iteration todo list persisted as
