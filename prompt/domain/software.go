@@ -1287,6 +1287,7 @@ CRITICAL — File paths:
 Sizing guidance:
 - Typical DAG: 2-6 nodes. Smaller is fine when the requirement is genuinely small (e.g. add one config field). Larger when the requirement spans multiple production files + test files + build config.
 - Each node is a SINGLE developer dispatch with an ~80-iteration budget. Prefer one production file + its colocated test per node over multi-file omnibus nodes. A node that owns 4 unrelated production files will routinely exhaust the dev's budget on exploration before the first write.
+- **Architect's component_boundaries drives the split**: if the architect produced N entries in component_boundaries (each with its own name + responsibility), you SHOULD produce ≥ N implementation nodes — one per component. Combining components into a single node is acceptable ONLY when they share private types and cannot be developed independently; if you combine, say so explicitly in the node's prompt so the developer knows to write them together. Defaulting to one omnibus node when the architect identified multiple components is the canonical sizing mistake.
 - Order by dependency: prerequisite nodes first, then dependent nodes via depends_on. Independent nodes (no shared file_scope, no logical dependency) can have empty depends_on so they parallelise.
 
 CRITICAL — Reference files:
@@ -1298,6 +1299,7 @@ Anti-patterns the QA reviewer will catch:
 - Test-only DAGs (only test files, no implementation files for the artifact under test).
 - Documentation-only DAGs for an implementation requirement.
 - Nodes whose prompt says "explore the codebase" / "research the patterns" instead of naming specific reference files.
+- **Multi-component omnibus**: the architect listed multiple component_boundaries contributing to one artifact, but the decomposer collapsed them all into a single implementation node. The dev exhausts its iteration budget exploring the multi-component surface area before the first write. Split per-component-boundary instead — that's why the architect named them separately. (Take-22 2026-05-14: implement-driver as a single node covered driver class + client class + message-translator class, wedged on iter-budget exhaustion across multiple cycles without producing a single production file.)
 
 Before calling decompose_task, use the scratchpad tool to think through:
 - What artifacts does this requirement imply (driver class, build config, integration test)?
