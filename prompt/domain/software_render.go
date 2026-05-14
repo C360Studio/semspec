@@ -874,3 +874,36 @@ func renderRecoveryAgentPrompt(r *prompt.RecoveryPromptContext) string {
 	sb.WriteString("\n---\nDiagnose the wedge from the evidence above and call submit_work with your chosen RecoveryAction. Do not call any other tool except scratchpad (which is for your own reasoning before you commit).")
 	return sb.String()
 }
+
+// renderResearcherPrompt builds the researcher's user prompt from the
+// asking developer's research() tool call. The renderer is intentionally
+// terse — the system prompt carries the role description; the user
+// prompt carries the specific request the researcher needs to answer.
+func renderResearcherPrompt(r *prompt.ResearcherPromptContext) string {
+	var sb strings.Builder
+
+	sb.WriteString("# RESEARCH REQUEST\n\n")
+	fmt.Fprintf(&sb, "**Research ID**: %s (pass verbatim to answer_research)\n", r.ResearchID)
+	if r.AskingPlanSlug != "" {
+		fmt.Fprintf(&sb, "**Asking plan**: %s\n", r.AskingPlanSlug)
+	}
+	if r.AskingTaskID != "" {
+		fmt.Fprintf(&sb, "**Asking task**: %s\n", r.AskingTaskID)
+	}
+
+	sb.WriteString("\n## Question\n\n")
+	sb.WriteString(r.Question)
+	sb.WriteString("\n")
+
+	if len(r.Sources) > 0 {
+		sb.WriteString("\n## Source hints (developer's starting points)\n\n")
+		for _, s := range r.Sources {
+			fmt.Fprintf(&sb, "- %s\n", s)
+		}
+	} else {
+		sb.WriteString("\n## Source hints\n\n(none — the developer did not narrow the starting points; use web_search to discover canonical upstream sources before fetching content)\n")
+	}
+
+	sb.WriteString("\n---\nRead just enough to answer the question concretely, then call answer_research with the answer + citations. If the question is too broad to answer concretely from what you can read, return what you have plus a brief note describing what's still ambiguous so the developer can ask a follow-up.")
+	return sb.String()
+}

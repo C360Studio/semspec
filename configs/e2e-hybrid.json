@@ -128,6 +128,15 @@
           "gemini-pro"
         ]
       },
+      "research": {
+        "description": "Single-shot upstream-API-surface investigation for the developer's research() tool. Reads source/docs/specs in its own context window, distills into an answer + citations capped at 4 KiB. Flash is the right tier: bulk reads + structured summary, no deep reasoning required. Pro fallback for cases where flash truncates too aggressively. See project_research_tool_plan_2026_05_14.",
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-pro"
+        ]
+      },
       "coding": {
         "description": "Code generation, implementation — Sonnet's strength",
         "preferred": [
@@ -724,6 +733,12 @@
     },
     "question-manager": {
       "name": "question-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
+    "researcher-manager": {
+      "name": "researcher-manager",
       "type": "processor",
       "enabled": true,
       "config": {}

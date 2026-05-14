@@ -243,17 +243,22 @@ type ResearchAnswerPayload struct {
 	Citations  []Citation `json:"citations,omitempty"`
 }
 
-// ResearchStore wraps the RESEARCH KV bucket with typed Get/Put helpers.
-// Mirrors QuestionStore (workflow/question.go) so callers familiar with the
-// question pattern can reach for the same shape.
+// ResearchStore wraps the RESEARCH KV bucket. Built on
+// natsclient.KVStore for built-in CAS-with-retry semantics on lifecycle
+// transitions (per the R3 review — hand-rolled CAS loops duplicated
+// capability the natsclient abstraction already provides). The raw
+// jetstream.KeyValue handle is retained for the watch path (the research
+// tool's executor watches the bucket directly for the asking dev's
+// unblock signal) since natsclient doesn't wrap KV.Watch.
 type ResearchStore struct {
-	nc     *natsclient.Client
-	bucket jetstream.KeyValue
+	nc      *natsclient.Client
+	bucket  jetstream.KeyValue
+	kvStore *natsclient.KVStore
 }
 
 // NewResearchStore creates the RESEARCH KV bucket if needed and returns a
-// store handle. Idempotent — safe to call from every component bootstrap that
-// needs research access.
+// store handle. Idempotent — safe to call from every component bootstrap
+// that needs research access.
 func NewResearchStore(nc *natsclient.Client) (*ResearchStore, error) {
 	js, err := nc.JetStream()
 	if err != nil {
@@ -270,35 +275,38 @@ func NewResearchStore(nc *natsclient.Client) (*ResearchStore, error) {
 	}
 
 	return &ResearchStore{
-		nc:     nc,
-		bucket: bucket,
+		nc:      nc,
+		bucket:  bucket,
+		kvStore: nc.NewKVStore(bucket),
 	}, nil
 }
 
-// Bucket exposes the underlying KV handle for components that need to watch
-// or scan the bucket directly (researcher-manager, the research tool
-// executor). Read-only callers should use Get instead.
+// Bucket exposes the underlying KV handle for the watch path. Used by
+// tools/research/executor.go to subscribe for the asking dev's unblock
+// signal. Mutation paths should go through Put/TransitionStatus instead.
 func (s *ResearchStore) Bucket() jetstream.KeyValue { return s.bucket }
 
-// Get retrieves a Research record by ID. Returns an error wrapping
-// jetstream.ErrKeyNotFound if the record doesn't exist.
+// Get retrieves a Research record by ID. Returns an error wrapping the
+// underlying KV miss when the record doesn't exist.
 func (s *ResearchStore) Get(ctx context.Context, id string) (*Research, error) {
 	if id == "" {
 		return nil, fmt.Errorf("research id is required")
 	}
-	entry, err := s.bucket.Get(ctx, id)
+	entry, err := s.kvStore.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("kv get %q: %w", id, err)
 	}
 	var r Research
-	if err := json.Unmarshal(entry.Value(), &r); err != nil {
+	if err := json.Unmarshal(entry.Value, &r); err != nil {
 		return nil, fmt.Errorf("unmarshal research %q: %w", id, err)
 	}
 	return &r, nil
 }
 
 // Put writes a Research record to KV. Validates the record before write so
-// no invalid state ever reaches the bucket. Returns the new revision.
+// no invalid state ever reaches the bucket. Unconditional — overwrites any
+// existing revision. Use TransitionStatus for state changes that must
+// preserve linearizable lifecycle ordering.
 func (s *ResearchStore) Put(ctx context.Context, r *Research) (uint64, error) {
 	if r == nil {
 		return 0, fmt.Errorf("research record is required")
@@ -310,9 +318,67 @@ func (s *ResearchStore) Put(ctx context.Context, r *Research) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("marshal research: %w", err)
 	}
-	rev, err := s.bucket.Put(ctx, r.ID, data)
+	rev, err := s.kvStore.Put(ctx, r.ID, data)
 	if err != nil {
 		return 0, fmt.Errorf("kv put %q: %w", r.ID, err)
 	}
 	return rev, nil
+}
+
+// ErrResearchStaleStatus is returned by TransitionStatus when the record's
+// current Status does not match any of the expected predecessor states.
+// Indicates the lifecycle has advanced under us — typical when a redelivered
+// dispatch tries to flip pending→in_progress on a record that's already
+// answered. Wrap-safe via errors.Is so callers can branch on it cleanly.
+var ErrResearchStaleStatus = fmt.Errorf("research record status has advanced — refusing to overwrite")
+
+// TransitionStatus is a CAS-with-retry write that succeeds only when the
+// record's current Status is in the expectedFrom set. Use this for any
+// lifecycle transition (pending → in_progress, in_progress → answered/error)
+// so a concurrent writer can't clobber a more-advanced state.
+//
+// The caller passes a record with the DESIRED post-transition state already
+// set (Status, Answer, Citations, etc). TransitionStatus delegates the CAS
+// retry loop to natsclient.KVStore.UpdateWithRetry — that helper has built-
+// in exponential backoff with jitter and proper retry classification for
+// transient vs permanent KV failures. On stale status the update function
+// returns ErrResearchStaleStatus which the retry helper recognises as
+// non-retryable.
+func (s *ResearchStore) TransitionStatus(ctx context.Context, r *Research, expectedFrom ...ResearchStatus) error {
+	if r == nil {
+		return fmt.Errorf("research record is required")
+	}
+	if err := r.Validate(); err != nil {
+		return fmt.Errorf("validate research before transition: %w", err)
+	}
+	desired, err := json.Marshal(r)
+	if err != nil {
+		return fmt.Errorf("marshal research: %w", err)
+	}
+
+	allowed := func(s ResearchStatus) bool {
+		for _, want := range expectedFrom {
+			if s == want {
+				return true
+			}
+		}
+		return false
+	}
+
+	return s.kvStore.UpdateWithRetry(ctx, r.ID, func(current []byte) ([]byte, error) {
+		if len(current) == 0 {
+			// Record doesn't exist — caller pre-Put'd a pending record in
+			// most code paths, so this should never fire. If it does,
+			// return a stale-status error so callers branch on it cleanly.
+			return nil, fmt.Errorf("%w (current=<missing>, expected=%v)", ErrResearchStaleStatus, expectedFrom)
+		}
+		var cur Research
+		if err := json.Unmarshal(current, &cur); err != nil {
+			return nil, fmt.Errorf("unmarshal current research: %w", err)
+		}
+		if !allowed(cur.Status) {
+			return nil, fmt.Errorf("%w (current=%s, expected=%v)", ErrResearchStaleStatus, cur.Status, expectedFrom)
+		}
+		return desired, nil
+	})
 }

@@ -131,7 +131,17 @@ func (e *AnswerExecutor) Execute(ctx context.Context, call agentic.ToolCall) (ag
 		return errorResult(call, fmt.Sprintf("answer rejected by validator: %v", err)), nil
 	}
 
-	if _, err := e.researchStore.Put(ctx, r); err != nil {
+	// CAS-transition pending OR in_progress → answered. Accepting either
+	// predecessor handles the race where the manager hasn't yet flipped
+	// status to in_progress before the researcher finishes (fast model on
+	// a small read) and the race where it has. ErrResearchStaleStatus
+	// only fires if the record is ALREADY in a terminal state (answered/
+	// timeout/error) — in which case another writer got there first and
+	// we should preserve their result.
+	if err := e.researchStore.TransitionStatus(ctx, r,
+		workflow.ResearchStatusPending,
+		workflow.ResearchStatusInProgress,
+	); err != nil {
 		// KV failure is a soft failure for the researcher — log loudly and
 		// end the loop. The asking dev will time out on its KV watch.
 		e.logger.Error("answer_research: failed to persist answer",

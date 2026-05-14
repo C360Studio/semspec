@@ -701,6 +701,12 @@
       "enabled": true,
       "config": {}
     },
+    "researcher-manager": {
+      "name": "researcher-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
     "requirement-executor": {
       "name": "requirement-executor",
       "type": "processor",

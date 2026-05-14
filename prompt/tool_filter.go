@@ -123,6 +123,21 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		RoleLessonDecomposer: {
 			AllowExact: []string{"bash", "submit_work", "write_todos", "scratchpad"},
 		},
+
+		// Researcher: single-shot upstream-API-surface investigation for a
+		// developer's research() call. Reads via bash (subject to the
+		// existing worktree-leak governance rule), http_request, and
+		// web_search; answer_research is the terminal. Deliberately
+		// minimal: NO submit_work (researcher delivers via answer_research,
+		// not a developer-shaped deliverable), NO research (no recursive
+		// delegation — bounds the delegation graph to one-deep), NO
+		// write_todos (researcher's task is narrow + bounded by its iter
+		// budget, no cross-iteration plan to persist), NO scratchpad in
+		// v1 (start tight; if R5 telemetry shows researcher reasoning is
+		// weak we add scratchpad in R5+1).
+		RoleResearcher: {
+			AllowExact: []string{"bash", "http_request", "web_search", "answer_research"},
+		},
 	}
 }
 

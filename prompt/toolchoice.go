@@ -36,6 +36,14 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 		// Generators must call tools — use bash/graph for context, submit_work for deliverable
 		return &agentic.ToolChoice{Mode: "required"}
 
+	case RoleResearcher:
+		// Researcher MUST call a tool each iteration — the loop ends only
+		// when answer_research fires (the terminal). Without "required",
+		// the model could emit free-form text and never call the terminal,
+		// hanging the asking dev until KV-watch timeout. Caught in R3
+		// review.
+		return &agentic.ToolChoice{Mode: "required"}
+
 	default:
 		// Single tool for any other role: force it
 		if len(toolNames) == 1 {

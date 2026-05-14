@@ -116,6 +116,11 @@ type AssemblyContext struct {
 	// prompt. Set by the recovery-agent component before assembly. nil for
 	// every other role.
 	Recovery *RecoveryPromptContext
+
+	// Researcher carries data for the researcher (RoleResearcher) user
+	// prompt. Set by the researcher-manager component before dispatching
+	// the researcher sub-agent. nil for every other role.
+	Researcher *ResearcherPromptContext
 }
 
 // TaskContext carries data for developer task prompts.
