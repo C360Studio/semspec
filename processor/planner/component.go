@@ -688,6 +688,7 @@ func (c *Component) waitForGraphReady(ctx context.Context, slug string) {
 func (c *Component) availableToolNames() []string {
 	tools := []string{
 		"bash", "submit_work",
+		"write_todos", "scratchpad",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 	}

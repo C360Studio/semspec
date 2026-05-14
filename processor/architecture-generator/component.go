@@ -792,6 +792,8 @@ func (c *Component) resolveProvider() prompt.Provider {
 func (c *Component) availableToolNames() []string {
 	return []string{
 		"bash", "submit_work",
+		"write_todos", "scratchpad",
+		"web_search", "http_request",
 	}
 }
 

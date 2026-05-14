@@ -1050,6 +1050,7 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Requir
 func (c *Component) availableToolNames() []string {
 	return []string{
 		"bash", "submit_work", "ask_question",
+		"write_todos", "scratchpad",
 		"graph_search", "graph_query",
 	}
 }

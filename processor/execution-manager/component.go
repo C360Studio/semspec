@@ -1532,6 +1532,7 @@ func (c *Component) availableToolNames() []string {
 	// models that picked it instead of submit_work.
 	return []string{
 		"bash", "submit_work", "ask_question",
+		"write_todos", "scratchpad",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task",
