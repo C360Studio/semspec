@@ -1,22 +1,20 @@
 // OSH driver skeleton — to be filled in by the agent during the @hard scenario.
 //
-// Reality check: OpenSensorHub (osh-core) is a Gradle multi-module project
-// that publishes its `org.sensorhub:*` artifacts. The historical publishing
-// target was Bintray, which JFrog sunset in 2021. Where its current public
-// artifacts live (snapshot repo, Maven Central, alternate mirror) is the
-// agent's job to discover by reading the upstream sources at
-// /sources/osh/github-com-opensensorhub-osh-core/build.gradle and
-// /sources/osh/github-com-opensensorhub-osh-core/release.gradle — then
-// declaring the matching `repositories` + `dependencies` blocks below.
+// Build target: a Java driver that implements OpenSensorHub's Connected
+// Systems API. The agent's first task is to fill in `repositories` and
+// `dependencies` below — discover the upstream coords (group / version /
+// publishing target) via `web_search` and `http_request` against the
+// canonical upstream repositories on GitHub.
 //
-// Upstream coords (already known from /sources/osh):
-//   group   = 'org.sensorhub'
-//   version = '2.0.0'  // see common.gradle: ext.oshCoreVersion
-//   relevant subprojects = sensorhub-core, sensorhub-service-consys, ...
+// Useful starting points for discovery (use http_request to fetch raw
+// content):
+//   https://github.com/opensensorhub/osh-core
+//   https://github.com/opengeospatial/ogcapi-connected-systems
+//   https://github.com/meshtastic/meshtastic
 //
-// The Connected Systems API spec lives at
-// /sources/ogc/github-com-opengeospatial-ogcapi-connected-systems for
-// reference. Use it to design the driver's API surface.
+// The legacy Bintray publishing target was sunset by JFrog in 2021; the
+// canonical artifact repository for OSH 2.x is the agent's to discover
+// from the upstream `release.gradle` / publishing configuration.
 
 plugins {
     id 'java-library'
@@ -26,7 +24,9 @@ group = 'org.sensorhub'
 version = '0.1.0-SNAPSHOT'
 
 java {
-    // Match osh-core's Java 17 target (see /sources/osh/.../common.gradle).
+    // Match osh-core's Java 17 target. Verify via http_request against
+    // raw.githubusercontent.com/opensensorhub/osh-core/master/common.gradle
+    // (or whichever branch is current).
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
 }
@@ -34,19 +34,20 @@ java {
 repositories {
     mavenCentral()
     // TODO(agent): add the OSH artifact repository here once you've
-    // identified it from /sources/osh/.../release.gradle. The original
-    // bintray target is dead; check the upstream for the current
-    // snapshot/release URL.
+    // identified it from the upstream `release.gradle`. The original
+    // bintray target is dead; discover the current snapshot/release URL
+    // via web_search + http_request against the upstream repo.
 }
 
 dependencies {
-    // TODO(agent): declare OSH dependencies. Read upstream subprojects
-    // from /sources/osh/.../sensorhub-core/build.gradle (and siblings)
-    // to identify which artifacts your driver needs. Common picks for
-    // a sensor driver:
-    //   implementation 'org.sensorhub:sensorhub-core:2.0.0'
-    //   implementation 'org.sensorhub:sensorhub-service-consys:2.0.0'
-    // Adjust based on what the upstream actually publishes.
+    // TODO(agent): declare OSH dependencies. Read the upstream subproject
+    // `build.gradle` files via http_request to identify which artifacts
+    // your driver needs. Common picks for a sensor driver:
+    //   implementation 'org.sensorhub:sensorhub-core:<version>'
+    //   implementation 'org.sensorhub:sensorhub-service-consys:<version>'
+    // Verify the version against the upstream `common.gradle` (look for
+    // `ext.oshCoreVersion`) and adjust based on what the upstream
+    // actually publishes.
 
     testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
 }

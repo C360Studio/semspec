@@ -1,9 +1,3 @@
-# /sources/ is the read-only mount of semsource clones — reference material
-# only. The agent never copies content from /sources/ into the worktree,
-# but if a tool or command accidentally writes a `sources/` directory
-# inside the workspace, this entry keeps it out of commits.
-sources/
-
 # Standard Java/Gradle build artefacts.
 .gradle/
 build/
