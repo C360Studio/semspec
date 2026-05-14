@@ -252,6 +252,6 @@ func RegisterPayloads(reg *payloadregistry.Registry) error {
 			},
 		}))
 	}
-	errs = append(errs, registerTaskPayload(reg), registerAnswerPayload(reg))
+	errs = append(errs, registerTaskPayload(reg), registerAnswerPayload(reg), registerResearchPayloads(reg))
 	return errors.Join(errs...)
 }

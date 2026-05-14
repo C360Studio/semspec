@@ -41,6 +41,7 @@ import (
 	qareviewer "github.com/c360studio/semspec/processor/qa-reviewer"
 	questionmanager "github.com/c360studio/semspec/processor/question-manager"
 	recoveryagent "github.com/c360studio/semspec/processor/recovery-agent"
+	researchermanager "github.com/c360studio/semspec/processor/researcher-manager"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
@@ -271,6 +272,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return workflowvalidator.Register(componentRegistry) },
 		func() error { return workflowdocuments.Register(componentRegistry) },
 		func() error { return questionmanager.Register(componentRegistry) },
+		func() error { return researchermanager.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return architecturegenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
