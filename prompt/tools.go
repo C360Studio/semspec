@@ -84,6 +84,31 @@ Text is unconstrained — plain prose explaining your approach, things you consi
 		{Name: "web_search", Order: 20, Guidance: "Search the web for reference materials, external APIs, or libraries. Always use this BEFORE http_request to find the right URL — never guess URLs."},
 		{Name: "http_request", Order: 21, Guidance: "Fetch a URL or test a local API endpoint. For web research: use web_search FIRST to find URLs — NEVER guess or fabricate URLs. For local API testing: use with localhost/sandbox URLs you built yourself."},
 
+		// research: delegate upstream-API-surface investigation to a
+		// sub-agent with its own context window. Single call replaces
+		// what would otherwise be many raw-source reads accumulating in
+		// the dev's context — the primary win is context compaction, not
+		// iter savings. Scenario-list anchored on concrete triggers (the
+		// "before your 3rd read of an upstream file" shape that catches
+		// the take-23 over-reading pattern), with explicit non-use cases
+		// so the model can self-classify out cleanly. See
+		// project_research_tool_plan_2026_05_14.
+		{Name: "research", Order: 22, Guidance: `Use research proactively in these scenarios:
+- BEFORE you start reading files from an upstream library you don't own (not your 2nd read, not your 3rd — the first one, when you know you'll need more)
+- WHEN you need a concrete API signature, method shape, or lifecycle expectation from external code
+- WHEN web_search + http_request would mean fetching multiple files just to extract one signature
+- WHEN you're about to extract source jars to /tmp/ to read them — that's the canonical "research()" moment
+
+When NOT to use research:
+- Files in YOUR worktree under /workspace/.semspec/worktrees/<node>/ — read them directly with bash
+- Anything you can answer in a single bash call (one file, one signature, one path check)
+- General "explore the codebase" with no specific question — the researcher returns weaker answers to vague questions
+- Asking the researcher to write or sketch code for you — the researcher answers questions about external surfaces; you are the developer who writes the code that uses those surfaces
+
+If you are tempted to ask research() to "show me how to write X" or "give me the implementation of Y" — STOP. That is not a research call. You are the developer; you write the code. Research answers questions about EXISTING external surfaces (signatures, lifecycles, configs) so you can write the code that uses them.
+
+Provide a SPECIFIC question (what signature, what lifecycle, what config shape) and concrete source hints (github.com/owner/repo, maven:group:artifact:version, or known doc URLs). Vague questions yield weaker answers; concrete questions get tight signatures + citations you can drop into your context.`},
+
 		// Agentic tools
 		// decompose_task is registered with RoleTaskGenerator semantically
 		// (the requirement-executor decomposer is what calls it). The

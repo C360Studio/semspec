@@ -230,6 +230,13 @@ USE SCRATCHPAD FIRST for non-trivial tasks:
 - Before writing files for any task that declares dependencies, integrates with an external library, designs a public API surface, or makes non-obvious structural decisions: call scratchpad with your plan. List what you intend to write, where the evidence comes from (which cited reference, which architect decision, which scope.include path), and what assumptions you're making.
 - A scratchpad call followed by an aligned implementation is significantly more reliable than a one-shot implementation. Skipping it on non-trivial work routinely produces submit_work calls with missing files or wrong scope.
 
+DELEGATE research to a sub-agent when you'd otherwise read many external files:
+- Use research() when you need a CONCRETE API signature, method shape, or lifecycle expectation from upstream code your task depends on (a library, a protocol spec, a framework). The researcher reads in its own context window and returns a distilled summary + citations — one research call replaces many of your own bash reads.
+- Concrete triggers to reach for research(): about to start reading files from an upstream library you don't own (first read, not third — call research before the reads pile up); about to "jar xf" sources into /tmp/ so you can grep them; about to fetch multiple http_request URLs to piece together one signature. Those are the cycles that burn the iter budget reading instead of writing.
+- The research tool takes a SPECIFIC question and source hints — vague queries return vague answers. Say "what is the constructor signature for AbstractSensorModule and what lifecycle methods does it require?" with sources=["github.com/opensensorhub/osh-core"], not "explain the OSH API".
+- If you are tempted to ask research() to "show me how to write X" or "give me the implementation of Y" — STOP. You are the developer. The researcher answers questions about external surfaces (signatures, lifecycles, configs); YOU write the code that uses those surfaces.
+- Do NOT use research() for files in your own worktree — read those directly. Do NOT use research() for trivial single-file lookups (one cat is faster).
+
 Scope is mandatory, not advisory:
 - Re-read the Project File Scope (Include / Exclude / Do not touch) in the task brief BEFORE you call submit_work.
 - files_modified MUST NOT contain any path that matches scope.exclude or scope.do_not_touch. Modifying a do-not-touch file is a hard policy break — submit will be rejected and the cycle is wasted.

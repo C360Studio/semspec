@@ -1,0 +1,112 @@
+package prompt
+
+import (
+	"slices"
+	"testing"
+)
+
+// TestFilterTools_DeveloperPalette pins the developer's allowed-tool set
+// to its load-bearing entries. The shape of these assertions catches two
+// regression classes:
+//
+//  1. Palette drift between the per-role allowlist (this file's input)
+//     and the per-component availableToolNames() that feeds it. After
+//     613ca6c we know "tool is registered + tool is in palette" is the
+//     adoption seam — losing the developer's research/write_todos/scratchpad
+//     entries would silently regress to the take-18 "MUST language is in
+//     the prompt but the tool isn't in the wire palette" failure mode.
+//  2. Researcher palette accidentally gaining `research` (recursive
+//     delegation), `submit_work` (wrong terminal), or `write_todos`
+//     (cross-iter persistence in a single-shot role). The guardrail
+//     test in processor/researcher-manager covers the same shape;
+//     duplicating the assertion here makes the lock visible at the
+//     prompt layer where the per-role policy lives.
+func TestFilterTools_DeveloperPalette(t *testing.T) {
+	// Superset of every tool the developer might be passed by the
+	// dispatcher. FilterTools narrows to what's in the role's AllowExact.
+	allTools := []string{
+		"bash", "submit_work", "ask_question",
+		"write_todos", "scratchpad",
+		"research",
+		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
+		"decompose_task",
+	}
+
+	allowed := FilterTools(allTools, RoleDeveloper)
+
+	// Load-bearing entries — losing any of these regresses an adoption
+	// story we built explicit memory + commits around.
+	required := []string{
+		"bash",            // primary execution surface
+		"submit_work",     // terminal
+		"web_search",      // upstream discovery
+		"http_request",    // canonical fetch
+		"write_todos",     // 613ca6c wiring fix
+		"scratchpad",      // 613ca6c wiring fix
+		"research",        // R4 wiring
+	}
+	for _, name := range required {
+		if !slices.Contains(allowed, name) {
+			t.Errorf("RoleDeveloper palette missing required tool %q (got %v)", name, allowed)
+		}
+	}
+
+	// Graph tools are filtered OUT for the developer (removed 2026-05-12
+	// per the package header). Pin the exclusion so a future revert is
+	// visible in the diff.
+	for _, name := range []string{"graph_search", "graph_query", "graph_summary"} {
+		if slices.Contains(allowed, name) {
+			t.Errorf("RoleDeveloper palette unexpectedly includes %q (graph removal regressed)", name)
+		}
+	}
+}
+
+// TestFilterTools_ResearcherPalette pins the researcher's tight palette.
+// The forbidden list catches the regressions that would invite recursion,
+// wrong-terminal submissions, or scope creep into developer-shaped work.
+func TestFilterTools_ResearcherPalette(t *testing.T) {
+	allTools := []string{
+		"bash", "submit_work", "ask_question",
+		"write_todos", "scratchpad",
+		"research", "answer_research",
+		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
+		"decompose_task",
+	}
+
+	allowed := FilterTools(allTools, RoleResearcher)
+
+	required := []string{"bash", "http_request", "web_search", "answer_research"}
+	for _, name := range required {
+		if !slices.Contains(allowed, name) {
+			t.Errorf("RoleResearcher palette missing required tool %q (got %v)", name, allowed)
+		}
+	}
+
+	// Critical guardrails — adding any of these would change the
+	// researcher's semantic shape.
+	forbidden := []string{
+		"research",       // recursion guard
+		"submit_work",    // wrong terminal — researcher delivers via answer_research
+		"write_todos",    // single-shot focused task, no cross-iter plan
+		"scratchpad",     // (intentional v1 absence — add only if R5 telemetry shows weak reasoning)
+		"decompose_task", // not a generator role
+		"ask_question",   // researcher answers questions, doesn't ask them
+	}
+	for _, name := range forbidden {
+		if slices.Contains(allowed, name) {
+			t.Errorf("RoleResearcher palette unexpectedly includes forbidden tool %q (would change role semantics)", name)
+		}
+	}
+}
+
+// TestFilterTools_UnknownRoleReturnsAll documents the fall-through
+// behavior so a future role-rename doesn't silently start receiving the
+// full palette.
+func TestFilterTools_UnknownRoleReturnsAll(t *testing.T) {
+	got := FilterTools([]string{"bash", "submit_work"}, Role("not-a-real-role"))
+	if !slices.Equal(got, []string{"bash", "submit_work"}) {
+		t.Errorf("unknown role should return all tools unchanged; got %v", got)
+	}
+}

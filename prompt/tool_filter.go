@@ -99,8 +99,15 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// scratchpad: pre-cycle "think through the implementation"
 		// runway, also useful between cycles when the prior reviewer
 		// feedback needs digesting.
+		// research: delegate upstream-API-surface investigation to a
+		// sub-agent whose context window is separate. Single research
+		// call replaces what would otherwise be many raw-source reads
+		// accumulating in the dev's context. See
+		// project_research_tool_plan_2026_05_14 — take-23 wedged on
+		// 35 external file reads with 0 worktree writes; research()
+		// is the structural fix for that pattern.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "web_search", "http_request", "write_todos", "scratchpad"},
+			AllowExact: []string{"bash", "submit_work", "web_search", "http_request", "write_todos", "scratchpad", "research"},
 		},
 
 		// Architect: technology choices, component boundaries, data flow.
