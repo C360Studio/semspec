@@ -316,7 +316,7 @@
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
         "tool_call_governance": {
-          "mode": "audit",
+          "mode": "enforce",
           "timeout": "1s"
         }
       }
@@ -373,19 +373,22 @@
         },
         "inline_rules": [
           {
-            "id": "block-bash-cd-workspace",
+            "id": "tool-call-governance",
             "type": "expression",
-            "name": "Block bash 'cd /workspace' (worktree leak)",
-            "description": "Audit-mode rejection of bash calls that change directory into /workspace.",
+            "name": "Tool-call governance — race-free worktree-leak deny + default approve",
+            "description": "Single consolidated rule per semstreams beta.72 / ADR-041 unified evaluator. Mirrors e2e-hybrid.json. Fires on every proposed tool call; per-action When clauses gate the publish+deny pairs; deny short-circuits remaining actions; unconditional approve at the end publishes only when no deny matched. Race-free in enforce mode.",
             "enabled": true,
             "conditions": [
-              {"field": "tool_name", "operator": "eq", "value": "bash", "required": true},
-              {"field": "command", "operator": "contains", "value": "cd /workspace", "required": true}
+              {"field": "$message.tool_name", "operator": "ne", "value": "", "required": false}
             ],
             "logic": "and",
             "on_enter": [
               {
                 "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "cd /workspace"}
+                ],
                 "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
                 "properties": {
                   "decision": "rejected",
@@ -394,59 +397,69 @@
                   "reason": "bash 'cd /workspace' blocked — stay in worktree"
                 }
               },
-              {"type": "deny", "reason": "bash 'cd /workspace' blocked — stay in worktree"}
-            ],
-            "metadata": {"category": "governance", "tier": 0}
-          },
-          {
-            "id": "block-bash-redirect-workspace",
-            "type": "expression",
-            "name": "Block bash '> /workspace/' (worktree leak via redirect)",
-            "description": "Audit-mode rejection of bash redirects writing into /workspace/.",
-            "enabled": true,
-            "conditions": [
-              {"field": "tool_name", "operator": "eq", "value": "bash", "required": true},
-              {"field": "command", "operator": "contains", "value": "> /workspace/", "required": true}
-            ],
-            "logic": "and",
-            "on_enter": [
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "cd /workspace"}
+                ],
+                "reason": "bash 'cd /workspace' blocked — stay in worktree"
+              },
               {
                 "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "> /workspace/"}
+                ],
                 "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
                 "properties": {
                   "decision": "rejected",
                   "call_id": "$message.call_id",
+                  "loop_id": "$message.loop_id",
                   "reason": "bash redirect into /workspace/ blocked — write to worktree path"
                 }
               },
-              {"type": "deny", "reason": "bash redirect into /workspace/ blocked — write to worktree path"}
-            ],
-            "metadata": {"category": "governance", "tier": 0}
-          },
-          {
-            "id": "block-bash-tee-workspace",
-            "type": "expression",
-            "name": "Block bash 'tee /workspace/' (worktree leak via tee)",
-            "description": "Audit-mode rejection of bash 'tee /workspace/' writes.",
-            "enabled": true,
-            "conditions": [
-              {"field": "tool_name", "operator": "eq", "value": "bash", "required": true},
-              {"field": "command", "operator": "contains", "value": "tee /workspace/", "required": true}
-            ],
-            "logic": "and",
-            "on_enter": [
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "> /workspace/"}
+                ],
+                "reason": "bash redirect into /workspace/ blocked — write to worktree path"
+              },
               {
                 "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "tee /workspace/"}
+                ],
                 "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
                 "properties": {
                   "decision": "rejected",
                   "call_id": "$message.call_id",
+                  "loop_id": "$message.loop_id",
                   "reason": "bash 'tee /workspace/' blocked — write to worktree path"
                 }
               },
-              {"type": "deny", "reason": "bash 'tee /workspace/' blocked — write to worktree path"}
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "tee /workspace/"}
+                ],
+                "reason": "bash 'tee /workspace/' blocked — write to worktree path"
+              },
+              {
+                "type": "publish",
+                "subject": "agent.toolcall.approved.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "approved",
+                  "call_id": "$message.call_id",
+                  "loop_id": "$message.loop_id"
+                }
+              }
             ],
-            "metadata": {"category": "governance", "tier": 0}
+            "metadata": {"category": "governance", "tier": 0, "adr": "041"}
           }
         ]
       }
