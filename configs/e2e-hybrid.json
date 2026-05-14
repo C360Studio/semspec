@@ -364,32 +364,6 @@
         "timeout": "180s"
       }
     },
-    "agentic-governance": {
-      "name": "agentic-governance",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "enable_tool_governance": true,
-        "filter_chain": {
-          "policy": "fail_fast",
-          "filters": [
-            {
-              "name": "tool_call_governance",
-              "enabled": true,
-              "tool_call_config": {
-                "blocked_command_patterns": [
-                  "cd /workspace ",
-                  "cd /workspace\n",
-                  "> /workspace/",
-                  ">> /workspace/",
-                  "tee /workspace/"
-                ]
-              }
-            }
-          ]
-        }
-      }
-    },
     "rule-processor": {
       "name": "rule-processor",
       "type": "processor",
@@ -438,7 +412,7 @@
                 "type": "publish",
                 "when": [
                   {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
-                  {"field": "$message.command", "operator": "contains", "value": "cd /workspace"}
+                  {"field": "$message.command", "operator": "regex", "value": "cd /workspace(\\s|$|[;&|])"}
                 ],
                 "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
                 "properties": {
@@ -451,7 +425,7 @@
                 "type": "deny",
                 "when": [
                   {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
-                  {"field": "$message.command", "operator": "contains", "value": "cd /workspace"}
+                  {"field": "$message.command", "operator": "regex", "value": "cd /workspace(\\s|$|[;&|])"}
                 ],
                 "reason": "bash 'cd /workspace' blocked — stay in worktree"
               },
