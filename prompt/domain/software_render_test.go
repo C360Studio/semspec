@@ -340,6 +340,40 @@ func TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits(t *testing.T) {
 	}
 }
 
+// TestRenderPlanReviewerPrompt_R2IncludesUpstreamResolutionCriterion locks
+// in criterion 7a (added 2026-05-15 alongside ArchitectureDocument.
+// UpstreamResolutions). Without it the architect's new schema would land
+// without an enforcement gate — architect could ignore upstream_resolutions
+// and the dev would still wedge on re-discovery. The criterion's signature
+// phrases ("Upstream resolution discipline", "upstream_resolutions",
+// "coordinate", "citation", "back-link") are what the model anchors on
+// when emitting Path B-shape findings; pinning them here catches a
+// well-meaning rewrite that softens the rule into uselessness.
+func TestRenderPlanReviewerPrompt_R2IncludesUpstreamResolutionCriterion(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x"}`,
+		Round:       2,
+	})
+
+	required := []string{
+		"7a.",                              // criterion number
+		"Upstream resolution discipline",   // criterion title
+		"upstream_resolutions",             // the schema field reviewer enforces
+		"coordinate",                       // structural-completeness check
+		"source_ref",                       // structural-completeness check
+		"citation",                         // structural-completeness check on APISurface
+		"Bidirectional invariant",          // back-link rule
+		"upstream_refs",                    // bidirectional partner field
+		"Goodhart guard",                   // anti-pad rule
+	}
+	for _, want := range required {
+		if !strings.Contains(out, want) {
+			t.Errorf("R2 reviewer prompt missing %q (criterion 7a regressed?)\nFull prompt:\n%s", want, out)
+		}
+	}
+}
+
 // TestRenderPlanReviewerPrompt_PriorRoundInjectsFindings pins the take-22
 // fix: on revision rounds (ReviewIteration > 0), the reviewer must see its
 // own previous findings + iteration context. Without this the reviewer is

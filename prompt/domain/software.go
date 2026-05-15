@@ -663,7 +663,8 @@ Guidelines:
 - Files in scope.create are explicit creation-intent declarations; do NOT flag scope.create entries as hallucinated paths even when they're not in the tree — that IS the entire point of the create field.
 - If a file appears in scope.include but is NOT in the project file tree AND is NOT in scope.create, flag as an error-severity violation (hallucinated path) and suggest moving it to scope.create.
 - For genuinely hallucinated paths (typos, wrong directories, files with no creation intent), suggest replacing with actual project files from the file tree.
-- Do NOT invent fields that don't exist in the plan schema — the valid scope keys are include / exclude / do_not_touch / create. Reviewers occasionally hallucinate suggestions like "scope.create" before that field shipped (it now exists, use it); never suggest fields the planner has no way to populate.`,
+- Do NOT invent fields that don't exist in the plan schema — the valid scope keys are include / exclude / do_not_touch / create. Reviewers occasionally hallucinate suggestions like "scope.create" before that field shipped (it now exists, use it); never suggest fields the planner has no way to populate.
+- The architecture document may include an upstream_resolutions array (added 2026-05-15) where the architect records the resolved coordinate + API surfaces of every external library the project integrates with. The dev no longer has a research sub-agent to re-discover those surfaces mid-cycle. Apply the round-2 criterion 7a (Upstream resolution discipline) when reviewing architecture: every external lib named must have a paired resolution; every resolution must carry a concrete coordinate + citations. Missing or vague resolutions are the canonical upstream defect that wedges the dev on hard fixtures.`,
 		},
 		{
 			// User-message renderer for plan-reviewer (rounds 1 + 2). Replaces
