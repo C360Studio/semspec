@@ -54,6 +54,24 @@ services:
         SANDBOX_UID: ${SANDBOX_UID:-1000}
         SANDBOX_GID: ${SANDBOX_GID:-1000}
     command: ["--addr", ":8090", "--repo", "/workspace"]
+    environment:
+      # GitHub Packages credentials passthrough — needed when the dev's
+      # build.gradle resolves dependencies from maven.pkg.github.com (e.g.,
+      # OpenSensorHub artifacts on hybrid/hard meshtastic). GitHub Packages
+      # requires authenticated reads even for PUBLIC packages — a quirk
+      # that distinguishes it from Maven Central. Without these, dependency
+      # resolution returns 401 and the dev fabricates stub classes to make
+      # the build pass (take-29 forensics 2026-05-15: dev cp'd
+      # /tmp/osh-stubs/classes/* into worktree, tests passed against fake
+      # AbstractSensorModule with empty methods, no real OSH integration).
+      #
+      # GITHUB_ACTOR is required to be NON-EMPTY but the value is not
+      # functionally checked for read access to public packages — the
+      # token's scope is what gates the read. We default to "USERNAME"
+      # via .env so the project doesn't couple to any specific human's
+      # GitHub identity.
+      GITHUB_ACTOR: ${GITHUB_ACTOR:-USERNAME}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
     volumes:
       # Mirrors the semsource workspace mount — see comment there. Both
       # services MUST point at the same fixture or planner scope checks
