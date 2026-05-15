@@ -80,10 +80,41 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 	}
 
 	if rg.ReviewFindings != "" {
-		fmt.Fprintf(&sb, "\n## Previous Review Findings (Address These)\n\nThe previous set of requirements was reviewed and rejected. Address ALL of the following findings:\n\n%s\n", rg.ReviewFindings)
+		fmt.Fprintf(&sb, "\n## Previous Review Findings (Address These)\n\nThe previous set of requirements was reviewed and rejected. Address ALL of the following findings:\n\n%s\n%s", rg.ReviewFindings, reviewFindingsActionDirective())
 	}
 
 	return sb.String()
+}
+
+// reviewFindingsActionDirective is the meta-rule appended to every
+// regen prompt's review-findings block. It tells the LLM to anchor on
+// the structured "Action: VERB `value` (TO|FROM|IN) `field`" line that
+// writeViolationFinding renders before any prose. The prose Suggestion
+// can drift toward bidirectional language ("ensure consistency between
+// A and B"); the directive is the reviewer's committed direction. Take-24
+// hybrid/hard (2026-05-14) escalated because a prose suggestion was
+// satisfied in the WRONG direction (regen REMOVED a file from
+// requirement.files_owned when the directive said ADD to scope.create).
+// Including this rule directly under the findings block keeps the
+// guidance close to where the model needs it — adding it to the system
+// prompt was tried in a draft and lost attention by the time the
+// findings block scrolled into the model's window.
+func reviewFindingsActionDirective() string {
+	return `
+**HOW TO READ FINDINGS:** Each error-severity violation begins with an
+` + "`Action:`" + ` line in the form ` + "`Action: VERB `value` (TO|FROM|IN) `field``" + `.
+The Action line is the reviewer's committed remediation direction —
+EXECUTE IT VERBATIM. Do NOT infer the inverse direction from the prose
+Suggestion ("remove X from files_owned to make it consistent with
+scope.create" is not a valid satisfaction of "Action: ADD X TO
+scope.create"). When in doubt, do exactly what the Action line says
+and ignore any prose that points the other way. If the directive
+itself is wrong (the reviewer asked for the opposite of what the
+plan needs), apply it anyway — the next review round will surface a
+new finding pointing at the bad directive, which is the right place
+to dispute it.
+
+`
 }
 
 // renderPlannerPrompt produces the planner agent's user message. Two paths:
@@ -102,6 +133,12 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 			sb.WriteString("\n```\n\n")
 		}
 		sb.WriteString(p.RevisionPrompt)
+		// Action-directive meta-rule appended after the findings block so
+		// the planner anchors on the structured directive over prose.
+		// Same fix-cause as requirement-generator/scenario-generator/
+		// architect — see reviewFindingsActionDirective() comments.
+		sb.WriteString("\n")
+		sb.WriteString(reviewFindingsActionDirective())
 		// Re-anchor the revision flow against two failure modes seen on
 		// 2026-05-03 v8: (1) the planner ignoring scope.create even when
 		// the reviewer suggested it by name, (2) the planner panicking
@@ -110,7 +147,7 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 		// revision prompt so it fires fresh on every revision turn —
 		// the system-prompt fragment alone is too far away in a long
 		// conversation for example-anchoring to stick.
-		sb.WriteString("\n\n## Scope Schema Reminder (ALWAYS APPLIES)\n\n")
+		sb.WriteString("\n## Scope Schema Reminder (ALWAYS APPLIES)\n\n")
 		sb.WriteString("scope.include = files that ALREADY EXIST and the plan will read or modify.\n")
 		sb.WriteString("scope.create  = files the plan will CREATE that don't exist yet.\n")
 		sb.WriteString("scope.exclude / scope.do_not_touch = boundaries (rarely used).\n\n")
@@ -356,7 +393,7 @@ Please fix the issue and ensure your response is valid JSON matching the require
 The previous set of scenarios was reviewed and rejected. Address ALL of the following findings:
 
 %s
-`, p.ReviewFindings)
+%s`, p.ReviewFindings, reviewFindingsActionDirective())
 	}
 
 	return base
@@ -401,7 +438,8 @@ Please fix the issue and ensure your deliverable matches the required structure.
 
 The previous round was reviewed and rejected. Read every finding before deciding actor / integration / test_surface shape — repeating the same shape will fail the next review the same way.
 
-%s`, p.ReviewFindings)
+%s
+%s`, p.ReviewFindings, reviewFindingsActionDirective())
 	}
 
 	return fmt.Sprintf(`Analyze the following plan and its requirements to produce architecture decisions.

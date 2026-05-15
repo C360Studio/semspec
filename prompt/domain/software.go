@@ -708,7 +708,23 @@ Guidelines:
   ]
 }
 
-For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.`,
+For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields. Every error-severity violation MUST also populate "action", "target_field", and "target_value" so the regen agent has an unambiguous remediation directive (see directive rules below).
+
+Example error finding with the full structured directive:
+
+{
+  "severity": "error",
+  "status": "violation",
+  "category": "completeness",
+  "phase": "requirements",
+  "target_id": "requirement.X.2",
+  "action": "add",
+  "target_field": "scope.create",
+  "target_value": "src/main/java/org/sensorhub/driver/meshtastic/MeshtasticConnection.java",
+  "issue": "ARCH-001 names MeshtasticConnection but plan.scope.create lacks the file.",
+  "suggestion": "Add the connection class file to scope.create so the plan declares its creation intent.",
+  "evidence": "ARCH-001.components = [Driver, Connection, Message]; plan.scope.create = [Driver, DriverConfig, Message]"
+}`,
 				`CRITICAL: findings drive the verdict, not summary. The summary is informational —
 the verdict gate is computed from findings. If you observe ANY plan defect (broken
 scope path, missing field, conflicting boundary, hallucinated file), you MUST
@@ -717,6 +733,44 @@ critical issue described only in summary, with verdict=approved and clean
 findings, is treated as approved and the plan ships broken. Every concern in
 summary needs a matching error-severity finding. If you have nothing rising to
 error severity, the plan is approved — say so cleanly without hedging in summary.
+
+ACTION DIRECTIVE RULES (every error-severity violation):
+
+1. "action" is the imperative verb. Allowed values: "add", "remove", "rename",
+   "replace", "move". Pick exactly one. The verb names the SINGLE mutation the
+   regen agent will perform.
+
+2. "target_field" names the SINGLE plan field the action mutates. Examples:
+   "scope.create", "scope.include", "requirement.<id>.files_owned",
+   "architecture.decisions[<arch_id>].components", "scenario.<id>.given".
+   Use dotted notation; index into arrays with [<id>] or [<n>]. ONE field
+   per finding — if you find a discrepancy that touches multiple fields,
+   emit MULTIPLE findings (one directive each), do not collapse them.
+
+3. "target_value" is the value being mutated. For "add" it is the new entry
+   (full path / full text). For "remove" it is the entry to drop. For
+   "rename" or "replace" the format is "old → new". Required whenever
+   "action" is set.
+
+4. "suggestion" remains free prose for human readers and as a fallback when
+   the regen agent can't fully interpret the structured fields. The
+   suggestion MUST be consistent with the directive — do NOT write "ensure
+   consistency between A and B" or "make X match Y" prose; the regen LLM
+   will pick a direction at random and you committed to one in "action".
+   Lead the suggestion with the same imperative verb you used in "action"
+   ("Add ...", "Remove ...", "Rename ...").
+
+5. The regen agent ALWAYS executes the directive (action + target_field +
+   target_value) verbatim and ignores ambiguous prose. So if the directive
+   is wrong the next round will surface a NEW finding pointing at your
+   bad directive — not silently bounce on the same finding shape. Commit
+   to the right direction with confidence.
+
+This rule was added 2026-05-14 after take-24 hybrid/hard escalated when a
+prose-only suggestion ("update scope.create to include X AND ensure
+consistency between scope.create and files_owned") was interpreted by
+regen as "remove X from files_owned" instead of "add X to scope.create".
+Structured directives close that ambiguity at the source.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 			),
