@@ -133,6 +133,67 @@ func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 	if !foundUR {
 		t.Errorf("component_boundaries.items.required missing 'upstream_refs' (bidirectional partner regressed)")
 	}
+
+	// upstream_resolutions.items must require role + test_harness (the
+	// Testcontainers-led integration tier additions — 2026-05-15). Mirror
+	// of the take-28 wedge prevention: Go struct + persona without the
+	// strict schema = silent field drop on strict-mode endpoints.
+	for _, want := range []string{"role", "test_harness"} {
+		found := false
+		for _, r := range urRequired {
+			if r == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("upstream_resolutions.items.required missing %q (Testcontainers-tier wiring regressed)", want)
+		}
+	}
+
+	// role must be an enum constraining the LLM to known values.
+	role, _ := urItemProps["role"].(map[string]any)
+	if role == nil {
+		t.Fatal("upstream_resolutions.items.role property missing")
+	}
+	roleEnum, _ := role["enum"].([]string)
+	if len(roleEnum) == 0 {
+		t.Error("upstream_resolutions.items.role.enum missing — strict mode requires constrained values to prevent free-form drift")
+	}
+	wantRoles := map[string]bool{"build_dep": true, "runtime_dep": true, "integration_target": true}
+	for _, r := range roleEnum {
+		if !wantRoles[r] {
+			t.Errorf("unexpected role enum value %q", r)
+		}
+		delete(wantRoles, r)
+	}
+	if len(wantRoles) > 0 {
+		t.Errorf("role enum missing values: %v", wantRoles)
+	}
+
+	// test_harness must be a nullable object so resolutions with role !=
+	// integration_target can satisfy "required" with null.
+	th, _ := urItemProps["test_harness"].(map[string]any)
+	if th == nil {
+		t.Fatal("upstream_resolutions.items.test_harness property missing")
+	}
+	thType, _ := th["type"].([]any)
+	if len(thType) != 2 || thType[0] != "object" || thType[1] != "null" {
+		t.Errorf("test_harness.type = %v, want [object, null] for nullable strict-mode shape", th["type"])
+	}
+	thRequired, _ := th["required"].([]string)
+	for _, want := range []string{"library", "image", "access_method"} {
+		found := false
+		for _, r := range thRequired {
+			if r == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("test_harness.required missing %q", want)
+		}
+	}
 }
 
 func TestToolsForDeliverable_SwapsSubmitWork(t *testing.T) {

@@ -390,8 +390,33 @@ func architectureSchema() map[string]any {
 							"items":       map[string]any{"type": "string"},
 							"description": "component_boundaries[].name entries that depend on this resolution. Bidirectional with component_boundaries[].upstream_refs — keeps 'what depends on this lib?' answerable without scanning every component.",
 						},
+						"role": map[string]any{
+							"type":        "string",
+							"description": "How this dep is consumed at test time. 'build_dep' = compile-time only (annotation processor, type stubs, codegen). 'runtime_dep' = library/framework called in-process; unit tests use it directly. 'integration_target' = separate process the dev talks to over a wire protocol (daemon, broker, database); REQUIRES test_harness so the dev's tests spawn a real container via Testcontainers and exercise the real wire format. Default to 'runtime_dep' when uncertain — it's the most common case.",
+							"enum":        []string{"build_dep", "runtime_dep", "integration_target"},
+						},
+						"test_harness": map[string]any{
+							"type":        []any{"object", "null"},
+							"description": "REQUIRED when role == 'integration_target'; set null otherwise. Tells the dev which Testcontainers binding to import and which public image to spawn. Goodhart-resistant: if the image doesn't exist on the registry, Testcontainers.start() fails at test time and the dev cannot fabricate a stub the way they can with a flat-dir JAR.",
+							"properties": map[string]any{
+								"library": map[string]any{
+									"type":        "string",
+									"description": "Testcontainers binding for the project's language. Examples: 'testcontainers-java' (Maven/Gradle), 'testcontainers-go' (Go), 'testcontainers-python' (pytest), 'testcontainers-node' (vitest/jest), 'testcontainers-dotnet', 'testcontainers-rust'.",
+								},
+								"image": map[string]any{
+									"type":        "string",
+									"description": "Public container image coordinate. Format 'repo/name:tag' or 'library/name:tag' on Docker Hub. Cite this from the upstream project's docker docs (web_search for '{project} docker image' or the project's docker-compose example). Examples: 'meshtastic/meshtasticd:latest', 'redis:7-alpine', 'postgres:16-alpine', 'confluentinc/cp-kafka:7.5.0'.",
+								},
+								"access_method": map[string]any{
+									"type":        "string",
+									"description": "Protocol and container port the dev's code connects to. Format '<protocol>:<port>'. Testcontainers exposes the port on a host-mapped random port; the dev calls GetMappedPort(<port>) at test time. Examples: 'tcp:4403', 'http:8080', 'grpc:9000', 'amqp:5672'.",
+								},
+							},
+							"required":             []string{"library", "image", "access_method"},
+							"additionalProperties": false,
+						},
 					},
-					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by"},
+					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by", "role", "test_harness"},
 					"additionalProperties": false,
 				},
 			},

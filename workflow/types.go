@@ -809,6 +809,74 @@ type UpstreamResolution struct {
 	// keeps "what depends on this lib?" answerable without scanning
 	// every component.
 	UsedBy []string `json:"used_by,omitempty"`
+
+	// Role classifies how the dep is consumed at test time. Drives the
+	// reviewer's test-strategy coupling and what kind of test the dev
+	// authors:
+	//   - "build_dep": compile-time only (annotation processor, type
+	//     stubs, codegen). No test-harness obligation.
+	//   - "runtime_dep": linked and called in-process. Library or
+	//     framework whose API is exercised directly in unit tests; no
+	//     Testcontainers needed.
+	//   - "integration_target": a separate process the dev's code talks
+	//     to over a wire protocol (daemon, broker, database). REQUIRES
+	//     a non-nil TestHarness so the dev's integration tests spawn a
+	//     real container via Testcontainers and exercise the real wire
+	//     format — closes the take-19/take-29 stub-JAR fabrication
+	//     pattern at the TDD-loop layer rather than at the QA gate.
+	//
+	// Empty string is treated as "runtime_dep" (the most common case).
+	// Added 2026-05-15 alongside the Testcontainers-led integration
+	// tier — see [[testcontainers-led-integration-tier]].
+	Role string `json:"role,omitempty"`
+
+	// TestHarness describes how the dev's integration tests reach a
+	// service-style upstream dep. REQUIRED when Role ==
+	// "integration_target" and IGNORED otherwise. Reviewer cross-checks
+	// this — declared integration_target with nil TestHarness is the
+	// canonical incomplete shape.
+	TestHarness *TestHarness `json:"test_harness,omitempty"`
+}
+
+// TestHarness describes how the dev's integration tests reach a
+// service-style upstream dep at test time. Populated on every
+// UpstreamResolution whose Role == "integration_target"; nil otherwise.
+//
+// Goodhart resistance: Image is a coordinate the docker daemon pulls at
+// test time. If the agent fabricates a non-existent image,
+// Testcontainers.start() fails and the test goes red immediately —
+// the dev cannot silently substitute a stub the way they could with a
+// fabricated JAR in a local-maven-repo flat-dir.
+//
+// Added 2026-05-15 alongside the Testcontainers-led integration tier.
+type TestHarness struct {
+	// Library is the Testcontainers binding the dev imports.
+	// Pick the binding that matches the project's test stack:
+	//   - "testcontainers-java": Maven/Gradle JVM projects.
+	//   - "testcontainers-go": Go projects.
+	//   - "testcontainers-python": pytest/unittest.
+	//   - "testcontainers-node": vitest/jest.
+	//   - "testcontainers-dotnet": NUnit/xUnit/MSTest.
+	//   - "testcontainers-rust": cargo test.
+	Library string `json:"library"`
+
+	// Image is the public container image coordinate Testcontainers
+	// spawns. Format "repo/name:tag" or "library/name:tag" for Docker
+	// Hub. Architect cites this from the upstream project's docs
+	// (web_search for "{project} docker image" or the project's
+	// docker-compose example).
+	//
+	// Examples: "meshtastic/meshtasticd:latest", "redis:7-alpine",
+	// "postgres:16-alpine", "confluentinc/cp-kafka:7.5.0".
+	Image string `json:"image"`
+
+	// AccessMethod tells the dev how their code reaches the spawned
+	// container. Format "<protocol>:<port>" — Testcontainers exposes
+	// the port on a host-mapped random port; the dev calls
+	// GetMappedPort(<port>) at test time.
+	//
+	// Examples: "tcp:4403", "http:8080", "grpc:9000", "amqp:5672".
+	AccessMethod string `json:"access_method"`
 }
 
 // APISurface is a single resolved external symbol — a class, method,

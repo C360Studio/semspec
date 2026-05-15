@@ -108,6 +108,80 @@ func TestArchitectureDocument_NewFieldsOmittedWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestUpstreamResolution_TestHarnessRoundTrip locks in the
+// Testcontainers-tier additions from 2026-05-15. Role +
+// TestHarness must survive marshal/unmarshal so the reviewer's
+// cross-check (declared integration_target ⇒ non-nil TestHarness with
+// real image coordinate) has reliable structural data to evaluate.
+func TestUpstreamResolution_TestHarnessRoundTrip(t *testing.T) {
+	resolution := UpstreamResolution{
+		Name:       "Meshtastic daemon",
+		Coordinate: "github.com/meshtastic/firmware",
+		SourceRef:  "https://meshtastic.org/docs/software/linux-native/",
+		APIs: []APISurface{
+			{
+				Symbol:    "ToRadio",
+				Kind:      "type",
+				Signature: "message ToRadio { oneof payload_variant { ... } }",
+				Citation:  "https://github.com/meshtastic/protobufs/blob/main/meshtastic/mesh.proto",
+			},
+		},
+		UsedBy: []string{"driver"},
+		Role:   "integration_target",
+		TestHarness: &TestHarness{
+			Library:      "testcontainers-java",
+			Image:        "meshtastic/meshtasticd:latest",
+			AccessMethod: "tcp:4403",
+		},
+	}
+
+	data, err := json.Marshal(&resolution)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var parsed UpstreamResolution
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if parsed.Role != "integration_target" {
+		t.Errorf("Role lost: %q", parsed.Role)
+	}
+	if parsed.TestHarness == nil {
+		t.Fatal("TestHarness lost — must round-trip non-nil for integration_target")
+	}
+	if got, want := parsed.TestHarness.Library, "testcontainers-java"; got != want {
+		t.Errorf("TestHarness.Library = %q, want %q", got, want)
+	}
+	if got, want := parsed.TestHarness.Image, "meshtastic/meshtasticd:latest"; got != want {
+		t.Errorf("TestHarness.Image = %q, want %q", got, want)
+	}
+	if got, want := parsed.TestHarness.AccessMethod, "tcp:4403"; got != want {
+		t.Errorf("TestHarness.AccessMethod = %q, want %q", got, want)
+	}
+}
+
+// TestUpstreamResolution_TestHarnessOmittedForRuntimeDep verifies that
+// a runtime_dep resolution (the common case — a library the dev imports
+// rather than a service it talks to) omits test_harness from the JSON
+// output. omitempty on the pointer field is what makes this work.
+func TestUpstreamResolution_TestHarnessOmittedForRuntimeDep(t *testing.T) {
+	resolution := UpstreamResolution{
+		Name:       "OpenSensorHub Core",
+		Coordinate: "org.sensorhub:sensorhub-core:2.0.0",
+		SourceRef:  "https://central.sonatype.com/artifact/org.sensorhub/sensorhub-core",
+		Role:       "runtime_dep",
+	}
+	data, err := json.Marshal(&resolution)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	got := string(data)
+	if strings.Contains(got, `"test_harness"`) {
+		t.Errorf("test_harness should be omitted for runtime_dep: %s", got)
+	}
+}
+
 // TestArchitectureDocument_BackwardCompat verifies a JSON document
 // produced before the upstream-strengthening schema landed (no
 // upstream_resolutions, no upstream_refs) deserializes cleanly with

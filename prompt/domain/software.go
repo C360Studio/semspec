@@ -1252,7 +1252,12 @@ BEFORE submit_work:
    - source_ref: the URL or file path where you verified the coordinate is valid (sonatype page, package-lock entry, github release tag URL).
    - apis: at least one APISurface entry naming a symbol the developer will integrate against. Each APISurface MUST have a citation (file path or URL where you verified the signature). Without citations the surface is a guess; resubmit after the missing reads.
    - used_by: names of component_boundaries entries that depend on this resolution (bidirectional with component_boundaries[].upstream_refs).
-   This is the load-bearing rule for upstream-strengthening: the dev no longer needs a research sub-agent because YOU pre-resolved everything they would have asked for. Take-23 (2026-05-13) wedged at iter=80 with 35 external file reads + 0 worktree writes specifically because architect named OSH classes without resolving their constructor + lifecycle into the deliverable; the dev had to discover them mid-cycle.
+   - role: classify how the dep is consumed at test time. "build_dep" = compile-time only (annotation processor, codegen). "runtime_dep" = library/framework called in-process (most cases — the dev imports the JAR/module and tests its methods directly). "integration_target" = a separate process the dev's code talks to over a wire protocol (daemon, broker, database, gRPC service). When you cannot tell, default to "runtime_dep".
+   - test_harness: REQUIRED when role == "integration_target"; OMIT otherwise. Tells the dev how to spin up the real service for integration tests via Testcontainers (sandbox has docker, dev's TDD cycle exercises real upstream). Three fields:
+     • library: which Testcontainers binding — "testcontainers-java" (Maven/Gradle), "testcontainers-go", "testcontainers-python", "testcontainers-node", "testcontainers-dotnet", "testcontainers-rust". Match the project's test stack from step 2.
+     • image: the public container image coordinate the dev will spawn. Format "repo/name:tag". Cite this from web_search of the upstream's docker docs OR the project's docker-compose example. Vague hints like "the official image" do NOT satisfy — find the specific repo path and tag. If no public image exists, the upstream isn't an integration_target via this mechanism — classify it as runtime_dep instead and document the limitation in your notes.
+     • access_method: format "<protocol>:<port>". Whatever wire protocol the dev's code uses to reach the container, on whatever port the image exposes. Testcontainers maps this to a random host port at start; the dev calls GetMappedPort(<port>) in test code.
+   This is the load-bearing rule for upstream-strengthening: the dev no longer needs a research sub-agent because YOU pre-resolved everything they would have asked for. Take-23 (2026-05-13) wedged at iter=80 with 35 external file reads + 0 worktree writes specifically because architect named OSH classes without resolving their constructor + lifecycle into the deliverable; the dev had to discover them mid-cycle. Take-29 (2026-05-15) hit 9/9 green on hard but with fabricated stub JARs because no integration_target was declared and the reviewer had no anchor to reject mock-based tests.
 
 7. For EVERY component in component_boundaries that depends on an external library: populate component_boundaries[].upstream_refs with the names of the matching upstream_resolutions entries. Bidirectional with upstream_resolutions[].used_by — both sides must agree.
 
@@ -1318,12 +1323,36 @@ Do NOT instruct the developer to "explore the upstream codebase" or "research th
           "citation": "https://github.com/opensensorhub/osh-core/blob/v2.0.0/sensorhub-core/src/main/java/org/sensorhub/api/module/AbstractSensorModule.java#L45-L52"
         }
       ],
-      "used_by": ["driver"]
+      "used_by": ["driver"],
+      "role": "runtime_dep",
+      "test_harness": null
+    },
+    {
+      "name": "Postgres backing store",
+      "coordinate": "postgres:16-alpine",
+      "source_ref": "https://hub.docker.com/_/postgres",
+      "apis": [
+        {
+          "symbol": "CREATE TABLE",
+          "kind": "type",
+          "signature": "DDL via JDBC driver",
+          "lifecycle": "connect() -> exec(SQL) -> close()",
+          "notes": "Use jdbc:postgresql://${host}:${port}/${db} from getJdbcUrl()",
+          "citation": "https://www.postgresql.org/docs/16/sql-createtable.html"
+        }
+      ],
+      "used_by": ["repository"],
+      "role": "integration_target",
+      "test_harness": {
+        "library": "testcontainers-java",
+        "image": "postgres:16-alpine",
+        "access_method": "tcp:5432"
+      }
     }
   ]
 }
 
-Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string). upstream_resolutions is required when any technology_choice / integration / component_boundary names an external library, API, or framework — in that case at least one entry per named external must appear, with non-empty coordinate + source_ref + at least one apis[] entry + used_by linking back to component_boundaries.`,
+Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations, upstream_resolutions, test_surface — all arrays except data_flow (string) and test_surface (object). Inside each upstream_resolutions[] entry: name, coordinate, source_ref, apis, used_by, role, AND test_harness (set test_harness to null when role != "integration_target"; set to an object with library/image/access_method when role == "integration_target"). Inside each apis[] entry: symbol, kind, signature, citation are required; lifecycle and notes may be null. Vague coordinates ("OSH 2.x", "latest Postgres") do NOT satisfy — find the specific version.`,
 				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.
 
 The upstream_resolutions[] field is the load-bearing piece of this output (added 2026-05-15). Skipping it OR populating with vague "OSH 2.x" coordinates instead of concrete "org.sensorhub:sensorhub-core:2.0.0" is the canonical failure mode that wedges the developer downstream — they end up re-discovering what you should have resolved. Cite every API surface you record; the citation is what makes it a resolution rather than a guess.`,
