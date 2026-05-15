@@ -1530,10 +1530,14 @@ func (c *Component) availableToolNames() []string {
 	// 2026-05-08 take-14 follow-up — no executor implements it, so its
 	// presence here just bloated the wire palette and confused small
 	// models that picked it instead of submit_work.
+	// research SHELVED 2026-05-15 — removed from dev's wire palette
+	// after take-27 evidence showed dispatch worked but didn't fix
+	// the actual wedge shape (RepeatToolFailure on bash 404
+	// worktree-not-found). Pivoted to upstream-strengthening. See
+	// [[research-shelved-pivot-to-upstream-strengthening-2026-05-15]].
 	return []string{
 		"bash", "submit_work", "ask_question",
 		"write_todos", "scratchpad",
-		"research",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task",

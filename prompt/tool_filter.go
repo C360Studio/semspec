@@ -107,7 +107,19 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// 35 external file reads with 0 worktree writes; research()
 		// is the structural fix for that pattern.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "web_search", "http_request", "write_todos", "scratchpad", "research"},
+			// research SHELVED 2026-05-15. Take-27 evidence: dev called
+			// research 4× with successful dispatch + valid researcher
+			// answers, but answers arrived past the dev's effective wait
+			// window AND the dev wedged on the same RepeatToolFailure
+			// (bash 404 worktree-not-found) shape that take-23 had —
+			// meaning context flood was not the load-bearing wedge cause.
+			// Pivoting to upstream-strengthening (architect/req-gen/plan-
+			// reviewer make requirements small enough that dev doesn't
+			// need to discover external API surfaces). Code paths stay
+			// buildable for revival if future evidence shows context
+			// flood is the actual bottleneck. See [[research-shelved-
+			// pivot-to-upstream-strengthening-2026-05-15]].
+			AllowExact: []string{"bash", "submit_work", "web_search", "http_request", "write_todos", "scratchpad"},
 		},
 
 		// Architect: technology choices, component boundaries, data flow.

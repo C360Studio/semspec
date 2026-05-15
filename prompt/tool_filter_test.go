@@ -38,13 +38,12 @@ func TestFilterTools_DeveloperPalette(t *testing.T) {
 	// Load-bearing entries — losing any of these regresses an adoption
 	// story we built explicit memory + commits around.
 	required := []string{
-		"bash",            // primary execution surface
-		"submit_work",     // terminal
-		"web_search",      // upstream discovery
-		"http_request",    // canonical fetch
-		"write_todos",     // 613ca6c wiring fix
-		"scratchpad",      // 613ca6c wiring fix
-		"research",        // R4 wiring
+		"bash",         // primary execution surface
+		"submit_work",  // terminal
+		"web_search",   // upstream discovery
+		"http_request", // canonical fetch
+		"write_todos",  // 613ca6c wiring fix
+		"scratchpad",   // 613ca6c wiring fix
 	}
 	for _, name := range required {
 		if !slices.Contains(allowed, name) {
@@ -52,12 +51,16 @@ func TestFilterTools_DeveloperPalette(t *testing.T) {
 		}
 	}
 
-	// Graph tools are filtered OUT for the developer (removed 2026-05-12
-	// per the package header). Pin the exclusion so a future revert is
-	// visible in the diff.
-	for _, name := range []string{"graph_search", "graph_query", "graph_summary"} {
+	// Tools filtered OUT for the developer.
+	// - graph_* removed 2026-05-12 (per package header)
+	// - research SHELVED 2026-05-15 — take-27 evidence showed dispatch
+	//   worked but didn't fix the actual wedge shape; pivoted to upstream-
+	//   strengthening. See [[research-shelved-pivot-to-upstream-
+	//   strengthening-2026-05-15]]. Pin the exclusion so re-enabling is
+	//   a deliberate diff, not an accidental revert.
+	for _, name := range []string{"graph_search", "graph_query", "graph_summary", "research"} {
 		if slices.Contains(allowed, name) {
-			t.Errorf("RoleDeveloper palette unexpectedly includes %q (graph removal regressed)", name)
+			t.Errorf("RoleDeveloper palette unexpectedly includes %q (regressed previously-removed tool)", name)
 		}
 	}
 }
