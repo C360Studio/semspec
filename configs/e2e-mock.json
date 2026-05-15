@@ -852,6 +852,7 @@
     "AGENT": {
       "subjects": [
         "agent.task.>",
+        "agent.research.requested.>",
         "dev.task.>",
         "agent.request.>",
         "agent.response.>",

@@ -153,6 +153,23 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 
+	// Validate the AGENT stream actually covers our FilterSubject BEFORE
+	// creating the consumer. JetStream lets you create a consumer with a
+	// FilterSubject that matches no stream subjects — the consumer is
+	// "successful" but never receives any messages, and every publish to
+	// that subject will hang waiting for a stream-ack that never comes.
+	// Take-26 (2026-05-14) hit this: AGENT stream lacked
+	// agent.research.requested.> entirely, so every dev research() call's
+	// publish timed out and the dev wasted up to 5 min per call. The
+	// validation here would have failed Start() at boot with a clear
+	// error pointing at the missing config entry instead of letting the
+	// gap surface as silent runtime hangs in paid runs.
+	if err := c.validateStreamCoversFilter(ctx, defaultStreamName, filterSubjectAll); err != nil {
+		cancel()
+		return fmt.Errorf("researcher-manager: stream %q does not cover filter %q: %w (add the subject to the AGENT stream's subjects list in your config)",
+			defaultStreamName, filterSubjectAll, err)
+	}
+
 	consumerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    defaultStreamName,
 		ConsumerName:  componentName,
@@ -174,6 +191,67 @@ func (c *Component) Start(ctx context.Context) error {
 		slog.String("filter", consumerCfg.FilterSubject),
 	)
 	return nil
+}
+
+// validateStreamCoversFilter asserts that at least one of the stream's
+// configured subjects is a NATS-pattern superset of filter. Returns nil
+// when the stream covers filter, non-nil error otherwise.
+//
+// Coverage rules (NATS subject pattern semantics):
+//   - exact match: stream subject == filter (e.g. both "agent.research.requested.>")
+//   - parent ">" wildcard: a stream subject ending in ">" covers any
+//     filter whose tokens start with the stream subject's prefix
+//     (e.g. stream "agent.>" covers filter "agent.research.requested.>")
+//   - "*" tokens are NOT specially handled here because filter is
+//     deployment-fixed by us, not user-tunable; if we ever start using
+//     "*" tokens in filter, this needs a real subject-matcher.
+//
+// Returns a clear error pointing at what to add to config when the
+// stream is missing the required subject.
+func (c *Component) validateStreamCoversFilter(ctx context.Context, streamName, filter string) error {
+	stream, err := c.natsClient.GetStream(ctx, streamName)
+	if err != nil {
+		return fmt.Errorf("get stream %q: %w", streamName, err)
+	}
+	info, err := stream.Info(ctx)
+	if err != nil {
+		return fmt.Errorf("get stream info for %q: %w", streamName, err)
+	}
+	for _, subj := range info.Config.Subjects {
+		if subjectCovers(subj, filter) {
+			return nil
+		}
+	}
+	return fmt.Errorf("stream subjects %v do not cover %q",
+		info.Config.Subjects, filter)
+}
+
+// subjectCovers returns true when a stream subject pattern (parent)
+// is a NATS-superset of a consumer filter (child). Handles exact match
+// and trailing-">" parent. Token-by-token comparison; case-sensitive
+// per NATS conventions.
+func subjectCovers(parent, child string) bool {
+	if parent == child {
+		return true
+	}
+	parentTokens := strings.Split(parent, ".")
+	if len(parentTokens) == 0 || parentTokens[len(parentTokens)-1] != ">" {
+		// Without a trailing ">" only exact matches count; the pattern
+		// "*" tokens are not handled here (see comment on
+		// validateStreamCoversFilter).
+		return false
+	}
+	prefix := parentTokens[:len(parentTokens)-1]
+	childTokens := strings.Split(child, ".")
+	if len(childTokens) < len(prefix) {
+		return false
+	}
+	for i, p := range prefix {
+		if childTokens[i] != p {
+			return false
+		}
+	}
+	return true
 }
 
 // Stop gracefully halts the component.
