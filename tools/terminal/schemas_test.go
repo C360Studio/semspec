@@ -12,7 +12,7 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 		{"plan", []string{"goal", "context"}},
 		{"requirements", []string{"requirements"}},
 		{"scenarios", []string{"scenarios"}},
-		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"}},
+		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "test_surface"}},
 		{"review", []string{"verdict", "feedback"}},
 		{"developer", []string{"summary", "files_modified"}},
 		{"lesson", []string{"summary", "detail", "injection_form", "root_cause_role"}},
@@ -53,6 +53,85 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestArchitectureSchema_UpstreamResolutionsShape locks in the strict-
+// schema additions from take-28's wiring-bug fix. The architect's
+// submit_work response_format is sent to the model with Strict: true
+// (tools/terminal/response_format.go:64), which means the model CANNOT
+// emit fields the schema doesn't include. Take-28 wedged because we
+// added upstream_resolutions to the Go struct + persona but missed the
+// strict JSON schema — gemini-pro silently dropped the field across two
+// revision iters even with explicit reviewer feedback. Pinning the
+// shape here catches the same wiring miss recurring (mirror of the
+// take-22 write_todos-not-in-palette pattern).
+func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
+	schema := schemaForDeliverable("architecture")
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("architecture schema must have properties")
+	}
+
+	// upstream_resolutions must be a top-level array.
+	ur, ok := props["upstream_resolutions"].(map[string]any)
+	if !ok {
+		t.Fatal("architecture schema missing upstream_resolutions property — wiring bug regressed")
+	}
+	if ur["type"] != "array" {
+		t.Errorf("upstream_resolutions.type = %v, want array", ur["type"])
+	}
+
+	// Each item must require name + coordinate + source_ref + apis + used_by.
+	urItems, ok := ur["items"].(map[string]any)
+	if !ok {
+		t.Fatal("upstream_resolutions.items missing")
+	}
+	urRequired, _ := urItems["required"].([]string)
+	for _, want := range []string{"name", "coordinate", "source_ref", "apis", "used_by"} {
+		found := false
+		for _, r := range urRequired {
+			if r == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("upstream_resolutions.items.required missing %q (got %v)", want, urRequired)
+		}
+	}
+
+	// apis[].items must require symbol/kind/signature/lifecycle/notes/citation.
+	urItemProps, _ := urItems["properties"].(map[string]any)
+	apis, _ := urItemProps["apis"].(map[string]any)
+	apisItems, _ := apis["items"].(map[string]any)
+	apisRequired, _ := apisItems["required"].([]string)
+	for _, want := range []string{"symbol", "kind", "signature", "citation"} {
+		found := false
+		for _, r := range apisRequired {
+			if r == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("upstream_resolutions.items.apis.items.required missing %q (got %v)", want, apisRequired)
+		}
+	}
+
+	// component_boundaries.items must require upstream_refs (bidirectional partner).
+	cb, _ := props["component_boundaries"].(map[string]any)
+	cbItems, _ := cb["items"].(map[string]any)
+	cbRequired, _ := cbItems["required"].([]string)
+	foundUR := false
+	for _, r := range cbRequired {
+		if r == "upstream_refs" {
+			foundUR = true
+			break
+		}
+	}
+	if !foundUR {
+		t.Errorf("component_boundaries.items.required missing 'upstream_refs' (bidirectional partner regressed)")
 	}
 }
 

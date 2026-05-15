@@ -242,7 +242,7 @@ func architectureSchema() map[string]any {
 			},
 			"component_boundaries": map[string]any{
 				"type":        "array",
-				"description": "Component definitions with name, responsibility, and dependencies",
+				"description": "Component definitions with name, responsibility, dependencies, and upstream_refs",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -252,8 +252,13 @@ func architectureSchema() map[string]any {
 							"type":  "array",
 							"items": map[string]any{"type": "string"},
 						},
+						"upstream_refs": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Names of upstream_resolutions[] entries this component integrates with. Bidirectional with upstream_resolutions[].used_by — both sides must agree. Emit [] when the component has no external integrations.",
+						},
 					},
-					"required":             []string{"name", "responsibility", "dependencies"},
+					"required":             []string{"name", "responsibility", "dependencies", "upstream_refs"},
 					"additionalProperties": false,
 				},
 			},
@@ -326,6 +331,70 @@ func architectureSchema() map[string]any {
 					"additionalProperties": false,
 				},
 			},
+			"upstream_resolutions": map[string]any{
+				"type":        "array",
+				"description": "External dependencies the architect resolved to concrete coordinates + API surfaces. Populate one entry per external library named anywhere (technology_choices, integrations, component_boundaries.dependencies). The dev no longer has a research sub-agent (shelved 2026-05-15) — these resolutions are the dev's pre-loaded reading list, so populating this field is what prevents the dev from wedging on re-discovery on hard fixtures (take-23 wedge: 35 external file reads + 0 worktree writes). Emit [] when the project is greenfield with no external integrations.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type":        "string",
+							"description": "Human label (e.g. 'OpenSensorHub Core'). Stable across version bumps so cross-references survive. Used for component_boundaries[].upstream_refs linkage.",
+						},
+						"coordinate": map[string]any{
+							"type":        "string",
+							"description": "Machine-resolvable identifier the dev pastes into the build manifest. Examples: 'org.sensorhub:sensorhub-core:2.0.0', 'npm:react@18.2.0', 'github.com/opensensorhub/osh-core@v2.0.0'. A vague hint like 'OSH 2.x' is NOT a coordinate — re-fetch and find the specific version.",
+						},
+						"source_ref": map[string]any{
+							"type":        "string",
+							"description": "URL or file path proving the coordinate is valid (sonatype page, package-lock entry, github release tag URL).",
+						},
+						"apis": map[string]any{
+							"type":        "array",
+							"description": "Specific symbols the dev will integrate against (constructors, methods, config fields). At least one entry is the architect's normal contribution — without any APIs this resolution is just a build-manifest pin with no usage guidance, which the reviewer flags as incomplete (criterion 7a).",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"symbol": map[string]any{
+										"type":        "string",
+										"description": "Name as the dev will reference it in code. For methods include the qualifier: 'Connection.send' not 'send'.",
+									},
+									"kind": map[string]any{
+										"type":        "string",
+										"description": "Classifier so the dev knows what shape to expect.",
+										"enum":        []string{"class", "method", "interface", "function", "config_field", "constant", "type", "annotation"},
+									},
+									"signature": map[string]any{
+										"type":        "string",
+										"description": "Type-level shape. For methods/functions: full signature including parameters and return type. For classes/interfaces: constructor or 'class X extends Y' form. Example: 'protected AbstractSensorModule(SensorConfig config)'.",
+									},
+									"lifecycle": map[string]any{
+										"type":        []any{"string", "null"},
+										"description": "Calling convention or expected sequence when the surface has one. Example: 'init(config) -> start() -> stop()'. Set null when the surface is a single-call utility with no lifecycle.",
+									},
+									"notes": map[string]any{
+										"type":        []any{"string", "null"},
+										"description": "Constraints or preconditions the signature alone doesn't convey: 'throws X if Y', 'must be called from main thread', 'config must include Z field'. Set null when there are no extra constraints.",
+									},
+									"citation": map[string]any{
+										"type":        "string",
+										"description": "File path or URL where the architect verified this surface. REQUIRED. An uncited surface is a guess; reviewer will reject.",
+									},
+								},
+								"required":             []string{"symbol", "kind", "signature", "lifecycle", "notes", "citation"},
+								"additionalProperties": false,
+							},
+						},
+						"used_by": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "component_boundaries[].name entries that depend on this resolution. Bidirectional with component_boundaries[].upstream_refs — keeps 'what depends on this lib?' answerable without scanning every component.",
+						},
+					},
+					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by"},
+					"additionalProperties": false,
+				},
+			},
 			"test_surface": map[string]any{
 				"type":        "object",
 				"description": "The test coverage surface this architecture implies. Consumed by developer role to guide integration/e2e test authoring, and by qa-reviewer to judge coverage adequacy. Derive integration_flows from integrations[] (each external boundary deserves an integration test). Derive e2e_flows from actors[] (each human/system actor triggers a user-visible flow worth end-to-end coverage). Emit empty arrays for either flow type when the architecture has none.",
@@ -364,7 +433,7 @@ func architectureSchema() map[string]any {
 				"additionalProperties": false,
 			},
 		},
-		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "test_surface"},
+		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "test_surface"},
 		"additionalProperties": false,
 	}
 }
