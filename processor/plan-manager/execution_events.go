@@ -440,8 +440,22 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 // level=none       → StatusComplete (or StatusAwaitingReview when gated)
 // level=synthesis  → StatusReadyForQA (qa-reviewer claims it, no tests run)
 // level=unit        → StatusReadyForQA (sandbox runs project tests first)
-// level=integration → StatusReadyForQA (qa-runner via act)
-// level=full        → StatusReadyForQA (qa-runner + e2e — TODO Phase 7)
+// level=integration → StatusReadyForQA (qa-runner via act in a clean-room
+//                     runner; dev's TDD already exercised the same tests
+//                     against Testcontainers-spawned services in the
+//                     sandbox — this is the reproducibility gate that
+//                     catches "passes with dev's working state, fails
+//                     fresh checkout" cases)
+// level=full        → StatusReadyForQA (qa-runner runs the integration
+//                     job plus the e2e job from .github/workflows/qa.yml,
+//                     adding Playwright/browser flows on top of
+//                     integration tests)
+//
+// The Testcontainers-led integration tier (2026-05-15) means dev's
+// TDD loop is already exercising real upstream services via the docker
+// socket mounted on the sandbox; qa-runner is the second, clean-room
+// run that catches sandbox-state leakage. Both layers exercise the
+// same test code — the difference is the execution environment.
 //
 // qa-reviewer owns the ready_for_qa → reviewing_qa transition via
 // plan.mutation.qa.start, mirroring plan-reviewer's mutation-driven shape.
