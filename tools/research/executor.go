@@ -139,19 +139,28 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		return errorResult(call, fmt.Sprintf("failed to register research request: %v", err)), nil
 	}
 
-	// Notify researcher-manager (R3 will subscribe to this subject + drive
-	// the researcher sub-agent dispatch). In R2 the publish is a no-op
-	// from a consumer's perspective; we still emit it so the wire
-	// shape settles before R3 wires the consumer.
+	// Notify researcher-manager (R3 subscribes to this subject and drives
+	// researcher sub-agent dispatch). Now that R3 owns dispatch via the
+	// subject subscription, a lost publish means the researcher-manager
+	// never sees the request — the dev hangs on the KV watch until the
+	// 5-minute timeout, wasting 5 min of LLM tokens per failed publish.
+	// Take-25 surfaced this exact failure (2026-05-14): both research()
+	// calls in the dev's first cycle hit "publish failed (best-effort)"
+	// because the parent ctx had a tight LLM-call deadline. The dev then
+	// timed out waiting for an answer that never came.
+	//
+	// Two fixes here:
+	//   (1) Use a bounded background ctx for the publish so a tight
+	//       parent deadline can't kill the JS publish in flight.
+	//   (2) Hard-fail with errorResult instead of best-effort warn — if
+	//       publish fails the dev finds out immediately and can decide
+	//       (retry / narrow / proceed-without) rather than burning 5 min.
 	if err := e.publishRequest(ctx, r.ID); err != nil {
-		// Publish failure is best-effort in R2 — the KV write is what
-		// actually unblocks the loop in R3 once the researcher-manager
-		// switches to KV-driven watches. Log and continue to wait.
-		// TODO(R3): convert to hard errorResult once researcher-manager
-		// owns dispatch; a failed publish then means the request never
-		// gets picked up and the dev wastes 5 min waiting.
-		e.logger.Warn("ResearchRequest publish failed (best-effort)",
+		e.logger.Error("ResearchRequest publish failed — researcher-manager will never see this request",
 			slog.String("research_id", r.ID), slog.Any("error", err))
+		return errorResult(call, fmt.Sprintf(
+			"failed to dispatch research request: %v. The researcher will not see this question. Retry, narrow your question, or proceed without research.",
+			err)), nil
 	}
 
 	// Block on the already-open watcher until the researcher writes the
@@ -183,25 +192,39 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 
 // publishRequest emits a ResearchRequestPayload-wrapped JetStream message
 // on the agent.research.requested subject. The researcher-manager component
-// (R3) will subscribe and dispatch a researcher loop in response.
+// (R3) subscribes and dispatches a researcher loop in response.
 //
-// In R2 there is no consumer, so this is essentially metrics-only — but
-// committing the wire shape early lets tests assert that subjects/payloads
-// are stable across R-phases.
-func (e *Executor) publishRequest(ctx context.Context, researchID string) error {
-	js, err := e.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
+// Uses natsclient.Client.PublishToStream rather than the bare JetStream
+// publish so we get the circuit-breaker check, trace-context propagation,
+// and metrics that the rest of semspec relies on. The bare js.Publish that
+// take-25 used was a regression — every other component in the project
+// goes through the natsclient publish path. Migrated 2026-05-14 after
+// take-25 hit two consecutive publish failures from a tight parent ctx.
+//
+// publishCtx is a fresh background context with an explicit short timeout.
+// The parent ctx (the agentic loop's tool-call ctx) can have a deadline
+// shorter than what JetStream needs to round-trip an ack — once that
+// deadline fires the publish goroutine sees ctx.Err() and returns
+// "context deadline exceeded" without ever reaching the broker. Decoupling
+// the publish from the parent deadline means the dispatch doesn't drop
+// just because the LLM-call clock is ticking down.
+func (e *Executor) publishRequest(parent context.Context, researchID string) error {
 	payload := workflow.ResearchRequestPayload{ResearchID: researchID}
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal request payload: %w", err)
 	}
 
+	publishCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Carry the parent's trace context into the publish so the
+	// researcher-manager's resulting work traces back to the dev call.
+	if tc, ok := natsclient.TraceContextFromContext(parent); ok {
+		publishCtx = natsclient.ContextWithTrace(publishCtx, tc)
+	}
+
 	subject := SubjectResearchRequested + researchID
-	if _, err := js.Publish(ctx, subject, data); err != nil {
+	if err := e.natsClient.PublishToStream(publishCtx, subject, data); err != nil {
 		return fmt.Errorf("publish %s: %w", subject, err)
 	}
 	return nil
