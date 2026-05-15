@@ -113,6 +113,20 @@ services:
       - NATS_URL=nats://nats:4222
     volumes:
       - ../../test/e2e/workspace:/workspace
+      # DooD for Testcontainers — dev's TDD loop spawns real integration-test
+      # containers via the host docker daemon. Trust boundary maintained by
+      # tool-call governance rules (configs/e2e-hybrid.json) that deny bash
+      # escape shapes like `docker run --privileged`.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The host docker socket is mounted with its native ownership preserved
+    # by the docker daemon. Mac Docker Desktop translates the socket to
+    # root:root mode 660 inside containers, so the sandbox user (uid 1000)
+    # needs supplementary membership in root group (GID 0) to access it.
+    # Linux hosts with rootful docker typically use root:docker (GID ~999);
+    # set DOCKER_GID in .env to that value on those hosts. Default 0 covers
+    # the Mac dev path; Linux CI override is one env var away.
+    group_add:
+      - "${DOCKER_GID:-0}"
     depends_on:
       nats:
         condition: service_healthy

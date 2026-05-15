@@ -63,6 +63,21 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm install -g typescript vitest \
     && rm -rf /var/lib/apt/lists/*
 
+# Docker CLI — DooD pattern. Sandbox uses the host docker daemon via the
+# /var/run/docker.sock mount declared in compose. Lets the dev's TDD loop
+# spawn real integration-test containers (Testcontainers, raw docker run
+# from gradle/maven build scripts, etc.) without a nested daemon. Trust
+# boundary is enforced at the tool-call governance layer — escape shapes
+# like `docker run --privileged`, host-root mounts, and nested socket
+# mounts are denied via configs/e2e-hybrid.json rule-processor inline_rules.
+ARG DOCKER_CLI_VERSION=27.5.1
+RUN ARCH=$(uname -m) \
+    && curl -fsSL "https://download.docker.com/linux/static/stable/${ARCH}/docker-${DOCKER_CLI_VERSION}.tgz" \
+        -o /tmp/docker.tgz \
+    && tar -xzf /tmp/docker.tgz -C /tmp \
+    && mv /tmp/docker/docker /usr/local/bin/docker \
+    && rm -rf /tmp/docker /tmp/docker.tgz
+
 # Non-root sandbox user with configurable UID/GID.
 # Pass SANDBOX_UID and SANDBOX_GID at build time to match host user.
 # This ensures files created inside the container are owned by the host

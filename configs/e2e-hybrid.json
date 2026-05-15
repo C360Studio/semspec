@@ -482,6 +482,94 @@
               },
               {
                 "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "--privileged"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker --privileged blocked — Testcontainers does not need privileged containers; use programmatic Testcontainers API instead"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "--privileged"}
+                ],
+                "reason": "docker --privileged blocked — Testcontainers does not need privileged containers; use programmatic Testcontainers API instead"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "/var/run/docker.sock"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker bind-mount of /var/run/docker.sock blocked — nested socket grants sibling-container creation, breaks the sandbox trust boundary"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "/var/run/docker.sock"}
+                ],
+                "reason": "docker bind-mount of /var/run/docker.sock blocked — nested socket grants sibling-container creation, breaks the sandbox trust boundary"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*(-v|--volume)\\s+/:"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker host-root bind-mount blocked — exposes the host filesystem to the spawned container"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*(-v|--volume)\\s+/:"}
+                ],
+                "reason": "docker host-root bind-mount blocked — exposes the host filesystem to the spawned container"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*--network[\\s=]host"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker --network host blocked — bypasses container network isolation; Testcontainers uses bridge networking by default"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*--network[\\s=]host"}
+                ],
+                "reason": "docker --network host blocked — bypasses container network isolation; Testcontainers uses bridge networking by default"
+              },
+              {
+                "type": "publish",
                 "subject": "agent.toolcall.approved.$message.loop_id.$message.call_id",
                 "properties": {
                   "decision": "approved",

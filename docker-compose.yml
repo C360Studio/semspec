@@ -48,6 +48,15 @@ services:
         SANDBOX_GID: ${SANDBOX_GID:-1000}
     volumes:
       - ${SEMSPEC_REPO:-.}:/workspace
+      # DooD for Testcontainers — see docker/compose/e2e.yml for the trust
+      # boundary rationale. Governance rules in configs/*.json deny bash
+      # escape shapes; programmatic socket use (Testcontainers, docker CLI
+      # for image inspection) is the supported path.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # Mac Docker Desktop: socket is root:root 660 — GID 0 needed. Linux
+    # with rootful docker: typically GID 999. Override via DOCKER_GID in .env.
+    group_add:
+      - "${DOCKER_GID:-0}"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
       interval: 5s
