@@ -1239,20 +1239,30 @@ ON FIRST ITERATION, before any reasoning about technology choices:
 
 3. bash('cat <workspace>/.semspec/project.json') and bash('cat <workspace>/.semspec/standards.json') — the operator's declared stack and quality gates. The quality_gates field names the build command (e.g. "./gradlew test"), which is authoritative about the build tool the project actually uses.
 
-4. For EACH external library, API, or framework named in the requirement: web_search to find the canonical documentation URL, then http_request to fetch the specific page that proves the integration surface. Save long fetches to /tmp via bash if you need to grep them later.
+4. For EACH external library, API, or framework named in the requirement: web_search to find the canonical documentation URL, then http_request (or bash on /sources/ when available, see step 5) to fetch the specific page that proves the integration surface. Save long fetches to /tmp via bash if you need to grep them later. The point of fetching is NOT to skim and move on — it is to extract the concrete coordinate (Maven groupId:artifactId:version, npm name@version, github URL@tag) AND the specific symbols (class names, method signatures, lifecycle methods, config fields) the developer will need. Both go into upstream_resolutions[] (step 6).
 
 5. /sources/ shortcut (only if the operator configured semsource): bash('ls /sources/ 2>/dev/null') to detect. If populated, the namespaces there are pre-cloned upstream repos — bash-readable for pom.xml, build.gradle, raw source, etc., faster than http_request when the upstream surface is large. Without /sources/, step 4 is the only path.
 
 BEFORE submit_work:
 
-6. Every entry in technology_choices MUST be either:
+6. For EVERY external library, API, or framework that any technology_choice, integration, or component_boundary names: populate one entry in upstream_resolutions[]. Each entry MUST have:
+   - name: human label (e.g. "OpenSensorHub Core")
+   - coordinate: machine-resolvable identifier the dev can paste into the build manifest. Examples: "org.sensorhub:sensorhub-core:2.0.0", "npm:react@18.2.0", "github.com/opensensorhub/osh-core@v2.0.0". A vague hint like "OSH 2.x" is NOT a coordinate — re-fetch and find the specific version.
+   - source_ref: the URL or file path where you verified the coordinate is valid (sonatype page, package-lock entry, github release tag URL).
+   - apis: at least one APISurface entry naming a symbol the developer will integrate against. Each APISurface MUST have a citation (file path or URL where you verified the signature). Without citations the surface is a guess; resubmit after the missing reads.
+   - used_by: names of component_boundaries entries that depend on this resolution (bidirectional with component_boundaries[].upstream_refs).
+   This is the load-bearing rule for upstream-strengthening: the dev no longer needs a research sub-agent because YOU pre-resolved everything they would have asked for. Take-23 (2026-05-13) wedged at iter=80 with 35 external file reads + 0 worktree writes specifically because architect named OSH classes without resolving their constructor + lifecycle into the deliverable; the dev had to discover them mid-cycle.
+
+7. For EVERY component in component_boundaries that depends on an external library: populate component_boundaries[].upstream_refs with the names of the matching upstream_resolutions entries. Bidirectional with upstream_resolutions[].used_by — both sides must agree.
+
+8. Every entry in technology_choices MUST be either:
    (a) the choice declared by a manifest you read in step 2 OR by a quality gate you read in step 3, with rationale citing the file path, OR
    (b) a greenfield choice, with rationale stating "no existing manifest; picking X because Y".
    A choice contradicting an existing manifest is a hard failure — picking Maven when the project has build.gradle, or npm when it has yarn.lock, is the canonical mistake. Re-check.
 
-7. Every entry in decisions[].rationale MUST cite at least one reference: workspace file path, /sources/<namespace>/<path>, or URL. A rationale without a citation is a guess; resubmit with the missing read.
+9. Every entry in decisions[].rationale MUST cite at least one reference: workspace file path, /sources/<namespace>/<path>, or URL. A rationale without a citation is a guess; resubmit with the missing read.
 
-Do NOT instruct the developer to "explore the upstream codebase" or "research the patterns" — that pattern exhausts the developer's iteration budget on re-discovery. Your job is to cite specific files and URLs; the developer's job is to use them.`,
+Do NOT instruct the developer to "explore the upstream codebase" or "research the patterns" — that pattern exhausts the developer's iteration budget on re-discovery. Your job is to cite specific files and URLs and PRE-RESOLVE upstream surfaces into upstream_resolutions[]; the developer's job is to use the resolutions you produced.`,
 		},
 		{
 			// User-message renderer for architect. Replaces
@@ -1277,25 +1287,45 @@ Do NOT instruct the developer to "explore the upstream codebase" or "research th
 
 {
   "technology_choices": [
-    {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}
+    {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework (workspace/requirements.txt:3)"}
   ],
   "component_boundaries": [
-    {"name": "api", "responsibility": "REST API serving JSON endpoints", "dependencies": []}
+    {"name": "driver", "responsibility": "Meshtastic protocol handler", "dependencies": [], "upstream_refs": ["OpenSensorHub Core", "Meshtastic Java"]}
   ],
-  "data_flow": "Browser sends GET to Flask API, API returns JSON response",
+  "data_flow": "Mesh node -> Meshtastic Java client -> driver -> OSH SensorHub event bus",
   "decisions": [
-    {"id": "ARCH-001", "title": "Extend existing app", "decision": "Add route to api/app.py", "rationale": "Single-file API, no need for new service"}
+    {"id": "ARCH-001", "title": "Extend OSH AbstractSensorModule", "decision": "Driver subclasses AbstractSensorModule", "rationale": "Standard OSH driver pattern (see /sources/osh-core/.../AbstractSensorModule.java)"}
   ],
   "actors": [
-    {"name": "User", "type": "human", "triggers": ["HTTP request"]}
+    {"name": "Mesh node", "type": "system", "triggers": ["Meshtastic packet"]}
   ],
   "integrations": [
-    {"name": "Flask API", "direction": "inbound", "protocol": "HTTP/REST"}
+    {"name": "Meshtastic mesh", "direction": "inbound", "protocol": "Meshtastic"}
+  ],
+  "upstream_resolutions": [
+    {
+      "name": "OpenSensorHub Core",
+      "coordinate": "org.sensorhub:sensorhub-core:2.0.0",
+      "source_ref": "https://central.sonatype.com/artifact/org.sensorhub/sensorhub-core/2.0.0",
+      "apis": [
+        {
+          "symbol": "AbstractSensorModule",
+          "kind": "class",
+          "signature": "protected AbstractSensorModule(SensorConfig config)",
+          "lifecycle": "init(config) -> start() -> stop()",
+          "notes": "Subclasses must call super.init(config) before any IO",
+          "citation": "https://github.com/opensensorhub/osh-core/blob/v2.0.0/sensorhub-core/src/main/java/org/sensorhub/api/module/AbstractSensorModule.java#L45-L52"
+        }
+      ],
+      "used_by": ["driver"]
+    }
   ]
 }
 
-Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string).`,
-				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string). upstream_resolutions is required when any technology_choice / integration / component_boundary names an external library, API, or framework — in that case at least one entry per named external must appear, with non-empty coordinate + source_ref + at least one apis[] entry + used_by linking back to component_boundaries.`,
+				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.
+
+The upstream_resolutions[] field is the load-bearing piece of this output (added 2026-05-15). Skipping it OR populating with vague "OSH 2.x" coordinates instead of concrete "org.sensorhub:sensorhub-core:2.0.0" is the canonical failure mode that wedges the developer downstream — they end up re-discovering what you should have resolved. Cite every API surface you record; the citation is what makes it a resolution rather than a guess.`,
 			),
 		},
 
