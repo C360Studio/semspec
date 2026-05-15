@@ -141,6 +141,16 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		results = append(results, tcResult)
 	}
 
+	// Deterministic stub-artifact detector — runs whenever .jar files
+	// appear in filesModified, regardless of project language. Hard
+	// reject (Required: true) on stubs because fabrication is a
+	// ship-stopper that neither reviewer prose nor Testcontainers
+	// discipline catches reliably. Take-19 deferred item (c).
+	if hasJarFiles(trigger.FilesModified) {
+		stubResult := CheckStubArtifacts(workDir, trigger.FilesModified)
+		results = append(results, stubResult)
+	}
+
 	passed := allRequiredPassed(results)
 
 	return &payloads.ValidationResult{
@@ -264,6 +274,18 @@ func hasGoFiles(files []string) bool {
 func hasTestFiles(files []string) bool {
 	for _, f := range files {
 		if strings.HasSuffix(f, "_test.go") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasJarFiles returns true if any file in the list has a .jar extension
+// (case-insensitive). Fast-path filter for the stub-artifact detector —
+// skips zip-open work when there's no .jar in the modified set.
+func hasJarFiles(files []string) bool {
+	for _, f := range files {
+		if strings.HasSuffix(strings.ToLower(f), ".jar") {
 			return true
 		}
 	}
