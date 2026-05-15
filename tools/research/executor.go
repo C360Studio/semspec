@@ -23,6 +23,7 @@ package research
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -127,8 +128,44 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	// goroutines past the wall-clock deadline. Restructure from the
 	// review of R2 — race tighter than the original Put-then-Watch
 	// order, cheaper than testing the race empirically.
-	waitCtx, cancel := context.WithTimeout(ctx, e.timeout)
+	//
+	// waitCtx uses context.Background() rather than parent ctx so the
+	// agentic-loop's tool-call deadline (often shorter than e.timeout)
+	// can't truncate our wait window. Take-27 (2026-05-14) hit this:
+	// configured 5-min timeout was effectively 3 min because the parent
+	// ctx fired its own deadline at 3 min and waitCtx (derived from
+	// parent via WithTimeout) inherited the earlier deadline. Researchers
+	// that took 5-12 min to answer were dispatched fine but the dev's
+	// wait was already over by the time the answer landed. Trace context
+	// is carried over for distributed tracing; a goroutine forwards
+	// parent cancellation so a real loop shutdown still aborts the wait.
+	waitCtx, cancel := context.WithTimeout(context.Background(), e.timeout)
 	defer cancel()
+	if tc, ok := natsclient.TraceContextFromContext(ctx); ok {
+		waitCtx = natsclient.ContextWithTrace(waitCtx, tc)
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			// Parent's Done channel fires for two reasons:
+			//   - context.Canceled — real shutdown (loop tear-down,
+			//     dev's containing ctx canceled). We MUST propagate
+			//     so the watcher exits cleanly rather than holding
+			//     resources until e.timeout fires.
+			//   - context.DeadlineExceeded — parent's own deadline
+			//     fired (LLM-call ctx, agentic-loop tool-call ctx).
+			//     We MUST NOT propagate because that's exactly the
+			//     truncation the take-27 fix is designed to prevent
+			//     — researcher may answer between parent's deadline
+			//     and our e.timeout, and the dev should see it.
+			if errors.Is(ctx.Err(), context.Canceled) {
+				cancel()
+			}
+		case <-waitCtx.Done():
+			// Our timeout fired or we already canceled — nothing
+			// to do, the deferred cancel cleaned up.
+		}
+	}()
 	watcher, err := e.researchStore.Bucket().Watch(waitCtx, r.ID)
 	if err != nil {
 		return errorResult(call, fmt.Sprintf("failed to open research watcher: %v", err)), nil
