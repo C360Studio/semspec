@@ -78,9 +78,10 @@ func (pc *ProjectConfig) EffectiveQALevel() QALevel {
 
 // EffectiveTestCommand returns the test command sandbox runs at level=unit.
 // When unset, infers from the primary language — Go projects run
-// `go test ./...`, Node `npm test`, Python `pytest`, Rust `cargo test`.
-// Falls through to an empty string when the language is unknown, leaving
-// the sandbox to refuse execution with a clear error.
+// `go test ./...`, Node `npm test`, Python `pytest`, Rust `cargo test`,
+// Java `./gradlew test`. Falls through to an empty string when the
+// language is unknown, leaving the sandbox to refuse execution with a
+// clear error.
 func (pc *ProjectConfig) EffectiveTestCommand() string {
 	if pc == nil {
 		return ""
@@ -101,6 +102,11 @@ func (pc *ProjectConfig) EffectiveTestCommand() string {
 			return "pytest"
 		case "Rust":
 			return "cargo test"
+		case "Java", "Kotlin":
+			// Default to Gradle wrapper. Maven projects must set
+			// QATestCommand explicitly ("./mvnw test") — we can't
+			// reliably disambiguate from ProjectConfig.Languages alone.
+			return "./gradlew test"
 		}
 	}
 	return ""
