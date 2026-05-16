@@ -593,6 +593,16 @@ type Plan struct {
 	// yet reached reviewing_qa.
 	QARun *QARun `json:"qa_run,omitempty"`
 
+	// QAVerdictSummary captures the qa-reviewer's prose verdict (summary +
+	// per-dimension paragraphs) at the moment plan-manager consumed the
+	// QAVerdictEvent. The structured QARun captures executor results;
+	// QAVerdictSummary captures the human-readable judgment so the
+	// qa-summary.md renderer can carry the full reviewer narrative.
+	//
+	// Nil for plans that never reached a QA verdict and plans that
+	// completed before this field landed.
+	QAVerdictSummary *QAVerdictSummary `json:"qa_verdict_summary,omitempty"`
+
 	// AssembledBranch is the git branch onto which plan-manager merged every
 	// completed requirement branch at plan-complete time (invariant B1 of
 	// docs/audit/task-11-worktree-invariants.md). Empty on plans that
@@ -632,6 +642,21 @@ type QARun struct {
 	RunnerError string          `json:"runner_error,omitempty"`
 	TraceID     string          `json:"trace_id,omitempty"`
 	CompletedAt time.Time       `json:"completed_at"`
+}
+
+// QAVerdictSummary is the persisted, human-readable form of the qa-reviewer's
+// verdict. Mirrors the verdict fields off QAVerdictEvent so the renderer can
+// read them straight off the plan without joining the in-flight event back in.
+//
+// RecordedAt is set by plan-manager when it consumes the verdict event, not
+// by qa-reviewer — it marks when the verdict landed on the plan, distinct
+// from QARun.CompletedAt (which marks when the executor finished).
+type QAVerdictSummary struct {
+	Verdict    QAVerdict           `json:"verdict"`
+	Level      QALevel             `json:"level"`
+	Summary    string              `json:"summary,omitempty"`
+	Dimensions QAVerdictDimensions `json:"dimensions,omitempty"`
+	RecordedAt time.Time           `json:"recorded_at"`
 }
 
 // EffectiveQALevel returns the plan's QA level, defaulting to synthesis when

@@ -9,21 +9,15 @@ import (
 )
 
 // RenderQASummary produces a markdown view of the plan's QA phase
-// outcome — the executor result (QARun) plus any plan-decisions the
-// qa-reviewer raised. Returns "" when the plan has no QA state yet
-// (pre-reviewing_qa) and no PlanDecisions.
-//
-// Note: the qa-reviewer's prose verdict (summary, dimensions) is not
-// currently persisted on Plan — only the structured QARun and emitted
-// PlanDecisions are. A future Plan.QAVerdictSummary string field would
-// let this renderer surface the full reviewer narrative. Until then,
-// the document covers what is persisted: did tests pass, what failed,
-// what change proposals were raised.
+// outcome — the qa-reviewer's prose verdict (when persisted), the
+// executor result (QARun), and any plan-decisions the qa-reviewer raised.
+// Returns "" when the plan has no QA state at all (pre-verdict, no QARun,
+// no PlanDecisions, no QAVerdictSummary).
 func RenderQASummary(plan *workflow.Plan) string {
 	if plan == nil {
 		return ""
 	}
-	if plan.QARun == nil && len(plan.PlanDecisions) == 0 {
+	if plan.QARun == nil && plan.QAVerdictSummary == nil && len(plan.PlanDecisions) == 0 {
 		return ""
 	}
 	var b strings.Builder
@@ -33,13 +27,56 @@ func RenderQASummary(plan *workflow.Plan) string {
 		title = plan.Slug
 	}
 	b.WriteString(fmt.Sprintf("# QA Summary: %s\n\n", title))
-	b.WriteString(fmt.Sprintf("*Generated from the QA phase's executor result and any plan-decisions the qa-reviewer raised. QA level for this plan: `%s`.*\n\n",
+	b.WriteString(fmt.Sprintf("*Generated from the qa-reviewer verdict, the QA phase's executor result, and any plan-decisions the qa-reviewer raised. QA level for this plan: `%s`.*\n\n",
 		plan.EffectiveQALevel()))
 
+	renderQAVerdictSummary(&b, plan.QAVerdictSummary)
 	renderQARun(&b, plan.QARun)
 	renderQAPlanDecisions(&b, plan.PlanDecisions)
 
 	return b.String()
+}
+
+// renderQAVerdictSummary renders the qa-reviewer's prose verdict (overall
+// summary + per-dimension paragraphs). Each dimension is rendered only when
+// non-empty so we surface what the reviewer actually assessed at the plan's
+// QA level rather than showing empty headings for dimensions that don't
+// apply (e.g. flake_judgment is integration-tier and up).
+func renderQAVerdictSummary(b *strings.Builder, v *workflow.QAVerdictSummary) {
+	if v == nil {
+		return
+	}
+	b.WriteString("## Reviewer verdict\n\n")
+	b.WriteString(fmt.Sprintf("- **Verdict:** `%s`\n", v.Verdict))
+	b.WriteString(fmt.Sprintf("- **Level assessed:** `%s`\n", v.Level))
+	if !v.RecordedAt.IsZero() {
+		b.WriteString(fmt.Sprintf("- **Recorded at:** %s\n", v.RecordedAt.UTC().Format(time.RFC3339)))
+	}
+	b.WriteString("\n")
+	if v.Summary != "" {
+		b.WriteString(fmt.Sprintf("%s\n\n", v.Summary))
+	}
+
+	dims := []struct {
+		label, body string
+	}{
+		{"Requirement fulfillment", v.Dimensions.RequirementFulfillment},
+		{"Coverage", v.Dimensions.Coverage},
+		{"Assertion quality", v.Dimensions.AssertionQuality},
+		{"Regression surface", v.Dimensions.RegressionSurface},
+		{"Flake judgment", v.Dimensions.FlakeJudgment},
+	}
+	headerWritten := false
+	for _, d := range dims {
+		if strings.TrimSpace(d.body) == "" {
+			continue
+		}
+		if !headerWritten {
+			b.WriteString("### Dimensions\n\n")
+			headerWritten = true
+		}
+		b.WriteString(fmt.Sprintf("**%s.** %s\n\n", d.label, d.body))
+	}
 }
 
 func renderQARun(b *strings.Builder, run *workflow.QARun) {
