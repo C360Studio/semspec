@@ -19,15 +19,15 @@
 	let mode = $state<PanelMode>('plans');
 	let manualOverride = $state(false);
 
-	// Auto-switch: feed when there's activity from any source — active loops,
-	// plan-scoped feed events, OR global loop ticks. The global branch matters
-	// on /board where no plan is selected and feedStore never populates
-	// (ActivityFeed renders activityStore in that case — see scope="global").
+	// Auto-switch: feed when there's LIVE activity — active loops or
+	// plan-scoped feed events. Use activityStore.loopLastSeen (live, evicted on
+	// loop_deleted) instead of activityStore.recent.length (sliding window that
+	// retains completed loops, fires Feed mode on SSE replay of stale history).
 	$effect(() => {
 		const hasActivity =
 			activeLoopCount > 0 ||
 			feedStore.events.length > 0 ||
-			activityStore.recent.length > 0;
+			activityStore.loopLastSeen.size > 0;
 		if (hasActivity && !manualOverride) {
 			mode = 'feed';
 		} else if (!hasActivity) {
