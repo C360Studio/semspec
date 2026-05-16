@@ -1,0 +1,37 @@
+Bundle metadata:
+  captured_at: None
+  captured_by: None
+  format: None
+
+Trajectories captured: 30
+
+  02cf22b7  steps=   4  tools={'?': 2, 'scratchpad': 1, 'submit_work': 1}
+  03f1309b  steps=   6  tools={'?': 3, 'bash': 2, 'submit_work': 1}
+  07e2be03  steps=   6  tools={'?': 3, 'bash': 2, 'submit_work': 1}
+  0ac1b6ce  steps=  15  tools={'?': 7, 'bash': 6, 'scratchpad': 1, 'submit_work': 1}
+  146d198b  steps=  20  tools={'?': 9, 'bash': 9, 'scratchpad': 1, 'submit_work': 1}
+  14ce4e93  steps=  41  tools={'?': 21, 'bash': 15, 'write_todos': 3, 'scratchpad': 1, 'submit_work': 1}
+  1f417124  steps=  47  tools={'?': 22, 'bash': 21, 'http_request': 2, 'scratchpad': 1, 'submit_work': 1}
+  31a2a307  steps=   4  tools={'?': 2, 'scratchpad': 1, 'submit_work': 1}
+  394f1a5b  steps=  78  tools={'bash': 46, '?': 30, 'scratchpad': 2}
+  396927ad  steps=  33  tools={'?': 16, 'bash': 11, 'write_todos': 4, 'scratchpad': 1, 'submit_work': 1}
+  3e3b0214  steps=   6  tools={'?': 3, 'bash': 2, 'submit_work': 1}
+  45b3e89a  steps=   2  tools={'?': 1, 'submit_work': 1}
+  4ae9166e  steps=  43  tools={'?': 21, 'bash': 16, 'write_todos': 3, 'scratchpad': 2, 'submit_work': 1}
+  562cf817  steps=   2  tools={'?': 1, 'decompose_task': 1}
+  7c7c6fae  steps=   6  tools={'?': 3, 'bash': 1, 'scratchpad': 1, 'submit_work': 1}
+  895b283e  steps= 249  tools={'?': 120, 'bash': 99, 'http_request': 19, 'scratchpad': 7, 'write_todos': 4}
+  8bd6a498  steps= 235  tools={'?': 116, 'bash': 106, 'write_todos': 8, 'scratchpad': 4, 'submit_work': 1}
+  9a40e263  steps=  58  tools={'bash': 28, '?': 26, 'scratchpad': 3, 'submit_work': 1}
+  9d5ae9d4  steps=  65  tools={'bash': 34, '?': 29, 'scratchpad': 1, 'submit_work': 1}
+  9fb21f70  steps=   2  tools={'?': 1, 'submit_work': 1}
+  ad4b1bff  steps=   2  tools={'?': 1, 'submit_work': 1}
+  be09d1c1  steps=  21  tools={'bash': 10, '?': 9, 'scratchpad': 1, 'submit_work': 1}
+  cbc4011a  steps=   2  tools={'?': 1, 'submit_work': 1}
+  d6bc314f  steps=   2  tools={'?': 1, 'decompose_task': 1}
+  dcf8825c  steps=  38  tools={'bash': 19, '?': 18, 'submit_work': 1}
+  e305b33e  steps=  10  tools={'?': 5, 'bash': 4, 'submit_work': 1}
+  f1a232dd  steps=   4  tools={'?': 2, 'bash': 1, 'submit_work': 1}
+  fca8e1aa  steps=  35  tools={'?': 16, 'bash': 15, 'write_todos': 2, 'scratchpad': 1, 'submit_work': 1}
+  fe062603  steps=   8  tools={'?': 4, 'bash': 2, 'scratchpad': 1, 'submit_work': 1}
+  fe6a2c05  steps=   4  tools={'?': 2, 'bash': 1, 'submit_work': 1}
