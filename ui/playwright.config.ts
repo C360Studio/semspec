@@ -24,6 +24,17 @@ const dockerComposeCommand = useMockLLM
 	? 'docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up --wait'
 	: 'docker compose -f docker-compose.e2e.yml up --wait';
 
+// Mock-LLM journeys are scripted against hello-world-py — the planner /
+// reviewer / coder fixtures all reference api/app.py + ui/app.js. The base
+// compose defaults semspec workspace to go-project, the mock overlay
+// defaults sandbox to hello-world-py; without an explicit override they
+// drift apart and planner scope.include validation fails on the first
+// dispatch. Pin both to hello-world-py here so operators don't have to
+// remember the env var.
+const mockEnv: Record<string, string> = useMockLLM
+	? { E2E_FIXTURE: process.env.E2E_FIXTURE ?? 'hello-world-py' }
+	: {};
+
 const T1_SPECS = ['e2e/plan-journey.spec.ts', 'e2e/plan-rejection-journey.spec.ts'];
 const T2_SPECS = [
 	'e2e/plan-lifecycle-llm.spec.ts',
@@ -75,6 +86,7 @@ export default defineConfig({
 		timeout: 120 * 1000,
 		stdout: 'pipe',
 		stderr: 'pipe',
+		env: mockEnv,
 	},
 	timeout,
 	expect: {
