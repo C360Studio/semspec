@@ -45,9 +45,13 @@ type QACycleScenario struct {
 }
 
 // integrationQAWorkflow is the qa.yml seeded into the workspace for the
-// integration-level variant. Kept in sync with the single-job
-// processor/project-manager/templates/qa.yml — e2e variant omits the e2e job
-// since act runs with --job integration at qa_level=integration.
+// integration-level variant. Single-job minimal — kept in sync with the
+// Go branch of processor/project-manager.BuildQAWorkflow, omitting the
+// e2e job since act runs with --job integration at qa_level=integration.
+// Pre-seeding is now redundant with plan-manager's auto-scaffold call
+// to EnsureQAWorkflow, but harmless because EnsureQAWorkflow doesn't
+// overwrite existing files. Kept here to make the scenario independent
+// of plan-manager wiring.
 const integrationQAWorkflow = `name: QA
 on: [push, pull_request]
 jobs:

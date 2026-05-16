@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	projectmanager "github.com/c360studio/semspec/processor/project-manager"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
@@ -397,6 +398,18 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 
 	// Load project config for test command (language-aware default).
 	pc := workflow.LoadProjectConfigFromDisk(c.resolveRepoRoot())
+
+	// Ensure .github/workflows/qa.yml exists in the workspace before
+	// publishing QARequestedEvent. project-manager scaffolds the file at
+	// /init time, but e2e fixtures (hand-authored) skip that flow; without
+	// this guard qa-runner fails on missing workflow with an opaque act
+	// error. Language-aware template — picks Java/Python/Node/Rust/Go
+	// based on project config primary language. Non-fatal on write error
+	// (qa-runner will surface a clearer act-side error than we can here).
+	if err := projectmanager.EnsureQAWorkflow(c.resolveRepoRoot(), pc, c.logger); err != nil {
+		c.logger.Warn("Failed to scaffold qa.yml before QA dispatch — qa-runner may fail with missing workflow",
+			"slug", plan.Slug, "error", err)
+	}
 
 	req := &payloads.QARequestedPayload{
 		QARequestedEvent: workflow.QARequestedEvent{
