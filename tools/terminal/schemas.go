@@ -242,7 +242,7 @@ func architectureSchema() map[string]any {
 			},
 			"component_boundaries": map[string]any{
 				"type":        "array",
-				"description": "Component definitions with name, responsibility, and dependencies",
+				"description": "Component definitions with name, responsibility, dependencies, and upstream_refs",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -252,8 +252,13 @@ func architectureSchema() map[string]any {
 							"type":  "array",
 							"items": map[string]any{"type": "string"},
 						},
+						"upstream_refs": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Names of upstream_resolutions[] entries this component integrates with. Bidirectional with upstream_resolutions[].used_by — both sides must agree. Emit [] when the component has no external integrations.",
+						},
 					},
-					"required":             []string{"name", "responsibility", "dependencies"},
+					"required":             []string{"name", "responsibility", "dependencies", "upstream_refs"},
 					"additionalProperties": false,
 				},
 			},
@@ -326,6 +331,95 @@ func architectureSchema() map[string]any {
 					"additionalProperties": false,
 				},
 			},
+			"upstream_resolutions": map[string]any{
+				"type":        "array",
+				"description": "External dependencies the architect resolved to concrete coordinates + API surfaces. Populate one entry per external library named anywhere (technology_choices, integrations, component_boundaries.dependencies). The dev no longer has a research sub-agent (shelved 2026-05-15) — these resolutions are the dev's pre-loaded reading list, so populating this field is what prevents the dev from wedging on re-discovery on hard fixtures (take-23 wedge: 35 external file reads + 0 worktree writes). Emit [] when the project is greenfield with no external integrations.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type":        "string",
+							"description": "Human label (e.g. 'OpenSensorHub Core'). Stable across version bumps so cross-references survive. Used for component_boundaries[].upstream_refs linkage.",
+						},
+						"coordinate": map[string]any{
+							"type":        "string",
+							"description": "Machine-resolvable identifier the dev pastes into the build manifest. Examples: 'org.sensorhub:sensorhub-core:2.0.0', 'npm:react@18.2.0', 'github.com/opensensorhub/osh-core@v2.0.0'. A vague hint like 'OSH 2.x' is NOT a coordinate — re-fetch and find the specific version.",
+						},
+						"source_ref": map[string]any{
+							"type":        "string",
+							"description": "URL or file path proving the coordinate is valid (sonatype page, package-lock entry, github release tag URL).",
+						},
+						"apis": map[string]any{
+							"type":        "array",
+							"description": "Specific symbols the dev will integrate against (constructors, methods, config fields). At least one entry is the architect's normal contribution — without any APIs this resolution is just a build-manifest pin with no usage guidance, which the reviewer flags as incomplete (criterion 7a).",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"symbol": map[string]any{
+										"type":        "string",
+										"description": "Name as the dev will reference it in code. For methods include the qualifier: 'Connection.send' not 'send'.",
+									},
+									"kind": map[string]any{
+										"type":        "string",
+										"description": "Classifier so the dev knows what shape to expect.",
+										"enum":        []string{"class", "method", "interface", "function", "config_field", "constant", "type", "annotation"},
+									},
+									"signature": map[string]any{
+										"type":        "string",
+										"description": "Type-level shape. For methods/functions: full signature including parameters and return type. For classes/interfaces: constructor or 'class X extends Y' form. Example: 'protected AbstractSensorModule(SensorConfig config)'.",
+									},
+									"lifecycle": map[string]any{
+										"type":        []any{"string", "null"},
+										"description": "Calling convention or expected sequence when the surface has one. Example: 'init(config) -> start() -> stop()'. Set null when the surface is a single-call utility with no lifecycle.",
+									},
+									"notes": map[string]any{
+										"type":        []any{"string", "null"},
+										"description": "Constraints or preconditions the signature alone doesn't convey: 'throws X if Y', 'must be called from main thread', 'config must include Z field'. Set null when there are no extra constraints.",
+									},
+									"citation": map[string]any{
+										"type":        "string",
+										"description": "File path or URL where the architect verified this surface. REQUIRED. An uncited surface is a guess; reviewer will reject.",
+									},
+								},
+								"required":             []string{"symbol", "kind", "signature", "lifecycle", "notes", "citation"},
+								"additionalProperties": false,
+							},
+						},
+						"used_by": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "component_boundaries[].name entries that depend on this resolution. Bidirectional with component_boundaries[].upstream_refs — keeps 'what depends on this lib?' answerable without scanning every component.",
+						},
+						"role": map[string]any{
+							"type":        "string",
+							"description": "How this dep is consumed at test time. 'build_dep' = compile-time only (annotation processor, type stubs, codegen). 'runtime_dep' = library/framework called in-process; unit tests use it directly. 'integration_target' = separate process the dev talks to over a wire protocol (daemon, broker, database); REQUIRES test_harness so the dev's tests spawn a real container via Testcontainers and exercise the real wire format. Default to 'runtime_dep' when uncertain — it's the most common case.",
+							"enum":        []string{"build_dep", "runtime_dep", "integration_target"},
+						},
+						"test_harness": map[string]any{
+							"type":        []any{"object", "null"},
+							"description": "REQUIRED when role == 'integration_target'; set null otherwise. Tells the dev which Testcontainers binding to import and which public image to spawn. Goodhart-resistant: if the image doesn't exist on the registry, Testcontainers.start() fails at test time and the dev cannot fabricate a stub the way they can with a flat-dir JAR.",
+							"properties": map[string]any{
+								"library": map[string]any{
+									"type":        "string",
+									"description": "Testcontainers binding for the project's language. Examples: 'testcontainers-java' (Maven/Gradle), 'testcontainers-go' (Go), 'testcontainers-python' (pytest), 'testcontainers-node' (vitest/jest), 'testcontainers-dotnet', 'testcontainers-rust'.",
+								},
+								"image": map[string]any{
+									"type":        "string",
+									"description": "Public container image coordinate. Format 'repo/name:tag' or 'library/name:tag' on Docker Hub. Cite this from the upstream project's docker docs (web_search for '{project} docker image' or the project's docker-compose example). Examples: 'meshtastic/meshtasticd:latest', 'redis:7-alpine', 'postgres:16-alpine', 'confluentinc/cp-kafka:7.5.0'.",
+								},
+								"access_method": map[string]any{
+									"type":        "string",
+									"description": "Protocol and container port the dev's code connects to. Format '<protocol>:<port>'. Testcontainers exposes the port on a host-mapped random port; the dev calls GetMappedPort(<port>) at test time. Examples: 'tcp:4403', 'http:8080', 'grpc:9000', 'amqp:5672'.",
+								},
+							},
+							"required":             []string{"library", "image", "access_method"},
+							"additionalProperties": false,
+						},
+					},
+					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by", "role", "test_harness"},
+					"additionalProperties": false,
+				},
+			},
 			"test_surface": map[string]any{
 				"type":        "object",
 				"description": "The test coverage surface this architecture implies. Consumed by developer role to guide integration/e2e test authoring, and by qa-reviewer to judge coverage adequacy. Derive integration_flows from integrations[] (each external boundary deserves an integration test). Derive e2e_flows from actors[] (each human/system actor triggers a user-visible flow worth end-to-end coverage). Emit empty arrays for either flow type when the architecture has none.",
@@ -364,7 +458,7 @@ func architectureSchema() map[string]any {
 				"additionalProperties": false,
 			},
 		},
-		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "test_surface"},
+		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "test_surface"},
 		"additionalProperties": false,
 	}
 }

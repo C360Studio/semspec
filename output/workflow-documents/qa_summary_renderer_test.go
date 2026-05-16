@@ -1,0 +1,116 @@
+package workflowdocuments
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/c360studio/semspec/workflow"
+)
+
+func TestRenderQASummary_NoQARunNoDecisionsReturnsEmpty(t *testing.T) {
+	if got := RenderQASummary(nil); got != "" {
+		t.Errorf("RenderQASummary(nil) = %q, want empty", got)
+	}
+	plan := &workflow.Plan{Slug: "no-qa"}
+	if got := RenderQASummary(plan); got != "" {
+		t.Errorf("RenderQASummary(plan without QARun or decisions) = %q, want empty", got)
+	}
+}
+
+func TestRenderQASummary_PassedRun(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:    "qa-pass",
+		Title:   "QA test",
+		QALevel: workflow.QALevelIntegration,
+		QARun: &workflow.QARun{
+			RunID:       "run-123",
+			Passed:      true,
+			DurationMs:  47500,
+			CompletedAt: time.Date(2026, 5, 16, 1, 30, 0, 0, time.UTC),
+			Artifacts: []workflow.QAArtifactRef{
+				{Path: "build/reports/tests/test", Type: "report", Purpose: "JUnit"},
+			},
+		},
+	}
+	md := RenderQASummary(plan)
+	checks := map[string]bool{
+		"# QA Summary: QA test": true,
+		"`integration`":         true,
+		"## Executor result":    true,
+		"PASSED":                true,
+		"`run-123`":             true,
+		"47.5s":                 true,
+		"### Artifacts (1)":     true,
+		"build/reports":         true,
+	}
+	for needle, want := range checks {
+		got := strings.Contains(md, needle)
+		if got != want {
+			t.Errorf("contains(%q) = %v, want %v", needle, got, want)
+		}
+	}
+}
+
+func TestRenderQASummary_FailedRunWithFailures(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "qa-fail",
+		QARun: &workflow.QARun{
+			RunID:  "r1",
+			Passed: false,
+			Failures: []workflow.QAFailure{
+				{JobName: "integration", Message: "assertion failed", LogExcerpt: "expected 200, got 404"},
+			},
+		},
+	}
+	md := RenderQASummary(plan)
+	if !strings.Contains(md, "FAILED") {
+		t.Error("should mark verdict FAILED")
+	}
+	if !strings.Contains(md, "### Failures (1)") {
+		t.Error("should render failures section")
+	}
+	if !strings.Contains(md, "expected 200, got 404") {
+		t.Error("should include log excerpt")
+	}
+}
+
+func TestRenderQASummary_WithPlanDecisions(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "decisions",
+		PlanDecisions: []workflow.PlanDecision{
+			{
+				ID:             "dec-1",
+				Title:          "Add error-path test",
+				Rationale:      "Coverage gap on 5xx responses",
+				Status:         workflow.PlanDecisionStatusProposed,
+				ProposedBy:     "qa-reviewer",
+				AffectedReqIDs: []string{"req-1"},
+			},
+		},
+	}
+	md := RenderQASummary(plan)
+	if !strings.Contains(md, "## Plan decisions raised (1)") {
+		t.Error("should render plan-decisions section")
+	}
+	if !strings.Contains(md, "### Add error-path test") {
+		t.Error("should render decision title")
+	}
+	if !strings.Contains(md, "**Rationale:** Coverage gap on 5xx responses") {
+		t.Error("should render rationale")
+	}
+}
+
+func TestRenderQASummary_SynthesisLevelNoExecutor(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:    "synth",
+		QALevel: workflow.QALevelSynthesis,
+		PlanDecisions: []workflow.PlanDecision{
+			{ID: "d1", Title: "Synthesis decision"},
+		},
+	}
+	md := RenderQASummary(plan)
+	if !strings.Contains(md, "No executor run on this plan") {
+		t.Errorf("synthesis level should note absent executor. got:\n%s", md)
+	}
+}

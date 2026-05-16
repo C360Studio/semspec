@@ -301,7 +301,9 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 
 	// Scaffold the default QA workflow if not already present. Non-fatal — a
 	// missing scaffold just means the project owner adds it manually later.
-	if err := ensureQAWorkflow(c.repoPath, c.logger); err != nil {
+	// Now language-aware: picks Java/Python/Node/Rust/Go template based on
+	// projectConfig.Languages primary entry.
+	if err := EnsureQAWorkflow(c.repoPath, &projectConfig, c.logger); err != nil {
 		c.logger.Warn("Failed to scaffold default QA workflow — continuing without it",
 			"repo_path", c.repoPath, "error", err)
 	}

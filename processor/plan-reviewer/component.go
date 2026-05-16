@@ -578,6 +578,7 @@ func extractPriorReviewContext(planContent string) (findings string, iteration i
 func (c *Component) availableToolNames() []string {
 	return []string{
 		"bash", "submit_work", "ask_question",
+		"write_todos", "scratchpad",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task",

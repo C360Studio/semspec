@@ -1,0 +1,161 @@
+{
+  "actors": [
+    {
+      "name": "Mesh node",
+      "permissions": [],
+      "triggers": [
+        "Meshtastic packet received"
+      ],
+      "type": "system"
+    },
+    {
+      "name": "OSH Client",
+      "permissions": [],
+      "triggers": [
+        "Connected Systems API request"
+      ],
+      "type": "system"
+    }
+  ],
+  "component_boundaries": [
+    {
+      "dependencies": [
+        "OpenSensorHub Core",
+        "Meshtastic Daemon"
+      ],
+      "name": "driver",
+      "responsibility": "Handles Meshtastic protocol translation and implements the OSH Connected Systems API",
+      "upstream_refs": [
+        "OpenSensorHub Core",
+        "OpenSensorHub Service Consys"
+      ]
+    }
+  ],
+  "data_flow": "Mesh node -> Meshtastic Daemon -> Driver -> OSH Event Bus",
+  "decisions": [
+    {
+      "decision": "Extend AbstractSensorModule for the driver",
+      "id": "ARCH-001",
+      "rationale": "Standard OSH driver pattern for integrating external systems (verified in osh-core/sensorhub-core).",
+      "title": "OSH Module Extension"
+    },
+    {
+      "decision": "Use testcontainers with meshtasticd for integration testing",
+      "id": "ARCH-002",
+      "rationale": "Ensures the driver can parse real Meshtastic TCP streams without mocking the binary protocol.",
+      "title": "Integration Testing Strategy"
+    }
+  ],
+  "integrations": [
+    {
+      "contract": "Meshtastic Protobufs",
+      "direction": "bidirectional",
+      "error_mode": "Reconnect on TCP connection loss",
+      "name": "Meshtastic Network",
+      "protocol": "TCP"
+    }
+  ],
+  "technology_choices": [
+    {
+      "category": "build_tool",
+      "choice": "Gradle",
+      "rationale": "Existing project framework (workspace/build.gradle)"
+    },
+    {
+      "category": "language",
+      "choice": "Java 17",
+      "rationale": "Matches OSH core target compatibility (workspace/build.gradle:20)"
+    }
+  ],
+  "test_surface": {
+    "e2e_flows": [
+      {
+        "actor": "Mesh node",
+        "steps": [
+          "Mesh node sends a text message payload",
+          "Meshtasticd forwards it over TCP",
+          "Driver translates it to OSH Event"
+        ],
+        "success_criteria": [
+          "OSH Event Bus emits the expected observation"
+        ]
+      }
+    ],
+    "integration_flows": [
+      {
+        "components_involved": [
+          "driver"
+        ],
+        "description": "Validates that the driver can connect to a real meshtasticd instance, authenticate, and listen for node info and chat packets.",
+        "name": "meshtastic-tcp-handshake",
+        "scenario_refs": []
+      }
+    ]
+  },
+  "upstream_resolutions": [
+    {
+      "apis": [
+        {
+          "citation": "https://github.com/opensensorhub/osh-core/blob/master/sensorhub-core/src/main/java/org/sensorhub/impl/sensor/AbstractSensorModule.java",
+          "kind": "class",
+          "lifecycle": "init() -> start() -> stop()",
+          "notes": "Driver must subclass this to participate in OSH module lifecycle",
+          "signature": "public abstract class AbstractSensorModule<T extends SensorConfig> extends AbstractModule<T> implements ISensorModule<T>",
+          "symbol": "org.sensorhub.impl.sensor.AbstractSensorModule"
+        }
+      ],
+      "coordinate": "org.sensorhub:sensorhub-core:2.0.0",
+      "name": "OpenSensorHub Core",
+      "role": "runtime_dep",
+      "source_ref": "https://raw.githubusercontent.com/opensensorhub/osh-core/master/common.gradle",
+      "test_harness": null,
+      "used_by": [
+        "driver"
+      ]
+    },
+    {
+      "apis": [
+        {
+          "citation": "https://github.com/opensensorhub/osh-core/blob/master/sensorhub-service-consys/src/main/java/org/sensorhub/impl/service/consys/ConnectedSystemsService.java",
+          "kind": "class",
+          "lifecycle": null,
+          "notes": "Service to register the module with.",
+          "signature": "public class ConnectedSystemsService",
+          "symbol": "org.sensorhub.impl.service.consys.ConnectedSystemsService"
+        }
+      ],
+      "coordinate": "org.sensorhub:sensorhub-service-consys:2.0.0",
+      "name": "OpenSensorHub Service Consys",
+      "role": "runtime_dep",
+      "source_ref": "https://raw.githubusercontent.com/opensensorhub/osh-core/master/common.gradle",
+      "test_harness": null,
+      "used_by": [
+        "driver"
+      ]
+    },
+    {
+      "apis": [
+        {
+          "citation": "https://meshtastic.org/docs/software/developers/protobufs/api/",
+          "kind": "interface",
+          "lifecycle": "connect() -> stream packets -> disconnect()",
+          "notes": "Uses Length-Prefixed protobufs over TCP port 4403",
+          "signature": "TCP Stream Protobuf API",
+          "symbol": "TCP API"
+        }
+      ],
+      "coordinate": "meshtastic/meshtasticd:daily-alpine",
+      "name": "Meshtastic Daemon",
+      "role": "integration_target",
+      "source_ref": "https://hub.docker.com/r/meshtastic/meshtasticd/tags",
+      "test_harness": {
+        "access_method": "tcp:4403",
+        "image": "meshtastic/meshtasticd:daily-alpine",
+        "library": "testcontainers-java"
+      },
+      "used_by": [
+        "driver"
+      ]
+    }
+  ]
+}

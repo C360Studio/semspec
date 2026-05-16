@@ -19,38 +19,41 @@
   "model_registry": {
     "endpoints": {
       "gemini-flash": {
-        "provider": "openai",
+        "provider": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-3-flash-preview",
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
         "reasoning_effort": "low",
-        "request_timeout": "120s"
+        "request_timeout": "120s",
+        "wire_backend": "wire"
       },
       "gemini-flash-lite": {
-        "provider": "openai",
+        "provider": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-flash-lite",
+        "model": "gemini-3.1-flash-lite",
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": false,
         "stream": false,
-        "request_timeout": "60s"
+        "request_timeout": "60s",
+        "wire_backend": "wire"
       },
       "gemini-pro": {
-        "provider": "openai",
+        "provider": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai",
-        "model": "gemini-2.5-pro",
+        "model": "gemini-3.1-pro-preview",
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": true,
         "tool_format": "openai",
         "stream": false,
         "reasoning_effort": "medium",
-        "request_timeout": "300s"
+        "request_timeout": "900s",
+        "wire_backend": "wire"
       },
       "claude-sonnet": {
         "provider": "anthropic",
@@ -118,6 +121,15 @@
       },
       "writing": {
         "description": "Documentation, plans, specifications",
+        "preferred": [
+          "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-pro"
+        ]
+      },
+      "research": {
+        "description": "Single-shot upstream-API-surface investigation for the developer's research() tool. Reads source/docs/specs in its own context window, distills into an answer + citations capped at 4 KiB. Flash is the right tier: bulk reads + structured summary, no deep reasoning required. Pro fallback for cases where flash truncates too aggressively. See project_research_tool_plan_2026_05_14.",
         "preferred": [
           "gemini-flash"
         ],
@@ -331,11 +343,15 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 80,
+        "max_iterations": 120,
         "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
-        "content_bucket": "AGENT_CONTENT"
+        "content_bucket": "AGENT_CONTENT",
+        "tool_call_governance": {
+          "mode": "enforce",
+          "timeout": "1s"
+        }
       }
     },
     "agentic-model": {
@@ -355,6 +371,219 @@
         "stream_name": "AGENT",
         "consumer_name_suffix": "semspec-e2e",
         "timeout": "180s"
+      }
+    },
+    "rule-processor": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "rule_toolcall_proposed_in",
+              "subject": "agent.toolcall.proposed.>",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "ADR-039 proposed tool calls awaiting governance verdict"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "toolcall_approved_out",
+              "subject": "agent.toolcall.approved.>",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "ADR-039 approve verdicts to agentic-loop (loop_id.call_id subject shape per migration doc)"
+            },
+            {
+              "name": "toolcall_rejected_out",
+              "subject": "agent.toolcall.rejected.>",
+              "type": "jetstream",
+              "stream_name": "AGENT",
+              "description": "ADR-039 reject verdicts to agentic-loop (loop_id.call_id subject shape per migration doc)"
+            }
+          ]
+        },
+        "inline_rules": [
+          {
+            "id": "tool-call-governance",
+            "type": "expression",
+            "name": "Tool-call governance — race-free worktree-leak deny + default approve",
+            "description": "Single consolidated rule per semstreams beta.72 / ADR-041 unified evaluator. Fires on every proposed tool call (rule-level condition is a tautological non-empty check on $message.tool_name). Each worktree-leak pattern's publish+deny pair is gated by per-action When clauses on $message.tool_name and $message.command. When a deny action fires, stateful_evaluator short-circuits the remaining actions per its 'break on ErrDenyVerdict' contract, so the unconditional approve at the end only publishes when no deny matched. Race-free in enforce mode — exactly one verdict per call_id, no Go-map-iteration order race. Replaces three sibling rules from beta.71 (block-bash-cd-workspace, block-bash-redirect-workspace, block-bash-tee-workspace) which raced under map iteration when more than one matched (or did not match) the same call.",
+            "enabled": true,
+            "conditions": [
+              {"field": "$message.tool_name", "operator": "ne", "value": "", "required": false}
+            ],
+            "logic": "and",
+            "on_enter": [
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "cd /workspace(\\s|$|[;&|])"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "bash 'cd /workspace' blocked — stay in worktree"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "cd /workspace(\\s|$|[;&|])"}
+                ],
+                "reason": "bash 'cd /workspace' blocked — stay in worktree"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "> /workspace/"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "bash redirect into /workspace/ blocked — write to worktree path"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "> /workspace/"}
+                ],
+                "reason": "bash redirect into /workspace/ blocked — write to worktree path"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "tee /workspace/"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "bash 'tee /workspace/' blocked — write to worktree path"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "tee /workspace/"}
+                ],
+                "reason": "bash 'tee /workspace/' blocked — write to worktree path"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "--privileged"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker --privileged blocked — Testcontainers does not need privileged containers; use programmatic Testcontainers API instead"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "--privileged"}
+                ],
+                "reason": "docker --privileged blocked — Testcontainers does not need privileged containers; use programmatic Testcontainers API instead"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "/var/run/docker.sock"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker bind-mount of /var/run/docker.sock blocked — nested socket grants sibling-container creation, breaks the sandbox trust boundary"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "contains", "value": "docker "},
+                  {"field": "$message.command", "operator": "contains", "value": "/var/run/docker.sock"}
+                ],
+                "reason": "docker bind-mount of /var/run/docker.sock blocked — nested socket grants sibling-container creation, breaks the sandbox trust boundary"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*(-v|--volume)\\s+/:"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker host-root bind-mount blocked — exposes the host filesystem to the spawned container"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*(-v|--volume)\\s+/:"}
+                ],
+                "reason": "docker host-root bind-mount blocked — exposes the host filesystem to the spawned container"
+              },
+              {
+                "type": "publish",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*--network[\\s=]host"}
+                ],
+                "subject": "agent.toolcall.rejected.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "rejected",
+                  "call_id": "$message.call_id",
+                  "reason": "docker --network host blocked — bypasses container network isolation; Testcontainers uses bridge networking by default"
+                }
+              },
+              {
+                "type": "deny",
+                "when": [
+                  {"field": "$message.tool_name", "operator": "eq", "value": "bash"},
+                  {"field": "$message.command", "operator": "regex", "value": "docker\\s+run.*--network[\\s=]host"}
+                ],
+                "reason": "docker --network host blocked — bypasses container network isolation; Testcontainers uses bridge networking by default"
+              },
+              {
+                "type": "publish",
+                "subject": "agent.toolcall.approved.$message.loop_id.$message.call_id",
+                "properties": {
+                  "decision": "approved",
+                  "call_id": "$message.call_id"
+                }
+              }
+            ],
+            "metadata": {
+              "category": "governance",
+              "tier": 0,
+              "adr": "041"
+            }
+          }
+        ]
       }
     },
     "graph-ingest": {
@@ -596,6 +825,12 @@
       "enabled": true,
       "config": {}
     },
+    "researcher-manager": {
+      "name": "researcher-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
     "requirement-executor": {
       "name": "requirement-executor",
       "type": "processor",
@@ -801,6 +1036,7 @@
     "AGENT": {
       "subjects": [
         "agent.task.>",
+        "agent.research.requested.>",
         "dev.task.>",
         "agent.request.>",
         "agent.response.>",
@@ -809,6 +1045,9 @@
         "agent.created.>",
         "agent.failed.>",
         "agent.context.compaction.>",
+        "agent.toolcall.proposed.>",
+        "agent.toolcall.approved.>",
+        "agent.toolcall.rejected.>",
         "context.build.>",
         "context.built.>",
         "tool.execute.>",

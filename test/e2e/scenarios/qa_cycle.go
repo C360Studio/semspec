@@ -44,25 +44,6 @@ type QACycleScenario struct {
 	name string
 }
 
-// integrationQAWorkflow is the qa.yml seeded into the workspace for the
-// integration-level variant. Kept in sync with the single-job
-// processor/project-manager/templates/qa.yml — e2e variant omits the e2e job
-// since act runs with --job integration at qa_level=integration.
-const integrationQAWorkflow = `name: QA
-on: [push, pull_request]
-jobs:
-  integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: false
-      - name: Integration tests
-        run: go test ./... -tags=integration -v
-`
-
 // NewQACycleScenario creates a new QA cycle scenario at qa_level=unit.
 // Exercises the sandbox unit-test executor path.
 func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
@@ -217,11 +198,11 @@ func (s *QACycleScenario) stageSetupWorkspace(_ context.Context, result *Result)
 		// at least one test and returns zero. Without the tag the default
 		// qa.yml integration job would report "no tests to run".
 		files["pkg/math/math_integration_test.go"] = "//go:build integration\n\npackage math\n\nimport \"testing\"\n\nfunc TestAddIntegration(t *testing.T) {\n\tif got := Add(10, 20); got != 30 {\n\t\tt.Errorf(\"Add(10, 20) = %d; want 30\", got)\n\t}\n}\n"
-
-		// act needs a qa.yml to execute. In a real project this would be
-		// scaffolded by project-manager's ensureQAWorkflow; here we pre-seed a
-		// minimal version so the scenario is independent of that helper.
-		files[".github/workflows/qa.yml"] = integrationQAWorkflow
+		// qa.yml is auto-scaffolded by plan-manager.publishQARequestIfNeeded
+		// before the QARequestedEvent is published (project-manager.EnsureQAWorkflow
+		// templates a Go workflow because project.json's primary language is Go).
+		// The scenario relies on that auto-scaffold — pre-seeding here was the
+		// pre-2026-05-15 shape, removed to exercise the real wiring end-to-end.
 	}
 
 	for path, content := range files {

@@ -113,8 +113,27 @@ services:
       - NATS_URL=nats://nats:4222
     volumes:
       - ../../test/e2e/workspace:/workspace
+      # DooD for Testcontainers — dev's TDD loop spawns real integration-test
+      # containers via the host docker daemon. Trust boundary maintained by
+      # tool-call governance rules (configs/e2e-hybrid.json) that deny bash
+      # escape shapes like `docker run --privileged`.
+      - /var/run/docker.sock:/var/run/docker.sock
+    # The host docker socket is mounted with its native ownership preserved
+    # by the docker daemon. Mac Docker Desktop translates the socket to
+    # root:root mode 660 inside containers, so the sandbox user (uid 1000)
+    # needs supplementary membership in root group (GID 0) to access it.
+    # Linux hosts with rootful docker typically use root:docker (GID ~999);
+    # set DOCKER_GID in .env to that value on those hosts. Default 0 covers
+    # the Mac dev path; Linux CI override is one env var away.
+    group_add:
+      - "${DOCKER_GID:-0}"
     depends_on:
       nats:
+        condition: service_healthy
+      # Same WORKFLOW-stream race as qa-runner — sandbox's qa-unit subscriber
+      # exits with code 1 if the stream isn't ready within ~60s of NATS
+      # connect. Gate on semspec health so the stream exists by then.
+      semspec:
         condition: service_healthy
     deploy:
       resources:
@@ -153,7 +172,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      # start_period covers cold-load and slow-network first-pull scenarios.
+      # Empirical: warm-disk model load ~80-90s; first-time HF fetch on a slow
+      # connection adds another minute or two. 180s start_period + 50s post-
+      # start retry budget (5 × 10s) = 230s total grace before unhealthy. No
+      # cost on warm-load runs — start_period only suppresses failure counting,
+      # doesn't delay the healthy transition.
+      start_period: 180s
     # 12-core host budget; 1 CPU is plenty for arctic-embed-s.
     deploy:
       resources:
@@ -251,6 +276,13 @@ services:
       - "8191:8091"
     depends_on:
       nats:
+        condition: service_healthy
+      # semspec creates the WORKFLOW stream during startup; qa-runner's
+      # QA subscriber waits ~60s (30 retries × 2s) for that stream and
+      # exits with code 1 if absent. On slow startups (cold semembed,
+      # slow network) semspec takes >60s to be ready, so qa-runner must
+      # gate on semspec health rather than just NATS.
+      semspec:
         condition: service_healthy
     environment:
       - NATS_URL=nats://nats:4222

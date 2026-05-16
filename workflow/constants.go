@@ -22,4 +22,11 @@ const (
 	// the AGENT_LOOPS watcher so the recovery-agent only acts on its own
 	// loop completions.
 	WorkflowSlugWedgeRecovery = "semspec-wedge-recovery"
+
+	// WorkflowSlugResearch identifies researcher sub-agent TaskMessages
+	// dispatched by researcher-manager in response to the developer's
+	// research() tool call. Set on the dispatched TaskMessage so the
+	// researcher's loop is attributable in AGENT_LOOPS and trajectory
+	// snapshots. See project_research_tool_plan_2026_05_14.
+	WorkflowSlugResearch = "semspec-research"
 )

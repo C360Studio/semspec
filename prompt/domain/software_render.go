@@ -80,10 +80,41 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 	}
 
 	if rg.ReviewFindings != "" {
-		fmt.Fprintf(&sb, "\n## Previous Review Findings (Address These)\n\nThe previous set of requirements was reviewed and rejected. Address ALL of the following findings:\n\n%s\n", rg.ReviewFindings)
+		fmt.Fprintf(&sb, "\n## Previous Review Findings (Address These)\n\nThe previous set of requirements was reviewed and rejected. Address ALL of the following findings:\n\n%s\n%s", rg.ReviewFindings, reviewFindingsActionDirective())
 	}
 
 	return sb.String()
+}
+
+// reviewFindingsActionDirective is the meta-rule appended to every
+// regen prompt's review-findings block. It tells the LLM to anchor on
+// the structured "Action: VERB `value` (TO|FROM|IN) `field`" line that
+// writeViolationFinding renders before any prose. The prose Suggestion
+// can drift toward bidirectional language ("ensure consistency between
+// A and B"); the directive is the reviewer's committed direction. Take-24
+// hybrid/hard (2026-05-14) escalated because a prose suggestion was
+// satisfied in the WRONG direction (regen REMOVED a file from
+// requirement.files_owned when the directive said ADD to scope.create).
+// Including this rule directly under the findings block keeps the
+// guidance close to where the model needs it — adding it to the system
+// prompt was tried in a draft and lost attention by the time the
+// findings block scrolled into the model's window.
+func reviewFindingsActionDirective() string {
+	return `
+**HOW TO READ FINDINGS:** Each error-severity violation begins with an
+` + "`Action:`" + ` line in the form ` + "`Action: VERB `value` (TO|FROM|IN) `field``" + `.
+The Action line is the reviewer's committed remediation direction —
+EXECUTE IT VERBATIM. Do NOT infer the inverse direction from the prose
+Suggestion ("remove X from files_owned to make it consistent with
+scope.create" is not a valid satisfaction of "Action: ADD X TO
+scope.create"). When in doubt, do exactly what the Action line says
+and ignore any prose that points the other way. If the directive
+itself is wrong (the reviewer asked for the opposite of what the
+plan needs), apply it anyway — the next review round will surface a
+new finding pointing at the bad directive, which is the right place
+to dispute it.
+
+`
 }
 
 // renderPlannerPrompt produces the planner agent's user message. Two paths:
@@ -102,6 +133,12 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 			sb.WriteString("\n```\n\n")
 		}
 		sb.WriteString(p.RevisionPrompt)
+		// Action-directive meta-rule appended after the findings block so
+		// the planner anchors on the structured directive over prose.
+		// Same fix-cause as requirement-generator/scenario-generator/
+		// architect — see reviewFindingsActionDirective() comments.
+		sb.WriteString("\n")
+		sb.WriteString(reviewFindingsActionDirective())
 		// Re-anchor the revision flow against two failure modes seen on
 		// 2026-05-03 v8: (1) the planner ignoring scope.create even when
 		// the reviewer suggested it by name, (2) the planner panicking
@@ -110,7 +147,7 @@ func renderPlannerPrompt(p *prompt.PlannerPromptContext) string {
 		// revision prompt so it fires fresh on every revision turn —
 		// the system-prompt fragment alone is too far away in a long
 		// conversation for example-anchoring to stick.
-		sb.WriteString("\n\n## Scope Schema Reminder (ALWAYS APPLIES)\n\n")
+		sb.WriteString("\n## Scope Schema Reminder (ALWAYS APPLIES)\n\n")
 		sb.WriteString("scope.include = files that ALREADY EXIST and the plan will read or modify.\n")
 		sb.WriteString("scope.create  = files the plan will CREATE that don't exist yet.\n")
 		sb.WriteString("scope.exclude / scope.do_not_touch = boundaries (rarely used).\n\n")
@@ -356,7 +393,7 @@ Please fix the issue and ensure your response is valid JSON matching the require
 The previous set of scenarios was reviewed and rejected. Address ALL of the following findings:
 
 %s
-`, p.ReviewFindings)
+%s`, p.ReviewFindings, reviewFindingsActionDirective())
 	}
 
 	return base
@@ -401,7 +438,8 @@ Please fix the issue and ensure your deliverable matches the required structure.
 
 The previous round was reviewed and rejected. Read every finding before deciding actor / integration / test_surface shape — repeating the same shape will fail the next review the same way.
 
-%s`, p.ReviewFindings)
+%s
+%s`, p.ReviewFindings, reviewFindingsActionDirective())
 	}
 
 	return fmt.Sprintf(`Analyze the following plan and its requirements to produce architecture decisions.
@@ -753,6 +791,8 @@ const planReviewerCompletenessR2 = "## Completeness Criteria (Round 2 — Requir
 	"5. **Scope alignment** — Scope files should be relevant to the requirements. Scope entries unrelated to any requirement may indicate stale or incorrect scope. (phase: \"plan\")\n" +
 	"6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent, component boundaries must not overlap, actors must have distinct trigger sets, and integration points must not contradict component boundaries. (phase: \"architecture\")\n" +
 	"7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Requirements involving external systems should map to declared integration points. Requirements triggered by user actions should map to declared actors. Flag requirements that conflict with architectural decisions. (phase: \"requirements\", target_id: the conflicting requirement ID)\n" +
+	"7a. **Upstream resolution discipline** — When the architecture references an external library, API, or framework (anywhere in technology_choices, integrations, or component_boundaries), the architect MUST have populated `architecture.upstream_resolutions[]` with the resolved coordinate + the API surface the developer will integrate against. The dev no longer has a research sub-agent (shelved 2026-05-15) — the architect's resolutions are the developer's pre-loaded reading list, and missing resolutions reproduce the take-23 wedge (35 external file reads, 0 worktree writes, iter budget exhausted on re-discovery). Apply the following STRUCTURAL checks; emit Path B-shape findings (action + target_field + target_value) so the architect's revision is unambiguous: (a) For every external library named in technology_choices, integrations, or any component_boundaries[].dependencies entry that is NOT also a component_boundaries[].name (i.e., it points outside the system), there MUST be a matching `architecture.upstream_resolutions[]` entry whose `name` matches. Missing resolution → action=\"add\", target_field=\"architecture.upstream_resolutions\", target_value=\"<lib-name> with coordinate, source_ref, and apis from the canonical docs you fetched in inspection step 4\". (b) Every `upstream_resolutions[]` entry MUST have non-empty `coordinate` (machine-resolvable: groupId:artifactId:version, name@version, github URL@tag — vague hints like \"OSH 2.x\" do NOT satisfy), non-empty `source_ref` (the URL or file path proving the coordinate), and at least one `apis[]` entry. Missing field → action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].<field>\", target_value=\"<concrete value to populate from your inspection notes>\". (c) Every `apis[]` entry MUST have non-empty `citation` (file path or URL where the signature was verified). An uncited surface is a guess; mark it action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].apis[<symbol>].citation\", target_value=\"<URL or path>\". (d) Bidirectional invariant: for every `component_boundaries[].upstream_refs` entry, the named resolution MUST exist in `upstream_resolutions[]`. For every `upstream_resolutions[].used_by` entry, the named component MUST exist in `component_boundaries[]` AND that component's `upstream_refs[]` MUST list the resolution back. Mismatch → action=\"add\", target_field=\"architecture.<the side missing the back-link>\", target_value=\"<the name to add>\". (e) Goodhart guard: do NOT reject for \"the apis section seems short\" or \"more notes would help\" — those are subjective and unenforceable. Only reject for STRUCTURAL violations (missing field, missing citation, missing back-link, vague coordinate). If you cannot name the SPECIFIC missing field per Path B's directive shape, the finding doesn't pass the bar. (phase: \"architecture\", target_id: the upstream_resolutions entry name OR the component name OR \"<missing>\" when the entry doesn't exist yet)\n" +
+	"7b. **Integration-target test_harness discipline** — Every `upstream_resolutions[]` entry whose `role` field is \"integration_target\" MUST carry a populated `test_harness` block with three concrete fields. This is the Testcontainers-led integration tier's structural anchor: it's what lets the dev's TDD loop spin up the real upstream container via Testcontainers, and it's what prevents the take-19 / take-29 stub-JAR fabrication shape from re-emerging (dev wrote tests against fabricated 55-byte JARs, reviewer approved, qa-runner had no anchor to detect because nothing in the deliverable named the real integration target). Apply Path B-shape findings: (a) For every entry with `role == \"integration_target\"` and missing-or-null `test_harness`: action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].test_harness\", target_value=\"{library: <testcontainers-X>, image: <repo/name:tag>, access_method: <protocol:port>}\". (b) Inside any present `test_harness`, every field (`library`, `image`, `access_method`) MUST be non-empty. Missing field → action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].test_harness.<field>\", target_value=\"<concrete value cited from upstream's docker docs>\". (c) `test_harness.image` MUST be a concrete registry coordinate — contains a tag (\":<tag>\") and a repo path (e.g., \"meshtastic/meshtasticd:latest\", \"postgres:16-alpine\"). Vague values like \"latest\", \"the official image\", \"a docker container\" do NOT satisfy. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].test_harness.image\", target_value=\"<concrete repo/name:tag from Docker Hub or GHCR>\". (d) `test_harness.access_method` MUST match shape \"<protocol>:<port>\" with a numeric port (e.g., \"tcp:4403\", \"http:8080\", \"grpc:9000\"). Reject \"the standard port\", \"whichever port it exposes\", etc. (e) Inverse goodhart guard: do NOT reject `runtime_dep` or `build_dep` resolutions for missing test_harness — those roles correctly emit `test_harness: null`. Only flag the integration_target shape. (f) Architect bias correction: when the architect classifies as `runtime_dep` something that's clearly a separate process (database driver, message-queue client library, gRPC stub for a remote service), the role is wrong. Heuristic: if the upstream's docs include a \"running it\" or \"docker compose\" section, it's an integration_target — not a runtime_dep. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].role\", target_value=\"integration_target\" + a paired add for test_harness. (phase: \"architecture\", target_id: the upstream_resolutions entry name)\n" +
 	"8. **Scenario-actor coverage** — Scenarios should reference the actors declared in the architecture. If the architecture declares an actor (e.g., a \"scheduler\" or \"event\" type) but no scenario has a Given/When involving that actor's triggers, flag as a warning — the plan may have blind spots for that actor's behavior. (phase: \"scenarios\")\n" +
 	"9. **Scenario-integration coverage** — Scenarios should exercise the integration points declared in the architecture. If the architecture declares an integration (e.g., an outbound HTTP API or a database) but no scenario verifies that integration's behavior or error handling, flag as a warning — untested integration boundaries are a common source of production failures. (phase: \"scenarios\")\n\n"
 
@@ -872,5 +912,38 @@ func renderRecoveryAgentPrompt(r *prompt.RecoveryPromptContext) string {
 	}
 
 	sb.WriteString("\n---\nDiagnose the wedge from the evidence above and call submit_work with your chosen RecoveryAction. Do not call any other tool except scratchpad (which is for your own reasoning before you commit).")
+	return sb.String()
+}
+
+// renderResearcherPrompt builds the researcher's user prompt from the
+// asking developer's research() tool call. The renderer is intentionally
+// terse — the system prompt carries the role description; the user
+// prompt carries the specific request the researcher needs to answer.
+func renderResearcherPrompt(r *prompt.ResearcherPromptContext) string {
+	var sb strings.Builder
+
+	sb.WriteString("# RESEARCH REQUEST\n\n")
+	fmt.Fprintf(&sb, "**Research ID**: %s (pass verbatim to answer_research)\n", r.ResearchID)
+	if r.AskingPlanSlug != "" {
+		fmt.Fprintf(&sb, "**Asking plan**: %s\n", r.AskingPlanSlug)
+	}
+	if r.AskingTaskID != "" {
+		fmt.Fprintf(&sb, "**Asking task**: %s\n", r.AskingTaskID)
+	}
+
+	sb.WriteString("\n## Question\n\n")
+	sb.WriteString(r.Question)
+	sb.WriteString("\n")
+
+	if len(r.Sources) > 0 {
+		sb.WriteString("\n## Source hints (developer's starting points)\n\n")
+		for _, s := range r.Sources {
+			fmt.Fprintf(&sb, "- %s\n", s)
+		}
+	} else {
+		sb.WriteString("\n## Source hints\n\n(none — the developer did not narrow the starting points; use web_search to discover canonical upstream sources before fetching content)\n")
+	}
+
+	sb.WriteString("\n---\nRead just enough to answer the question concretely, then call answer_research with the answer + citations. If the question is too broad to answer concretely from what you can read, return what you have plus a brief note describing what's still ambiguous so the developer can ask a follow-up.")
 	return sb.String()
 }

@@ -12,17 +12,48 @@ import (
 // Migrated 2026-04-28 from workflow/prompts/plan_reviewer.go as part of the
 // Plan B persona/fragment consolidation — the type is a domain output, not a
 // prompt-content artifact, so it belongs alongside the rest of workflow/.
+//
+// Action / TargetField / TargetValue carry the structured remediation
+// directive (added 2026-05-14 after take-24 hybrid/hard escalation). The
+// finding's prose Suggestion is human-readable but bidirectional ("ensure
+// consistency between scope.create and files_owned" can be satisfied in
+// EITHER direction). The downstream regen LLM (requirement-generator,
+// scenario-generator, architect, planner) consumes findings as prose and
+// must infer both the action verb and the target field — when the prose
+// is ambiguous a non-deterministic model picks the smaller mutation, which
+// is often the wrong direction. Take-24's reviewer asked to "Add X to
+// scope.create AND ensure consistency"; regen REMOVED X from
+// requirement.files_owned and the loop escalated. Action+TargetField+
+// TargetValue let the reviewer commit to one direction at the source so
+// downstream regen has nothing to misinterpret.
 type PlanReviewFinding struct {
-	SOPID      string `json:"sop_id"`
-	SOPTitle   string `json:"sop_title"`
-	Severity   string `json:"severity"`
-	Status     string `json:"status"`
-	Category   string `json:"category,omitempty"`  // "sop" or "completeness" (ADR-029)
-	Phase      string `json:"phase,omitempty"`     // "plan", "requirements", "architecture", "scenarios"
-	TargetID   string `json:"target_id,omitempty"` // specific entity ID (e.g., "REQ-2", "SCEN-3")
-	Issue      string `json:"issue,omitempty"`
-	Suggestion string `json:"suggestion,omitempty"`
-	Evidence   string `json:"evidence,omitempty"`
+	SOPID    string `json:"sop_id"`
+	SOPTitle string `json:"sop_title"`
+	Severity string `json:"severity"`
+	Status   string `json:"status"`
+	Category string `json:"category,omitempty"`  // "sop" or "completeness" (ADR-029)
+	Phase    string `json:"phase,omitempty"`     // "plan", "requirements", "architecture", "scenarios"
+	TargetID string `json:"target_id,omitempty"` // specific entity ID (e.g., "REQ-2", "SCEN-3")
+	// Action is the imperative remediation verb. Required on every error-
+	// severity violation when verdict=needs_changes. Allowed values: "add",
+	// "remove", "rename", "replace", "move". Empty on compliant/info
+	// findings (no remediation needed) and on warnings the reviewer
+	// chose not to commit a direction on.
+	Action string `json:"action,omitempty"`
+	// TargetField is the SINGLE plan field the Action mutates. Examples:
+	// "scope.create", "scope.include", "requirement.<id>.files_owned",
+	// "architecture.decisions", "scenario.<id>.given". Required whenever
+	// Action is set. Multi-field "ensure consistency between A and B"
+	// guidance is forbidden — pick ONE side and commit.
+	TargetField string `json:"target_field,omitempty"`
+	// TargetValue is the value being added/removed/renamed. For "add"
+	// it's the new entry; for "remove" the entry to drop; for "rename"
+	// or "replace" the format is "old → new". Required whenever Action
+	// is set.
+	TargetValue string `json:"target_value,omitempty"`
+	Issue       string `json:"issue,omitempty"`
+	Suggestion  string `json:"suggestion,omitempty"`
+	Evidence    string `json:"evidence,omitempty"`
 }
 
 // PlanReviewResult is the structured output from plan review.
@@ -123,11 +154,23 @@ func (r *PlanReviewResult) FormatFindings() string {
 // writeViolationFinding renders one violation as structured prose
 // preserving every diagnostic field. The order is fixed so model
 // attention is consistent across findings within a round and across
-// rounds: header → issue → evidence → suggestion. Evidence is the
-// reviewer's verbatim quote of the inconsistency and is the highest-
-// signal field for the next-round generator.
+// rounds: header → ACTION DIRECTIVE → issue → evidence → suggestion.
+// Evidence is the reviewer's verbatim quote of the inconsistency.
+//
+// Action is rendered FIRST when present so the regen LLM sees the
+// committed remediation direction before any prose that might be
+// bidirectional. The Suggestion field is still surfaced (it carries
+// the reviewer's reasoning) but it's preceded by the directive — so
+// even if the suggestion language drifts toward "ensure consistency"
+// the regen has an unambiguous instruction to anchor on. Format is
+// "Action: ADD `value` TO `field`" — the verb is uppercase and the
+// value/field are backtick-quoted to survive copy-paste through the
+// model's tokenization.
 func writeViolationFinding(sb *strings.Builder, f PlanReviewFinding) {
 	fmt.Fprintf(sb, "- **[%s]** %s\n", strings.ToUpper(f.Severity), findingHeader(f))
+	if f.Action != "" {
+		fmt.Fprintf(sb, "  - Action: %s\n", formatActionDirective(f))
+	}
 	if f.Issue != "" {
 		fmt.Fprintf(sb, "  - Issue: %s\n", f.Issue)
 	}
@@ -138,6 +181,47 @@ func writeViolationFinding(sb *strings.Builder, f PlanReviewFinding) {
 		fmt.Fprintf(sb, "  - Suggestion: %s\n", f.Suggestion)
 	}
 	sb.WriteString("\n")
+}
+
+// formatActionDirective renders the Action / TargetField / TargetValue
+// triple as an imperative directive. Falls back gracefully when only
+// some fields are populated (older payloads or partial reviewer output)
+// — the verb alone is still a stronger signal than prose suggestion
+// when the field/value couldn't be committed. Examples:
+//   - ADD `MeshtasticConnection.java` TO `scope.create`
+//   - REMOVE `requirement.X.2.files_owned[2]` (no field/value)
+//   - RENAME `old → new` IN `architecture.decisions[ARCH-001]`
+//
+// The verb is uppercased to make it visually stand out from the
+// surrounding prose; downstream regen prompts cite this rendering
+// shape in their meta-rule.
+func formatActionDirective(f PlanReviewFinding) string {
+	verb := strings.ToUpper(strings.TrimSpace(f.Action))
+	value := strings.TrimSpace(f.TargetValue)
+	field := strings.TrimSpace(f.TargetField)
+
+	switch {
+	case value != "" && field != "":
+		// Most informative shape — both endpoints committed.
+		switch verb {
+		case "ADD":
+			return fmt.Sprintf("ADD `%s` TO `%s`", value, field)
+		case "REMOVE":
+			return fmt.Sprintf("REMOVE `%s` FROM `%s`", value, field)
+		case "RENAME", "REPLACE":
+			return fmt.Sprintf("%s `%s` IN `%s`", verb, value, field)
+		case "MOVE":
+			return fmt.Sprintf("MOVE `%s` TO `%s`", value, field)
+		default:
+			return fmt.Sprintf("%s `%s` IN `%s`", verb, value, field)
+		}
+	case value != "":
+		return fmt.Sprintf("%s `%s`", verb, value)
+	case field != "":
+		return fmt.Sprintf("%s in `%s`", verb, field)
+	default:
+		return verb
+	}
 }
 
 // findingHeader composes a meaningful bullet header even when SOPTitle

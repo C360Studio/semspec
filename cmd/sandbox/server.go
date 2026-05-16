@@ -452,6 +452,19 @@ type mergeResponse struct {
 	Note            string           `json:"note,omitempty"`
 	NothingToCommit bool             `json:"nothing_to_commit,omitempty"`
 	FilesChanged    []fileChangeInfo `json:"files_changed,omitempty"`
+
+	// RecoveryNote names a non-fatal recovery action the merge handler
+	// took to succeed. Empty for clean merges. Set when path-confusion
+	// recovery discarded /workspace leakage to unblock the merge
+	// (2026-05-12 take-16 fix). Operators reading the merge result for
+	// audit see exactly what was thrown away.
+	RecoveryNote string `json:"recovery_note,omitempty"`
+
+	// DiscardedPaths lists files/directories the recovery wiped from
+	// /workspace because they conflicted with the incoming worktree
+	// commit AND were a subset of what that commit was bringing in.
+	// Same audit-trail purpose as RecoveryNote.
+	DiscardedPaths []string `json:"discarded_paths,omitempty"`
 }
 
 // handleMergeWorktree commits any pending changes in the worktree and merges
@@ -642,6 +655,176 @@ func writeMergeError(w http.ResponseWriter, mergeErr error) {
 	writeError(w, http.StatusConflict, "merge conflict: "+mergeErr.Error())
 }
 
+// workspaceLeakRecovery captures the outcome of a single
+// tryRecoverFromWorkspaceLeak invocation. success indicates whether the
+// retry merge succeeded; note carries a human-readable summary for
+// logging + mergeResponse audit; discarded lists the paths the recovery
+// wiped from /workspace.
+type workspaceLeakRecovery struct {
+	success   bool
+	note      string
+	discarded []string
+}
+
+// maxWorkspaceLeakDiscards bounds the number of leaked files
+// tryRecoverFromWorkspaceLeak will discard before refusing recovery.
+// The recovery throws away uncommitted state in the repo root — a
+// 10-file ceiling is a conservative middle ground: enough to handle
+// typical sonnet bash-leak shapes (build.gradle + a handful of test
+// files), tight enough that a truly broken cross-node integration
+// conflict (which often involves a much larger working set) falls
+// through to the existing restore logic instead of being silently
+// nuked. Bump this only with a corresponding audit-log review.
+const maxWorkspaceLeakDiscards = 10
+
+// tryRecoverFromWorkspaceLeak attempts to recover from a merge failure
+// caused by sonnet (or another agent) writing files to /workspace
+// instead of its assigned worktree via `cd /workspace && cat > file`.
+// The recovery is gated on three invariants:
+//
+//  1. The merge failure message names files via the "would be
+//     overwritten by merge" wording (tracked OR untracked variant).
+//  2. Every named conflicting file is a subset of what the incoming
+//     worktree commit would bring (i.e. the file would be added or
+//     modified by the merge anyway). This is the signal that the
+//     /workspace dirty state is leaked work, not a legitimate
+//     cross-node integration conflict.
+//  3. The number of files to discard does not exceed
+//     maxWorkspaceLeakDiscards.
+//
+// When all three hold, the recovery runs `git checkout HEAD -- <path>`
+// (tracked) or `rm -rf <path>` (untracked) in /workspace for each
+// conflicting path, aborts the in-flight merge to clear MERGE_HEAD,
+// and retries the merge. On success returns success=true; on any
+// invariant violation or retry failure returns success=false with a
+// note explaining why. Must be called under s.repoMu.
+//
+// 2026-05-12: see .semspec/investigation-diff-gate-2026-05-12.md.
+func (s *Server) tryRecoverFromWorkspaceLeak(ctx context.Context, taskID, hash string, mergeErr error) *workspaceLeakRecovery {
+	tracked, untracked := parseMergeOverwriteFiles(mergeErr.Error())
+	conflicting := append(append([]string{}, tracked...), untracked...)
+	if len(conflicting) == 0 {
+		return &workspaceLeakRecovery{success: false, note: "merge error did not name overwrite-blocked files"}
+	}
+	if len(conflicting) > maxWorkspaceLeakDiscards {
+		return &workspaceLeakRecovery{
+			success: false,
+			note:    fmt.Sprintf("would discard %d files (cap=%d) — refusing", len(conflicting), maxWorkspaceLeakDiscards),
+		}
+	}
+
+	// Compute incoming worktree commit's file set. The merge would
+	// bring everything in `git diff --name-only HEAD..<hash>`. If any
+	// conflicting path is NOT in this set, the conflict is genuine
+	// (someone else's work in /workspace), not the path-confusion
+	// failure mode.
+	diffOut, diffErr := gitOutput(ctx, s.repoPath, "diff", "--name-only", "HEAD.."+hash)
+	if diffErr != nil {
+		return &workspaceLeakRecovery{success: false, note: "failed to compute incoming diff: " + diffErr.Error()}
+	}
+	incoming := make(map[string]struct{})
+	for _, line := range strings.Split(strings.TrimSpace(diffOut), "\n") {
+		if line != "" {
+			incoming[line] = struct{}{}
+		}
+	}
+	for _, path := range conflicting {
+		if _, ok := incoming[path]; !ok {
+			return &workspaceLeakRecovery{
+				success: false,
+				note:    fmt.Sprintf("conflicting path %q not in incoming commit — likely cross-node conflict, not leakage", path),
+			}
+		}
+	}
+
+	// Abort the failed merge first so the index is clean before we
+	// touch the working tree. Ignore the error — `merge --abort` is
+	// best-effort here; if it fails the subsequent checkout/rm will
+	// either succeed (clean repo) or fail (real problem) and the
+	// caller's restore logic still runs.
+	_ = runGit(ctx, s.repoPath, "merge", "--abort")
+
+	// Discard leaked state. Tracked files: `git checkout HEAD -- <path>`
+	// restores from the index. Untracked: `rm -rf <path>` because
+	// `git checkout` doesn't apply.
+	if len(tracked) > 0 {
+		args := append([]string{"checkout", "HEAD", "--"}, tracked...)
+		if err := runGit(ctx, s.repoPath, args...); err != nil {
+			return &workspaceLeakRecovery{success: false, note: "checkout HEAD failed: " + err.Error()}
+		}
+	}
+	for _, path := range untracked {
+		// Defense against path-traversal: filepath.Clean + reject any
+		// path that resolves outside repoPath. The git-output parsing
+		// should never produce these (porcelain output is repo-rooted)
+		// but the sandbox model is "untrusted input from agent
+		// trajectory" so we keep the guard.
+		clean := filepath.Clean(path)
+		full := filepath.Join(s.repoPath, clean)
+		if !strings.HasPrefix(full+string(filepath.Separator), s.repoPath+string(filepath.Separator)) && full != s.repoPath {
+			return &workspaceLeakRecovery{success: false, note: "untracked path escapes repo root: " + path}
+		}
+		if err := os.RemoveAll(full); err != nil {
+			return &workspaceLeakRecovery{success: false, note: "rm untracked failed: " + err.Error()}
+		}
+	}
+
+	// Retry the merge with the same commit message.
+	mergeMsg := fmt.Sprintf("merge: agent task %s (path-confusion recovery)", taskID)
+	if err := runGit(ctx, s.repoPath, "merge", hash, "--no-ff", "-m", mergeMsg); err != nil {
+		return &workspaceLeakRecovery{success: false, note: "retry merge failed: " + err.Error()}
+	}
+
+	return &workspaceLeakRecovery{
+		success:   true,
+		note:      fmt.Sprintf("discarded %d leaked /workspace path(s)", len(conflicting)),
+		discarded: conflicting,
+	}
+}
+
+// parseMergeOverwriteFiles extracts the file paths git names in its
+// "would be overwritten by merge" error. Returns two slices because git
+// reports tracked-with-local-changes separately from untracked. Both
+// blocks have the same column-1 tab indentation but different
+// headlines:
+//
+//	"Your local changes to the following files would be overwritten by merge:"
+//	"The following untracked working tree files would be overwritten by merge:"
+//
+// Each block is terminated by an empty line or one of the trailing
+// instructions ("Please commit your changes...", "Aborting").
+//
+// Returns nil, nil when neither block is present. Defensive against
+// git wording changes — adding new tests as new shapes appear is the
+// right escape path.
+func parseMergeOverwriteFiles(errMsg string) (tracked, untracked []string) {
+	const (
+		trackedHeader   = "Your local changes to the following files would be overwritten by merge:"
+		untrackedHeader = "The following untracked working tree files would be overwritten by merge:"
+	)
+	parseBlock := func(after string) []string {
+		var out []string
+		for _, line := range strings.Split(after, "\n") {
+			if !strings.HasPrefix(line, "\t") {
+				// Block terminates at the first non-tab-indented line.
+				break
+			}
+			path := strings.TrimSpace(line)
+			if path != "" {
+				out = append(out, path)
+			}
+		}
+		return out
+	}
+	if idx := strings.Index(errMsg, trackedHeader); idx >= 0 {
+		tracked = parseBlock(errMsg[idx+len(trackedHeader)+1:])
+	}
+	if idx := strings.Index(errMsg, untrackedHeader); idx >= 0 {
+		untracked = parseBlock(errMsg[idx+len(untrackedHeader)+1:])
+	}
+	return tracked, untracked
+}
+
 // selfHealAfterFailedRestore attempts to return the main repo to origBranch
 // after a merge failed AND the initial `checkout origBranch` also failed
 // (typically: the failed merge left the working tree dirty with conflict
@@ -738,6 +921,40 @@ func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req
 	mergeMsg = appendTrailers(mergeMsg, req.Trailers)
 
 	if err := runGit(ctx, s.repoPath, "merge", hash, "--no-ff", "-m", mergeMsg); err != nil {
+		// Path-confusion recovery: 2026-05-12 hybrid @hard take 16
+		// surfaced a wedge where sonnet's `cd /workspace && cat > foo`
+		// left /workspace with uncommitted modifications that blocked
+		// every subsequent worktree merge. Git's "would be overwritten
+		// by merge" error names the conflicting files; if they're all
+		// a subset of what the incoming worktree commit would bring AND
+		// the count is below the safety threshold, discard the
+		// /workspace dirty state and retry the merge. Outside the
+		// subset / over-threshold falls through to the existing restore
+		// logic (legitimate cross-node integration conflict, not the
+		// path-confusion failure mode).
+		if recovered := s.tryRecoverFromWorkspaceLeak(ctx, taskID, hash, err); recovered != nil {
+			if recovered.success {
+				s.logger.Warn("Merge succeeded after discarding leaked /workspace state",
+					"task_id", taskID,
+					"discarded_paths", recovered.discarded,
+				)
+				// Fall through to the post-merge response below.
+				mergeHash, _ := gitOutput(ctx, s.repoPath, "rev-parse", "HEAD")
+				mergeHash = strings.TrimSpace(mergeHash)
+				filesChanged := s.parseChangedFiles(ctx, s.repoPath, mergeHash)
+				return mergeResponse{
+					Status:           "merged",
+					Commit:           mergeHash,
+					FilesChanged:     filesChanged,
+					RecoveryNote:     recovered.note,
+					DiscardedPaths:   recovered.discarded,
+				}, nil
+			}
+			s.logger.Info("Path-confusion recovery did not apply",
+				"task_id", taskID,
+				"reason", recovered.note,
+			)
+		}
 		// Restore original branch on merge failure. If the plain checkout
 		// fails — typically because the failed merge left conflict markers in
 		// tracked files — try to self-heal with `git merge --abort` followed
@@ -1344,8 +1561,13 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
-	if _, err := os.Stat(worktreePath); err != nil {
+	// Use worktreeFor so task_id="main" resolves to the repo root.
+	// 2026-05-12: previous filepath.Join(s.worktreeRoot, req.TaskID) was
+	// inconsistent with handleExec which already uses worktreeFor —
+	// blocked execution-manager's pre-reviewer gate from checking the
+	// fixture root for leaked writes (see investigation-diff-gate-2026-05-12.md).
+	worktreePath := s.worktreeFor(req.TaskID)
+	if worktreePath == "" {
 		writeError(w, http.StatusNotFound, "worktree not found for task_id: "+req.TaskID)
 		return
 	}

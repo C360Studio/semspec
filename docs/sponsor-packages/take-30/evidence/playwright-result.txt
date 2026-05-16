@@ -1,0 +1,13 @@
+[WATCH:LLM] Provider=hybrid Tier=@hard Config=e2e-hybrid.json Epic=off
+[WATCH:LLM] Running @hard Playwright tests...
+  ✓  1 [t2] › e2e/epic-meshtastic-llm.spec.ts:165:2 › @t2 @hard epic-meshtastic-llm › federated graph has sufficient entities (7ms)
+  ✓  2 [t2] › e2e/epic-meshtastic-llm.spec.ts:174:2 › @t2 @hard epic-meshtastic-llm › plan created with goal (4ms)
+  ✓  3 [t2] › e2e/epic-meshtastic-llm.spec.ts:182:2 › @t2 @hard epic-meshtastic-llm › plan reviewed and approved (15.1s)
+  ✓  4 [t2] › e2e/epic-meshtastic-llm.spec.ts:198:2 › @t2 @hard epic-meshtastic-llm › at least 3 requirements generated (45.1s)
+  ✓  5 [t2] › e2e/epic-meshtastic-llm.spec.ts:224:2 › @t2 @hard epic-meshtastic-llm › architecture generated (3.1m)
+  ✓  6 [t2] › e2e/epic-meshtastic-llm.spec.ts:245:2 › @t2 @hard epic-meshtastic-llm › at least 3 scenarios generated and reviewed (4.0m)
+  ✓  7 [t2] › e2e/epic-meshtastic-llm.spec.ts:261:2 › @t2 @hard epic-meshtastic-llm › execution triggered (1.2s)
+  ✓  8 [t2] › e2e/epic-meshtastic-llm.spec.ts:293:2 › @t2 @hard epic-meshtastic-llm › execution completes (1.2h)
+  ✓  9 [t2] › e2e/epic-meshtastic-llm.spec.ts:314:2 › @t2 @hard epic-meshtastic-llm › trajectories exist after execution (16ms)
+  9 passed (1.3h)
+  ALERT: RepeatToolFailure severity=undetermined evidence_id= remediation="One or more agent.response RawData payloads failed to decode. Re-run the bundle capture or inspect the raw message-logger entries for malformed JSON."

@@ -296,7 +296,7 @@ func TestIntegrationToolFilteringAndGuidance(t *testing.T) {
 	t.Parallel()
 	assembler := buildPipeline(softwareFragments())
 
-	t.Run("developer sees all tool guidance", func(t *testing.T) {
+	t.Run("developer sees tool guidance for allowed tools", func(t *testing.T) {
 		t.Parallel()
 		tools := FilterTools(allSemspecTools, RoleDeveloper)
 		result := assembler.Assemble(&AssemblyContext{
@@ -310,8 +310,13 @@ func TestIntegrationToolFilteringAndGuidance(t *testing.T) {
 		if !strings.Contains(result.SystemMessage, "bash") {
 			t.Error("developer should see bash guidance")
 		}
-		if !strings.Contains(result.SystemMessage, "graph_search") {
-			t.Error("developer should see graph_search guidance")
+		// web_search replaces graph_search as the canonical research path
+		// since 2026-05-12 graph-tool removal (see tool_filter.go header).
+		if !strings.Contains(result.SystemMessage, "web_search") {
+			t.Error("developer should see web_search guidance")
+		}
+		if strings.Contains(result.SystemMessage, "graph_search") {
+			t.Error("developer should NOT see graph_search guidance (removed 2026-05-12)")
 		}
 	})
 
@@ -330,8 +335,11 @@ func TestIntegrationToolFilteringAndGuidance(t *testing.T) {
 		if strings.Contains(result.SystemMessage, "file_write") {
 			t.Error("reviewer should not see file_write guidance")
 		}
-		if !strings.Contains(result.SystemMessage, "graph_search") {
-			t.Error("reviewer should see graph_search guidance")
+		if strings.Contains(result.SystemMessage, "graph_search") {
+			t.Error("reviewer should NOT see graph_search guidance (removed 2026-05-12)")
+		}
+		if !strings.Contains(result.SystemMessage, "bash") {
+			t.Error("reviewer should see bash guidance")
 		}
 	})
 

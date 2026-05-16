@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /goodbye\", \"then\": [\"a 200 status code is returned\", \"the response body contains JSON with message 'Goodbye, World!'\"], \"title\": \"A GET request is sent to /goodbye\"}, {\"given\": \"the API server is running with the /goodbye endpoint\", \"when\": \"the endpoint is called and the response is checked\", \"then\": [\"the Content-Type header is application/json\", \"the response is valid JSON\"], \"title\": \"The endpoint is called and the response is checked\"}]}"
+        "arguments": "{\"scenarios\": [{\"title\": \"Sub returns 2 when called with 5 and 3\", \"given\": \"the math package is imported\", \"when\": \"Sub(5, 3) is invoked\", \"then\": [\"the return value is 2\", \"no panic or error occurs\"]}, {\"title\": \"Sub handles negative differences\", \"given\": \"the math package is imported\", \"when\": \"Sub(3, 5) is invoked\", \"then\": [\"the return value is -2\"]}]}"
       }
     }
   ],

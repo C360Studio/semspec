@@ -69,6 +69,14 @@ const (
 	// Reserved here so capability resolution doesn't surprise stage-2
 	// when it lands.
 	CapabilityCoordinatorRecovery Capability = "coordinator_recovery"
+
+	// CapabilityResearch is the dispatch target for the researcher
+	// sub-agent the developer's research() tool spawns. Single-shot
+	// upstream-API-surface investigation: bash/http_request/web_search
+	// read-only, terminal answer_research, no recursive delegation.
+	// Defaults to a cheap fast-synthesis model (gemini-flash class).
+	// See project_research_tool_plan_2026_05_14.
+	CapabilityResearch Capability = "research"
 )
 
 // RoleCapabilities maps workflow roles to their default capability.
@@ -92,6 +100,7 @@ var RoleCapabilities = map[string]Capability{
 	"lesson-decomposer":     CapabilityLessonDecomposition,
 	"task-decomposer":       CapabilityTaskDecomposition,
 	"recovery-agent":        CapabilityExecutionWedgeRecovery, // overridden per-dispatch by recovery-agent based on layer
+	"researcher":            CapabilityResearch,
 }
 
 // CapabilityForRole returns the default capability for a given role.
@@ -110,7 +119,8 @@ func (c Capability) IsValid() bool {
 		CapabilityPlanReview, CapabilityArchitecture, CapabilityRequirementGeneration,
 		CapabilityScenarioGeneration, CapabilityQA, CapabilityFast,
 		CapabilityLessonDecomposition, CapabilityTaskDecomposition,
-		CapabilityPlanWedgeRecovery, CapabilityExecutionWedgeRecovery, CapabilityCoordinatorRecovery:
+		CapabilityPlanWedgeRecovery, CapabilityExecutionWedgeRecovery, CapabilityCoordinatorRecovery,
+		CapabilityResearch:
 		return true
 	}
 	return false

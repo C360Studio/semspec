@@ -336,6 +336,82 @@ func TestValidateArchitectDeliverable(t *testing.T) {
 			},
 			wantError: "e2e_flows[0] requires an actor",
 		},
+		// --- pure-library architecture relaxations (2026-05-15) ---
+		{
+			name: "pure-library: empty integrations + no human actor + empty flows is valid",
+			mutate: func(d map[string]any) {
+				// Strip the human actor — only the system actor remains.
+				d["actors"] = []any{
+					map[string]any{
+						"name":     "Test runner",
+						"type":     "system",
+						"triggers": []any{"go test ./..."},
+					},
+				}
+				d["integrations"] = []any{}
+				d["test_surface"] = map[string]any{
+					"integration_flows": []any{},
+					"e2e_flows":         []any{},
+				}
+			},
+		},
+		{
+			name: "empty integrations fails when a human actor is declared",
+			mutate: func(d map[string]any) {
+				// Baseline keeps the human actor — emptying integrations must fail.
+				d["integrations"] = []any{}
+			},
+			wantError: "integrations must not be empty",
+		},
+		{
+			name: "empty integrations fails when an integration_target upstream is declared",
+			mutate: func(d map[string]any) {
+				d["actors"] = []any{
+					map[string]any{
+						"name":     "Test runner",
+						"type":     "system",
+						"triggers": []any{"go test ./..."},
+					},
+				}
+				d["integrations"] = []any{}
+				d["upstream_resolutions"] = []any{
+					map[string]any{
+						"name":       "Redis cache",
+						"coordinate": "redis:7-alpine",
+						"role":       "integration_target",
+					},
+				}
+			},
+			wantError: "integrations must not be empty",
+		},
+		{
+			name: "empty test_surface flows fails when integrations declared",
+			mutate: func(d map[string]any) {
+				// Baseline has 1 integration; emptying flows must fail.
+				d["test_surface"] = map[string]any{
+					"integration_flows": []any{},
+					"e2e_flows":         []any{},
+				}
+			},
+			wantError: "at least one entry in integration_flows or e2e_flows",
+		},
+		{
+			name: "empty test_surface flows valid for pure-library (no human, no integrations)",
+			mutate: func(d map[string]any) {
+				d["actors"] = []any{
+					map[string]any{
+						"name":     "Test runner",
+						"type":     "system",
+						"triggers": []any{"go test ./..."},
+					},
+				}
+				d["integrations"] = []any{}
+				d["test_surface"] = map[string]any{
+					"integration_flows": []any{},
+					"e2e_flows":         []any{},
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

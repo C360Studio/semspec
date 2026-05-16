@@ -492,12 +492,26 @@ tasks:
       TIER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
-      # Hard tier uses the Meshtastic/OSH Java fixture + 3 external semsources.
-      # Other tiers use the default go-project fixture.
+      # Hard tier uses the Meshtastic/OSH Java fixture. Pre-cloned external
+      # semsources (e2e-epic.yml) are opt-in via WITH_EPIC=1 — default OFF.
+      # The fixture itself is self-contained (no /sources/ refs) so the
+      # agent uses web_search + http_request for upstream discovery as a
+      # real capability test. WITH_EPIC=1 mounts /sources/ as an optional
+      # speedup for runs that want cached upstream artifacts instead.
       FIXTURE_DIR:
         sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
       EPIC_OVERLAY:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+      EPIC_ON:
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '1'; else echo '0'; fi
+    # E2E_FIXTURE feeds docker-compose's ${E2E_FIXTURE:-go-project} workspace
+    # mount substitution. WITH_EPIC is re-exported with the resolved default
+    # so the Playwright spec (ui/e2e/epic-meshtastic-llm.spec.ts) sees the
+    # same effective value the overlay decision used — it gates the graph
+    # entity threshold (100 with epic, 0 without).
+    env:
+      E2E_FIXTURE: "{{.FIXTURE_DIR}}"
+      WITH_EPIC: "{{.EPIC_ON}}"
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
@@ -506,7 +520,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Debug=${DEBUG:-off}"
+      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Debug=${DEBUG:-off}"
       - echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
       - task: reset-fixtures
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
@@ -531,7 +545,14 @@ tasks:
             # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
             # cap fired before sonnet could complete the dev pipeline (commit
             # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
-            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
+            #
+            # GOAL_TIMEOUT bumped to 15min for @hard — gemini-3.1-pro-preview
+            # under reasoning_effort=medium can take 5-10min per call when
+            # service is degraded (observed 2026-05-13 take-19d/e where curl
+            # to gemini-pro took 66s for a 10-token request). Default 5min
+            # was tight against gemini-pro's own 300s request_timeout. Goal
+            # timeout > request_timeout + fallback budget = ~15min.
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
@@ -558,8 +579,15 @@ tasks:
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
       FIXTURE_DIR:
         sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
+      # Epic overlay (e2e-epic.yml) is opt-in via WITH_EPIC=1 — default OFF.
+      # The fixture is self-contained (no /sources/ refs), so the agent's
+      # default behaviour is to discover upstream coordinates via web_search
+      # and http_request. Setting WITH_EPIC=1 mounts /sources/ with pre-cloned
+      # upstream repos as a speedup for runs that want cached artifacts.
       EPIC_OVERLAY:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+      EPIC_ON:
+        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '1'; else echo '0'; fi
       RUN_TS:
         sh: date +%Y%m%d-%H%M%S
       OUT_DIR: "/tmp/semspec-watch-{{.PROVIDER}}-{{.TIER}}-{{.RUN_TS}}"
@@ -570,8 +598,13 @@ tasks:
     # osh-driver-meshtastic — fixture mismatch the planner scope validator
     # caught 2026-05-05 (false-positive rejections on pom.xml because semspec
     # could not stat what sandbox had mounted).
+    #
+    # WITH_EPIC is re-exported with the resolved default so the Playwright
+    # spec (ui/e2e/epic-meshtastic-llm.spec.ts) sees the same effective value
+    # the overlay decision used. Spec uses it for the graph entity threshold.
     env:
       E2E_FIXTURE: "{{.FIXTURE_DIR}}"
+      WITH_EPIC: "{{.EPIC_ON}}"
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
@@ -580,7 +613,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}}"
+      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}}"
       - mkdir -p {{.OUT_DIR}}
       - echo "[WATCH:LLM] Artifacts will land in {{.OUT_DIR}}"
       # Build the host-side semspec binary that runs the watch sidecar.
@@ -674,7 +707,14 @@ tasks:
             # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
             # cap fired before sonnet could complete the dev pipeline (commit
             # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
-            CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
+            #
+            # GOAL_TIMEOUT bumped to 15min for @hard — gemini-3.1-pro-preview
+            # under reasoning_effort=medium can take 5-10min per call when
+            # service is degraded (observed 2026-05-13 take-19d/e where curl
+            # to gemini-pro took 66s for a 10-token request). Default 5min
+            # was tight against gemini-pro's own 300s request_timeout. Goal
+            # timeout > request_timeout + fallback budget = ~15min.
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \

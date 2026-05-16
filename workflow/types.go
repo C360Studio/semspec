@@ -659,6 +659,26 @@ type ArchitectureDocument struct {
 	// actually implemented. Optional for backward compat with plans drafted
 	// before the field existed.
 	TestSurface *TestSurface `json:"test_surface,omitempty"`
+
+	// UpstreamResolutions records the architect's resolved external
+	// dependencies — concrete coordinates + the API surfaces (constructor
+	// signatures, lifecycle methods, config fields) the dev needs to
+	// integrate against. The architect's existing inspection protocol
+	// already fetches upstream pages "to prove the integration surface";
+	// this field is where the resolution gets STRUCTURED so the dev never
+	// has to re-discover the same surface mid-cycle.
+	//
+	// Added 2026-05-15 as the first piece of upstream-strengthening
+	// (research sub-agent SHELVED — fix the source of K-too-big rather
+	// than shuffling K via handoffs). See [[research-shelved-pivot-to-
+	// upstream-strengthening-2026-05-15]] for the physics framing and
+	// goodhart guards driving this design.
+	//
+	// Optional for backward compat — plans drafted before the field
+	// existed deserialize cleanly. Reviewer enforcement of "every external
+	// lib named has a paired resolution" lands in a follow-up commit so
+	// architect adoption can be measured before enforcement gates plans.
+	UpstreamResolutions []UpstreamResolution `json:"upstream_resolutions,omitempty"`
 }
 
 // TestSurface describes the test coverage implied by an ArchitectureDocument.
@@ -699,6 +719,17 @@ type ComponentDef struct {
 	Name           string   `json:"name"`
 	Responsibility string   `json:"responsibility"`
 	Dependencies   []string `json:"dependencies"`
+	// UpstreamRefs names the UpstreamResolution.Name entries this
+	// component depends on. Bidirectional link with
+	// UpstreamResolution.UsedBy — each side is queryable without
+	// scanning the other. Empty when the component has no external
+	// integrations (greenfield internal modules).
+	//
+	// Added 2026-05-15 alongside ArchitectureDocument.UpstreamResolutions.
+	// Optional for backward compat. Reviewer enforcement that "every
+	// component using an external lib has a populated UpstreamRefs" is
+	// a follow-up commit.
+	UpstreamRefs []string `json:"upstream_refs,omitempty"`
 }
 
 // ArchDecision is a single architecture decision record produced by the architect agent.
@@ -724,6 +755,171 @@ type IntegrationPoint struct {
 	Protocol  string `json:"protocol"`             // http | nats | grpc | db | filesystem
 	Contract  string `json:"contract,omitempty"`   // schema ref or description
 	ErrorMode string `json:"error_mode,omitempty"` // what happens on failure
+}
+
+// UpstreamResolution is the architect's structural record of a single
+// external dependency the project integrates with. Coordinate is the
+// machine-resolvable identifier (Maven `groupId:artifactId:version`,
+// `npm:name@version`, `pypi:name==version`, github URL). APIs are the
+// specific surfaces (signatures, lifecycle, config fields) the dev will
+// touch — pre-resolved here so the dev's cycle doesn't burn iterations
+// re-discovering them.
+//
+// Citation discipline mirrors the research-tool's structural rule:
+// every APISurface MUST cite the file path or URL where the surface was
+// verified. Architect that names "AbstractSensorModule" without citing
+// where its signature was read from is hallucinating; reviewer (next
+// commit) will catch that.
+//
+// Added 2026-05-15 as part of upstream-strengthening. See
+// [[research-shelved-pivot-to-upstream-strengthening-2026-05-15]].
+type UpstreamResolution struct {
+	// Name is the human label, e.g. "OpenSensorHub Core". Free text,
+	// stable across revisions of the same dep so cross-references survive
+	// version bumps. Used for ComponentDef.UpstreamRefs[] linkage.
+	Name string `json:"name"`
+
+	// Coordinate is the machine-resolvable identifier. Examples:
+	//   - "org.sensorhub:sensorhub-core:2.0.0"
+	//   - "npm:react@18.2.0"
+	//   - "pypi:requests==2.31.0"
+	//   - "github.com/opensensorhub/osh-core@v2.0.0"
+	// MUST be specific enough that the dev can wire the dep into the
+	// build manifest without further lookup. "OSH 2.x" is not a coordinate;
+	// it's a vague hint that wastes the dev's cycle.
+	Coordinate string `json:"coordinate"`
+
+	// SourceRef is the citation proving the coordinate is valid: the
+	// file path / URL where the architect verified the dep exists at this
+	// version. Examples:
+	//   - "https://central.sonatype.com/artifact/org.sensorhub/sensorhub-core"
+	//   - "/sources/osh-core/pom.xml"
+	//   - "https://github.com/opensensorhub/osh-core/releases/tag/v2.0.0"
+	SourceRef string `json:"source_ref"`
+
+	// APIs are the specific surfaces the dev will integrate against.
+	// At least one entry is the architect's normal contribution — without
+	// any APIs, the resolution is just a pin in the build manifest with
+	// no usage guidance, which is rarely useful. Reviewer (next commit)
+	// flags resolutions with zero APIs as incomplete.
+	APIs []APISurface `json:"apis,omitempty"`
+
+	// UsedBy lists ComponentDef.Name entries that depend on this
+	// resolution. Bidirectional link with ComponentDef.UpstreamRefs —
+	// keeps "what depends on this lib?" answerable without scanning
+	// every component.
+	UsedBy []string `json:"used_by,omitempty"`
+
+	// Role classifies how the dep is consumed at test time. Drives the
+	// reviewer's test-strategy coupling and what kind of test the dev
+	// authors:
+	//   - "build_dep": compile-time only (annotation processor, type
+	//     stubs, codegen). No test-harness obligation.
+	//   - "runtime_dep": linked and called in-process. Library or
+	//     framework whose API is exercised directly in unit tests; no
+	//     Testcontainers needed.
+	//   - "integration_target": a separate process the dev's code talks
+	//     to over a wire protocol (daemon, broker, database). REQUIRES
+	//     a non-nil TestHarness so the dev's integration tests spawn a
+	//     real container via Testcontainers and exercise the real wire
+	//     format — closes the take-19/take-29 stub-JAR fabrication
+	//     pattern at the TDD-loop layer rather than at the QA gate.
+	//
+	// Empty string is treated as "runtime_dep" (the most common case).
+	// Added 2026-05-15 alongside the Testcontainers-led integration
+	// tier — see [[testcontainers-led-integration-tier]].
+	Role string `json:"role,omitempty"`
+
+	// TestHarness describes how the dev's integration tests reach a
+	// service-style upstream dep. REQUIRED when Role ==
+	// "integration_target" and IGNORED otherwise. Reviewer cross-checks
+	// this — declared integration_target with nil TestHarness is the
+	// canonical incomplete shape.
+	TestHarness *TestHarness `json:"test_harness,omitempty"`
+}
+
+// TestHarness describes how the dev's integration tests reach a
+// service-style upstream dep at test time. Populated on every
+// UpstreamResolution whose Role == "integration_target"; nil otherwise.
+//
+// Goodhart resistance: Image is a coordinate the docker daemon pulls at
+// test time. If the agent fabricates a non-existent image,
+// Testcontainers.start() fails and the test goes red immediately —
+// the dev cannot silently substitute a stub the way they could with a
+// fabricated JAR in a local-maven-repo flat-dir.
+//
+// Added 2026-05-15 alongside the Testcontainers-led integration tier.
+type TestHarness struct {
+	// Library is the Testcontainers binding the dev imports.
+	// Pick the binding that matches the project's test stack:
+	//   - "testcontainers-java": Maven/Gradle JVM projects.
+	//   - "testcontainers-go": Go projects.
+	//   - "testcontainers-python": pytest/unittest.
+	//   - "testcontainers-node": vitest/jest.
+	//   - "testcontainers-dotnet": NUnit/xUnit/MSTest.
+	//   - "testcontainers-rust": cargo test.
+	Library string `json:"library"`
+
+	// Image is the public container image coordinate Testcontainers
+	// spawns. Format "repo/name:tag" or "library/name:tag" for Docker
+	// Hub. Architect cites this from the upstream project's docs
+	// (web_search for "{project} docker image" or the project's
+	// docker-compose example).
+	//
+	// Examples: "meshtastic/meshtasticd:latest", "redis:7-alpine",
+	// "postgres:16-alpine", "confluentinc/cp-kafka:7.5.0".
+	Image string `json:"image"`
+
+	// AccessMethod tells the dev how their code reaches the spawned
+	// container. Format "<protocol>:<port>" — Testcontainers exposes
+	// the port on a host-mapped random port; the dev calls
+	// GetMappedPort(<port>) at test time.
+	//
+	// Examples: "tcp:4403", "http:8080", "grpc:9000", "amqp:5672".
+	AccessMethod string `json:"access_method"`
+}
+
+// APISurface is a single resolved external symbol — a class, method,
+// interface, or config field the dev will use. Architect populates this
+// from the upstream source (or canonical docs); the dev consumes it
+// directly without re-fetching.
+//
+// Citation is REQUIRED. An API surface without a citation is a guess,
+// and guesses produce code that fails at integration time. Reviewer
+// (next commit) rejects resolutions with uncited APIs.
+type APISurface struct {
+	// Symbol is the name as the dev will reference it in code. For
+	// methods, include the qualifier: "Connection.send" not "send".
+	Symbol string `json:"symbol"`
+
+	// Kind classifies the surface so the dev knows what shape to expect.
+	// Allowed values: "class" | "method" | "interface" | "function" |
+	// "config_field" | "constant" | "type" | "annotation".
+	Kind string `json:"kind"`
+
+	// Signature is the type-level shape. For methods/functions: the
+	// full signature including parameters and return type. For
+	// classes/interfaces: the constructor signature or "class X extends Y"
+	// form. For config_fields: the field type + default if any.
+	// Example: "protected AbstractSensorModule(SensorConfig config)"
+	Signature string `json:"signature"`
+
+	// Lifecycle is the calling convention or expected sequence, when
+	// the surface has one. Examples:
+	//   - "init(config) -> start() -> stop()"
+	//   - "open() -> read() repeatedly -> close()"
+	// Empty when the surface is a single-call utility with no lifecycle.
+	Lifecycle string `json:"lifecycle,omitempty"`
+
+	// Notes capture constraints or preconditions the signature alone
+	// doesn't convey: "throws X if Y", "must be called from main thread",
+	// "config must include Z field". Optional but high-value for the dev.
+	Notes string `json:"notes,omitempty"`
+
+	// Citation is the file path or URL where the architect verified
+	// this surface. REQUIRED. No citation = no surface (architect must
+	// re-read and cite, or remove the entry).
+	Citation string `json:"citation"`
 }
 
 // FindRequirement returns a pointer into p.Requirements and its index by ID.

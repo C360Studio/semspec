@@ -137,6 +137,61 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 			t.Errorf("developer persona contains Go-specific text %q — should be language-agnostic so Python/Node/etc dispatches aren't polluted", banned)
 		}
 	}
+
+	// Empty WorktreePath → no path banner (graceful fallback).
+	if strings.Contains(result.SystemMessage, "Your worktree path:") {
+		t.Error("workspace-contract fragment should NOT render path banner when WorktreePath is empty")
+	}
+}
+
+// TestSoftwareDeveloperAssembly_WorktreePath_BannerRendered pins the
+// 2026-05-12 path-confusion fix (A2 from
+// .semspec/semspec-plan-2026-05-12.md). When execution-manager threads
+// exec.WorktreePath into TaskContext, the workspace-contract fragment
+// must lead with an explicit "Your worktree path: X" / "DO NOT cd
+// /workspace" banner. Sonnet's hybrid @hard take 16 behavior — cd into
+// /workspace and cat-write — needs the explicit warning at the head
+// of the contract, not buried in the "If file write seems to have
+// succeeded but git status shows nothing..." paragraph downstream.
+func TestSoftwareDeveloperAssembly_WorktreePath_BannerRendered(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	r.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+
+	a := prompt.NewAssembler(r)
+	result := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderAnthropic,
+		AvailableTools: []string{"bash", "submit_work"},
+		SupportsTools:  true,
+		TaskContext: &prompt.TaskContext{
+			WorktreePath: "/workspace/.semspec/worktrees/node-abc123/",
+		},
+	})
+
+	wantPins := []string{
+		"Your worktree path: /workspace/.semspec/worktrees/node-abc123/",
+		"DO NOT `cd /workspace` to write files",
+		"parent fixture root, NOT your worktree",
+		"Reading from `/workspace`, `/sources/`",
+	}
+	for _, want := range wantPins {
+		if !strings.Contains(result.SystemMessage, want) {
+			t.Errorf("workspace-contract banner missing %q; got system message head:\n%s", want, result.SystemMessage[:min(800, len(result.SystemMessage))])
+		}
+	}
+
+	// Order check: the path banner must appear BEFORE the "Honest
+	// reporting is mandatory" block — that's the whole point of the
+	// banner (anchor the model's mental model first, then constraints).
+	bannerIdx := strings.Index(result.SystemMessage, "Your worktree path:")
+	honestIdx := strings.Index(result.SystemMessage, "Honest reporting is mandatory:")
+	if bannerIdx < 0 || honestIdx < 0 {
+		t.Fatalf("required markers not both present (banner=%d honest=%d)", bannerIdx, honestIdx)
+	}
+	if bannerIdx >= honestIdx {
+		t.Errorf("path banner must appear BEFORE 'Honest reporting' (banner@%d, honest@%d)", bannerIdx, honestIdx)
+	}
 }
 
 func TestSoftwarePlannerAssembly(t *testing.T) {

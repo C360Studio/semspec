@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	projectmanager "github.com/c360studio/semspec/processor/project-manager"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
@@ -398,6 +399,18 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 	// Load project config for test command (language-aware default).
 	pc := workflow.LoadProjectConfigFromDisk(c.resolveRepoRoot())
 
+	// Ensure .github/workflows/qa.yml exists in the workspace before
+	// publishing QARequestedEvent. project-manager scaffolds the file at
+	// /init time, but e2e fixtures (hand-authored) skip that flow; without
+	// this guard qa-runner fails on missing workflow with an opaque act
+	// error. Language-aware template — picks Java/Python/Node/Rust/Go
+	// based on project config primary language. Non-fatal on write error
+	// (qa-runner will surface a clearer act-side error than we can here).
+	if err := projectmanager.EnsureQAWorkflow(c.resolveRepoRoot(), pc, c.logger); err != nil {
+		c.logger.Warn("Failed to scaffold qa.yml before QA dispatch — qa-runner may fail with missing workflow",
+			"slug", plan.Slug, "error", err)
+	}
+
 	req := &payloads.QARequestedPayload{
 		QARequestedEvent: workflow.QARequestedEvent{
 			Slug:              plan.Slug,
@@ -440,8 +453,22 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 // level=none       → StatusComplete (or StatusAwaitingReview when gated)
 // level=synthesis  → StatusReadyForQA (qa-reviewer claims it, no tests run)
 // level=unit        → StatusReadyForQA (sandbox runs project tests first)
-// level=integration → StatusReadyForQA (qa-runner via act)
-// level=full        → StatusReadyForQA (qa-runner + e2e — TODO Phase 7)
+// level=integration → StatusReadyForQA (qa-runner via act in a clean-room
+//                     runner; dev's TDD already exercised the same tests
+//                     against Testcontainers-spawned services in the
+//                     sandbox — this is the reproducibility gate that
+//                     catches "passes with dev's working state, fails
+//                     fresh checkout" cases)
+// level=full        → StatusReadyForQA (qa-runner runs the integration
+//                     job plus the e2e job from .github/workflows/qa.yml,
+//                     adding Playwright/browser flows on top of
+//                     integration tests)
+//
+// The Testcontainers-led integration tier (2026-05-15) means dev's
+// TDD loop is already exercising real upstream services via the docker
+// socket mounted on the sandbox; qa-runner is the second, clean-room
+// run that catches sandbox-state leakage. Both layers exercise the
+// same test code — the difference is the execution environment.
 //
 // qa-reviewer owns the ready_for_qa → reviewing_qa transition via
 // plan.mutation.qa.start, mirroring plan-reviewer's mutation-driven shape.

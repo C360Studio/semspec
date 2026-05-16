@@ -81,6 +81,14 @@ type stubSandbox struct {
 	// gitStatusErr lets tests assert the gate's failure-path behaviour
 	// (warn-and-proceed when the sandbox is unreachable).
 	gitStatusErr error
+	// gitStatusByTask overrides per-task-id responses. When set, GitStatus
+	// returns gitStatusByTask[taskID] (with a corresponding error from
+	// gitStatusErrByTask[taskID] if present) instead of the default
+	// gitStatusOutput/gitStatusErr. Used by tests that need different
+	// status for the worktree task_id vs "main" (the repo root). The
+	// path-confusion gate added 2026-05-12 queries both.
+	gitStatusByTask    map[string]string
+	gitStatusErrByTask map[string]error
 }
 
 func (s *stubSandbox) CreateWorktree(_ context.Context, _ string, _ ...sandbox.WorktreeOption) (*sandbox.WorktreeInfo, error) {
@@ -119,7 +127,17 @@ func (s *stubSandbox) ListWorktreeFiles(_ context.Context, _ string) ([]sandbox.
 	return nil, nil
 }
 
-func (s *stubSandbox) GitStatus(_ context.Context, _ string) (string, error) {
+func (s *stubSandbox) GitStatus(_ context.Context, taskID string) (string, error) {
+	if s.gitStatusErrByTask != nil {
+		if err, ok := s.gitStatusErrByTask[taskID]; ok {
+			return "", err
+		}
+	}
+	if s.gitStatusByTask != nil {
+		if out, ok := s.gitStatusByTask[taskID]; ok {
+			return out, nil
+		}
+	}
 	if s.gitStatusErr != nil {
 		return "", s.gitStatusErr
 	}

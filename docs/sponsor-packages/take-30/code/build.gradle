@@ -1,0 +1,79 @@
+// OSH Meshtastic driver — Gradle build file.
+//
+// Artifact coordinates verified against upstream sources:
+//   - OSH 2.0.0: https://github.com/opensensorhub/osh-core (common.gradle, ext.oshCoreVersion = '2.0.0')
+//   - sensorhub-core and sensorhub-service-consys are the two subprojects used by sensor drivers.
+//   - Published to GitHub Packages (maven.pkg.github.com/opensensorhub/osh-core) and mavenLocal.
+//   - Meshtastic TCP protocol uses Protocol Buffers; the runtime is com.google.protobuf:protobuf-java.
+//   - TCP transport uses standard Java java.net.Socket — no additional library required.
+
+plugins {
+    id 'java-library'
+    id 'com.google.protobuf' version '0.9.4'
+}
+
+group = 'org.sensorhub'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    // Matches osh-core's Java 17 target (common.gradle: project.sourceCompatibility = 17).
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    // OSH 2.x artifacts are published to GitHub Packages.
+    // Set GITHUB_ACTOR and GITHUB_TOKEN environment variables to resolve from upstream.
+    // See: https://github.com/opensensorhub/osh-core/blob/master/common.gradle (publishing block)
+    if (System.getenv('GITHUB_ACTOR') != null && System.getenv('GITHUB_TOKEN') != null) {
+        maven {
+            url = uri('https://maven.pkg.github.com/opensensorhub/osh-core')
+            credentials {
+                username = System.getenv('GITHUB_ACTOR')
+                password = System.getenv('GITHUB_TOKEN')
+            }
+        }
+    }
+}
+
+// Protobuf source-generation configuration.
+// The Meshtastic TCP daemon protocol is defined in .proto files from
+// https://github.com/meshtastic/protobufs — place them under src/main/proto.
+protobuf {
+    protoc {
+        // protoc binary fetched from Maven Central for the matching runtime version.
+        artifact = 'com.google.protobuf:protoc:3.25.3'
+    }
+}
+
+dependencies {
+    // ---- OpenSensorHub core ----
+    // org.sensorhub group, version 2.0.0 (ext.oshCoreVersion in common.gradle).
+    // AbstractSensorDriver and the ISensorDriver API live in sensorhub-core.
+    implementation 'org.sensorhub:sensorhub-core:2.0.0'
+
+    // Connected Systems API service — provides the OGC CS-API endpoint that the
+    // driver pushes observations into.  Subproject sensorhub-service-consys in
+    // the osh-core Gradle multi-project (settings.gradle, master branch).
+    implementation 'org.sensorhub:sensorhub-service-consys:2.0.0'
+
+    // ---- Meshtastic protocol ----
+    // Meshtastic messages are exchanged with the meshtastic-daemon over TCP using
+    // Protocol Buffers.  The runtime library decodes the binary frames.
+    // Version 3.25.3 is the latest stable 3.x release on Maven Central.
+    implementation 'com.google.protobuf:protobuf-java:3.25.3'
+
+    // ---- TCP transport ----
+    // java.net.Socket (JDK built-in) is used for the TCP connection to the
+    // meshtastic daemon — no additional library is required.
+
+    // ---- Testing ----
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+}
+
+test {
+    useJUnitPlatform()
+}

@@ -758,13 +758,35 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	// markApprovedLocked (after the reviewer approves) — that path is
 	// unreachable for this failure mode because the reviewer correctly rejects.
 	if c.config.requireDeveloperDiff() && c.developerWorkClean(ctx, exec) {
-		feedback := fmt.Sprintf("Your submit_work claimed to modify %d file(s) (%s) but `git status` against your worktree shows NO changes. Reading a file with `cat` is not modifying it. You must use bash to actually write the files before calling submit_work — for example: `cat > main.go << 'EOF' ... EOF`, or `tee path < input`, or `sed -i 's/old/new/' path`. Verify with `bash('git status')` BEFORE submit_work — if the output is empty, you have not written anything yet. Re-implement the work and submit again.", len(exec.FilesModified), strings.Join(exec.FilesModified, ", "))
-		c.logger.Warn("Developer claim/observation mismatch — files_modified non-empty but worktree clean; routing to retry",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"claimed_files", exec.FilesModified,
-			"tdd_cycle", exec.TDDCycle,
-		)
+		// Before declaring fabrication, check whether the agent wrote
+		// the claimed files to /workspace (parent fixture root) instead
+		// of its assigned worktree. 2026-05-12 take 16 revealed this
+		// distinct failure mode: sonnet ran `cd /workspace && cat > build.gradle`
+		// — writes landed in /workspace, not the worktree, and the
+		// downstream merge loop wedged because /workspace stayed dirty
+		// across cycles. The gate's "worktree clean" verdict is correct
+		// in both cases; the inferred root cause differs and so should
+		// the feedback. See .semspec/investigation-diff-gate-2026-05-12.md.
+		leaked := c.developerLeakedToWorkspace(ctx, exec)
+		var feedback string
+		if len(leaked) > 0 {
+			feedback = fmt.Sprintf("Your `git status` in your worktree is empty, but the parent fixture root (`/workspace`) has uncommitted changes to: %s. You likely ran `cd /workspace && cat > <file>` or similar — those writes land in the parent fixture, NOT your worktree, so they do NOT count as your contribution. Your bash starts with cwd=your worktree. Use relative paths or paths inside your worktree. Do NOT `cd /workspace` to write files.", strings.Join(leaked, ", "))
+			c.logger.Warn("Developer wrote to /workspace instead of worktree; routing to retry with path-confusion guidance",
+				"slug", exec.Slug,
+				"task_id", exec.TaskID,
+				"claimed_files", exec.FilesModified,
+				"leaked_to_workspace", leaked,
+				"tdd_cycle", exec.TDDCycle,
+			)
+		} else {
+			feedback = fmt.Sprintf("Your submit_work claimed to modify %d file(s) (%s) but `git status` against your worktree shows NO changes. Reading a file with `cat` is not modifying it. You must use bash to actually write the files before calling submit_work — for example: `cat > main.go << 'EOF' ... EOF`, or `tee path < input`, or `sed -i 's/old/new/' path`. Verify with `bash('git status')` BEFORE submit_work — if the output is empty, you have not written anything yet. Re-implement the work and submit again.", len(exec.FilesModified), strings.Join(exec.FilesModified, ", "))
+			c.logger.Warn("Developer claim/observation mismatch — files_modified non-empty but worktree clean; routing to retry",
+				"slug", exec.Slug,
+				"task_id", exec.TaskID,
+				"claimed_files", exec.FilesModified,
+				"tdd_cycle", exec.TDDCycle,
+			)
+		}
 		c.routeFixableRejection(ctx, exec, feedback)
 		return
 	}
@@ -801,6 +823,75 @@ func (c *Component) developerWorkClean(ctx context.Context, exec *taskExecution)
 		return false
 	}
 	return strings.TrimSpace(output) == ""
+}
+
+// developerLeakedToWorkspace returns the subset of exec.FilesModified
+// that appear in the fixture root (/workspace) as modified or
+// untracked. Used by the pre-reviewer gate to distinguish path
+// confusion (sonnet's `cd /workspace && cat > file`) from genuine
+// fabrication — both produce a clean worktree but the right feedback
+// differs.
+//
+// Returns nil when the sandbox is unavailable, the GitStatus call
+// errors, or no claimed files appear in /workspace. The caller should
+// fall through to the fabrication feedback in that case.
+//
+// Implementation notes:
+//   - Queries sandbox.GitStatus(ctx, "main") which resolves to the
+//     repo root per worktreeFor() (since 2026-05-12 handleGitStatus fix).
+//   - Parses `git status --porcelain` output: lines start with a
+//     2-char status code (e.g. " M ", "?? ") followed by the path.
+//   - Strict path match — does not handle renames (which would appear
+//     as "old -> new"). Renames into /workspace are not in scope for
+//     the leakage failure mode this gate catches.
+func (c *Component) developerLeakedToWorkspace(ctx context.Context, exec *taskExecution) []string {
+	if c.sandbox == nil || len(exec.FilesModified) == 0 {
+		return nil
+	}
+	output, err := c.sandbox.GitStatus(ctx, "main")
+	if err != nil {
+		c.logger.Debug("git status main query failed in path-confusion check; falling back to fabrication feedback",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		return nil
+	}
+	if strings.TrimSpace(output) == "" {
+		return nil
+	}
+
+	// Collect dirty paths in /workspace from porcelain output.
+	dirty := make(map[string]struct{})
+	for _, line := range strings.Split(output, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		// Porcelain format: 2-char status + space + path.
+		path := strings.TrimSpace(line[3:])
+		// Untracked directories appear as "src/test/java/org/" — keep
+		// the prefix so we can match files claimed under that tree.
+		if path != "" {
+			dirty[path] = struct{}{}
+		}
+	}
+
+	var leaked []string
+	for _, claimed := range exec.FilesModified {
+		// Exact match (modified file) OR prefix match (file under an
+		// untracked directory listed by porcelain).
+		if _, ok := dirty[claimed]; ok {
+			leaked = append(leaked, claimed)
+			continue
+		}
+		for dirtyPath := range dirty {
+			if strings.HasSuffix(dirtyPath, "/") && strings.HasPrefix(claimed, dirtyPath) {
+				leaked = append(leaked, claimed)
+				break
+			}
+		}
+	}
+	return leaked
 }
 
 // ---------------------------------------------------------------------------
@@ -1375,6 +1466,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			MaxIterations: exec.MaxTDDCycles,
 			Checklist:     c.checklist,
 			TestSurface:   c.readPlanTestSurface(ctx, exec.Slug),
+			WorktreePath:  exec.WorktreePath,
 		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
@@ -1438,8 +1530,14 @@ func (c *Component) availableToolNames() []string {
 	// 2026-05-08 take-14 follow-up — no executor implements it, so its
 	// presence here just bloated the wire palette and confused small
 	// models that picked it instead of submit_work.
+	// research SHELVED 2026-05-15 — removed from dev's wire palette
+	// after take-27 evidence showed dispatch worked but didn't fix
+	// the actual wedge shape (RepeatToolFailure on bash 404
+	// worktree-not-found). Pivoted to upstream-strengthening. See
+	// [[research-shelved-pivot-to-upstream-strengthening-2026-05-15]].
 	return []string{
 		"bash", "submit_work", "ask_question",
+		"write_todos", "scratchpad",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task",

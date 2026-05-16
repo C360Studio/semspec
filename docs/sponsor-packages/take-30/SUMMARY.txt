@@ -1,0 +1,52 @@
+SEMSPEC — TAKE-30 RESULT — 2026-05-16
+
+CHALLENGE: "Design and implement a Meshtastic driver for OpenSensorHub.
+            The driver must use the Connected Systems API to send and
+            receive messages over the Meshtastic mesh network. Deliver
+            working Java source files, unit tests, and a README with
+            usage examples."
+
+INPUTS:    Single English prompt + empty Java/Gradle skeleton.
+           No prior work, no examples, no human assistance.
+
+OUTPUT:    2,283 lines of working Java across 9 files,
+           passing 9/9 end-to-end test assertions, in 78 minutes.
+
+VERIFIED:  No fabricated stubs. Real artifacts pulled from real
+           registries (Maven Central + GitHub Packages with auth).
+           Real upstream class extension. Real TCP+protobuf framing.
+           Tests exercise real code paths.
+
+CONTRAST:  Previous attempt (take-29, day before) also showed 9/9 green
+           but the integration was fabricated stubs. This run is the
+           first VERIFIED-real pass. See evidence/take29-vs-take30-contrast.md.
+
+ARTIFACTS:
+  README.md                              Narrative + technical detail
+  SUMMARY.txt                            This file
+  flow-overview.md                       Agent roles, phase state machine,
+                                          six-layer defense-in-depth
+                                          (start here if new to the system)
+  operator-rules/standards.json          Operator's 17 SOPs the
+                                          plan-reviewer enforces as
+                                          compliance criteria
+  operator-rules/checklist.json          Per-project structural checks
+                                          (gradle dependencies + gradle test
+                                          for this project; required: true)
+  code/production/                       4 Java production files (798 LOC)
+  code/tests/                            5 Java test files (1485 LOC)
+  code/build.gradle                      Build config (Maven Central +
+                                          authenticated GitHub Packages)
+  architecture/                          Agent's architectural deliverable
+  run-narrative/architecture.md          Architecture rendered to markdown
+  run-narrative/requirements.md          Requirements rendered to markdown
+  run-narrative/scenarios.md             Scenarios rendered (BDD form)
+  evidence/playwright-result.txt         9/9 test outcome
+  evidence/timeline.md                   Phase-by-phase run timeline
+  evidence/take29-vs-take30-contrast.md  Hollow vs real forensic
+  evidence/watch.log                     Live observability stream (32 KB)
+  evidence/trajectories-summary.txt      Per-loop summary
+
+CONTACT:   Repository — github.com/C360Studio/semspec
+           Branch     — bump-semstreams-rules-alignment
+           Commits    — through 8403c8d (12 in session, all pushed)

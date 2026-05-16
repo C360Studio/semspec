@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"requirements\": [{\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing 'Goodbye, World!'. The response must have Content-Type application/json and return HTTP 200. Include unit tests.\"}]}"
+        "arguments": "{\"requirements\": [{\"title\": \"Sub function returns difference of two integers\", \"description\": \"pkg/math.Sub(a, b int) int returns a - b. Mirror Add's exported-function shape: live in pkg/math/sub.go, package math, package comment on the file, function-level GoDoc. A unit test in pkg/math/sub_test.go must call Sub with at least one positive case and assert the result, mirroring TestAdd's table-free shape.\", \"files_owned\": [\"pkg/math/sub.go\", \"pkg/math/sub_test.go\"], \"depends_on\": []}]}"
       }
     }
   ],

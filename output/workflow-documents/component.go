@@ -174,7 +174,40 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 }
 
-// writePlanDocuments writes plan.md and plan.json to .semspec/plans/{slug}/.
+// phaseArtifact pairs an output filename with the renderer that produces
+// its content. The renderer returns "" when it has nothing to emit at the
+// current plan state, which writePlanDocuments treats as "skip this file."
+// Adding a new BMAD/OpenSpec-style artifact = appending one entry here.
+type phaseArtifact struct {
+	filename string
+	render   func(*workflow.Plan) string
+}
+
+// phaseArtifacts is the full ordered list of markdown deliverables
+// workflow-documents writes at each milestone transition. plan.md remains
+// the comprehensive view; the rest are per-phase artifacts that mirror
+// BMAD/OpenSpec's drill-down structure (architecture / requirements /
+// scenarios / qa-summary / run-summary).
+//
+// Each render function decides whether to emit content based on the
+// plan's current state — e.g. RenderArchitecture returns "" when
+// plan.Architecture is nil, so architecture.md isn't created on
+// pre-architecture-phase plans.
+var phaseArtifacts = []phaseArtifact{
+	{"plan.md", RenderPlan},
+	{"architecture.md", RenderArchitecture},
+	{"requirements.md", RenderRequirements},
+	{"scenarios.md", RenderScenarios},
+	{"qa-summary.md", RenderQASummary},
+	{"run-summary.md", RenderRunSummary},
+}
+
+// writePlanDocuments writes plan.md, plan.json, and the per-phase
+// markdown artifacts (architecture.md, requirements.md, scenarios.md,
+// qa-summary.md, run-summary.md) to .semspec/plans/{slug}/. Each
+// per-phase file is only written when its renderer returns non-empty
+// content, so e.g. scenarios.md doesn't appear until the plan has
+// scenarios attached.
 func (c *Component) writePlanDocuments(ctx context.Context, plan *workflow.Plan) {
 	select {
 	case <-ctx.Done():
@@ -196,14 +229,25 @@ func (c *Component) writePlanDocuments(ctx context.Context, plan *workflow.Plan)
 		return
 	}
 
-	// Write plan.md
-	markdown := RenderPlan(plan)
-	mdPath := filepath.Join(planDir, "plan.md")
-	if err := os.WriteFile(mdPath, []byte(markdown), 0644); err != nil {
-		c.logger.Error("Failed to write plan.md",
-			"slug", plan.Slug, "error", err)
-		c.writeErrors.Add(1)
-		return
+	// Write phase artifacts. plan.md is non-skippable (always renders);
+	// the rest skip themselves when the plan has nothing to show for
+	// that phase.
+	var writtenFiles []string
+	for _, a := range phaseArtifacts {
+		content := a.render(plan)
+		if content == "" {
+			continue
+		}
+		path := filepath.Join(planDir, a.filename)
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			c.logger.Error("Failed to write phase artifact",
+				"slug", plan.Slug, "file", a.filename, "error", err)
+			c.writeErrors.Add(1)
+			// Continue with the other artifacts — one failed write
+			// shouldn't abort the rest.
+			continue
+		}
+		writtenFiles = append(writtenFiles, a.filename)
 	}
 
 	// Write plan.json (pretty-printed)
@@ -216,6 +260,8 @@ func (c *Component) writePlanDocuments(ctx context.Context, plan *workflow.Plan)
 		if err := os.WriteFile(jsonPath, prettyJSON, 0644); err != nil {
 			c.logger.Warn("Failed to write plan.json",
 				"slug", plan.Slug, "error", err)
+		} else {
+			writtenFiles = append(writtenFiles, "plan.json")
 		}
 	}
 
@@ -225,7 +271,8 @@ func (c *Component) writePlanDocuments(ctx context.Context, plan *workflow.Plan)
 	c.logger.Info("Wrote plan documents",
 		"slug", plan.Slug,
 		"status", plan.EffectiveStatus(),
-		"path", mdPath)
+		"path", planDir,
+		"files", writtenFiles)
 }
 
 // Stop gracefully stops the component.
