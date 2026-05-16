@@ -26,6 +26,7 @@
     "@sveltejs/kit": "^2.15.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",
     "@vitest/ui": "^4.0.18",
+    "jsdom": "^29.1.1",
     "openapi-typescript": "^7.4.4",
     "svelte": "^5.19.0",
     "svelte-check": "^4.1.4",
@@ -34,10 +35,13 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@types/dompurify": "^3.0.5",
+    "dompurify": "^3.4.3",
     "graphology": "^0.26.0",
     "graphology-layout-forceatlas2": "^0.10.1",
     "graphology-types": "^0.24.8",
     "lucide-svelte": "^0.469.0",
+    "marked": "^14.1.4",
     "sigma": "^3.0.2"
   }
 }
