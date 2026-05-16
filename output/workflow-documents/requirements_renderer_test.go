@@ -35,17 +35,17 @@ func TestRenderRequirements_FullList(t *testing.T) {
 	}
 	md := RenderRequirements(plan)
 	checks := map[string]bool{
-		"# Requirements: Auth feature":              true,
-		"**2 requirements**":                        true,
-		"## Login endpoint":                         true,
-		"## Token validation":                       true,
-		"src/auth/login.go":                         true,
-		"**Depends on:** req-1":                     true,
-		"**Verified by 2 scenario(s)**":             true, // req-1 has 2 scenarios
-		"**Verified by 1 scenario(s)**":             true, // req-2 has 1
-		"## Dependency graph":                       true,
-		"```mermaid":                                true,
-		"req-1 --> req-2":                           true,
+		"# Requirements: Auth feature":  true,
+		"**2 requirements**":            true,
+		"## Login endpoint":             true,
+		"## Token validation":           true,
+		"src/auth/login.go":             true,
+		"**Depends on:** req-1":         true,
+		"**Verified by 2 scenario(s)**": true, // req-1 has 2 scenarios
+		"**Verified by 1 scenario(s)**": true, // req-2 has 1
+		"## Dependency graph":           true,
+		"```mermaid":                    true,
+		"req-1 --> req-2":               true,
 	}
 	for needle, want := range checks {
 		got := strings.Contains(md, needle)

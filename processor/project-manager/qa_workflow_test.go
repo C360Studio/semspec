@@ -24,12 +24,12 @@ func TestBuildQAWorkflow_JavaPrimary(t *testing.T) {
 	}
 	body := BuildQAWorkflow(pc)
 	checks := map[string]bool{
-		"setup-java":               true,
-		"distribution: temurin":    true,
-		"java-version: '21'":       true,
-		"./gradlew test":           true,
-		"setup-go":                 false, // wrong-language toolchain
-		"go-version":               false,
+		"setup-java":            true,
+		"distribution: temurin": true,
+		"java-version: '21'":    true,
+		"./gradlew test":        true,
+		"setup-go":              false, // wrong-language toolchain
+		"go-version":            false,
 	}
 	for needle, want := range checks {
 		got := strings.Contains(body, needle)

@@ -357,15 +357,15 @@ func TestRenderPlanReviewerPrompt_R2IncludesUpstreamResolutionCriterion(t *testi
 	})
 
 	required := []string{
-		"7a.",                              // criterion number
-		"Upstream resolution discipline",   // criterion title
-		"upstream_resolutions",             // the schema field reviewer enforces
-		"coordinate",                       // structural-completeness check
-		"source_ref",                       // structural-completeness check
-		"citation",                         // structural-completeness check on APISurface
-		"Bidirectional invariant",          // back-link rule
-		"upstream_refs",                    // bidirectional partner field
-		"Goodhart guard",                   // anti-pad rule
+		"7a.",                            // criterion number
+		"Upstream resolution discipline", // criterion title
+		"upstream_resolutions",           // the schema field reviewer enforces
+		"coordinate",                     // structural-completeness check
+		"source_ref",                     // structural-completeness check
+		"citation",                       // structural-completeness check on APISurface
+		"Bidirectional invariant",        // back-link rule
+		"upstream_refs",                  // bidirectional partner field
+		"Goodhart guard",                 // anti-pad rule
 	}
 	for _, want := range required {
 		if !strings.Contains(out, want) {

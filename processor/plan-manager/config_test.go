@@ -15,11 +15,11 @@ func TestResolveAutoRejectOnExhaustion(t *testing.T) {
 	falsePtr := func() *bool { v := false; return &v }
 
 	tests := []struct {
-		name  string
-		plan  *workflow.Plan
-		cfg   Config
-		want  bool
-		why   string
+		name string
+		plan *workflow.Plan
+		cfg  Config
+		want bool
+		why  string
 	}{
 		{
 			name: "nil plan falls back to config true",

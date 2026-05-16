@@ -48,7 +48,6 @@ type Component struct {
 	// without a PlanBranch, which is the pre-B1 behavior.
 	sandbox *sandbox.Client
 
-
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
 	state     atomic.Int32

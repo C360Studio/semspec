@@ -943,11 +943,11 @@ func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req
 				mergeHash = strings.TrimSpace(mergeHash)
 				filesChanged := s.parseChangedFiles(ctx, s.repoPath, mergeHash)
 				return mergeResponse{
-					Status:           "merged",
-					Commit:           mergeHash,
-					FilesChanged:     filesChanged,
-					RecoveryNote:     recovered.note,
-					DiscardedPaths:   recovered.discarded,
+					Status:         "merged",
+					Commit:         mergeHash,
+					FilesChanged:   filesChanged,
+					RecoveryNote:   recovered.note,
+					DiscardedPaths: recovered.discarded,
 				}, nil
 			}
 			s.logger.Info("Path-confusion recovery did not apply",
