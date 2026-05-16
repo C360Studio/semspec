@@ -370,6 +370,80 @@ export async function stubRequirementFileDiff(
 }
 
 // ---------------------------------------------------------------------------
+// Phase-artifacts view — stubs for /plans/{slug}/artifacts list + content
+// endpoints backing PhaseArtifactsView. The list stub fulfils the JSON index;
+// the content stub serves text/markdown bodies keyed by artifact name.
+// Unstubbed names 404 so the loader's null-body branch is exercised.
+// ---------------------------------------------------------------------------
+
+export interface PhaseArtifactFixture {
+	name: string;
+	filename?: string;
+	size?: number;
+	modified_at?: string;
+}
+
+function materializeArtifact(input: PhaseArtifactFixture): Record<string, unknown> {
+	return {
+		name: input.name,
+		filename: input.filename ?? `${input.name}.md`,
+		size: input.size ?? 1,
+		modified_at: input.modified_at ?? new Date().toISOString()
+	};
+}
+
+export async function stubPhaseArtifacts(
+	page: Page,
+	slug: string,
+	artifacts: PhaseArtifactFixture[]
+): Promise<void> {
+	await page.route(`**/plan-manager/plans/${slug}/artifacts`, async (route) => {
+		if (route.request().method() !== 'GET') {
+			await route.fallback();
+			return;
+		}
+		await fulfillJSON(route, {
+			slug,
+			artifacts: artifacts.map(materializeArtifact)
+		});
+	});
+}
+
+/**
+ * Stub per-artifact markdown content. `contents` is a map from artifact
+ * name (e.g. "architecture") to the raw markdown body. Names not in the
+ * map fall through to a 404 — matches backend behaviour for not-yet-
+ * written artifacts and exercises the loader's null-body branch.
+ */
+export async function stubPhaseArtifactContent(
+	page: Page,
+	slug: string,
+	contents: Record<string, string>
+): Promise<void> {
+	await page.route(
+		new RegExp(`/plan-manager/plans/${slug}/artifacts/[^/?]+(\\?.*)?$`),
+		async (route) => {
+			if (route.request().method() !== 'GET') {
+				await route.fallback();
+				return;
+			}
+			const url = new URL(route.request().url());
+			const name = decodeURIComponent(url.pathname.split('/').pop() ?? '');
+			const body = contents[name];
+			if (body === undefined) {
+				await route.fulfill({ status: 404, contentType: 'application/json', body: '{}' });
+				return;
+			}
+			await route.fulfill({
+				status: 200,
+				contentType: 'text/markdown; charset=utf-8',
+				body
+			});
+		}
+	);
+}
+
+// ---------------------------------------------------------------------------
 // Board-scenario bundle — most /board truth-tests need the same four stubs
 // with identical no-op content. One call; specs can still add overrides.
 // ---------------------------------------------------------------------------
