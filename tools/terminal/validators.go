@@ -456,14 +456,23 @@ func validateOptionalDecisions(d map[string]any) error {
 // say "tests ran" instead of "tests covered the integration_flows the
 // architect declared."
 //
-// Minimum shape: an object with at least one of integration_flows[] or
-// e2e_flows[] non-empty. Both empty would mean "this system has neither
-// external boundaries nor user-visible flows" which contradicts the
-// required actors[] + integrations[] elsewhere in the deliverable.
+// Shape contract:
+//   - test_surface key MUST exist with integration_flows[] and e2e_flows[] arrays.
+//   - At least ONE of the two arrays must be non-empty when the architecture
+//     has anything to exercise — human actors OR integrations[] entries.
+//   - Both arrays MAY be empty for pure-library architectures that have
+//     neither human actors NOR integrations[] entries.
+//
+// Relaxed 2026-05-15: previously rejected any test_surface with both flows
+// empty regardless of context. Pure-library architectures (e.g. pkg/math.Sub
+// addition) have neither external boundaries nor user-visible flows, so
+// both empty is the correct shape. The conditional rejection still catches
+// lazy-architect cases — any architecture with integrations or human actors
+// must have at least one flow.
 func validateTestSurface(d map[string]any) error {
 	raw, ok := d["test_surface"]
 	if !ok {
-		return fmt.Errorf("test_surface is required — provide {integration_flows: [...], e2e_flows: [...]} so qa-reviewer can judge coverage. Each integration[] should map to at least one integration_flow; each human/system actor should map to at least one e2e_flow")
+		return fmt.Errorf("test_surface is required — provide {integration_flows: [...], e2e_flows: [...]} (both may be empty for pure-library architectures with no human actors and no integrations[] entries)")
 	}
 	obj, ok := raw.(map[string]any)
 	if !ok {
@@ -471,8 +480,13 @@ func validateTestSurface(d map[string]any) error {
 	}
 	intFlows, _ := obj["integration_flows"].([]any)
 	e2eFlows, _ := obj["e2e_flows"].([]any)
+	integrations, _ := d["integrations"].([]any)
 	if len(intFlows) == 0 && len(e2eFlows) == 0 {
-		return fmt.Errorf("test_surface requires at least one entry in integration_flows or e2e_flows — derive from your integrations[] and actors[]")
+		if hasHumanActor(d) || len(integrations) > 0 {
+			return fmt.Errorf("test_surface requires at least one entry in integration_flows or e2e_flows — derive from your integrations[] and actors[]")
+		}
+		// pure-library architecture: no human actor, no integrations[] —
+		// both flows legitimately empty
 	}
 	if err := validateIntegrationFlows(intFlows); err != nil {
 		return err
@@ -548,11 +562,35 @@ func validateActors(d map[string]any) error {
 	return nil
 }
 
+// validateIntegrations enforces structural shape on the integrations[] array.
+//
+// integrations[] is REQUIRED as a key (the architect must consider external
+// boundaries even if there are none) but MAY be empty for pure-library or
+// pure-internal-tool architectures with no external surface. The conditional
+// rejection catches the common lazy-architect case: declaring a human actor
+// or an integration_target upstream resolution without the corresponding
+// integration entry.
+//
+// Relaxed 2026-05-15: previously rejected any empty array, which forced
+// pure-library scenarios (e.g. test/e2e/fixtures/mock-responses/qa-cycle*
+// adding a Sub function to pkg/math) to declare stretched integrations
+// like "Go test toolchain" just to satisfy the validator. Now empty is
+// valid when the architecture has neither human actors nor integration_target
+// upstream resolutions.
 func validateIntegrations(d map[string]any) error {
 	validDirections := map[string]bool{"inbound": true, "outbound": true, "bidirectional": true}
 	integrations, ok := d["integrations"].([]any)
-	if !ok || len(integrations) == 0 {
-		return fmt.Errorf("integrations is required — provide an array of {name, direction, protocol} objects describing external boundaries")
+	if !ok {
+		return fmt.Errorf("integrations is required — provide an array of {name, direction, protocol} objects (use [] for pure libraries with no external boundaries)")
+	}
+	if len(integrations) == 0 {
+		if hasHumanActor(d) {
+			return fmt.Errorf("integrations must not be empty — architecture declares a human actor, so at least one inbound integration must describe the surface the human reaches (UI, CLI, API, etc.)")
+		}
+		if hasIntegrationTargetUpstream(d) {
+			return fmt.Errorf("integrations must not be empty — architecture declares an upstream_resolutions[] entry with role=integration_target, so the integration that consumes it must appear here")
+		}
+		return nil
 	}
 	for i, ig := range integrations {
 		obj, ok := ig.(map[string]any)
@@ -570,4 +608,40 @@ func validateIntegrations(d map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// hasHumanActor returns true when actors[] contains at least one entry
+// with type=="human". Used by validateIntegrations and validateTestSurface
+// to decide whether empty integrations[] / test_surface flow arrays are
+// allowed (no human actor → pure-internal architecture).
+func hasHumanActor(d map[string]any) bool {
+	actors, _ := d["actors"].([]any)
+	for _, a := range actors {
+		obj, ok := a.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := obj["type"].(string); t == "human" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasIntegrationTargetUpstream returns true when upstream_resolutions[]
+// contains at least one entry with role=="integration_target". Used by
+// validateIntegrations to require a corresponding integration entry when
+// the architect declares an integration target.
+func hasIntegrationTargetUpstream(d map[string]any) bool {
+	resolutions, _ := d["upstream_resolutions"].([]any)
+	for _, r := range resolutions {
+		obj, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		if role, _ := obj["role"].(string); role == "integration_target" {
+			return true
+		}
+	}
+	return false
 }

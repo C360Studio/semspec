@@ -1,12 +1,12 @@
 {
-  "content": "Plan review complete. Verdict: approved.",
+  "content": "Plan-phase review complete. Verdict: approved.",
   "tool_calls": [
     {
       "id": "call_review",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Plan is well-structured with clear scope covering both API and UI changes. SOP requirements for testing and JSON responses are addressed in the plan goal.\", \"findings\": [{\"sop_id\": \"api-testing-sop\", \"sop_title\": \"API Testing Requirements\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan explicitly includes adding tests for the new endpoint\"}], \"summary\": \"Plan is well-structured with clear scope covering both API and UI changes. SOP requirements for testing and JSON responses are addressed in the plan goal.\"}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Plan is well-scoped and consistent across phases. The Sub function mirrors Add's shape; scope.create lists the new files; the SOP testing requirement is addressed by sub_test.go.\", \"findings\": [{\"sop_id\": \"go-testing-sop\", \"sop_title\": \"Every exported function needs a test\", \"severity\": \"info\", \"status\": \"compliant\", \"category\": null, \"phase\": null, \"target_id\": null, \"issue\": null, \"suggestion\": null, \"evidence\": \"pkg/math/sub_test.go is in scope.create alongside pkg/math/sub.go\"}], \"scenario_verdicts\": [], \"summary\": \"Plan-phase artifacts approved — Sub plan, architecture, requirements, and scenarios are coherent and Go-shaped.\", \"rejection_type\": null}"
       }
     }
   ],
