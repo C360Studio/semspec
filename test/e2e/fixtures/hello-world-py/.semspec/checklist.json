@@ -4,7 +4,7 @@
   "checks": [
     {
       "name": "pip-install",
-      "command": "cd api && pip install --break-system-packages -q -r requirements.txt",
+      "command": "cd api && python3 -m pip install --break-system-packages -q -r requirements.txt",
       "trigger": [],
       "category": "setup",
       "required": true,
