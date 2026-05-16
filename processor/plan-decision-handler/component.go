@@ -298,21 +298,26 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 		"affected_requirements", len(result.AffectedRequirementIDs),
 		"affected_scenarios", len(result.AffectedScenarioIDs))
 
-	// Write cascade result to graph as entity triples.
-	entityID := fmt.Sprintf("%s.exec.cascade.run.%s-%s", workflow.EntityPrefix(), req.Slug, req.ProposalID)
+	// Build the entity once; both the inline triple-writer path (cross-component
+	// facts in ENTITY_STATES) and the publishEntity path (graph-ingest for
+	// relationship tracking) use the same EntityID. HashInstanceID-derived per
+	// entity.go — proposalIDs from recovery cascades contain dots and must not
+	// reach the part-6 segment.
+	entity := NewCascadeEntity(req.ProposalID, req.Slug, req.TraceID,
+		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs)).
+		WithPhase("cascaded")
+	entityID := entity.EntityID()
+
 	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, "cascaded"); err != nil {
 		c.logger.Error("Failed to write cascade phase triple", "entity_id", entityID, "error", err)
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "cascade")
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, req.Slug)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeProposalID, req.ProposalID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, req.TraceID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedRequirements, len(result.AffectedRequirementIDs))
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedScenarios, len(result.AffectedScenarioIDs))
 
-	// Publish full Graphable entity to graph-ingest for relationship tracking.
-	entity := NewCascadeEntity(req.ProposalID, req.Slug, req.TraceID,
-		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs)).
-		WithPhase("cascaded")
 	c.publishEntity(ctx, entity)
 
 	// Send Core NATS cancellation signals for any running scenario loops.

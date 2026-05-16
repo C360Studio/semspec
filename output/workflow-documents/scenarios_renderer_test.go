@@ -38,16 +38,16 @@ func TestRenderScenarios_GroupedByRequirement(t *testing.T) {
 	}
 	md := RenderScenarios(plan)
 	checks := map[string]bool{
-		"# Scenarios: Auth":                      true,
-		"**2 scenarios**":                        true,
-		"## Login":                               true, // requirement title is the heading
-		"## Token":                               true,
-		"**Given** user has valid credentials":   true,
-		"**When** they POST to /login":           true,
-		"- 200 response":                         true,
-		"- JWT in body":                          true,
-		"`req-1`":                                true,
-		"`req-2`":                                true,
+		"# Scenarios: Auth":                    true,
+		"**2 scenarios**":                      true,
+		"## Login":                             true, // requirement title is the heading
+		"## Token":                             true,
+		"**Given** user has valid credentials": true,
+		"**When** they POST to /login":         true,
+		"- 200 response":                       true,
+		"- JWT in body":                        true,
+		"`req-1`":                              true,
+		"`req-2`":                              true,
 	}
 	for needle, want := range checks {
 		got := strings.Contains(md, needle)

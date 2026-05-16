@@ -1266,7 +1266,7 @@ func TestHandleDeveloperComplete_LeakedToWorkspace_RoutesPathConfusion(t *testin
 	// claimed files as dirty — the agent wrote to the wrong tree.
 	c.sandbox = &stubSandbox{
 		gitStatusByTask: map[string]string{
-			"task-dev-path-confusion": "",                                                 // worktree clean
+			"task-dev-path-confusion": "",                                                   // worktree clean
 			"main":                    " M build.gradle\n?? src/test/java/org/sensorhub/\n", // /workspace dirty
 		},
 	}
@@ -1305,11 +1305,11 @@ func TestHandleDeveloperComplete_LeakedToWorkspace_RoutesPathConfusion(t *testin
 	// what to do differently. The fabrication feedback's "cat >" idiom
 	// is NOT the right correction here — the agent already used cat>.
 	wantSubstrs := []string{
-		"/workspace",                  // names the wrong tree
-		"parent fixture",              // explains what /workspace is
-		"NOT your worktree",           // clarifies the boundary
-		"build.gradle",                // echoes back leaked file
-		"Do NOT `cd /workspace`",      // names the antipattern
+		"/workspace",             // names the wrong tree
+		"parent fixture",         // explains what /workspace is
+		"NOT your worktree",      // clarifies the boundary
+		"build.gradle",           // echoes back leaked file
+		"Do NOT `cd /workspace`", // names the antipattern
 	}
 	for _, want := range wantSubstrs {
 		if !strings.Contains(exec.Feedback, want) {
@@ -1328,12 +1328,12 @@ func TestHandleDeveloperComplete_LeakedToWorkspace_RoutesPathConfusion(t *testin
 // shapes the gate cares about.
 func TestDeveloperLeakedToWorkspace(t *testing.T) {
 	tests := []struct {
-		name             string
-		filesModified    []string
-		workspaceStatus  string
-		workspaceErr     error
-		wantLeakedExact  []string // exact match (order-insensitive)
-		nilSandbox       bool
+		name            string
+		filesModified   []string
+		workspaceStatus string
+		workspaceErr    error
+		wantLeakedExact []string // exact match (order-insensitive)
+		nilSandbox      bool
 	}{
 		{
 			name:            "no claimed files (skip query)",

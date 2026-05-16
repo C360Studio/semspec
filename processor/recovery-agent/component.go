@@ -107,8 +107,8 @@ type Component struct {
 // the resolved model. The model is captured at dispatch time so completion
 // log lines can attribute the recovery to a (model, capability) tuple.
 type inFlightDispatch struct {
-	Req      *payloads.RecoveryRequested
-	Model    string
+	Req        *payloads.RecoveryRequested
+	Model      string
 	Capability model.Capability
 }
 
@@ -420,8 +420,8 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		return nil
 	}
 
-	cap := capabilityForRequest(req)
-	modelName := c.modelRegistry.Resolve(string(cap))
+	capName := capabilityForRequest(req)
+	modelName := c.modelRegistry.Resolve(string(capName))
 	if modelName == "" {
 		// Fall back to plan-review-class reasoning if the recovery
 		// capability isn't configured for this deployment. Recovery still
@@ -432,7 +432,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		}
 		c.logger.Warn("Recovery capability not configured; falling back",
 			"slug", req.Slug,
-			"capability", cap,
+			"capability", capName,
 			"fallback_model", modelName)
 	}
 
@@ -501,7 +501,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 			"requirement_id": req.RequirementID,
 			"task_id":        req.TaskID,
 			"loop_id":        req.LoopID,
-			"capability":     string(cap),
+			"capability":     string(capName),
 			"model":          modelName,
 			"role":           string(prompt.RoleRecoveryAgent),
 		},
@@ -513,7 +513,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		return fmt.Errorf("marshal task message: %w", err)
 	}
 
-	c.trackInFlight(taskID, req, modelName, cap)
+	c.trackInFlight(taskID, req, modelName, capName)
 	if err := c.natsClient.PublishToStream(ctx, agentTaskSubject, data); err != nil {
 		c.untrackInFlight(taskID)
 		return fmt.Errorf("publish task: %w", err)
@@ -524,7 +524,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		"slug", req.Slug,
 		"recovery_id", req.RecoveryID,
 		"task_id", taskID,
-		"capability", cap,
+		"capability", capName,
 		"model", modelName,
 		"trajectory_steps", len(steps),
 		"prompt_chars", len(assembled.UserMessage),
@@ -551,13 +551,13 @@ func (c *Component) fetchTrajectorySteps(ctx context.Context, req *payloads.Reco
 	return summarizeTrajectory(traj, c.config.TrajectoryStepLimit)
 }
 
-func (c *Component) trackInFlight(taskID string, req *payloads.RecoveryRequested, modelName string, cap model.Capability) {
+func (c *Component) trackInFlight(taskID string, req *payloads.RecoveryRequested, modelName string, capName model.Capability) {
 	c.inFlightMu.Lock()
 	defer c.inFlightMu.Unlock()
 	if c.inFlight == nil {
 		c.inFlight = make(map[string]*inFlightDispatch)
 	}
-	c.inFlight[taskID] = &inFlightDispatch{Req: req, Model: modelName, Capability: cap}
+	c.inFlight[taskID] = &inFlightDispatch{Req: req, Model: modelName, Capability: capName}
 }
 
 func (c *Component) untrackInFlight(taskID string) *inFlightDispatch {
@@ -823,8 +823,6 @@ func buildRecoveryRationale(req *payloads.RecoveryRequested, loop *agentic.LoopE
 	sb.WriteString(diagnosis)
 	return sb.String()
 }
-
-
 
 // ackOrWarn acks the JetStream message and warns on failure.
 func (c *Component) ackOrWarn(msg jetstream.Msg, disposition string) {

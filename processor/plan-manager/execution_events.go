@@ -454,15 +454,18 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 // level=synthesis  → StatusReadyForQA (qa-reviewer claims it, no tests run)
 // level=unit        → StatusReadyForQA (sandbox runs project tests first)
 // level=integration → StatusReadyForQA (qa-runner via act in a clean-room
-//                     runner; dev's TDD already exercised the same tests
-//                     against Testcontainers-spawned services in the
-//                     sandbox — this is the reproducibility gate that
-//                     catches "passes with dev's working state, fails
-//                     fresh checkout" cases)
+//
+//	runner; dev's TDD already exercised the same tests
+//	against Testcontainers-spawned services in the
+//	sandbox — this is the reproducibility gate that
+//	catches "passes with dev's working state, fails
+//	fresh checkout" cases)
+//
 // level=full        → StatusReadyForQA (qa-runner runs the integration
-//                     job plus the e2e job from .github/workflows/qa.yml,
-//                     adding Playwright/browser flows on top of
-//                     integration tests)
+//
+//	job plus the e2e job from .github/workflows/qa.yml,
+//	adding Playwright/browser flows on top of
+//	integration tests)
 //
 // The Testcontainers-led integration tier (2026-05-15) means dev's
 // TDD loop is already exercising real upstream services via the docker

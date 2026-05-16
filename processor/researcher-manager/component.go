@@ -46,8 +46,8 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
-	ssmodel "github.com/c360studio/semstreams/model"
 	"github.com/c360studio/semstreams/message"
+	ssmodel "github.com/c360studio/semstreams/model"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -390,8 +390,8 @@ func (c *Component) dispatchResearcher(ctx context.Context, r *workflow.Research
 		return fmt.Errorf("model registry not wired — cannot resolve research capability")
 	}
 
-	cap := string(model.CapabilityResearch)
-	modelName := c.modelRegistry.Resolve(cap)
+	capName := string(model.CapabilityResearch)
+	modelName := c.modelRegistry.Resolve(capName)
 	if modelName == "" {
 		// Fallback to "writing" (cheap synthesis class) if research isn't
 		// configured for this deployment. Researcher still runs; operators
@@ -462,7 +462,7 @@ func (c *Component) dispatchResearcher(ctx context.Context, r *workflow.Research
 			"asking_call_id": r.AskingCallID,
 			"plan_slug":      r.PlanSlug,
 			"task_id":        r.TaskID,
-			"capability":     cap,
+			"capability":     capName,
 			"model":          modelName,
 			"role":           string(prompt.RoleResearcher),
 		},
@@ -569,9 +569,9 @@ func (c *Component) Meta() component.Metadata {
 	}
 }
 
-// InputPorts/OutputPorts declare the message-flow contract.
-// Subjects are documented in the descriptions since component.Port doesn't
-// carry a typed subject field (Direction is the only structural metadata).
+// InputPorts declares the inbound message-flow contract. Subjects are
+// documented in the descriptions since component.Port doesn't carry a typed
+// subject field (Direction is the only structural metadata).
 func (c *Component) InputPorts() []component.Port {
 	return []component.Port{{
 		Name:        "research_requested_in",
@@ -580,6 +580,7 @@ func (c *Component) InputPorts() []component.Port {
 	}}
 }
 
+// OutputPorts declares the outbound message-flow contract.
 func (c *Component) OutputPorts() []component.Port {
 	return []component.Port{{
 		Name:        "research_task_out",

@@ -1,8 +1,10 @@
-// awaiting_recovery.go — ADR-037 race-closure between req-executor's
-// synchronous markFailedLocked and recovery-agent's async PlanDecision
-// emit. When Config.DeferTerminalOnRecovery is true, exhaustion call
-// sites that have already published RecoveryRequested transition the
-// exec to phaseAwaitingRecovery and arm a timer instead of immediately
+package requirementexecutor
+
+// ADR-037 race-closure between req-executor's synchronous markFailedLocked
+// and recovery-agent's async PlanDecision emit. When
+// Config.DeferTerminalOnRecovery is true, exhaustion call sites that have
+// already published RecoveryRequested transition the exec to
+// phaseAwaitingRecovery and arm a timer instead of immediately
 // terminal-failing. The accepted-PlanDecision watcher
 // (workflow.events.plan-decision.accepted) resumes the exec; the timer
 // terminal-fails it on no-accept.
@@ -10,9 +12,8 @@
 // Take 8 (2026-05-11 gemini @hard) surfaced this race: req-executor
 // terminal-failed in <1ms while recovery's accepted PlanDecision landed
 // ~14s later. By then, the req was gone and cascade dirty-marks hit a
-// graveyard. This file closes the gap so accepted recovery
-// PlanDecisions can actually revive the wedged req.
-package requirementexecutor
+// graveyard. This file closes the gap so accepted recovery PlanDecisions
+// can actually revive the wedged req.
 
 import (
 	"context"

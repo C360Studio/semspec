@@ -42,9 +42,15 @@ func NewCascadeEntity(proposalID, slug, traceID string, affectedRequirements, af
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: {prefix}.exec.cascade.run.<slug>-<proposalID>
+// Format: {prefix}.exec.cascade.run.<hash>
+//
+// Slug and proposalID are hashed into the instance segment because recovery
+// cascades produce dotted proposalIDs (`plan-decision.<slug>.recovery.<short>`),
+// which would inflate the dot-separated part count past 6 and fail
+// graph-ingest validation. The logical IDs are persisted as triples
+// (wf.Slug, wf.CascadeProposalID) so they remain queryable.
 func (e *CascadeEntity) EntityID() string {
-	return fmt.Sprintf("%s.exec.cascade.run.%s-%s", workflow.EntityPrefix(), e.Slug, e.ProposalID)
+	return fmt.Sprintf("%s.exec.cascade.run.%s", workflow.EntityPrefix(), workflow.HashInstanceID(e.Slug, e.ProposalID))
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.
@@ -75,6 +81,7 @@ func (e *CascadeEntity) Triples() []message.Triple {
 	triples := []message.Triple{
 		{Subject: id, Predicate: wf.Type, Object: "cascade", Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.Slug, Object: e.Slug, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.CascadeProposalID, Object: e.ProposalID, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.CascadeAffectedRequirements, Object: e.AffectedRequirementsCount, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.CascadeAffectedScenarios, Object: e.AffectedScenariosCount, Source: "plan-decision-handler", Timestamp: now, Confidence: 1.0},
 	}

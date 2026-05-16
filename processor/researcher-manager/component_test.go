@@ -38,7 +38,7 @@ func TestSubjectSuffix(t *testing.T) {
 	}{
 		{"agent.research.requested.research-abc123", "agent.research.requested.", "research-abc123"},
 		{"agent.research.requested.research-abc", "agent.research.requested.", "research-abc"},
-		{"agent.task.something", "agent.research.requested.", ""},     // wrong prefix
+		{"agent.task.something", "agent.research.requested.", ""},      // wrong prefix
 		{"agent.research.requested.", "agent.research.requested.", ""}, // prefix-only
 		{"", "agent.research.requested.", ""},                          // empty subject
 	}

@@ -5,45 +5,57 @@ import (
 	"testing"
 
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 )
 
-func TestCascadeEntity_EntityID(t *testing.T) {
-	tests := []struct {
-		name       string
-		slug       string
-		proposalID string
-		want       string
-	}{
-		{
-			name:       "basic",
-			slug:       "my-feature",
-			proposalID: "prop-abc-123",
-			want:       "semspec.local.exec.cascade.run.my-feature-prop-abc-123",
-		},
-		{
-			name:       "auth",
-			slug:       "auth-refresh",
-			proposalID: "cp-001",
-			want:       "semspec.local.exec.cascade.run.auth-refresh-cp-001",
-		},
+func TestCascadeEntity_EntityID_Deterministic(t *testing.T) {
+	// Same inputs must produce the same hashed entity ID across calls — the
+	// inline triple writer and graph-ingest both derive it independently and
+	// must converge.
+	a := (&CascadeEntity{Slug: "my-feature", ProposalID: "prop-abc-123"}).EntityID()
+	b := (&CascadeEntity{Slug: "my-feature", ProposalID: "prop-abc-123"}).EntityID()
+	if a != b {
+		t.Errorf("EntityID() not deterministic: %q vs %q", a, b)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			e := &CascadeEntity{Slug: tt.slug, ProposalID: tt.proposalID}
-			got := e.EntityID()
-			if got != tt.want {
-				t.Errorf("EntityID() = %q, want %q", got, tt.want)
-			}
-		})
+	want := workflow.EntityPrefix() + ".exec.cascade.run." + workflow.HashInstanceID("my-feature", "prop-abc-123")
+	if a != want {
+		t.Errorf("EntityID() = %q, want %q", a, want)
+	}
+}
+
+func TestCascadeEntity_EntityID_DistinctInputsDistinctOutputs(t *testing.T) {
+	// Distinct (slug, proposalID) pairs must hash differently — confirms the
+	// null-separator join in HashInstanceID isn't ambiguous for our shape.
+	a := (&CascadeEntity{Slug: "auth-refresh", ProposalID: "cp-001"}).EntityID()
+	b := (&CascadeEntity{Slug: "auth", ProposalID: "refresh-cp-001"}).EntityID()
+	if a == b {
+		t.Errorf("EntityID() collision on distinct inputs: %q", a)
 	}
 }
 
 func TestCascadeEntity_EntityID_6PartFormat(t *testing.T) {
-	e := &CascadeEntity{Slug: "test-slug", ProposalID: "prop-1"}
-	parts := strings.Split(e.EntityID(), ".")
-	if len(parts) != 6 {
-		t.Errorf("EntityID() has %d dot-separated parts, want 6: %q", len(parts), e.EntityID())
+	tests := []struct {
+		name       string
+		slug       string
+		proposalID string
+	}{
+		// Recovery-cascade shape — proposalID contains dots. Caught issue #7:
+		// graph-ingest rejected the old `<slug>-<proposalID>` concatenation
+		// when proposalID was `plan-decision.<slug>.recovery.<short>` (9 parts).
+		{"recovery_dotted_proposal", "hello-world", "plan-decision.hello-world.recovery.1ead294d"},
+		{"plain", "test-slug", "prop-1"},
+		{"slug_with_dashes_only", "auth-refresh-v2", "cp-001"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := &CascadeEntity{Slug: tt.slug, ProposalID: tt.proposalID}
+			id := e.EntityID()
+			parts := strings.Split(id, ".")
+			if len(parts) != 6 {
+				t.Errorf("EntityID() has %d dot-separated parts, want 6: %q", len(parts), id)
+			}
+		})
 	}
 }
 
@@ -63,6 +75,7 @@ func TestCascadeEntity_Triples_RequiredPredicates(t *testing.T) {
 
 	required := []string{
 		wf.Type, wf.Slug,
+		wf.CascadeProposalID,
 		wf.CascadeAffectedRequirements,
 		wf.CascadeAffectedScenarios,
 	}
@@ -212,9 +225,28 @@ func TestNewCascadeEntity_Fields(t *testing.T) {
 		t.Errorf("AffectedScenariosCount = %d, want 2", entity.AffectedScenariosCount)
 	}
 
-	expectedID := "semspec.local.exec.cascade.run.my-slug-prop-xyz"
+	expectedID := workflow.EntityPrefix() + ".exec.cascade.run." + workflow.HashInstanceID("my-slug", "prop-xyz")
 	if got := entity.EntityID(); got != expectedID {
 		t.Errorf("EntityID() = %q, want %q", got, expectedID)
+	}
+}
+
+func TestCascadeEntity_Triples_ProposalIDPreservesDottedLogicalID(t *testing.T) {
+	// Regression for issue #7: even though dots in proposalID are hashed out
+	// of the entity ID, the logical proposalID must remain queryable via
+	// the wf.CascadeProposalID triple.
+	dottedProposalID := "plan-decision.hello-world.recovery.1ead294d"
+	e := &CascadeEntity{Slug: "hello-world", ProposalID: dottedProposalID}
+
+	var got string
+	for _, tr := range e.Triples() {
+		if tr.Predicate == wf.CascadeProposalID {
+			got = tr.Object.(string)
+			break
+		}
+	}
+	if got != dottedProposalID {
+		t.Errorf("CascadeProposalID triple Object = %q, want %q", got, dottedProposalID)
 	}
 }
 
