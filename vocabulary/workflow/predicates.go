@@ -197,6 +197,12 @@ const (
 
 	// CascadeTasksDirtied is the count of tasks marked dirty by a cascade.
 	CascadeTasksDirtied = "workflow.cascade.tasks_dirtied"
+
+	// CascadeProposalID is the logical PlanDecision proposal ID this cascade ran for.
+	// Persisted as a triple because the entity-ID instance segment is a hash
+	// of (slug, proposalID) per the entity-ID convention — the human-readable
+	// proposalID must remain queryable.
+	CascadeProposalID = "workflow.cascade.proposal_id"
 )
 
 // Relationship predicates.
@@ -452,6 +458,11 @@ func registerCascadePredicates() {
 		vocabulary.WithDescription("Count of tasks marked dirty by a PlanDecision cascade"),
 		vocabulary.WithDataType("int"),
 		vocabulary.WithIRI(Namespace+"cascadeTasksDirtied"))
+
+	vocabulary.Register(CascadeProposalID,
+		vocabulary.WithDescription("Logical PlanDecision proposal ID this cascade ran for (entity ID hashes it)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"cascadeProposalId"))
 }
 
 func registerRelationPredicates() {

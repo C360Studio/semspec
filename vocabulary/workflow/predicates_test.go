@@ -41,6 +41,7 @@ var allPredicates = []string{
 	CascadeAffectedRequirements,
 	CascadeAffectedScenarios,
 	CascadeTasksDirtied,
+	CascadeProposalID,
 	// Relationship predicates
 	RelPlan,
 	RelTask,
@@ -143,6 +144,7 @@ func TestPredicatesRegistered(t *testing.T) {
 		CascadeAffectedRequirements,
 		CascadeAffectedScenarios,
 		CascadeTasksDirtied,
+		CascadeProposalID,
 	}
 
 	for _, pred := range cascadePredicates {
@@ -199,6 +201,7 @@ func TestPredicateDataTypes(t *testing.T) {
 		{Feedback, "string"},
 		{RejectionType, "string"},
 		{FailureReason, "string"},
+		{CascadeProposalID, "string"},
 		// Integer counters
 		{TDDCycle, "int"},
 		{MaxTDDCycles, "int"},
