@@ -814,26 +814,47 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Apply updates to a copy.
+	// Apply updates to a copy. Track whether any field actually changed so
+	// we can skip the save (and the UpdatedAt reseat that goes with it) on
+	// a true no-op PATCH. Without this, committed e2e fixture project.json
+	// files drift on every PATCH whose payload happens to match the
+	// current state (qa-cycle e2e scenario re-asserts qa_level=integration
+	// against a fixture that already has it).
 	updated := *pc
-	if req.Name != nil {
+	changed := false
+	if req.Name != nil && *req.Name != pc.Name {
 		updated.Name = *req.Name
+		changed = true
 	}
-	if req.Description != nil {
+	if req.Description != nil && *req.Description != pc.Description {
 		updated.Description = *req.Description
+		changed = true
 	}
-	if req.Org != nil {
+	if req.Org != nil && *req.Org != pc.Org {
 		updated.Org = *req.Org
+		changed = true
 	}
-	if req.Platform != nil {
+	if req.Platform != nil && *req.Platform != pc.Platform {
 		updated.Platform = *req.Platform
+		changed = true
 	}
-	if req.QALevel != nil {
+	if req.QALevel != nil && workflow.QALevel(*req.QALevel) != pc.QALevel {
 		updated.QALevel = workflow.QALevel(*req.QALevel)
+		changed = true
 	}
-	if req.QATestCommand != nil {
+	if req.QATestCommand != nil && *req.QATestCommand != pc.QATestCommand {
 		updated.QATestCommand = *req.QATestCommand
+		changed = true
 	}
+
+	if !changed {
+		// No-op PATCH — return the current config without touching the
+		// file (would otherwise reseat UpdatedAt and dirty the working
+		// tree for committed e2e fixture configs).
+		writeJSON(w, http.StatusOK, updated)
+		return
+	}
+
 	updated.UpdatedAt = time.Now()
 
 	if err := c.saveConfigThrough(r.Context(), s, &updated); err != nil {

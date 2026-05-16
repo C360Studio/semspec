@@ -970,6 +970,19 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 			"plan_decision_ids", req.PlanDecisionIDs, "summary", req.Summary)
 	}
 
+	// Persist the prose verdict alongside the status transition so the
+	// qa-summary.md renderer can surface the reviewer's narrative.
+	// Pre-this-field, only QARun (executor result) + PlanDecisions (proposals)
+	// were persisted; the prose summary + dimension paragraphs lived only
+	// on the in-flight event.
+	plan.QAVerdictSummary = &workflow.QAVerdictSummary{
+		Verdict:    req.Verdict,
+		Level:      req.Level,
+		Summary:    req.Summary,
+		Dimensions: req.Dimensions,
+		RecordedAt: time.Now().UTC(),
+	}
+
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan after QA verdict", "slug", req.Slug, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
