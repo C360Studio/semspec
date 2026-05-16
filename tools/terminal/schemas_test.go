@@ -66,6 +66,23 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 // revision iters even with explicit reviewer feedback. Pinning the
 // shape here catches the same wiring miss recurring (mirror of the
 // take-22 write_todos-not-in-palette pattern).
+// requireFieldsPresent asserts every name in want appears in got.
+func requireFieldsPresent(t *testing.T, location string, want, got []string) {
+	t.Helper()
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s missing %q (got %v)", location, w, got)
+		}
+	}
+}
+
 func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 	schema := schemaForDeliverable("architecture")
 	props, ok := schema["properties"].(map[string]any)
@@ -73,7 +90,6 @@ func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 		t.Fatal("architecture schema must have properties")
 	}
 
-	// upstream_resolutions must be a top-level array.
 	ur, ok := props["upstream_resolutions"].(map[string]any)
 	if !ok {
 		t.Fatal("architecture schema missing upstream_resolutions property — wiring bug regressed")
@@ -82,76 +98,41 @@ func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 		t.Errorf("upstream_resolutions.type = %v, want array", ur["type"])
 	}
 
-	// Each item must require name + coordinate + source_ref + apis + used_by.
 	urItems, ok := ur["items"].(map[string]any)
 	if !ok {
 		t.Fatal("upstream_resolutions.items missing")
 	}
-	urRequired, _ := urItems["required"].([]string)
-	for _, want := range []string{"name", "coordinate", "source_ref", "apis", "used_by"} {
-		found := false
-		for _, r := range urRequired {
-			if r == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("upstream_resolutions.items.required missing %q (got %v)", want, urRequired)
-		}
-	}
-
-	// apis[].items must require symbol/kind/signature/lifecycle/notes/citation.
 	urItemProps, _ := urItems["properties"].(map[string]any)
+	urRequired, _ := urItems["required"].([]string)
+	requireFieldsPresent(t, "upstream_resolutions.items.required",
+		[]string{"name", "coordinate", "source_ref", "apis", "used_by"}, urRequired)
+
+	// apis[].items shape.
 	apis, _ := urItemProps["apis"].(map[string]any)
 	apisItems, _ := apis["items"].(map[string]any)
 	apisRequired, _ := apisItems["required"].([]string)
-	for _, want := range []string{"symbol", "kind", "signature", "citation"} {
-		found := false
-		for _, r := range apisRequired {
-			if r == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("upstream_resolutions.items.apis.items.required missing %q (got %v)", want, apisRequired)
-		}
-	}
+	requireFieldsPresent(t, "upstream_resolutions.items.apis.items.required",
+		[]string{"symbol", "kind", "signature", "citation"}, apisRequired)
 
 	// component_boundaries.items must require upstream_refs (bidirectional partner).
 	cb, _ := props["component_boundaries"].(map[string]any)
 	cbItems, _ := cb["items"].(map[string]any)
 	cbRequired, _ := cbItems["required"].([]string)
-	foundUR := false
-	for _, r := range cbRequired {
-		if r == "upstream_refs" {
-			foundUR = true
-			break
-		}
-	}
-	if !foundUR {
-		t.Errorf("component_boundaries.items.required missing 'upstream_refs' (bidirectional partner regressed)")
-	}
+	requireFieldsPresent(t, "component_boundaries.items.required",
+		[]string{"upstream_refs"}, cbRequired)
 
-	// upstream_resolutions.items must require role + test_harness (the
-	// Testcontainers-led integration tier additions — 2026-05-15). Mirror
-	// of the take-28 wedge prevention: Go struct + persona without the
-	// strict schema = silent field drop on strict-mode endpoints.
-	for _, want := range []string{"role", "test_harness"} {
-		found := false
-		for _, r := range urRequired {
-			if r == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("upstream_resolutions.items.required missing %q (Testcontainers-tier wiring regressed)", want)
-		}
-	}
+	// Testcontainers-tier additions (2026-05-15) on upstream_resolutions.items:
+	// role + test_harness. Mirrors the take-28 wedge prevention.
+	requireFieldsPresent(t, "upstream_resolutions.items.required",
+		[]string{"role", "test_harness"}, urRequired)
 
-	// role must be an enum constraining the LLM to known values.
+	assertRoleEnum(t, urItemProps)
+	assertTestHarnessShape(t, urItemProps)
+}
+
+// assertRoleEnum validates the role property is a constrained enum.
+func assertRoleEnum(t *testing.T, urItemProps map[string]any) {
+	t.Helper()
 	role, _ := urItemProps["role"].(map[string]any)
 	if role == nil {
 		t.Fatal("upstream_resolutions.items.role property missing")
@@ -170,9 +151,13 @@ func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 	if len(wantRoles) > 0 {
 		t.Errorf("role enum missing values: %v", wantRoles)
 	}
+}
 
-	// test_harness must be a nullable object so resolutions with role !=
-	// integration_target can satisfy "required" with null.
+// assertTestHarnessShape validates the test_harness property is a nullable
+// object so resolutions with role != integration_target can satisfy
+// "required" with null.
+func assertTestHarnessShape(t *testing.T, urItemProps map[string]any) {
+	t.Helper()
 	th, _ := urItemProps["test_harness"].(map[string]any)
 	if th == nil {
 		t.Fatal("upstream_resolutions.items.test_harness property missing")
@@ -182,18 +167,8 @@ func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 		t.Errorf("test_harness.type = %v, want [object, null] for nullable strict-mode shape", th["type"])
 	}
 	thRequired, _ := th["required"].([]string)
-	for _, want := range []string{"library", "image", "access_method"} {
-		found := false
-		for _, r := range thRequired {
-			if r == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("test_harness.required missing %q", want)
-		}
-	}
+	requireFieldsPresent(t, "test_harness.required",
+		[]string{"library", "image", "access_method"}, thRequired)
 }
 
 func TestToolsForDeliverable_SwapsSubmitWork(t *testing.T) {

@@ -144,80 +144,87 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 	// dispatch by requirement-executor — replaced the LLM-driven child-agent
 	// spawning pattern. See docs/audit/task-11-worktree-invariants.md (A4).
 
-	// ask_question — writes to QUESTIONS KV, dispatches answerer agent, blocks on KV watch.
-	// answer_question — terminal tool for answerer agents, writes answer to QUESTIONS KV.
-	if deps.NATSClient != nil {
-		var questionStore *wf.QuestionStore
-		if store, storeErr := wf.NewQuestionStore(deps.NATSClient); storeErr == nil {
-			questionStore = store
-		}
-		questionExec := question.NewExecutor(deps.NATSClient, questionStore, nil)
-		if deps.DefaultModel != "" {
-			questionExec = questionExec.WithDefaultModel(deps.DefaultModel)
-		}
-		if deps.AnswererRegistry != nil {
-			questionExec = questionExec.WithAnswererRegistry(deps.AnswererRegistry)
-		}
-		errs = append(errs, reg.RegisterTool("ask_question", questionExec))
-
-		answerExec := question.NewAnswerExecutor(questionStore, nil)
-		errs = append(errs, reg.RegisterTool("answer_question", answerExec))
-	}
-
-	// research — non-terminal dev tool that delegates upstream-API-surface
-	// investigation to a researcher sub-agent. Blocks on RESEARCH KV until
-	// the researcher submits via answer_research. The actual researcher
-	// dispatch (researcher-manager subscribing to agent.research.requested.>
-	// + spawning a researcher loop) lands in R3; R2 wires only the tool
-	// executors so the wire shape and arg validation are exercisable in
-	// unit + mock e2e tests before paying for the dispatch loop.
-	//
-	// answer_research — terminal tool for the researcher sub-agent. Validates
-	// answer size against workflow.MaxResearchAnswerBytes and citation shape
-	// before writing back to RESEARCH KV.
-	if deps.NATSClient != nil {
-		var researchStore *wf.ResearchStore
-		if store, storeErr := wf.NewResearchStore(deps.NATSClient); storeErr == nil {
-			researchStore = store
-		}
-		researchExec := research.NewExecutor(deps.NATSClient, researchStore, nil)
-		errs = append(errs, reg.RegisterTool("research", researchExec))
-
-		researchAnswerExec := research.NewAnswerExecutor(researchStore, nil)
-		errs = append(errs, reg.RegisterTool("answer_research", researchAnswerExec))
-	}
-
-	// write_todos — agent-private cross-iteration todo list persisted as
-	// graph triples on the calling loop's entity (semstreams ADR-036).
-	// Available to Builder + Architect + LessonDecomposer via the
-	// per-role tool filter; survives context compaction so multi-step
-	// dispatches can hold a plan across iterations. Requires NATS (graph
-	// mutations) and a non-zero Platform (loop entity ID resolution);
-	// skipped silently if either is missing.
-	//
-	// scratchpad — agent-private one-shot reasoning channel persisted as
-	// graph triples on the calling loop's entity (semstreams beta.62,
-	// originally semspec's 2026-05-12 ask). Distinct from write_todos:
-	// no IDs, no status enum, no list semantics — single text dump per
-	// call. Intended as a "think before commit" runway for generator
-	// roles where decomposition cognitive load was crimping output
-	// quality. Persona-side guidance is prescriptive (see prompt/tools.go).
-	if deps.NATSClient != nil && deps.Platform.Org != "" && deps.Platform.Platform != "" {
-		todoWriter := agentictools.NewNATSTodoWriter(deps.NATSClient)
-		todoExec := agentictools.NewWriteTodosExecutor(todoWriter, deps.Platform)
-		todoExec.SetLogger(slog.Default())
-		errs = append(errs, reg.RegisterTool(agentictools.WriteTodosToolName, todoExec))
-
-		scratchPub := agentictools.NewNATSTriplePublisher(deps.NATSClient)
-		scratchExec := agentictools.NewScratchpadExecutor(scratchPub, deps.Platform)
-		scratchExec.SetLogger(slog.Default())
-		errs = append(errs, reg.RegisterTool(agentictools.ScratchpadToolName, scratchExec))
-	}
+	errs = append(errs, registerQuestionTools(reg, deps)...)
+	errs = append(errs, registerResearchTools(reg, deps)...)
+	errs = append(errs, registerAgentScratchTools(reg, deps)...)
 
 	if joined := errors.Join(errs...); joined != nil {
 		return fmt.Errorf("register agentic tools: %w", joined)
 	}
 	return nil
+}
+
+// registerQuestionTools wires ask_question (KV write + answerer dispatch +
+// KV watch) and answer_question (terminal tool for answerer agents).
+func registerQuestionTools(reg *agentictools.ExecutorRegistry, deps AgenticToolDeps) []error {
+	if deps.NATSClient == nil {
+		return nil
+	}
+	var questionStore *wf.QuestionStore
+	if store, storeErr := wf.NewQuestionStore(deps.NATSClient); storeErr == nil {
+		questionStore = store
+	}
+	questionExec := question.NewExecutor(deps.NATSClient, questionStore, nil)
+	if deps.DefaultModel != "" {
+		questionExec = questionExec.WithDefaultModel(deps.DefaultModel)
+	}
+	if deps.AnswererRegistry != nil {
+		questionExec = questionExec.WithAnswererRegistry(deps.AnswererRegistry)
+	}
+	return []error{
+		reg.RegisterTool("ask_question", questionExec),
+		reg.RegisterTool("answer_question", question.NewAnswerExecutor(questionStore, nil)),
+	}
+}
+
+// registerResearchTools wires research (non-terminal dev tool that delegates
+// upstream-API-surface investigation to a researcher sub-agent; blocks on
+// RESEARCH KV until answer_research lands) and answer_research (terminal
+// tool for the researcher sub-agent; validates answer size against
+// workflow.MaxResearchAnswerBytes and citation shape).
+//
+// R2 wires only the tool executors so wire shape and arg validation are
+// exercisable in unit + mock e2e tests before paying for the dispatch
+// loop. researcher-manager (R3) subscribes to agent.research.requested.>
+// and spawns the researcher loop.
+func registerResearchTools(reg *agentictools.ExecutorRegistry, deps AgenticToolDeps) []error {
+	if deps.NATSClient == nil {
+		return nil
+	}
+	var researchStore *wf.ResearchStore
+	if store, storeErr := wf.NewResearchStore(deps.NATSClient); storeErr == nil {
+		researchStore = store
+	}
+	return []error{
+		reg.RegisterTool("research", research.NewExecutor(deps.NATSClient, researchStore, nil)),
+		reg.RegisterTool("answer_research", research.NewAnswerExecutor(researchStore, nil)),
+	}
+}
+
+// registerAgentScratchTools wires write_todos and scratchpad — agent-private
+// reasoning channels persisted as graph triples on the calling loop's entity
+// (semstreams ADR-036 / beta.62). write_todos is cross-iteration list
+// semantics; scratchpad is a single-shot reasoning dump. Both survive context
+// compaction so multi-step dispatches can hold state across iterations.
+//
+// Requires NATS (graph mutations) and a non-zero Platform (loop entity ID
+// resolution); skipped silently if either is missing.
+func registerAgentScratchTools(reg *agentictools.ExecutorRegistry, deps AgenticToolDeps) []error {
+	if deps.NATSClient == nil || deps.Platform.Org == "" || deps.Platform.Platform == "" {
+		return nil
+	}
+	todoWriter := agentictools.NewNATSTodoWriter(deps.NATSClient)
+	todoExec := agentictools.NewWriteTodosExecutor(todoWriter, deps.Platform)
+	todoExec.SetLogger(slog.Default())
+
+	scratchPub := agentictools.NewNATSTriplePublisher(deps.NATSClient)
+	scratchExec := agentictools.NewScratchpadExecutor(scratchPub, deps.Platform)
+	scratchExec.SetLogger(slog.Default())
+
+	return []error{
+		reg.RegisterTool(agentictools.WriteTodosToolName, todoExec),
+		reg.RegisterTool(agentictools.ScratchpadToolName, scratchExec),
+	}
 }
 
 // resolveRepoRoot determines the workspace root from env or cwd.

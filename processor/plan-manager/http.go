@@ -498,7 +498,12 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Route collection and action endpoints.
+	c.dispatchPlanActionEndpoint(w, r, slug, endpoint)
+}
+
+// dispatchPlanActionEndpoint routes /plans/{slug}/<endpoint> to the matching
+// handler. Returns 404 when no collection-endpoint helper claims the endpoint.
+func (c *Component) dispatchPlanActionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) {
 	switch endpoint {
 	case "":
 		c.handlePlanCRUD(w, r, slug)
@@ -529,19 +534,14 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 	case "execute":
 		requireMethod(w, r, http.MethodPost, func() { c.handleExecutePlan(w, r, slug) })
 	default:
-		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
-			return
+		switch {
+		case c.handlePhaseCollectionEndpoint(w, r, slug, endpoint):
+		case c.handleRequirementCollectionEndpoint(w, r, slug, endpoint):
+		case c.handleScenarioCollectionEndpoint(w, r, slug, endpoint):
+		case c.handlePlanDecisionCollectionEndpoint(w, r, slug, endpoint):
+		default:
+			http.Error(w, "Unknown endpoint", http.StatusNotFound)
 		}
-		if handled := c.handleRequirementCollectionEndpoint(w, r, slug, endpoint); handled {
-			return
-		}
-		if handled := c.handleScenarioCollectionEndpoint(w, r, slug, endpoint); handled {
-			return
-		}
-		if handled := c.handlePlanDecisionCollectionEndpoint(w, r, slug, endpoint); handled {
-			return
-		}
-		http.Error(w, "Unknown endpoint", http.StatusNotFound)
 	}
 }
 

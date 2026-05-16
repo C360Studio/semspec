@@ -770,6 +770,46 @@ func (c *Component) checkAllApproved(s *projectStore) bool {
 // PATCH /project-manager/config
 // ----------------------------------------------------------------------------
 
+// applyConfigUpdate copies pc, overlays any non-nil ConfigUpdateRequest fields
+// that actually differ, and reports whether anything changed. Pure function —
+// no I/O, no UpdatedAt mutation. The caller decides whether to persist.
+//
+// Tracking changes (rather than blindly overwriting) lets the PATCH handler
+// skip the save (and the UpdatedAt reseat that goes with it) on a true no-op
+// PATCH. Without this, committed e2e fixture project.json files drift on
+// every PATCH whose payload happens to match the current state (qa-cycle e2e
+// scenario re-asserts qa_level=integration against a fixture that already
+// has it).
+func applyConfigUpdate(pc workflow.ProjectConfig, req ConfigUpdateRequest) (workflow.ProjectConfig, bool) {
+	updated := pc
+	changed := false
+	if req.Name != nil && *req.Name != pc.Name {
+		updated.Name = *req.Name
+		changed = true
+	}
+	if req.Description != nil && *req.Description != pc.Description {
+		updated.Description = *req.Description
+		changed = true
+	}
+	if req.Org != nil && *req.Org != pc.Org {
+		updated.Org = *req.Org
+		changed = true
+	}
+	if req.Platform != nil && *req.Platform != pc.Platform {
+		updated.Platform = *req.Platform
+		changed = true
+	}
+	if req.QALevel != nil && workflow.QALevel(*req.QALevel) != pc.QALevel {
+		updated.QALevel = workflow.QALevel(*req.QALevel)
+		changed = true
+	}
+	if req.QATestCommand != nil && *req.QATestCommand != pc.QATestCommand {
+		updated.QATestCommand = *req.QATestCommand
+		changed = true
+	}
+	return updated, changed
+}
+
 // handleConfig handles PATCH /project-manager/config.
 // Updates project.json fields. Org and platform changes are only allowed
 // before the first plan is created (no entities in graph = safe to rename).
@@ -814,38 +854,7 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Apply updates to a copy. Track whether any field actually changed so
-	// we can skip the save (and the UpdatedAt reseat that goes with it) on
-	// a true no-op PATCH. Without this, committed e2e fixture project.json
-	// files drift on every PATCH whose payload happens to match the
-	// current state (qa-cycle e2e scenario re-asserts qa_level=integration
-	// against a fixture that already has it).
-	updated := *pc
-	changed := false
-	if req.Name != nil && *req.Name != pc.Name {
-		updated.Name = *req.Name
-		changed = true
-	}
-	if req.Description != nil && *req.Description != pc.Description {
-		updated.Description = *req.Description
-		changed = true
-	}
-	if req.Org != nil && *req.Org != pc.Org {
-		updated.Org = *req.Org
-		changed = true
-	}
-	if req.Platform != nil && *req.Platform != pc.Platform {
-		updated.Platform = *req.Platform
-		changed = true
-	}
-	if req.QALevel != nil && workflow.QALevel(*req.QALevel) != pc.QALevel {
-		updated.QALevel = workflow.QALevel(*req.QALevel)
-		changed = true
-	}
-	if req.QATestCommand != nil && *req.QATestCommand != pc.QATestCommand {
-		updated.QATestCommand = *req.QATestCommand
-		changed = true
-	}
+	updated, changed := applyConfigUpdate(*pc, req)
 
 	if !changed {
 		// No-op PATCH — return the current config without touching the
