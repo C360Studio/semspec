@@ -487,6 +487,17 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Route phase-artifact endpoints (e.g. /artifacts, /artifacts/{name}).
+	if endpoint == "artifacts" || strings.HasPrefix(endpoint, "artifacts/") {
+		_, name := extractSlugArtifactName(r.URL.Path)
+		if name == "" {
+			requireMethod(w, r, http.MethodGet, func() { c.handlePlanArtifactsList(w, r, slug) })
+		} else {
+			requireMethod(w, r, http.MethodGet, func() { c.handlePlanArtifactContent(w, r, slug, name) })
+		}
+		return
+	}
+
 	// Route collection and action endpoints.
 	switch endpoint {
 	case "":

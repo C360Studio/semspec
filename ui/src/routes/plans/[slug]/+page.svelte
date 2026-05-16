@@ -7,6 +7,7 @@
 	import PlanDetail from '$lib/components/plan/PlanDetail.svelte';
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
+	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
 	import { ReviewDashboard } from '$lib/components/review';
@@ -45,7 +46,7 @@
 	// ---------------------------------------------------------------------------
 	// View mode — toggle between Doc, Graph, and Files
 	// ---------------------------------------------------------------------------
-	type ViewMode = 'doc' | 'graph' | 'files';
+	type ViewMode = 'doc' | 'artifacts' | 'graph' | 'files';
 	let viewMode = $state<ViewMode>('doc');
 
 	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
@@ -309,6 +310,15 @@
 				</button>
 				<button
 					class="toggle-btn"
+					class:active={viewMode === 'artifacts'}
+					aria-pressed={viewMode === 'artifacts'}
+					onclick={() => setViewMode('artifacts')}
+				>
+					<Icon name="book-open" size={14} />
+					<span>Artifacts</span>
+				</button>
+				<button
+					class="toggle-btn"
 					class:active={viewMode === 'graph'}
 					aria-pressed={viewMode === 'graph'}
 					onclick={() => setViewMode('graph')}
@@ -387,6 +397,10 @@
 	{:else if viewMode === 'files'}
 		<div class="files-content">
 			<PlanWorkspace slug={plan.slug} />
+		</div>
+	{:else if viewMode === 'artifacts'}
+		<div class="artifacts-content">
+			<PhaseArtifactsView slug={plan.slug} />
 		</div>
 	{:else}
 		<div class="plan-content">
@@ -759,6 +773,13 @@
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
+	}
+
+	/* Artifacts mode content — scrolls vertically so the sticky TOC can pin. */
+	.artifacts-content {
+		flex: 1;
+		overflow-y: auto;
+		padding: 0 var(--space-2);
 	}
 
 	@media (max-width: 768px) {
