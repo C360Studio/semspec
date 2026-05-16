@@ -5,13 +5,11 @@
     {
       "name": "pip-install",
       "command": "cd api && python3 -m pip install --break-system-packages -q -r requirements.txt",
-      "trigger": [
-        "*.py"
-      ],
+      "trigger": [],
       "category": "setup",
       "required": true,
       "timeout": "120s",
-      "description": "Install Python project dependencies — must run whenever pytest does because pytest depends on the installed packages. structural-validator skips checks with empty trigger when FilesModified is non-empty (matchesAny returns false on []).",
+      "description": "Install Python project dependencies. Empty trigger means always run — pytest's runtime depends on these packages regardless of which files changed.",
       "working_dir": "."
     },
     {

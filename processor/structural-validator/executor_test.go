@@ -520,6 +520,55 @@ func TestRunAllChecks_WithFilesModified(t *testing.T) {
 	}
 }
 
+// TestRunAllChecks_EmptyTrigger verifies that a check with no Trigger
+// patterns always runs, even when FilesModified is non-empty. Empty trigger
+// reads as "always run" — the alternative ("never matches") makes the
+// checklist authoring footgun caught in PR #8 (hello-world-py pip-install
+// silently skipped). Required-by-design test for the executor contract.
+func TestRunAllChecks_EmptyTrigger(t *testing.T) {
+	dir := t.TempDir()
+	writeChecklist(t, dir, workflow.Checklist{
+		Version: "1",
+		Checks: []workflow.Check{
+			{
+				Name:     "always",
+				Command:  trueCmd(),
+				Trigger:  nil, // empty trigger → always run
+				Category: workflow.CheckCategoryLint,
+				Required: true,
+				Timeout:  "5s",
+			},
+			{
+				Name:     "go-only",
+				Command:  falseCmd(), // would fail if run
+				Trigger:  []string{"*.go"},
+				Category: workflow.CheckCategoryCompile,
+				Required: true,
+				Timeout:  "5s",
+			},
+		},
+	})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "empty-trigger",
+		FilesModified: []string{"README.md"}, // matches no patterns
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ChecksRun != 1 {
+		t.Errorf("expected 1 check to run (the always-run one), got %d", result.ChecksRun)
+	}
+	if !result.Passed {
+		t.Error("expected Passed=true — only the passing always-run check ran")
+	}
+	if len(result.CheckResults) > 0 && result.CheckResults[0].Name != "always" {
+		t.Errorf("expected the 'always' check to run, got %q", result.CheckResults[0].Name)
+	}
+}
+
 // TestSplitCommand exercises the command tokeniser directly.
 func TestSplitCommand(t *testing.T) {
 	tests := []struct {
