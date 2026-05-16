@@ -123,6 +123,41 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		expect(plan.stage).toBe('ready_for_execution');
 	});
 
+	test('artifacts view renders backend-written markdown at ready_for_execution', async ({ page }) => {
+		// Closes the loop on PR #4: workflow-documents writes
+		// .semspec/plans/{slug}/{plan,architecture,requirements,scenarios}.md
+		// at every milestone; plan-manager serves them via /artifacts; the
+		// viewer fetches + renders them inline. Unit + smoke tests already
+		// cover the rendering pipeline against stubs — this one proves the
+		// real file → API → DOM path.
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		// Switch to the Artifacts view mode.
+		await page.getByRole('button', { name: 'Artifacts' }).click();
+
+		const view = page.getByTestId('phase-artifacts');
+		await expect(view).toBeVisible();
+
+		// plan.md is non-skippable — RenderPlan always emits content, so it
+		// must appear regardless of which other phases ran. The TOC chip
+		// proves the list endpoint returned it; the section proves the
+		// content endpoint + renderer worked end-to-end.
+		await expect(page.getByTestId('toc-plan')).toBeVisible({ timeout: 15000 });
+		const planSection = page.locator('section#artifact-plan');
+		await expect(planSection).toBeVisible();
+		await expect(planSection.locator('.markdown-body')).not.toBeEmpty();
+
+		// Hello-world fixture exercises the architecture + requirement +
+		// scenario generators, so those artifacts should also be present
+		// by ready_for_execution. Asserting them here catches a regression
+		// in the workflow-documents milestone watcher.
+		for (const name of ['architecture', 'requirements', 'scenarios']) {
+			await expect(page.getByTestId(`toc-${name}`)).toBeVisible();
+			await expect(page.locator(`section#artifact-${name} .markdown-body`)).not.toBeEmpty();
+		}
+	});
+
 	test('editing is available at ready_for_execution', async ({ page }) => {
 		// After round 2 approval, the plan is at ready_for_execution — a human
 		// decision point. Editing should be enabled here so users can review

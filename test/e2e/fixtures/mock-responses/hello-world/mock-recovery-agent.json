@@ -1,0 +1,14 @@
+{
+  "content": "Recovery decision: refine the developer prompt and let TDD retry once.",
+  "tool_calls": [
+    {
+      "id": "call_recovery_refine",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"action\":\"refine_prompt\",\"diagnosis\":\"Developer loop stopped short of submitting files_modified. Refining the prompt to require the explicit file list in submit_work so the next TDD cycle terminates cleanly.\",\"refined_prompt\":\"On submit_work, always include files_modified with the actual files you wrote (e.g. api/app.py, api/test_goodbye.py). Empty arrays or missing fields will be rejected by the developer-terminal validator.\",\"recovery_succeeded\":true}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
