@@ -9,12 +9,18 @@ import {
 	feedModeRadio
 } from './helpers/selectors';
 
-/** Ensure Plans mode is active (may auto-switch to Feed when loops exist). */
+/**
+ * Ensure Plans mode is active and stays active. Click is unconditional because
+ * we need manualOverride=true in LeftPanel — a one-shot aria-checked read can
+ * miss the auto-switch effect that fires when activityStore picks up SSE
+ * replays from prior tests' loops. Wait on the "Filter plans" radiogroup so
+ * we know PlansList (not ActivityFeed) is actually mounted before proceeding.
+ */
 async function ensurePlansMode(page: import('@playwright/test').Page) {
 	const plansRadio = page.getByRole('radio', { name: 'Plans' });
-	if ((await plansRadio.getAttribute('aria-checked')) === 'false') {
-		await plansRadio.click();
-	}
+	await plansRadio.click();
+	await expect(plansRadio).toHaveAttribute('aria-checked', 'true');
+	await expect(page.getByRole('radiogroup', { name: 'Filter plans' })).toBeVisible();
 }
 
 test.describe('@t0 plan-list', () => {
