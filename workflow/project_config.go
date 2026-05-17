@@ -188,7 +188,11 @@ type Check struct {
 	Command string `json:"command"`
 
 	// Trigger is a list of glob patterns — the check runs only when a
-	// modified file matches at least one pattern.
+	// modified file matches at least one pattern. An empty Trigger
+	// (nil or []) means "always run", regardless of which files changed —
+	// use this for setup/install steps whose runtime is independent of the
+	// modified set. Authors who want a check to never run should omit it,
+	// not give it an empty Trigger.
 	Trigger []string `json:"trigger"`
 
 	// Category classifies the check type.

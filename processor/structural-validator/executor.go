@@ -87,7 +87,14 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 
 	var results []payloads.CheckResult
 	for _, check := range checklist.Checks {
-		if !runAll && !matchesAny(check.Trigger, trigger.FilesModified) {
+		// Empty Trigger means "always run" — a checklist author who wanted
+		// the check to never run would simply delete it. matchesAny returns
+		// false on empty patterns (it's a pure pattern matcher), so the
+		// len-guard is what gives empty Trigger the always-run semantic
+		// fixture authors expect. Caught PR #8 (issue #6 ring 2):
+		// hello-world-py pip-install had trigger:[] and was silently
+		// skipped on every dispatch, so pytest ran against an empty venv.
+		if !runAll && len(check.Trigger) > 0 && !matchesAny(check.Trigger, trigger.FilesModified) {
 			continue
 		}
 
