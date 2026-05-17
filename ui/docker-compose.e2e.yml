@@ -1,4 +1,29 @@
 services:
+  # workspace-init snapshots the fixture into a named volume at stack-up.
+  # Rationale: in production, /workspace is the user's actual repo (bind-mount
+  # — semspec writing project.json timestamps is fine because they own the
+  # file). In e2e, the fixture is supposed to be IMMUTABLE test data; a
+  # bind-mount conflates "test seed" and "scratch workspace" and any runtime
+  # write to .semspec/* leaks back into the parent semspec repo as drift.
+  # `find -delete; cp -a` makes the snapshot deterministic per stack-up so
+  # the fixture-as-snapshot invariant holds regardless of what agents (or
+  # project-manager PATCHes) do during a run.
+  workspace-init:
+    image: alpine:3.19
+    # chown after cp so the sandbox user (uid SANDBOX_UID:1000 — runs git
+    # ops in /workspace and trips git's "dubious ownership" guard otherwise)
+    # owns the snapshot. semspec + qa-runner run as root and can rw any
+    # uid via root's normal access; only the sandbox user needs to be the
+    # nominal owner for git to operate.
+    command:
+      - sh
+      - -c
+      - "find /target -mindepth 1 -delete && cp -a /fixture/. /target/ && chown -R ${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000} /target"
+    volumes:
+      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/fixture:ro
+      - workspace-snapshot:/target
+    restart: "no"
+
   nats:
     image: nats:2.12-alpine
     ports:
@@ -39,8 +64,10 @@ services:
       # avoid the backend E2E stack's 9090.
       - "9190:9090"
     volumes:
-      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/workspace
+      - workspace-snapshot:/workspace
     depends_on:
+      workspace-init:
+        condition: service_completed_successfully
       nats:
         condition: service_healthy
       # Gate on small-model graph stack so graph-embedding worker doesn't
@@ -239,6 +266,8 @@ services:
     ports:
       - "8291:8091"
     depends_on:
+      workspace-init:
+        condition: service_completed_successfully
       nats:
         condition: service_healthy
       # semspec creates the WORKFLOW stream during startup; qa-runner's
@@ -253,7 +282,7 @@ services:
       - PROJECT_HOST_PATH=${SEMSPEC_REPO:-/workspace}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/workspace
+      - workspace-snapshot:/workspace
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
       interval: 10s
@@ -263,6 +292,7 @@ services:
 
 volumes:
   ui-nats-data:
+  workspace-snapshot:
 
 networks:
   default:

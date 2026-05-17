@@ -33,19 +33,23 @@ volumes:
     driver: local
 
 services:
-  # Workspace semsource: swap to Java project fixture.
+  # Workspace semsource: keep the LLM-overlay semsource definition but ensure
+  # it watches the same workspace-snapshot volume the rest of the stack uses.
+  # The task wrapper sets E2E_FIXTURE=osh-driver-meshtastic for `hard` tier,
+  # which feeds the base workspace-init container — no hardcoded fixture
+  # path needed here.
   semsource:
     volumes:
       - ../docker/semsource.json:/etc/semsource/semsource.json:ro
-      - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace:ro
+      - workspace-snapshot:/workspace:ro
 
-  # Sandbox: swap to Java project fixture.
-  # /sources is the read-only view of the shared semsource-clones volume —
-  # agent bash reads upstream files (pom.xml etc.) for ground-truth coords
-  # instead of fabricating them.
+  # Sandbox: also adds the read-only view of the shared semsource-clones
+  # volume at /sources/, where the 3 external semsources clone osh-core /
+  # ogc-cs / meshtastic upstream. Agent bash reads upstream files there
+  # for ground-truth coords instead of fabricating them.
   sandbox:
     volumes:
-      - ../test/e2e/fixtures/osh-driver-meshtastic:/workspace
+      - workspace-snapshot:/workspace
       - semsource-clones:/sources:ro
 
   # External semsources are CHAINED on healthy = "seeding done" — chain
