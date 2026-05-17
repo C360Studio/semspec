@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
+import { ensurePlansMode } from './helpers/leftPanelMode';
 import { connectionStatus } from './helpers/selectors';
 
 test.describe('@t0 @smoke health check', () => {
@@ -28,15 +29,12 @@ test.describe('@t0 @smoke health check', () => {
 		await waitForHydration(page);
 		// LeftPanel auto-switches to Feed mode when loops exist (c50c87f).
 		// Under mock stack, earlier @t0 specs create plans that spawn loops, so
-		// this test routinely lands on Feed. Click Plans and wait for the
-		// aria-checked flip before asserting on Plans-mode UI — otherwise the
-		// getByTitle('New Plan') query hits a stale DOM where PlansList isn't
-		// mounted yet.
-		const plansRadio = page.getByRole('radio', { name: 'Plans' });
-		if ((await plansRadio.getAttribute('aria-checked')) !== 'true') {
-			await plansRadio.click();
-			await expect(plansRadio).toHaveAttribute('aria-checked', 'true');
-		}
+		// this test routinely lands on Feed. ensurePlansMode clicks Plans
+		// unconditionally (locks manualOverride=true) and awaits the Filter
+		// plans radiogroup — without that handshake the auto-switch $effect
+		// races us and the New Plan button query times out against a DOM
+		// where PlansList isn't mounted.
+		await ensurePlansMode(page);
 		await page.getByTitle('New Plan').click();
 		await expect(page).toHaveURL('/plans/new');
 		await expect(page.getByLabel('What do you want to build?')).toBeVisible();
