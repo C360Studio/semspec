@@ -541,10 +541,19 @@ tasks:
             CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           elif [ "{{.TIER}}" = "hard" ]; then
-            # 90min cap for @hard execution-completes — Meshtastic driver epic
-            # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
-            # cap fired before sonnet could complete the dev pipeline (commit
-            # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
+            # 120min cap for @hard execution-completes — Meshtastic driver
+            # epic decomposes into 2 requirements × ~4 task-nodes each, with
+            # each node a full dev (5-25min sonnet) + reviewer (1-8min)
+            # cycle, sometimes plus a tdd_cycle reject→approve retry.
+            # Take-33 (2026-05-17 hybrid WITH_EPIC=1) hit Playwright's
+            # 90min cap at exactly the moment req-2 node-2-of-4 dispatched;
+            # ~15min pre-execution + ~75min execution-in-flight + remaining
+            # ~2 nodes ≈ ~110min nominal. 120min gives ~10min headroom for
+            # one extra tdd_cycle retry. EXECUTION_TIMEOUT (the spec's
+            # waitForStage budget) must equal PLAYWRIGHT_TIMEOUT (Playwright's
+            # per-test wall clock) — otherwise whichever is smaller wins.
+            # Pairs with agentic-loop.timeout=1800s in e2e-hybrid.json which
+            # gives each individual dev/review loop 30min of its own.
             #
             # GOAL_TIMEOUT bumped to 15min for @hard — gemini-3.1-pro-preview
             # under reasoning_effort=medium can take 5-10min per call when
@@ -552,7 +561,7 @@ tasks:
             # to gemini-pro took 66s for a 10-token request). Default 5min
             # was tight against gemini-pro's own 300s request_timeout. Goal
             # timeout > request_timeout + fallback budget = ~15min.
-            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=7200000 PLAYWRIGHT_TIMEOUT=7200000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
@@ -703,10 +712,19 @@ tasks:
             CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=2400000 PLAYWRIGHT_TIMEOUT=2400000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           elif [ "{{.TIER}}" = "hard" ]; then
-            # 90min cap for @hard execution-completes — Meshtastic driver epic
-            # has 5 reqs × ~5 TDD cycles × ~3min sonnet ≈ 75min nominal; 30min
-            # cap fired before sonnet could complete the dev pipeline (commit
-            # 06f0eeb hybrid run hit "Test timeout of 1800000ms exceeded").
+            # 120min cap for @hard execution-completes — Meshtastic driver
+            # epic decomposes into 2 requirements × ~4 task-nodes each, with
+            # each node a full dev (5-25min sonnet) + reviewer (1-8min)
+            # cycle, sometimes plus a tdd_cycle reject→approve retry.
+            # Take-33 (2026-05-17 hybrid WITH_EPIC=1) hit Playwright's
+            # 90min cap at exactly the moment req-2 node-2-of-4 dispatched;
+            # ~15min pre-execution + ~75min execution-in-flight + remaining
+            # ~2 nodes ≈ ~110min nominal. 120min gives ~10min headroom for
+            # one extra tdd_cycle retry. EXECUTION_TIMEOUT (the spec's
+            # waitForStage budget) must equal PLAYWRIGHT_TIMEOUT (Playwright's
+            # per-test wall clock) — otherwise whichever is smaller wins.
+            # Pairs with agentic-loop.timeout=1800s in e2e-hybrid.json which
+            # gives each individual dev/review loop 30min of its own.
             #
             # GOAL_TIMEOUT bumped to 15min for @hard — gemini-3.1-pro-preview
             # under reasoning_effort=medium can take 5-10min per call when
@@ -714,7 +732,7 @@ tasks:
             # to gemini-pro took 66s for a 10-token request). Default 5min
             # was tight against gemini-pro's own 300s request_timeout. Goal
             # timeout > request_timeout + fallback budget = ~15min.
-            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=5400000 PLAYWRIGHT_TIMEOUT=5400000 \
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=7200000 PLAYWRIGHT_TIMEOUT=7200000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
