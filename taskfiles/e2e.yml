@@ -926,6 +926,19 @@ tasks:
           git -C "$fixture" for-each-ref --format='%(refname:short)' refs/heads | grep -vE '^main$' | while read -r b; do
             git -C "$fixture" branch -D -q "$b" 2>/dev/null || true
           done
+          # Restore parent-tracked .semspec/ files from the parent semspec
+          # repo's HEAD. The fixture's own `git reset --hard ROOT` above
+          # restores the fixture-git's view of .semspec/ (osh-driver-meshtastic
+          # committed .semspec/project.json + standards.json to its own nested
+          # git at root), which silently REVERTS any newer parent-tracked
+          # override (e.g. aa7ec51 chore(fixtures): qa_level=integration was
+          # added in the parent but the fixture's root commit predated it).
+          # Restoring from parent HEAD makes the parent repo's view of
+          # .semspec/ authoritative. The fixture-git's index entry then reads
+          # as "modified" from fixture's POV but we don't care; the
+          # cp-into-volume init container snapshots the working tree, not
+          # the fixture's git index.
+          git checkout -q HEAD -- "$fixture/.semspec/" 2>/dev/null || true
         done
         echo "[OK] Fixtures reset"
 

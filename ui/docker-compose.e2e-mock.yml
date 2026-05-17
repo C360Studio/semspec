@@ -37,8 +37,15 @@ services:
     ports:
       - "8191:8090"  # Offset from backend E2E (8190)
     command: ["--addr", ":8090", "--repo", "/workspace"]
+    # Mounts the workspace-snapshot named volume populated by workspace-init
+    # in the base compose. Shared with semspec so agent writes and structural
+    # validation see the same files. Fixture immutability is enforced by the
+    # init container, not by per-service mount mode.
+    depends_on:
+      workspace-init:
+        condition: service_completed_successfully
     volumes:
-      - ../test/e2e/fixtures/${E2E_FIXTURE:-hello-world-py}:/workspace
+      - workspace-snapshot:/workspace
     deploy:
       resources:
         limits:
