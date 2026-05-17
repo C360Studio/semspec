@@ -29,7 +29,14 @@ const EPIC_PROMPT = `Design and implement a Meshtastic driver for OpenSensorHub 
 const GRAPH_READY_TIMEOUT = Number(process.env.GRAPH_READY_TIMEOUT) || 600_000;
 const GOAL_TIMEOUT = Number(process.env.GOAL_TIMEOUT) || 300_000;
 const CASCADE_TIMEOUT = Number(process.env.CASCADE_TIMEOUT) || 900_000;
-const EXECUTION_TIMEOUT = Number(process.env.EXECUTION_TIMEOUT) || 3_600_000;
+// 90 min default — take-30 hybrid/hard completed at ~72 min wallclock for the
+// execution phase alone. 60 min was too tight; take-31 (2026-05-17) failed
+// `execution completes` at exactly 60 min with the developer still at
+// iter=108/120 doing constructive work (real artifacts on disk, real upstream
+// reads). Raising to 90 min gives the dev the budget take-30 used + ~25%
+// headroom for the protobuf-coord wall on Meshtastic-Android. Override via
+// EXECUTION_TIMEOUT env if longer runs are needed.
+const EXECUTION_TIMEOUT = Number(process.env.EXECUTION_TIMEOUT) || 5_400_000;
 const POLL_INTERVAL = 5_000;
 
 // Aggregated source-manifest summary across every semsource sharing the bus.
