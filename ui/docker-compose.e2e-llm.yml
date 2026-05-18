@@ -26,7 +26,7 @@ services:
     volumes:
       - ../docker/semsource.json:/etc/semsource/semsource.json:ro
       - ../docker/semsource.gitconfig:/root/.gitconfig:ro
-      # Mount the same workspace-snapshot semspec + sandbox see. semsource
+      # Mount the same WORKSPACE_HOST_PATH semspec + sandbox see. semsource
       # runs watch-mode AST/docs indexers, so it must observe agent writes
       # to keep the federated graph consistent with what the agent actually
       # built. :ro is safe — semsource never writes to /workspace.
@@ -34,7 +34,7 @@ services:
       # E2E_FIXTURE-vs-default mismatch (caught take-18 2026-05-13) is now
       # impossible because workspace-init in the base resolves the fixture
       # once for the entire stack.
-      - workspace-snapshot:/workspace:ro
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
       test: ["CMD", "semsource", "version"]
@@ -79,10 +79,10 @@ services:
       workspace-init:
         condition: service_completed_successfully
     volumes:
-      # Shared workspace-snapshot — same volume semspec and semsource use.
-      # Single named volume = single workspace view, no risk of drift
-      # between services (caught take-18 2026-05-13 with separate bind mounts).
-      - workspace-snapshot:/workspace
+      # Shared WORKSPACE_HOST_PATH — same bind mount semspec and semsource use.
+      # Single host path = single workspace view, no risk of drift between
+      # services (caught take-18 2026-05-13 with separate bind mounts).
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
     deploy:
       resources:
         limits:

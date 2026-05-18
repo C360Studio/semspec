@@ -34,14 +34,14 @@ volumes:
 
 services:
   # Workspace semsource: keep the LLM-overlay semsource definition but ensure
-  # it watches the same workspace-snapshot volume the rest of the stack uses.
-  # The task wrapper sets E2E_FIXTURE=osh-driver-meshtastic for `hard` tier,
-  # which feeds the base workspace-init container — no hardcoded fixture
-  # path needed here.
+  # it watches the same WORKSPACE_HOST_PATH bind mount the rest of the stack
+  # uses. The task wrapper sets E2E_FIXTURE=osh-driver-meshtastic for `hard`
+  # tier, which feeds the base workspace-init container — no hardcoded
+  # fixture path needed here.
   semsource:
     volumes:
       - ../docker/semsource.json:/etc/semsource/semsource.json:ro
-      - workspace-snapshot:/workspace:ro
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace:ro
 
   # Sandbox: also adds the read-only view of the shared semsource-clones
   # volume at /sources/, where the 3 external semsources clone osh-core /
@@ -49,7 +49,7 @@ services:
   # for ground-truth coords instead of fabricating them.
   sandbox:
     volumes:
-      - workspace-snapshot:/workspace
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
       - semsource-clones:/sources:ro
 
   # External semsources are CHAINED on healthy = "seeding done" — chain

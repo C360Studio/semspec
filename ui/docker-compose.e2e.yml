@@ -1,10 +1,21 @@
 services:
-  # workspace-init snapshots the fixture into a named volume at stack-up.
-  # Rationale: in production, /workspace is the user's actual repo (bind-mount
-  # — semspec writing project.json timestamps is fine because they own the
-  # file). In e2e, the fixture is supposed to be IMMUTABLE test data; a
-  # bind-mount conflates "test seed" and "scratch workspace" and any runtime
-  # write to .semspec/* leaks back into the parent semspec repo as drift.
+  # workspace-init snapshots the fixture into a host-bind-mount tmpdir at
+  # stack-up. Rationale: in production, /workspace is the user's actual repo
+  # (bind-mount — semspec writing project.json timestamps is fine because
+  # they own the file). In e2e, the fixture is supposed to be IMMUTABLE test
+  # data; a bind-mount directly to the fixture conflates "test seed" and
+  # "scratch workspace" and any runtime write to .semspec/* leaks back into
+  # the parent semspec repo as drift.
+  #
+  # The intermediate WORKSPACE_HOST_PATH tmpdir is a host bind-mount (not a
+  # Docker named volume) for one specific reason: qa-runner spawns `act`
+  # sibling containers via the docker socket, and act --bind needs a HOST
+  # filesystem path that the docker daemon recognizes for sibling-container
+  # mounts. Named volumes have no usable host path on Docker Desktop. The
+  # bind-mount tmpdir gives us snapshot isolation (init container cp's
+  # fixture → tmpdir, agents and project-manager write to tmpdir not
+  # fixture) AND a host path qa-runner / act can use.
+  #
   # `find -delete; cp -a` makes the snapshot deterministic per stack-up so
   # the fixture-as-snapshot invariant holds regardless of what agents (or
   # project-manager PATCHes) do during a run.
@@ -21,7 +32,7 @@ services:
       - "find /target -mindepth 1 -delete && cp -a /fixture/. /target/ && chown -R ${SANDBOX_UID:-1000}:${SANDBOX_GID:-1000} /target"
     volumes:
       - ../test/e2e/fixtures/${E2E_FIXTURE:-go-project}:/fixture:ro
-      - workspace-snapshot:/target
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/target
     restart: "no"
 
   nats:
@@ -50,6 +61,13 @@ services:
       - NATS_URL=nats://nats:4222
       - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
+      # PROJECT_HOST_PATH is the HOST filesystem path of /workspace, embedded
+      # in QARequestedEvent so qa-runner can act-bind-mount it into sibling
+      # containers. Must match WORKSPACE_HOST_PATH and the qa-runner mount
+      # below. Without this, plan-manager refuses to publish the QA event
+      # for qa_level=integration/full plans and the plan sits in
+      # ready_for_qa until test timeout (caught take-34 2026-05-17).
+      - PROJECT_HOST_PATH=${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # bash tool default timeout (120s) is too aggressive for e2e fixtures
       # that exercise full toolchain installs/compiles: mvn test cold-cache
@@ -64,7 +82,7 @@ services:
       # avoid the backend E2E stack's 9090.
       - "9190:9090"
     volumes:
-      - workspace-snapshot:/workspace
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
     depends_on:
       workspace-init:
         condition: service_completed_successfully
@@ -279,10 +297,13 @@ services:
         condition: service_healthy
     environment:
       - NATS_URL=nats://nats:4222
-      - PROJECT_HOST_PATH=${SEMSPEC_REPO:-/workspace}
+      # Same WORKSPACE_HOST_PATH as semspec — both must point at the same
+      # host path or act sibling containers and semspec's published QA event
+      # disagree on what workspace to mount.
+      - PROJECT_HOST_PATH=${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - workspace-snapshot:/workspace
+      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
       interval: 10s
@@ -292,7 +313,6 @@ services:
 
 volumes:
   ui-nats-data:
-  workspace-snapshot:
 
 networks:
   default:
