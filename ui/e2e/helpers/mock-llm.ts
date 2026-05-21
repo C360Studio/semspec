@@ -68,4 +68,19 @@ export class MockLLMClient {
 		);
 		if (!res.ok) throw new Error(`Mock LLM scenario reset failed (${res.status})`);
 	}
+
+	/**
+	 * Set a per-response delay on the mock LLM. Useful for tests that need
+	 * to assert mid-LLM UI state (e.g. "drafting" hints) which would otherwise
+	 * be invisible because mock fixtures normally respond in <1ms. Pass 0 to
+	 * clear the delay.
+	 */
+	async setDelay(delayMs: number): Promise<void> {
+		const res = await fetch(`${this.baseUrl}/admin/config`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ delay_ms: delayMs })
+		});
+		if (!res.ok) throw new Error(`Mock LLM setDelay failed (${res.status})`);
+	}
 }
