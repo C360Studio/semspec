@@ -227,15 +227,17 @@
 		{/if}
 	</div>
 
-	<!-- Workflow Guidance -->
-	{#if !isEditing && guidance}
+	<!-- Workflow Guidance. Suppressed when guidance.isLoading because the
+	     route-level InProgressPanel above already surfaces the same copy
+	     prominently; rendering both was an immediate duplication when the
+	     plan body is empty (caught 2026-05-21 demo). The non-loading branch
+	     (e.g. "Review the plan details, then create requirements…" + the
+	     Create Requirements button) still renders here — it's the action
+	     gate, not status reporting. -->
+	{#if !isEditing && guidance && !guidance.isLoading}
 		<div class="detail-guidance">
 			<div class="guidance-hint">
-				{#if guidance.isLoading}
-					<Icon name="loader" size={14} />
-				{:else}
-					<Icon name="lightbulb" size={14} />
-				{/if}
+				<Icon name="lightbulb" size={14} />
 				<span>{guidance.message}</span>
 			</div>
 			<div class="guidance-actions">

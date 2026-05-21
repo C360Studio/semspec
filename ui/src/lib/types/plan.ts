@@ -30,16 +30,24 @@ type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
  * Maps to the `stage` string field from the Go API.
  */
 export type PlanStage =
+	| 'created' // Just created, planner hasn't claimed yet
 	| 'draft' // Unapproved, gathering information
-	| 'drafting' // Plan content being generated
+	| 'drafting' // Planner LLM is composing plan content
+	| 'drafted' // Planner done, waiting for plan reviewer to claim
+	| 'reviewing_draft' // Plan reviewer (R1) is evaluating the draft
 	| 'ready_for_approval' // Plan has goal/context, ready for approval
 	| 'reviewed' // Plan reviewed by reviewer (may be approved or need changes)
 	| 'needs_changes' // Reviewer requested changes
 	| 'planning' // Approved, finalizing approach
 	| 'approved' // Plan explicitly approved
 	| 'rejected' // Plan rejected
+	| 'generating_requirements' // Requirement generator is running
 	| 'requirements_generated' // Requirements generated via auto-cascade
+	| 'generating_architecture' // Architecture generator is running
+	| 'architecture_generated' // Architecture generated
+	| 'generating_scenarios' // Scenario generator is running
 	| 'scenarios_generated' // Scenarios generated via auto-cascade
+	| 'reviewing_scenarios' // Plan reviewer (R2) evaluating scenarios
 	| 'scenarios_reviewed' // Scenarios reviewed, waiting for human approval (round 2)
 	| 'ready_for_execution' // Both approvals done, ready to execute
 	| 'phases_generated' // Legacy: Phases generated
@@ -49,6 +57,8 @@ export type PlanStage =
 	| 'tasks' // Legacy: Tasks generated
 	| 'implementing' // Tasks being implemented
 	| 'executing' // Legacy: Tasks being executed
+	| 'ready_for_qa' // Implementation done, awaiting QA gate
+	| 'reviewing_qa' // QA in progress (sandbox unit tests or qa-runner act)
 	| 'reviewing_rollup' // Plan rollup review in progress
 	| 'complete' // All tasks completed successfully
 	| 'archived' // Plan archived (soft deleted)
