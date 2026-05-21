@@ -14,9 +14,13 @@
 
 	let { plan, hasRequirements = false, hasScenarios = false, onPromote, onExecute, onReplay, onRetryFailed }: Props = $props();
 
-	// Button visibility logic
-	// Round 1: plan reviewed, waiting for human approval (stage=reviewed, approved=false)
-	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
+	// Button visibility logic.
+	// NOTE: the Round-1 "Create Requirements" button used to render here too,
+	// but PlanDetail's guidance hint already owns that CTA with contextual
+	// copy ("Review the plan details, then create requirements and
+	// scenarios."). Rendering it in two places produced the duplicate-button
+	// confusion caught 2026-05-19 during the demo. ActionBar now only
+	// surfaces post-approval actions.
 
 	// Cascade: approved but requirements/scenarios not yet generated
 	const isCascading = $derived(
@@ -104,20 +108,8 @@
 	}
 </script>
 
-{#if showApprovePlan || isCascading || showApproveScenarios || showExecute || isExecuting || showFailedActions || plan.stage === 'complete'}
+{#if isCascading || showApproveScenarios || showExecute || isExecuting || showFailedActions || plan.stage === 'complete'}
 	<div class="action-bar">
-		{#if showApprovePlan}
-			<button
-				class="action-btn btn-primary"
-				onclick={handlePromote}
-				disabled={promoteLoading}
-				aria-busy={promoteLoading}
-			>
-				<Icon name="arrow-up" size={16} />
-				<span>Create Requirements</span>
-			</button>
-		{/if}
-
 		{#if isCascading}
 			<div class="cascade-status" role="status">
 				<Icon name="loader" size={16} />

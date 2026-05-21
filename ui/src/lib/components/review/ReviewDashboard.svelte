@@ -154,8 +154,8 @@
 	{:else}
 		<div class="empty-state">
 			<Icon name="inbox" size={32} />
-			<p>No review results available</p>
-			<span class="empty-hint">Reviews will appear here after code review completes</span>
+			<p>Code review not run yet</p>
+			<span class="empty-hint">The implementation-review synthesis appears here once requirements have executed.</span>
 		</div>
 	{/if}
 </div>

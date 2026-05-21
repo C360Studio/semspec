@@ -76,4 +76,47 @@ test.describe('@t0 trajectory-entry expansion', () => {
 		await expect(page.getByTestId('entry-expand-btn')).toHaveCount(0);
 		await expect(page.getByTestId('entry-preview')).toHaveCount(0);
 	});
+
+	test('model-call with messages reveals the full request audit trail', async ({ page }) => {
+		// 2026-05-21: semstreams beta.77 persists the task-initiation step's
+		// `messages` array — the full conversation sent to the LLM. Before
+		// this the audit trail was one-sided: token counts + response text but
+		// no record of the prompt. TrajectoryEntryCard now renders a
+		// "Request (N messages)" section above "Response" with role chips so
+		// readers can audit what the planner/reviewer was actually asked.
+		await page.goto('/e2e-test/trajectory-entry?scenario=model-call-with-messages');
+		await waitForHydration(page);
+
+		const card = page.getByTestId('trajectory-entry');
+		await expect(card).toHaveAttribute('data-step-type', 'model_call');
+
+		// Expand chevron must be present — messages alone counts as preview.
+		await expect(page.getByTestId('entry-expand-btn')).toBeVisible();
+		await page.getByTestId('entry-expand-btn').click();
+
+		const preview = page.getByTestId('entry-preview');
+		await expect(preview).toBeVisible();
+
+		// Section header — should call out the message count so the operator
+		// knows up front whether they're reading a short turn or a deep loop.
+		await expect(preview).toContainText(/Request \(3 messages\)/i);
+
+		// All three roles render with their content. Loose contains-matches so
+		// the test survives copy tweaks to system prompts; the assertion is
+		// about RENDERING, not exact prompt fidelity.
+		const messages = preview.locator('.message');
+		await expect(messages).toHaveCount(3);
+		await expect(messages.nth(0)).toContainText(/system/i);
+		await expect(messages.nth(0)).toContainText(/Iteration Budget/);
+		await expect(messages.nth(1)).toContainText(/system/i);
+		await expect(messages.nth(1)).toContainText(/SemStreams agentic system/);
+		await expect(messages.nth(2)).toContainText(/user/i);
+		await expect(messages.nth(2)).toContainText(/Project Files/);
+
+		// Response section renders the assistant's tool_calls (no response
+		// text in this fixture — covers the empty-response case explicitly).
+		await expect(preview).toContainText(/Response/i);
+		await expect(preview).toContainText(/bash/);
+		await expect(preview).toContainText(/ls -R/);
+	});
 });

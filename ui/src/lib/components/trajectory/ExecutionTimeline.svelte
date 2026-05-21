@@ -60,11 +60,14 @@
 	}
 
 	// ── Loop grouping ──────────────────────────────────────────────
-	// Plan-phase steps: workflow_step values from the trajectory API for planning activity
+	// Plan-phase steps: workflow_step values from the trajectory API for
+	// planning activity. `architecture-generation` was previously missing,
+	// causing those loops to land in the Execution section (caught 2026-05-21).
 	const PLAN_STEPS = new Set([
 		'drafting',
 		'reviewing',
 		'requirement-generation',
+		'architecture-generation',
 		'scenario-generation',
 	]);
 
@@ -98,8 +101,6 @@
 			.filter((l) => !PLAN_STEPS.has(l.workflow_step ?? '') && !isPlanRole(l))
 			.sort(byCreatedAt)
 	);
-
-	const hasAnyLoops = $derived(planLoops.length > 0 || executionLoops.length > 0);
 
 	// ── Collapse state management ──────────────────────────────────
 	// User-explicit toggles (sticky across state transitions)
@@ -250,30 +251,41 @@
 	</a>
 {/snippet}
 
-{#if hasAnyLoops}
-	<div class="execution-timeline">
-		<!-- Plan Phase -->
-		{#if planLoops.length > 0}
-			<div class="phase-section">
-				<button class="phase-header" onclick={() => toggle('plan-phase')}>
-					<div class="phase-left">
-						<Icon name={planPhaseExpanded ? 'chevron-down' : 'chevron-right'} size={14} />
-						<Icon name="edit-3" size={14} />
-						<span class="phase-title">Planning</span>
-						<span class="phase-count">{planLoops.length} loop{planLoops.length !== 1 ? 's' : ''}</span>
-					</div>
-					<div class="phase-stats">
-						{#if planStats.llmCalls > 0}
-							<span class="stat">{planStats.llmCalls} LLM</span>
-						{/if}
-						{#if planStats.totalTokens > 0}
-							<span class="stat">{formatTokens(planStats.totalTokens)} tok</span>
-						{/if}
-						{#if planStats.totalDuration > 0}
-							<span class="stat">{formatDuration(planStats.totalDuration)}</span>
-						{/if}
-					</div>
-				</button>
+<div class="execution-timeline">
+	<!-- Plan Phase. Always rendered so the workflow roadmap is visible from
+	     plan creation onward. Ghost variant (non-interactive, dimmed) shows
+	     "Not started" when no loops have run yet; flips to the interactive
+	     button + content once the first plan-phase loop arrives. -->
+	<div class="phase-section" class:phase-section--ghost={planLoops.length === 0}>
+		{#if planLoops.length === 0}
+			<div class="phase-header phase-header--ghost">
+				<div class="phase-left">
+					<Icon name="circle" size={14} />
+					<Icon name="edit-3" size={14} />
+					<span class="phase-title">Planning</span>
+					<span class="phase-count phase-count--ghost">Not started</span>
+				</div>
+			</div>
+		{:else}
+			<button class="phase-header" onclick={() => toggle('plan-phase')}>
+				<div class="phase-left">
+					<Icon name={planPhaseExpanded ? 'chevron-down' : 'chevron-right'} size={14} />
+					<Icon name="edit-3" size={14} />
+					<span class="phase-title">Planning</span>
+					<span class="phase-count">{planLoops.length} loop{planLoops.length !== 1 ? 's' : ''}</span>
+				</div>
+				<div class="phase-stats">
+					{#if planStats.llmCalls > 0}
+						<span class="stat">{planStats.llmCalls} LLM</span>
+					{/if}
+					{#if planStats.totalTokens > 0}
+						<span class="stat">{formatTokens(planStats.totalTokens)} tok</span>
+					{/if}
+					{#if planStats.totalDuration > 0}
+						<span class="stat">{formatDuration(planStats.totalDuration)}</span>
+					{/if}
+				</div>
+			</button>
 
 				{#if planPhaseExpanded}
 					<div class="phase-content">
@@ -308,12 +320,23 @@
 						{/each}
 					</div>
 				{/if}
-			</div>
-		{/if}
+			{/if}
+		</div>
 
-		<!-- Execution Phase -->
-		{#if executionLoops.length > 0}
-			<div class="phase-section">
+		<!-- Execution Phase. Same ghost-when-empty pattern as Planning so the
+		     workflow roadmap (Planning → Execution) is visible from plan
+		     creation onward. -->
+		<div class="phase-section" class:phase-section--ghost={executionLoops.length === 0}>
+			{#if executionLoops.length === 0}
+				<div class="phase-header phase-header--ghost">
+					<div class="phase-left">
+						<Icon name="circle" size={14} />
+						<Icon name="play" size={14} />
+						<span class="phase-title">Execution</span>
+						<span class="phase-count phase-count--ghost">Not started</span>
+					</div>
+				</div>
+			{:else}
 				<button class="phase-header" onclick={() => toggle('exec-phase')}>
 					<div class="phase-left">
 						<Icon name={execPhaseExpanded ? 'chevron-down' : 'chevron-right'} size={14} />
@@ -370,10 +393,9 @@
 						{/each}
 					</div>
 				{/if}
-			</div>
-		{/if}
+			{/if}
+		</div>
 	</div>
-{/if}
 
 <style>
 	.execution-timeline {
@@ -386,6 +408,14 @@
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
 		overflow: hidden;
+	}
+
+	/* Ghost: phase hasn't started yet. Dimmed, dashed border, no hover/click
+	 * affordance so the user reads it as a roadmap step, not an empty card
+	 * to investigate. */
+	.phase-section--ghost {
+		border-style: dashed;
+		opacity: 0.55;
 	}
 
 	.phase-header {
@@ -402,6 +432,20 @@
 
 	.phase-header:hover {
 		background: var(--color-bg-elevated);
+	}
+
+	.phase-header--ghost {
+		cursor: default;
+		background: transparent;
+	}
+
+	.phase-header--ghost:hover {
+		background: transparent;
+	}
+
+	.phase-count--ghost {
+		font-style: italic;
+		color: var(--color-text-muted);
 	}
 
 	.phase-left {

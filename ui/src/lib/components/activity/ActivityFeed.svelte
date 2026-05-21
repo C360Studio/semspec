@@ -130,6 +130,69 @@
 		return `${sourceLabel(source)} (${count})`;
 	}
 
+	// -----------------------------------------------------------------------
+	// Autoscroll-to-newest (chat-app pattern)
+	// -----------------------------------------------------------------------
+	// Events are appended at the bottom. When the user is reading the latest
+	// activity (scrolled to the bottom), new events should auto-scroll into
+	// view. When the user has scrolled up to read history, we MUST NOT yank
+	// their scroll position — instead surface a "N new ↓" pill so they can
+	// opt back into following the live tail.
+	//
+	// Design discipline: `isUserPinnedToBottom` is set ONLY from the user's
+	// scroll handler (user event → state update is fine). `lastSeenIndex` is
+	// set ONLY when the user explicitly jumps to bottom (pill click or
+	// scrolls there manually). The autoscroll itself is a $effect that does
+	// nothing but mutate the DOM scrollTop — no reactive state assignment
+	// inside the effect (avoids the abuse pattern caught 2026-05-19, see
+	// [[svelte5-effect-for-side-effects-only]]).
+	let listEl = $state<HTMLDivElement | null>(null);
+	let isUserPinnedToBottom = $state(true);
+	let lastSeenIndex = $state(0);
+
+	// Pixels from absolute bottom that still count as "at the bottom".
+	// Generous threshold absorbs sub-pixel rounding and the in-flight
+	// growth of the row that triggered the scroll event.
+	const PINNED_THRESHOLD_PX = 48;
+
+	const newEventsBelow = $derived(
+		Math.max(0, filteredEvents.length - lastSeenIndex)
+	);
+
+	function handleScroll() {
+		if (!listEl) return;
+		const distanceFromBottom =
+			listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight;
+		const nowPinned = distanceFromBottom <= PINNED_THRESHOLD_PX;
+		isUserPinnedToBottom = nowPinned;
+		if (nowPinned) {
+			lastSeenIndex = filteredEvents.length;
+		}
+	}
+
+	function jumpToNewest() {
+		if (!listEl) return;
+		listEl.scrollTop = listEl.scrollHeight;
+		isUserPinnedToBottom = true;
+		lastSeenIndex = filteredEvents.length;
+	}
+
+	// Side-effect-only $effect: when filteredEvents grows AND the user is
+	// pinned to the bottom, follow the new content. Reads reactive state
+	// (length, pinned) and mutates the DOM — no reactive state assignment
+	// inside.
+	$effect(() => {
+		const len = filteredEvents.length;
+		if (!listEl) return;
+		if (!isUserPinnedToBottom) return;
+		// Read length so this effect is properly tracked against new events,
+		// then schedule scroll after the DOM has appended the new row.
+		void len;
+		queueMicrotask(() => {
+			if (!listEl) return;
+			listEl.scrollTop = listEl.scrollHeight;
+		});
+	});
 </script>
 
 <div class="activity-feed">
@@ -180,7 +243,12 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="events-list" role="log" aria-live="polite">
+		<div
+			class="events-list"
+			role="log"
+			bind:this={listEl}
+			onscroll={handleScroll}
+		>
 			{#snippet anchorPill(anchor: string)}
 				<span
 					class="req-anchor"
@@ -236,6 +304,18 @@
 				{/if}
 			{/each}
 		</div>
+		{#if newEventsBelow > 0 && !isUserPinnedToBottom}
+			<button
+				type="button"
+				class="new-events-pill"
+				onclick={jumpToNewest}
+				data-testid="new-events-pill"
+				aria-label="Jump to {newEventsBelow} new event{newEventsBelow === 1 ? '' : 's'}"
+			>
+				<Icon name="arrow-down" size={12} />
+				<span>{newEventsBelow} new</span>
+			</button>
+		{/if}
 	{/if}
 </div>
 
@@ -245,6 +325,40 @@
 		flex-direction: column;
 		height: 100%;
 		overflow: hidden;
+		/* Anchor for the absolutely-positioned `.new-events-pill` that floats
+		 * over the bottom of the events list when the user has scrolled up
+		 * and new activity is below the viewport. */
+		position: relative;
+	}
+
+	.new-events-pill {
+		position: absolute;
+		bottom: var(--space-4);
+		right: var(--space-4);
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-1) var(--space-3);
+		background: var(--color-accent);
+		color: var(--color-bg-primary);
+		border: none;
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		cursor: pointer;
+		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+		transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+		z-index: 1;
+	}
+
+	.new-events-pill:hover {
+		transform: translateY(-1px);
+		box-shadow: 0 6px 14px rgba(0, 0, 0, 0.3);
+	}
+
+	.new-events-pill:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
 	}
 
 	.feed-header {

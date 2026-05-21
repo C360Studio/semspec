@@ -5,6 +5,9 @@
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import PlanDetail from '$lib/components/plan/PlanDetail.svelte';
+	import PlanReviewCard from '$lib/components/plan/PlanReviewCard.svelte';
+	import InProgressPanel from '$lib/components/plan/InProgressPanel.svelte';
+	import { deriveGuidance } from '$lib/components/plan/guidance';
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
@@ -36,7 +39,15 @@
 	let { data }: Props = $props();
 
 	const slug = $derived(page.params.slug);
-	const plan = $derived(data.plan);
+	// Prefer the SSE-fed feedStore mirror for the active slug — it carries the
+	// same PlanWithStatus shape the loader returns, and updates without a
+	// full loader re-run. Fall back to load-function data for initial render
+	// (before the first SSE event arrives) and for stale slugs.
+	const plan = $derived(
+		feedStore.currentPlan && feedStore.currentPlan.slug === slug
+			? feedStore.currentPlan
+			: data.plan
+	);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
 	const requirements = $derived(data.requirements);
 	const scenariosByReq = $derived(data.scenariosByReq);
@@ -159,10 +170,81 @@
 	// Approved plans show requirements and reviews
 	const showApprovedContent = $derived(plan?.approved === true);
 
+	// Guidance for the active LLM phase. Reused for the prominent in-progress
+	// panel above PlanDetail. PlanDetail still renders its own small chip via
+	// the same predicate so the existing small-form factor remains for cases
+	// where the big panel is hidden.
+	const planGuidance = $derived(
+		plan ? deriveGuidance(plan.approved, plan.stage, requirements.length) : null
+	);
+
+	// Pick the best available timestamp to drive the in-progress panel's
+	// elapsed-time ticker for the CURRENT stage. The plan API doesn't yet
+	// expose a `stage_started_at` field, so we fall back through the
+	// available timestamps in order of relevance per phase. Without this,
+	// passing `plan.created_at` to a `reviewing_qa` plan that was created
+	// hours ago would render "4h 12m" for what is actually a 3-minute QA
+	// run — the inflated time reads exactly as wedged, which is the UX
+	// problem the in-progress panel was added to solve. Caught
+	// 2026-05-21 by svelte-reviewer.
+	function stageStartedAt(p: typeof plan): string | null {
+		if (!p) return null;
+		switch (p.stage) {
+			case 'reviewing_qa':
+			case 'reviewing_rollup':
+			case 'reviewing_scenarios':
+			case 'generating_requirements':
+			case 'generating_architecture':
+			case 'generating_scenarios':
+				// Post-approval phases: approved_at is the closest stage-start
+				// proxy we have. Falls back to reviewed_at, then created_at.
+				return p.approved_at ?? p.reviewed_at ?? p.created_at;
+			case 'drafted':
+			case 'reviewing_draft':
+				// Drafted is set when the planner finishes; reviewed_at fires
+				// when plan-reviewer claims (or completes). Either is closer
+				// than created_at for a multi-iteration draft.
+				return p.reviewed_at ?? p.created_at;
+			default:
+				return p.created_at;
+		}
+	}
+
+	// Headline label for the in-progress panel keyed by plan.stage. Falls back
+	// to a generic "Working…" so the panel still renders if a future stage
+	// adds an isLoading guidance entry but hasn't been wired here yet.
+	function stageTitle(stage: string | undefined): string {
+		switch (stage) {
+			case 'drafting':
+				return 'Drafting plan…';
+			case 'drafted':
+				return 'Plan drafted — awaiting reviewer';
+			case 'reviewing_draft':
+				return 'Reviewing plan draft…';
+			case 'approved':
+				// Falls through — `approved` is the brief window between plan
+				// approval and the requirement-generator claiming the work, so
+				// it gets the same "Generating requirements…" copy.
+			case 'generating_requirements':
+				return 'Generating requirements…';
+			case 'generating_architecture':
+				return 'Generating architecture…';
+			case 'requirements_generated':
+			case 'generating_scenarios':
+				return 'Generating scenarios…';
+			case 'reviewing_scenarios':
+				return 'Reviewing scenarios…';
+			case 'reviewing_qa':
+				return 'Running QA review…';
+			case 'reviewing_rollup':
+				return 'Reviewing rollup…';
+			default:
+				return 'Working…';
+		}
+	}
+
 	// Stages where reviews are most relevant — expand by default
 	const REVIEW_FOCUS_STAGES = new Set(['scenarios_generated', 'ready_for_execution', 'ready_for_approval']);
-	// Stages where execution is active — collapse reviews by default
-	const EXECUTING_STAGES = new Set(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed']);
 
 	const reviewsDefaultExpanded = $derived(
 		plan ? REVIEW_FOCUS_STAGES.has(plan.stage) : false
@@ -174,13 +256,6 @@
 	const reviewsExpanded = $derived(
 		reviewsUserToggle !== null ? reviewsUserToggle : reviewsDefaultExpanded
 	);
-
-	// Reset user toggle when plan stage changes to a decisive stage
-	$effect(() => {
-		if (plan && EXECUTING_STAGES.has(plan.stage)) {
-			reviewsUserToggle = null;
-		}
-	});
 
 	function toggleReviews() {
 		reviewsUserToggle = !reviewsExpanded;
@@ -236,21 +311,28 @@
 	// at these boundaries (new requirements, scenarios, execution results, etc.).
 	// Within-stage SSE events (task/requirement updates) only affect the activity
 	// feed display and do not require a REST re-fetch.
+	//
+	// REDUCED 2026-05-19: previously included drafted/reviewed/approved/
+	// scenarios_reviewed/ready_for_execution/failed — but the plan content for
+	// those is now mirrored into feedStore.currentPlan directly from the SSE
+	// payload, so no loader re-run is needed. We only invalidate when a
+	// dependent COLLECTION (requirements, scenarios, trajectories, reviews)
+	// changes shape — these aren't in the plan SSE payload. The previous
+	// 6-stage invalidate storm caused 1-3s browser lockups per transition;
+	// the trimmed list reduces that to ~3 targeted refetches per plan
+	// lifecycle (caught during the 2026-05-19 demo session).
 	const STRUCTURAL_STAGES = new Set([
-		'drafted',
-		'reviewed',
-		'approved',
-		'requirements_generated',
-		'scenarios_generated',
-		'scenarios_reviewed',
-		'ready_for_execution',
-		'complete',
-		'failed'
+		'requirements_generated', // requirements list appears
+		'scenarios_generated', // scenarios per requirement appear
+		'implementing', // trajectories start populating
+		'complete' // reviews finalize
 	]);
 
 	// Feed store: connects plan + execution SSE for the Activity Feed panel.
-	// Invalidates load function data only on structural plan stage transitions,
-	// not on every SSE event (task/requirement updates feed the display, not REST).
+	// Invalidates load function data only on structural plan stage transitions
+	// where dependent COLLECTIONS change. Other stage transitions update plan
+	// content via feedStore.currentPlan (see `plan` derivation above) without
+	// any REST round-trip.
 	$effect(() => {
 		const currentSlug = slug;
 		if (!currentSlug || typeof window === 'undefined') return;
@@ -449,6 +531,20 @@
 				</div>
 			{/if}
 
+			<!-- In-progress callout for active LLM phases. Without this, the
+			     plan-detail body during drafting/reviewing/generating reads as
+			     empty ("nothing's happening") because PlanDetail's goal/
+			     context/scope sections haven't been populated yet. Reuses
+			     planGuidance — same predicate that gates the small chip
+			     inside PlanDetail — so the panel and chip stay in sync. -->
+			{#if planGuidance?.isLoading}
+				<InProgressPanel
+					title={stageTitle(plan.stage)}
+					detail={planGuidance.message}
+					startedAt={stageStartedAt(plan)}
+				/>
+			{/if}
+
 			<!-- Agent pipeline during execution -->
 			{#if plan.active_loops && plan.active_loops.length > 0}
 				<div class="pipeline-section">
@@ -459,8 +555,13 @@
 			<!-- Plan details: goal, context, scope -->
 			<PlanDetail {plan} phases={[]} requirements={requirements} onRefresh={handleRefresh} />
 
-			<!-- Review Dashboard: inline collapsible, shown after plan is approved -->
-			{#if showApprovedContent}
+			<!-- Reviews: collapsible. R1 plan-reviewer verdict appears as soon as the
+			     planner+reviewer have finished (plan.review_verdict is set on the plan
+			     itself). Implementation-time code-review aggregation (ReviewDashboard)
+			     populates later, after requirements + scenarios + tasks have executed.
+			     Both render under the same Reviews header so users find them where the
+			     mental model expects "reviews" to be. -->
+			{#if plan.review_verdict || showApprovedContent}
 				<div class="review-section">
 					<button class="section-toggle" onclick={toggleReviews} aria-expanded={reviewsExpanded} aria-label={reviewsExpanded ? 'Collapse reviews section' : 'Expand reviews section'}>
 						<div class="section-toggle-left">
@@ -471,7 +572,17 @@
 					</button>
 					{#if reviewsExpanded}
 						<div class="review-body">
-							<ReviewDashboard slug={plan.slug} result={data.reviews ?? undefined} autoFetch={false} />
+							{#if plan.review_verdict}
+								<PlanReviewCard
+									verdict={plan.review_verdict}
+									summary={plan.review_summary}
+									reviewedAt={plan.reviewed_at}
+									iteration={plan.review_iteration}
+								/>
+							{/if}
+							{#if showApprovedContent}
+								<ReviewDashboard slug={plan.slug} result={data.reviews ?? undefined} autoFetch={false} />
+							{/if}
 						</div>
 					{/if}
 				</div>
@@ -493,6 +604,12 @@
 		height: 100%;
 		display: flex;
 		flex-direction: column;
+		/* min-height: 0 lets .plan-content (flex:1; overflow-y:auto) actually
+		 * scroll. Without it the flex item's default min-height:auto expands
+		 * to fit content, defeating overflow:auto — so dynamically added SSE
+		 * content silently extends below the viewport with no scrollbar
+		 * update. Caught 2026-05-19 during gemini-stack walk-through. */
+		min-height: 0;
 	}
 
 	.detail-header {

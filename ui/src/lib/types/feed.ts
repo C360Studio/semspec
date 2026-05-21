@@ -17,15 +17,23 @@ export type FeedEvent = {
 	data?: Record<string, unknown>;
 };
 
-/** Subset of PlanWithStatus relevant for feed display */
-export type PlanSSEPayload = {
-	slug: string;
-	stage: string;
-	goal?: string;
-	approved?: boolean;
-	requirements?: { id: string; title: string }[];
-	scenarios?: { id: string }[];
-};
+/**
+ * PlanSSEPayload mirrors the server's `enrichPlanSSEPayload` output
+ * (processor/plan-manager/http_sse.go) which marshals the full
+ * PlanWithStatus object — same shape as GET /plan-manager/plans/{slug}.
+ *
+ * Previously this type was a subset stub, which encouraged the
+ * route+loader pattern of "SSE event → invalidate('app:plans') →
+ * re-fetch the same plan we just received in the event payload". The
+ * full type lets the feedStore mirror plan state directly and lets the
+ * route skip the redundant refetch.
+ *
+ * Use the generated PlanWithStatus to stay in sync with the OpenAPI
+ * contract; if the server adds fields they flow through automatically.
+ */
+import type { PlanWithStatus } from './plan';
+
+export type PlanSSEPayload = PlanWithStatus;
 
 /** Task execution payload from execution SSE */
 export type TaskSSEPayload = {

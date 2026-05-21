@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/c360studio/semstreams v1.0.0-beta.72
+	github.com/c360studio/semstreams v1.0.0-beta.77
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/google/uuid v1.6.0
@@ -110,6 +110,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/mod v0.34.0 // indirect
+	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect

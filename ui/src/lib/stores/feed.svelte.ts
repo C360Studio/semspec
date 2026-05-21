@@ -26,6 +26,18 @@ class FeedStore {
 	/** Latest task SSE payload keyed by task_id — consumers like PlanCard derive
 	 * "TDD cycle X/Y · updated Nm ago" from this to answer "is this working?" */
 	taskStages = $state<Map<string, TaskSSEPayload>>(new Map());
+	/**
+	 * Live plan state, mirrored directly from the SSE plan_updated payload.
+	 * The server emits the full PlanWithStatus on every mutation, so consumers
+	 * can read from this store instead of re-fetching the plan via the loader
+	 * on every structural stage transition. Null until the first event arrives
+	 * for the connected slug — callers should fall back to load-function data
+	 * for initial render.
+	 *
+	 * Added 2026-05-19 to eliminate the invalidate('app:plans') storm that
+	 * locked the browser for 1-3s on each plan stage transition during demos.
+	 */
+	currentPlan = $state<PlanSSEPayload | null>(null);
 
 	private planSSE: EventSource | null = null;
 	private execSSE: EventSource | null = null;
@@ -75,6 +87,7 @@ class FeedStore {
 			this.lastPlanStage = null;
 			this.seenQuestionIds.clear();
 			this.requirementStages = new Map();
+			this.currentPlan = null;
 		});
 	}
 
@@ -108,6 +121,7 @@ class FeedStore {
 		this.events = [];
 		this.lastPlanStage = null;
 		this.seenQuestionIds.clear();
+		this.currentPlan = null;
 	}
 
 	// ── Private ────────────────────────────────────────────────────
@@ -133,6 +147,13 @@ class FeedStore {
 				summary: 'Plan deleted',
 				slug
 			});
+			// Drop the mirrored plan so the UI doesn't keep rendering ghost content
+			// from a plan that no longer exists on the server. Route consumers fall
+			// back to `data.plan`, which the loader will resolve to null on the next
+			// fetch (404). Caught while wiring the SSE-mirror refactor 2026-05-19.
+			if (this.currentPlan && this.currentPlan.slug === slug) {
+				this.currentPlan = null;
+			}
 		});
 
 		sse.onerror = () => {
@@ -174,6 +195,12 @@ class FeedStore {
 		const stage = payload.stage;
 		const prevStage = this.lastPlanStage;
 		this.lastPlanStage = stage;
+
+		// Mirror the full plan payload into the store on EVERY update (not just
+		// stage transitions) — within-stage updates still carry meaningful
+		// changes (review_verdict on `reviewed`, scope edits on `drafted`, etc.)
+		// and consumers should see them without a server round-trip.
+		this.currentPlan = payload;
 
 		// Lazily connect execution SSE when plan reaches execution
 		const execStages = ['implementing', 'executing', 'reviewing_rollup'];

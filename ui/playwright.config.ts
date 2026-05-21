@@ -35,7 +35,11 @@ const mockEnv: Record<string, string> = useMockLLM
 	? { E2E_FIXTURE: process.env.E2E_FIXTURE ?? 'hello-world-py' }
 	: {};
 
-const T1_SPECS = ['e2e/plan-journey.spec.ts', 'e2e/plan-rejection-journey.spec.ts'];
+const T1_SPECS = [
+	'e2e/plan-journey.spec.ts',
+	'e2e/plan-rejection-journey.spec.ts',
+	'e2e/plan-pre-execution-ux.spec.ts'
+];
 const T2_SPECS = [
 	'e2e/plan-lifecycle-llm.spec.ts',
 	'e2e/epic-meshtastic-llm.spec.ts',

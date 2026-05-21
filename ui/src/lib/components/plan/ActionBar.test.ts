@@ -37,25 +37,10 @@ describe('ActionBar visibility logic', () => {
 		...overrides
 	});
 
-	describe('Approve Plan button', () => {
-		it('should show when plan is not approved and has a goal', () => {
-			const plan = createMockPlan({ approved: false, goal: 'Add auth' });
-			const shouldShow = !plan.approved && !!plan.goal;
-			expect(shouldShow).toBe(true);
-		});
-
-		it('should hide when plan is already approved', () => {
-			const plan = createMockPlan({ approved: true, goal: 'Add auth' });
-			const shouldShow = !plan.approved && !!plan.goal;
-			expect(shouldShow).toBe(false);
-		});
-
-		it('should hide when plan has no goal', () => {
-			const plan = createMockPlan({ approved: false, goal: '' });
-			const shouldShow = !plan.approved && !!plan.goal;
-			expect(shouldShow).toBe(false);
-		});
-	});
+	// Round-1 "Create Requirements" CTA moved to PlanDetail's guidance hint
+	// 2026-05-19 — ActionBar's bare button was a duplicate of the contextual
+	// hint and the two together read as a UI bug. See guidance.test.ts for the
+	// behaviour that drives the surviving button.
 
 	describe('Generate Tasks button', () => {
 		it('should show when plan is approved and stage is planning', () => {

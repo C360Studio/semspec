@@ -380,6 +380,7 @@
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
+        "trajectory_detail": "full",
         "consumer": {
           "ack_wait": "720s",
           "heartbeat_interval": "240s"

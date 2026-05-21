@@ -16,7 +16,25 @@
 	const isModelCall = $derived(entry.step_type === 'model_call');
 	const hasError = $derived(!!entry.error);
 	const preview = $derived(entry.step_type === 'model_call' ? entry.response : entry.tool_result);
-	const hasPreview = $derived(!!preview || !!entry.tool_arguments);
+	// Audit fields surface the full conversation for model_call entries when
+	// the backend records them (`trajectory_detail: full` on agentic-loop).
+	// Without `messages`/`tool_calls` the trail is one-sided — token counts
+	// without the prompt or response shape.
+	const hasMessages = $derived(!!entry.messages && entry.messages.length > 0);
+	const hasModelToolCalls = $derived(!!entry.tool_calls && entry.tool_calls.length > 0);
+	const hasPreview = $derived(
+		!!preview || !!entry.tool_arguments || hasMessages || hasModelToolCalls
+	);
+
+	function roleLabel(role: string): string {
+		const labels: Record<string, string> = {
+			system: 'system',
+			user: 'user',
+			assistant: 'assistant',
+			tool: 'tool'
+		};
+		return labels[role] ?? role;
+	}
 
 	const displayName = $derived(
 		entry.step_type === 'model_call'
@@ -151,14 +169,58 @@
 
 	{#if expanded && hasPreview}
 		<div class="preview-block" data-testid="entry-preview">
-			{#if entry.tool_arguments}
+			{#if isModelCall && hasMessages}
+				<div class="arguments-label">Request ({entry.messages!.length} message{entry.messages!.length === 1 ? '' : 's'})</div>
+				<div class="messages-list">
+					{#each entry.messages! as m, i (i)}
+						<div class="message" data-role={m.role}>
+							<span class="message-role message-role--{m.role}">{roleLabel(m.role)}</span>
+							{#if m.content}
+								<pre class="message-content">{m.content}</pre>
+							{/if}
+							{#if m.tool_calls && m.tool_calls.length > 0}
+								<div class="message-tool-calls">
+									{#each m.tool_calls as tc (tc.id)}
+										<div class="message-tool-call">
+											<span class="tc-name">{tc.name}</span>
+											{#if tc.arguments}
+												<pre class="tc-args">{JSON.stringify(tc.arguments, null, 2)}</pre>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							{/if}
+							{#if m.tool_call_id}
+								<div class="message-meta">tool_call_id: {m.tool_call_id}</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			{/if}
+			{#if isModelCall && (preview || hasModelToolCalls)}
+				<div class="arguments-label">Response</div>
+				{#if preview}
+					<pre class="preview-text">{preview}</pre>
+				{/if}
+				{#if hasModelToolCalls}
+					<div class="messages-list">
+						{#each entry.tool_calls! as tc (tc.id)}
+							<div class="message-tool-call">
+								<span class="tc-name">{tc.name}</span>
+								{#if tc.arguments}
+									<pre class="tc-args">{JSON.stringify(tc.arguments, null, 2)}</pre>
+								{/if}
+							</div>
+						{/each}
+					</div>
+				{/if}
+			{/if}
+			{#if !isModelCall && entry.tool_arguments}
 				<div class="arguments-label">Arguments</div>
 				<pre class="preview-text">{JSON.stringify(entry.tool_arguments, null, 2)}</pre>
 			{/if}
-			{#if preview}
-				{#if entry.tool_arguments}
-					<div class="arguments-label">Result</div>
-				{/if}
+			{#if !isModelCall && preview}
+				<div class="arguments-label">Result</div>
 				<pre class="preview-text">{preview}</pre>
 			{/if}
 		</div>
@@ -364,5 +426,110 @@
 		margin: 0;
 		max-height: 200px;
 		overflow-y: auto;
+	}
+
+	/* Request audit trail — one message per row with a role chip + content.
+	 * Each message scrolls internally so a 10k-char system prompt doesn't
+	 * push everything else out of the viewport. */
+	.messages-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		margin-bottom: var(--space-2);
+	}
+
+	.message {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-primary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-sm);
+	}
+
+	.message-role {
+		display: inline-flex;
+		align-self: flex-start;
+		padding: 1px var(--space-2);
+		font-size: 10px;
+		font-weight: var(--font-weight-semibold);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		border-radius: var(--radius-full);
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-muted);
+	}
+
+	.message-role--system {
+		background: var(--color-bg-elevated);
+		color: var(--color-text-muted);
+	}
+
+	.message-role--user {
+		background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+		color: var(--color-accent);
+	}
+
+	.message-role--assistant {
+		background: color-mix(in srgb, var(--color-success) 18%, transparent);
+		color: var(--color-success);
+	}
+
+	.message-role--tool {
+		background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+		color: var(--color-warning);
+	}
+
+	.message-content {
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-secondary);
+		white-space: pre-wrap;
+		word-break: break-word;
+		line-height: var(--line-height-relaxed);
+		margin: 0;
+		max-height: 220px;
+		overflow-y: auto;
+	}
+
+	.message-tool-calls {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.message-tool-call {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		padding: var(--space-1) var(--space-2);
+		background: var(--color-bg-secondary);
+		border-radius: var(--radius-sm);
+	}
+
+	.tc-name {
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-primary);
+	}
+
+	.tc-args {
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-secondary);
+		white-space: pre-wrap;
+		word-break: break-word;
+		line-height: var(--line-height-relaxed);
+		margin: 0;
+		max-height: 160px;
+		overflow-y: auto;
+	}
+
+	.message-meta {
+		font-family: var(--font-family-mono);
+		font-size: 10px;
+		color: var(--color-text-muted);
 	}
 </style>
