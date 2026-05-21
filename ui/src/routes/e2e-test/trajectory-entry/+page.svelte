@@ -42,6 +42,33 @@
 		timestamp: '2026-04-23T12:00:01Z'
 	} as unknown as TrajectoryEntry;
 
+	// 2026-05-21: task-initiation step shape — what semstreams beta.77's
+	// HandleTask AddStep persists. Carries the full request messages
+	// (system + user) so the audit trail is two-sided.
+	const modelCallWithMessagesEntry = {
+		step_type: 'model_call',
+		model: 'gemini-flash',
+		provider: 'google',
+		messages: [
+			{ role: 'system', content: '[Iteration Budget] Iteration 1 of 75 (1% used).' },
+			{
+				role: 'system',
+				content:
+					'You are an AI agent in the SemStreams agentic system. You have access to bash, scratchpad, write_todos, and submit_work tools.'
+			},
+			{
+				role: 'user',
+				content:
+					'## Project Files (ground truth — captured at dispatch via git ls-files)\n\nREADME.md\ngo.mod\ninternal/auth/auth.go\ninternal/auth/auth_test.go\nmain.go'
+			}
+		],
+		tool_calls: [
+			{ id: 'call_1', name: 'bash', arguments: { command: 'ls -R' } }
+		],
+		duration: 1200,
+		timestamp: '2026-04-23T12:00:03Z'
+	} as unknown as TrajectoryEntry;
+
 	// Tool call with no arguments and no result yet — covers the boundary
 	// where `hasPreview` is false so the expand button must NOT render.
 	const noPreviewEntry = {
@@ -55,9 +82,11 @@
 	const entry = $derived(
 		data.scenario === 'model-call'
 			? modelCallEntry
-			: data.scenario === 'no-preview'
-				? noPreviewEntry
-				: toolCallEntry
+			: data.scenario === 'model-call-with-messages'
+				? modelCallWithMessagesEntry
+				: data.scenario === 'no-preview'
+					? noPreviewEntry
+					: toolCallEntry
 	);
 </script>
 

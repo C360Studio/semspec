@@ -18,16 +18,6 @@
   },
   "model_registry": {
     "endpoints": {
-      "qwen3-coder-30b": {
-        "provider": "ollama",
-        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "semspec/qwen3-coder-30b-128k",
-        "max_tokens": 131072,
-        "supports_tools": true,
-        "stream": false,
-        "request_timeout": "120s",
-        "idle_conn_timeout": "10s"
-      },
       "qwen3-14b": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
@@ -43,16 +33,6 @@
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
         "model": "semspec/qwen3-fast-32k",
         "max_tokens": 32768,
-        "supports_tools": true,
-        "stream": false,
-        "request_timeout": "120s",
-        "idle_conn_timeout": "10s"
-      },
-      "qwen35-coder-35b": {
-        "provider": "ollama",
-        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
-        "model": "semspec/qwen35-coder-35b-128k",
-        "max_tokens": 131072,
         "supports_tools": true,
         "stream": false,
         "request_timeout": "120s",
@@ -227,9 +207,9 @@
         "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
+        "description": "Answerer-agent backend for ask_question routes — uses workflow default to keep laptop footprint reasonable.",
         "preferred": [
-          "qwen3-coder-30b"
+          "qwen3-14b"
         ],
         "fallback": [
           "qwen3-14b"
@@ -322,6 +302,7 @@
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
+        "trajectory_detail": "full",
         "consumer": {
           "ack_wait": "5m",
           "heartbeat_interval": "2m",
