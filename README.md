@@ -224,6 +224,7 @@ implementation, a careful model for review.
 | Document | Purpose |
 |----------|---------|
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
+| [Real-LLM Expectations](docs/real-llm-expectations.md) | Empirical floor — wallclock, loop counts, what we don't yet know |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
 | [Project Setup](docs/project-setup.md) | Standards, quality gates |
 | [Structured Output Levels](docs/structured-output-levels.md) | L1–L4 wire-format discipline for LLM agent output (response_format, tool-use, thinking mode) |

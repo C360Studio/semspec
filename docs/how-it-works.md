@@ -440,6 +440,9 @@ and the backend-only `e2e-mock.json` stay at `"summary"`.
 trajectories from `OBJ_AGENT_CONTENT` into a tarball — one JSON per loop — so you can
 ship a forensic snapshot to a reviewer or replay it locally with `jq`.
 
+For wallclock and loop-count expectations across `easy` / `medium` / `hard` tiers,
+see [Real-LLM Expectations](real-llm-expectations.md).
+
 ## LLM Configuration
 
 See [Model Configuration](model-configuration.md) for the full capability-to-model mapping
