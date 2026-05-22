@@ -19,16 +19,27 @@ cp .env.example .env
 **Option A: Cloud API** (no GPU required)
 
 ```bash
-# Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY in .env
+# Set ANTHROPIC_API_KEY in .env — the default config ships with Anthropic +
+# Ollama endpoints only. Gemini, OpenAI, OpenRouter, and vLLM each need an
+# endpoint added — see docs/model-configuration.md for the one-block addition.
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
 
 **Option B: Ollama** (local, no API key)
 
+The default config (`configs/semspec.json`) routes capabilities through three Ollama
+models. Pull all three for the no-edit path:
+
 ```bash
-ollama pull qwen2.5-coder:7b                                    # 4.7 GB, fits 16 GB RAM
+ollama pull qwen3-coder:30b   # 19 GB — coding capability (needs 32+ GB RAM)
+ollama pull qwen3:14b         # 8.5 GB — reasoning/review (16 GB OK)
+ollama pull qwen3:1.7b        # 1.4 GB — fast capability
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
+
+For a single-model 16 GB setup, pull `qwen2.5-coder:7b` and follow the
+[Local-Only setup](docs/model-configuration.md#local-only-no-api-keys) to
+re-route the capability chains to the `ollama-coder` endpoint.
 
 Open **http://localhost:8080**. See [Model Configuration](docs/model-configuration.md) for
 larger models and capability tuning.
@@ -59,7 +70,19 @@ larger models and capability tuning.
    field is required and locked after the first plan.
 3. **Create a plan** — Navigate to Plans and describe what you want built. The pipeline
    auto-coordinates from there.
-4. **Monitor** — Watch real-time agent activity, execution progress, and review verdicts.
+4. **Monitor** — While a plan is in flight you get three live surfaces:
+   - **In-progress panel** at the top of the plan view names the active phase (drafting,
+     reviewing, generating requirements/architecture/scenarios, executing, QA) with an
+     elapsed-time counter.
+   - **Execution timeline** ghost-renders the Planning + Execution stages before any work
+     happens, then fills in interactively as each loop completes.
+   - **Activity feed** streams agent-loop events in real time; pin-to-bottom autoscroll
+     with a "N new ↓" pill if you scroll up.
+5. **Inspect** — Click any agent-loop entry to expand the per-step trajectory. The
+   request side (system + user prompts with role chips) renders alongside the response
+   (assistant text + tool calls). Production ships at `trajectory_detail: "summary"`
+   to keep storage lean; flip to `"full"` on the `agentic-loop` component for the
+   complete request payload — see [How It Works](docs/how-it-works.md#trajectory-capture--llm-audit-trail).
 
 See [Project Setup](docs/project-setup.md) for config details.
 
@@ -99,8 +122,11 @@ See [Project Setup](docs/project-setup.md) for the full configuration guide, or 
 curl -X POST http://localhost:8080/project-manager/detect    # Auto-detect stack
 curl -X POST http://localhost:8080/project-manager/init \    # Generate all three files
   -H "Content-Type: application/json" \
-  -d '{"name": "my-project", "description": "..."}'
+  -d '{"name": "my-project", "org": "mycompany", "description": "..."}'
 ```
+
+> `org` is required (first segment of every entity ID) and locked after the first plan.
+> Without it the UI redirects to `/settings` and blocks plan creation.
 
 ## System Requirements
 
@@ -198,8 +224,10 @@ implementation, a careful model for review.
 | Document | Purpose |
 |----------|---------|
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
+| [Real-LLM Expectations](docs/real-llm-expectations.md) | Empirical floor — wallclock, loop counts, what we don't yet know |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
 | [Project Setup](docs/project-setup.md) | Standards, quality gates |
+| [Structured Output Levels](docs/structured-output-levels.md) | L1–L4 wire-format discipline for LLM agent output (response_format, tool-use, thinking mode) |
 | [Diagnostic Bundles](docs/diagnostic-bundles.md) | `semspec watch` — live monitoring + shareable bundles for adopter handoff |
 | [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 | [Troubleshooting](docs/model-configuration.md#troubleshooting) | Common model and connection errors |

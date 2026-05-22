@@ -297,7 +297,7 @@ Deterministic quality gates — shell commands that run after each agent task. A
 |-------|-------------|
 | `name` | Unique identifier |
 | `command` | Shell command to run |
-| `trigger` | Glob patterns — check runs only when matching files were modified |
+| `trigger` | Glob patterns — check runs only when matching files were modified. An empty array (`[]`) means *always run* — use this for setup/install steps. Omit the check entirely if it should never run. |
 | `category` | `compile`, `lint`, `typecheck`, `test`, `format`, or `setup` |
 | `required` | If `true`, failure blocks the review stage |
 | `timeout` | Maximum execution time (e.g., `"120s"`) |
