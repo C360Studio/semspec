@@ -59,7 +59,17 @@ larger models and capability tuning.
    field is required and locked after the first plan.
 3. **Create a plan** — Navigate to Plans and describe what you want built. The pipeline
    auto-coordinates from there.
-4. **Monitor** — Watch real-time agent activity, execution progress, and review verdicts.
+4. **Monitor** — While a plan is in flight you get three live surfaces:
+   - **In-progress panel** at the top of the plan view names the active phase (drafting,
+     reviewing, generating requirements/architecture/scenarios, executing, QA) with an
+     elapsed-time counter.
+   - **Execution timeline** ghost-renders the Planning + Execution stages before any work
+     happens, then fills in interactively as each loop completes.
+   - **Activity feed** streams agent-loop events in real time; pin-to-bottom autoscroll
+     with a "N new ↓" pill if you scroll up.
+5. **Inspect** — Click any trajectory entry to expand the LLM request side (system + user
+   prompts, role chips) alongside the response. Enable richer capture by setting
+   `trajectory_detail: "full"` on the `agentic-loop` component (default is `summary`).
 
 See [Project Setup](docs/project-setup.md) for config details.
 
@@ -200,6 +210,7 @@ implementation, a careful model for review.
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
 | [Project Setup](docs/project-setup.md) | Standards, quality gates |
+| [Structured Output Levels](docs/structured-output-levels.md) | L1–L4 wire-format discipline for LLM agent output (response_format, tool-use, thinking mode) |
 | [Diagnostic Bundles](docs/diagnostic-bundles.md) | `semspec watch` — live monitoring + shareable bundles for adopter handoff |
 | [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 | [Troubleshooting](docs/model-configuration.md#troubleshooting) | Common model and connection errors |

@@ -7,12 +7,6 @@ Semspec exposes a REST API at `http://localhost:8080`. Routes are mounted at
 **Interactive docs**: `http://localhost:8080/docs` (Swagger UI playground)
 **OpenAPI spec**: `http://localhost:8080/openapi.json` (machine-readable)
 
-> **Note**: The generated OpenAPI document currently lists plan-manager paths
-> under `/plan-api/...` due to legacy spec strings in
-> `processor/plan-manager/openapi.go`. Live routes are mounted under
-> `/plan-manager/...` (see e2e client `test/e2e/client/http.go`). Trust this
-> document over Swagger for plan-manager paths until the spec is fixed.
-
 ## API Groups
 
 ### Plans — `/plan-manager/plans`
@@ -40,6 +34,8 @@ review aggregation.
 | `GET /plan-manager/plans/{slug}/branches` | Per-requirement branch + diff metadata (files view) |
 | `GET /plan-manager/plans/{slug}/git-audit` | Git audit log for the plan |
 | `GET /plan-manager/plans/{slug}/phases/retrospective` | Phase retrospective data |
+| `GET /plan-manager/plans/{slug}/artifacts` | List phase artifacts written by workflow-documents |
+| `GET /plan-manager/plans/{slug}/artifacts/{name}` | Read a specific artifact |
 
 ### Requirements — `/plan-manager/plans/{slug}/requirements`
 
@@ -55,6 +51,7 @@ decomposed into a TaskDAG at runtime by the requirement-executor.
 | `DELETE /plan-manager/plans/{slug}/requirements/{reqId}` | Delete a requirement |
 | `POST /plan-manager/plans/{slug}/requirements/{reqId}/deprecate` | Deprecate a requirement |
 | `GET /plan-manager/plans/{slug}/requirements/{reqId}/file-diff` | Per-file diff for a requirement branch |
+| `GET /plan-manager/plans/{slug}/requirements/{reqId}/scenarios` | Scenarios attached to this requirement |
 
 ### Scenarios — `/plan-manager/plans/{slug}/scenarios`
 

@@ -115,7 +115,7 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 
 1. Semspec imports semstreams as a Go library
 2. Docker Compose runs the shared infrastructure (NATS, optional Ollama)
-3. The semspec binary registers and runs all 16 semspec-specific components
+3. The semspec binary registers and runs 22 semspec-specific components
 
 ## What You Need Running
 
@@ -124,7 +124,7 @@ With Docker Compose (recommended):
 | Container | Purpose |
 |-----------|---------|
 | **nats** | JetStream message bus for all inter-component communication |
-| **semspec** | All 16 semspec components + semstreams infrastructure |
+| **semspec** | All 22 semspec components + semstreams infrastructure |
 | **sandbox** | Isolated code execution environment for agents |
 | **semsource** | Source code indexing (AST, git, docs) → knowledge graph |
 | **qa-runner** | Runs `.github/workflows/qa.yml` via nektos/act for `qa_level=integration`/`full` |
@@ -303,7 +303,7 @@ These files are git-friendly. Commit them to preserve context across sessions an
 
 ## Component Groups
 
-Semspec registers 16 components at startup alongside the full semstreams component suite.
+Semspec registers 22 components at startup alongside the full semstreams component suite.
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
@@ -329,19 +329,35 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │
 │                          scoped by qa_level (synthesis/unit/          │
 │                          integration/full)                           │
-│  plan-decision-handler  PlanDecision OODA loop and cascade      │
+│  plan-decision-handler  PlanDecision OODA loop and cascade           │
+│  recovery-agent         Wedge recovery — manager-role agents that    │
+│                          unstick stuck loops via trajectory analysis │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Support ─────────────────────────────────────────────────┐
-│  plan-manager         Requirement/Scenario/PlanDecision HTTP API;  │
+│  plan-manager         Requirement/Scenario/PlanDecision HTTP API;    │
 │                        owns PLAN_STATES writes and event handling    │
 │  project-manager      Project management HTTP API                    │
 │  workflow-validator   Document structure validation (request/reply)  │
 │  workflow-documents   File output to .semspec/plans/                 │
 │  structural-validator  Structural integrity checks                   │
 │  question-manager     Question routing, SLA tracking, LLM answering  │
+│  lesson-decomposer    Splits reviewer rejections into atomic triples │
+│                        for the role-scoped lessons pipeline          │
+│  lesson-curator       Rotates and retires lessons by recency and     │
+│                        observed efficacy                             │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────── Optional integrations ───────────────────────────────────┐
+│  researcher-manager   Spawns research sub-loops on demand            │
+│  github-watcher       Mirrors GitHub issues into plans               │
+│  github-submitter     Pushes plan outcomes back to GitHub PRs        │
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+The Optional integrations are registered but not wired into `configs/semspec.json`
+by default — enable per-deployment by adding their instance config. The other 19
+components are configured out of the box.
 
 **Note**: `context-builder`, `task-dispatcher`, and other infrastructure components are
 semstreams components, not registered by semspec directly. Source indexing (AST parsing,
@@ -368,6 +384,61 @@ read them when assembling codebase summaries and relevant code patterns via `gra
 Each plan and task becomes a graph entity with predicates describing its status, content, and
 relationships. Agents query these when assembling planning context via `graph_search`, so later
 plans benefit from awareness of earlier decisions.
+
+## Trajectory Capture & LLM Audit Trail
+
+Every agent loop produces a **trajectory** — an ordered timeline of steps the loop took:
+the LLM request, tool calls, tool results, and the next LLM request that built on them.
+Trajectories are how the UI shows agent activity in real time and how diagnostic bundles
+preserve forensic detail after the fact.
+
+### `trajectory_detail` levels
+
+The `agentic-loop` component supports two capture levels:
+
+| Level | What's captured per step | Storage cost | Use case |
+|-------|--------------------------|--------------|----------|
+| `summary` *(default)* | Step type, model, timestamps, token counts, tool-call summaries | Low | Production — keeps the NATS object store lean |
+| `full` | Everything above plus the complete `messages` array (system + user + assistant + tool messages) | Moderate (~50–150 KB per loop) | Demos, diagnostic bundles, audit-trail-driven reviews |
+
+```json
+"agentic-loop": {
+  "config": {
+    "trajectory_detail": "full",
+    ...
+  }
+}
+```
+
+The e2e configs (`e2e-gemini.json`, `e2e-claude.json`, `e2e-hybrid.json`,
+`e2e-openrouter.json`, `e2e-sparky.json`, `e2e-local.json`, `e2e-mock-ui.json`) all set
+`"full"` so demos and operator runs surface the request side. Production `semspec.json`
+and the backend-only `e2e-mock.json` stay at `"summary"`.
+
+### Where the data lives
+
+| Bucket | Stores | Notes |
+|--------|--------|-------|
+| `KV_AGENT_LOOPS` | Loop metadata (status, role, task ref) | Always populated |
+| `OBJ_AGENT_CONTENT` | Trajectory step JSON blobs | Object store — sized for the full `messages` payload when `trajectory_detail: "full"` |
+| `KV_AGENT_CONTENT` | (legacy / unused at present) | Stays empty — don't grep here for trajectory content |
+
+### How the UI surfaces trajectories
+
+- **Activity feed** (`/agentic-dispatch/activity` SSE) — streams `loop_created`,
+  `loop_updated`, `loop_deleted` events so the live feed updates without polling.
+- **Execution timeline** — groups loops into Planning vs Execution stages and ghosts
+  the empty stages before any loop exists.
+- **TrajectoryEntryCard** — clicking a loop expands the per-step view. When the loop
+  was captured at `trajectory_detail: "full"`, the card renders the **Request** side
+  (one row per message with role chip + scrollable content) alongside the **Response**
+  side (assistant text + tool calls). This is the audit trail.
+
+### Diagnostic bundles
+
+`semspec watch --bundle` (see [Diagnostic Bundles](diagnostic-bundles.md)) extracts
+trajectories from `OBJ_AGENT_CONTENT` into a tarball — one JSON per loop — so you can
+ship a forensic snapshot to a reviewer or replay it locally with `jq`.
 
 ## LLM Configuration
 

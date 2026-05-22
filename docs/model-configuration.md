@@ -5,7 +5,7 @@ This guide explains how to configure models for your setup.
 
 ## Capability System
 
-Semspec defines 10 capabilities. Each capability has a preferred chain (cloud) and a fallback
+Semspec defines 11 capabilities. Each capability has a preferred chain (cloud) and a fallback
 chain (local). When a task requires a capability, semspec tries preferred models first, then
 falls back to local Ollama models.
 
@@ -21,6 +21,7 @@ falls back to local Ollama models.
 | `qa` | QA rollup review, integration validation | claude-sonnet | qwen3 → qwen |
 | `writing` | Documentation, proposals, specifications | claude-sonnet | qwen3 → qwen |
 | `fast` | Quick responses, simple tasks | claude-haiku | qwen3-fast → qwen |
+| `lesson_decomposition` | Atomic-triple extraction for the lessons pipeline (ADR-033) | claude-opus → claude-sonnet | qwen3 → qwen |
 
 ## Configured Endpoints
 
