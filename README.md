@@ -27,19 +27,25 @@ SEMSPEC_REPO=/path/to/your/project docker compose up -d
 
 **Option B: Ollama** (local, no API key)
 
-The default config (`configs/semspec.json`) routes capabilities through three Ollama
-models. Pull all three for the no-edit path:
+Ollama loads models on demand — pull just the one that fits your hardware:
 
 ```bash
-ollama pull qwen3-coder:30b   # 19 GB — coding capability (needs 32+ GB RAM)
-ollama pull qwen3:14b         # 8.5 GB — reasoning/review (16 GB OK)
-ollama pull qwen3:1.7b        # 1.4 GB — fast capability
+# 16 GB RAM (recommended starting point):
+ollama pull qwen3:14b           # 8.5 GB — handles all capabilities via the default fallback chain
+
+# 32+ GB RAM (stronger coding-specific quality):
+ollama pull qwen3-coder:30b     # 19 GB — coder-specialized model
+
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
 
-For a single-model 16 GB setup, pull `qwen2.5-coder:7b` and follow the
-[Local-Only setup](docs/model-configuration.md#local-only-no-api-keys) to
-re-route the capability chains to the `ollama-coder` endpoint.
+On a 16 GB system the default config still tries `qwen3-coder:30b` first
+(returns model-not-found, falls through to `qwen3:14b` after a brief
+delay per dispatch). To skip the fallthrough latency, follow the
+[Local-Only setup](docs/model-configuration.md#local-only-no-api-keys)
+to point the capability chains directly at the model you pulled — or
+swap to `qwen2.5-coder:7b` (4.7 GB) and re-route the chains to the
+`ollama-coder` endpoint.
 
 Open **http://localhost:8080**. See [Model Configuration](docs/model-configuration.md) for
 larger models and capability tuning.
