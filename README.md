@@ -27,25 +27,26 @@ SEMSPEC_REPO=/path/to/your/project docker compose up -d
 
 **Option B: Ollama** (local, no API key)
 
-Ollama loads models on demand — pull just the one that fits your hardware:
-
 ```bash
-# 16 GB RAM (recommended starting point):
-ollama pull qwen3:14b           # 8.5 GB — handles all capabilities via the default fallback chain
-
-# 32+ GB RAM (stronger coding-specific quality):
-ollama pull qwen3-coder:30b     # 19 GB — coder-specialized model
+ollama pull qwen3:14b           # 8.5 GB — handles all general capabilities
+ollama pull qwen3:1.7b          # 1.4 GB — optional, for the `fast` capability
 
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
 
-On a 16 GB system the default config still tries `qwen3-coder:30b` first
-(returns model-not-found, falls through to `qwen3:14b` after a brief
-delay per dispatch). To skip the fallthrough latency, follow the
-[Local-Only setup](docs/model-configuration.md#local-only-no-api-keys)
-to point the capability chains directly at the model you pulled — or
-swap to `qwen2.5-coder:7b` (4.7 GB) and re-route the chains to the
-`ollama-coder` endpoint.
+> **Be honest about what local-only buys you.** `qwen3:14b` is the
+> realistic floor for local dev — fine for well-defined, simple tasks
+> on demo scenarios (`easy` tier). Complex multi-step prompts
+> (`medium`/`hard` tiers) likely exceed its capability today. We're
+> still empirically calibrating where that floor sits per tier — see
+> [Real-LLM Expectations](docs/real-llm-expectations.md). For
+> production work, an API key on a frontier model is the realistic
+> path; Ollama is for evaluation and iteration on your spec quality.
+
+Power users who want stronger coding-specific quality can pull
+`qwen3-coder:30b` (19 GB, needs 32+ GB RAM) and re-route the coding
+capability — see
+[Model Configuration](docs/model-configuration.md#adding-a-stronger-coding-model).
 
 Open **http://localhost:8080**. See [Model Configuration](docs/model-configuration.md) for
 larger models and capability tuning.
@@ -139,8 +140,15 @@ curl -X POST http://localhost:8080/project-manager/init \    # Generate all thre
 | Setup | RAM | Disk | GPU |
 |-------|-----|------|-----|
 | Cloud API only | 4 GB | 2 GB | None |
-| Ollama `qwen2.5-coder:7b` | 16 GB | 8 GB | Recommended |
-| Ollama `qwen3-coder:30b` | 32 GB+ | 20 GB | Required |
+| Ollama `qwen3:14b` (default local) | 16 GB | 10 GB | Recommended |
+| Ollama `qwen3:14b` + `qwen3:1.7b` (default + fast) | 16 GB | 12 GB | Recommended |
+
+Heavier local models (e.g. `qwen3-coder:30b` at 32+ GB RAM) are not
+default — operators who want them know how to add them. See
+[Model Configuration](docs/model-configuration.md) for the full
+capability/endpoint reference and
+[Real-LLM Expectations](docs/real-llm-expectations.md) for the empirical
+floor we've measured per tier.
 
 See [Model Configuration](docs/model-configuration.md#development-minimal-resources) for
 lightweight setups and [Troubleshooting](docs/model-configuration.md#troubleshooting) for
