@@ -1,5 +1,5 @@
 {
-  "version": "1.1.0",
+  "version": "1.1.1",
   "persona_preset": "bmad",
   "platform": {
     "org": "semspec",
@@ -15,8 +15,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "writing": {
@@ -25,8 +24,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "coding": {
@@ -35,7 +33,6 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen",
           "qwen3"
         ]
       },
@@ -45,8 +42,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "plan_review": {
@@ -56,8 +52,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "architecture": {
@@ -67,8 +62,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "fast": {
@@ -78,7 +72,7 @@
         ],
         "fallback": [
           "qwen3-fast",
-          "qwen"
+          "qwen3"
         ]
       },
       "requirement_generation": {
@@ -87,8 +81,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "scenario_generation": {
@@ -97,8 +90,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "qa": {
@@ -107,8 +99,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       },
       "lesson_decomposition": {
@@ -118,8 +109,7 @@
           "claude-sonnet"
         ],
         "fallback": [
-          "qwen3",
-          "qwen"
+          "qwen3"
         ]
       }
     },
@@ -189,7 +179,7 @@
       }
     },
     "defaults": {
-      "model": "qwen",
+      "model": "qwen3",
       "max_concurrent_global": 10
     }
   },
@@ -245,7 +235,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "qwen",
+        "default_model": "qwen3",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {

@@ -7,21 +7,31 @@ This guide explains how to configure models for your setup.
 
 Semspec defines 11 capabilities. Each capability has a preferred chain (cloud) and a fallback
 chain (local). When a task requires a capability, semspec tries preferred models first, then
-falls back to local Ollama models.
+falls back to local Ollama models. The default local fallback is `qwen3:14b` for every general
+capability; `qwen3:1.7b` handles `fast`. Heavier models are not in default chains — see
+[Adding a stronger coding model](#adding-a-stronger-coding-model) for the opt-in pattern.
 
 | Capability | Description | Preferred | Fallback |
 | ---------- | ----------- | --------- | -------- |
-| `planning` | High-level reasoning, architecture decisions | claude-opus → claude-sonnet | qwen3 → qwen |
-| `plan_review` | Strategic plan assessment, SOP compliance | claude-opus → claude-sonnet | qwen3 → qwen |
-| `architecture` | Technology choices, component boundaries | claude-opus → claude-sonnet | qwen3 → qwen |
-| `requirement_generation` | Requirement decomposition from plans | claude-sonnet | qwen3 → qwen |
-| `scenario_generation` | BDD scenario generation from requirements | claude-sonnet | qwen3 → qwen |
-| `coding` | Code generation, implementation | claude-sonnet | qwen → qwen3 |
-| `reviewing` | Code review, quality analysis | claude-sonnet | qwen3 → qwen |
-| `qa` | QA rollup review, integration validation | claude-sonnet | qwen3 → qwen |
-| `writing` | Documentation, proposals, specifications | claude-sonnet | qwen3 → qwen |
-| `fast` | Quick responses, simple tasks | claude-haiku | qwen3-fast → qwen |
-| `lesson_decomposition` | Atomic-triple extraction for the lessons pipeline (ADR-033) | claude-opus → claude-sonnet | qwen3 → qwen |
+| `planning` | High-level reasoning, architecture decisions | claude-opus → claude-sonnet | qwen3 |
+| `plan_review` | Strategic plan assessment, SOP compliance | claude-opus → claude-sonnet | qwen3 |
+| `architecture` | Technology choices, component boundaries | claude-opus → claude-sonnet | qwen3 |
+| `requirement_generation` | Requirement decomposition from plans | claude-sonnet | qwen3 |
+| `scenario_generation` | BDD scenario generation from requirements | claude-sonnet | qwen3 |
+| `coding` | Code generation, implementation | claude-sonnet | qwen3 |
+| `reviewing` | Code review, quality analysis | claude-sonnet | qwen3 |
+| `qa` | QA rollup review, integration validation | claude-sonnet | qwen3 |
+| `writing` | Documentation, proposals, specifications | claude-sonnet | qwen3 |
+| `fast` | Quick responses, simple tasks | claude-haiku | qwen3-fast → qwen3 |
+| `lesson_decomposition` | Atomic-triple extraction for the lessons pipeline (ADR-033) | claude-opus → claude-sonnet | qwen3 |
+
+> **Be honest about the local-only floor.** `qwen3:14b` is the realistic
+> default for local dev — fine for well-defined, simple tasks on demo
+> scenarios (`easy` tier). Complex multi-step prompts (`medium`/`hard`)
+> likely exceed its capability. We're still calibrating where the floor
+> sits per tier; see [Real-LLM Expectations](real-llm-expectations.md).
+> For production work, a frontier API key is the realistic path; Ollama
+> is for evaluation and spec-quality iteration.
 
 ## Configured Endpoints
 
@@ -32,10 +42,10 @@ These are the model endpoints defined in `configs/semspec.json`:
 | `claude-opus` | anthropic | claude-opus-4-6 |
 | `claude-sonnet` | anthropic | claude-sonnet-4-6 |
 | `claude-haiku` | anthropic | claude-haiku-4-5-20251001 |
-| `qwen` | ollama | qwen3-coder:30b |
-| `qwen3` | ollama | qwen3:14b |
-| `qwen3-fast` | ollama | qwen3:1.7b |
-| `ollama-coder` | ollama | qwen2.5-coder:7b |
+| `qwen` | ollama | qwen3-coder:30b (defined, not in any default chain — opt-in) |
+| `qwen3` | ollama | qwen3:14b (default local fallback for every general capability) |
+| `qwen3-fast` | ollama | qwen3:1.7b (default for `fast` capability) |
+| `ollama-coder` | ollama | qwen2.5-coder:7b (defined, opt-in only — small or well-defined tasks) |
 
 ## Configuration Reference
 
@@ -48,7 +58,7 @@ Models are configured in `configs/semspec.json` under `model_registry`:
       "coding": {
         "description": "Code generation, implementation",
         "preferred": ["claude-sonnet"],
-        "fallback": ["qwen", "qwen3"]
+        "fallback": ["qwen3"]
       }
     },
     "endpoints": {
@@ -60,7 +70,7 @@ Models are configured in `configs/semspec.json` under `model_registry`:
       }
     },
     "defaults": {
-      "model": "qwen"
+      "model": "qwen3"
     }
   }
 }
@@ -110,12 +120,43 @@ documented context limit.
 ### Local-Only (No API Keys)
 
 ```bash
-ollama pull qwen3-coder:30b   # Coding tasks (default model)
-ollama pull qwen3:14b          # Reasoning tasks
-ollama pull qwen3:1.7b         # Fast tasks
+ollama pull qwen3:14b          # Default fallback for every general capability
+ollama pull qwen3:1.7b         # Default for the `fast` capability (optional)
 ```
 
-All capabilities fall back to local models automatically.
+That's the whole setup. Every capability's local fallback resolves to
+`qwen3:14b`. Pulling `qwen3:1.7b` is optional but recommended — the
+`fast` capability falls back to `qwen3:14b` if the lighter model isn't
+available, so nothing breaks without it; it's just less efficient for
+quick lookups.
+
+Local-only is best treated as evaluation territory, not production.
+See the floor-honesty note above the capability table.
+
+### Adding a stronger coding model
+
+If you have 32+ GB RAM and want coder-specialized quality for the
+`coding` capability, the `qwen` endpoint is already defined (it points
+at `qwen3-coder:30b`) but is not in any default chain. To opt in:
+
+```bash
+ollama pull qwen3-coder:30b
+```
+
+Then edit `configs/semspec.json` to add `qwen` to the coding
+fallback chain:
+
+```json
+"coding": {
+  "description": "Code generation, implementation",
+  "preferred": ["claude-sonnet"],
+  "fallback": ["qwen", "qwen3"]
+}
+```
+
+Bump the `version` field at the top of `semspec.json` (e.g.
+`"1.1.1"` → `"1.1.2"`) so the KV reconciler picks up your change on
+next boot.
 
 ### Claude (Cloud + Local Fallback)
 
@@ -143,17 +184,33 @@ GEMINI_API_KEY=... docker compose up -d
 
 Any OpenAI-compatible API works the same way (OpenRouter, vLLM, etc.).
 
-### Development (Minimal Resources)
+### Development (Minimal Resources — small or well-defined tasks only)
+
+For very constrained systems or quick smoke-test work, you can drop
+to `qwen2.5-coder:7b`:
 
 ```bash
-ollama pull qwen2.5-coder:7b  # 4.7GB, fits 16GB RAM
+ollama pull qwen2.5-coder:7b  # 4.7 GB, fits 16 GB RAM with comfortable headroom
 ```
 
-Use a single model for all capabilities by setting the default:
+Then add `ollama-coder` to capability chains you care about, e.g.:
+
+```json
+"coding": {
+  "preferred": ["claude-sonnet"],
+  "fallback": ["qwen3", "ollama-coder"]
+}
+```
+
+Or as a global default:
 
 ```json
 "defaults": { "model": "ollama-coder" }
 ```
+
+**This is genuinely small-task territory.** Going below `qwen3:14b`
+typically doesn't work out unless the task is small and well-defined.
+See the floor-honesty note above the capability table.
 
 ## Adding a New Model
 
