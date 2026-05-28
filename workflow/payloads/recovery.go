@@ -99,9 +99,28 @@ type RecoveryRequested struct {
 	// Slug is the plan slug — routing key and trace-deep-link.
 	Slug string `json:"slug"`
 
-	// RequirementID is set when the wedge is requirement-scoped. Empty for
-	// plan-phase wedges that don't bind to a single requirement.
+	// RequirementID is set when the wedge is requirement-scoped to a single
+	// requirement (e.g., execution-manager iteration exhaustion on one TDD
+	// task). Empty for plan-phase wedges.
 	RequirementID string `json:"requirement_id,omitempty"`
+
+	// AffectedRequirementIDs lists the requirement IDs the wedge implicates
+	// when there is more than one. Populated by plan-manager on QA verdict
+	// wedges where the qa-reviewer's verdict applies to all assembled
+	// requirements (e.g., "the implementation is flaky across the plan").
+	// When set, supersedes RequirementID — recovery-agent's emitPlanDecision
+	// uses this list to populate PlanDecision.AffectedReqIDs, which is what
+	// the existing auto-accept watcher
+	// (plan-decision-handler/recovery_autoaccept.go) requires non-empty
+	// before firing without operator intervention.
+	//
+	// Empty (the default) preserves pre-2026-05-28 behavior: the single
+	// RequirementID is used if set, else PlanDecision.AffectedReqIDs is
+	// empty and the auto-accept watcher leaves the decision for human
+	// review. That fallback remains correct for plan-review revision-cap
+	// wedges where the PLAN itself is wrong and human gating is the right
+	// outcome.
+	AffectedRequirementIDs []string `json:"affected_requirement_ids,omitempty"`
 
 	// TaskID identifies the specific TDD task that wedged. Empty for
 	// plan-phase wedges.

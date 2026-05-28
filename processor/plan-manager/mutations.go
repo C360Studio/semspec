@@ -668,6 +668,45 @@ func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *w
 	return MutationResponse{Success: true}
 }
 
+// collectActiveRequirementIDsForRecovery returns the IDs of every still-
+// active requirement on plan, used to populate
+// RecoveryRequested.AffectedRequirementIDs on QA-verdict wedges. The
+// recovery-agent threads this list into PlanDecision.AffectedReqIDs;
+// without it, the auto-accept watcher (plan-decision-handler/
+// recovery_autoaccept.go, gated by Config.AutoAcceptRecovery, filter
+// Kind=requirement_change + len(AffectedReqIDs)>0) cannot fire, and every
+// QA-rejection would require manual operator acceptance to drive a retry
+// — defeating the autonomous issue-to-PR shape Phase 1c was built for.
+//
+// Status == "" is the unset default for requirements drafted before the
+// lifecycle field landed and for newly-created requirements where the
+// producer relies on the JSON `omitempty` convention.
+// RequirementStatus.IsValid() rejects empty string, but in practice
+// active requirements emit no status — so the empty branch is the
+// "active by default" path, equivalent to RequirementStatusActive.
+// Deprecated and superseded entries are excluded: those are no longer
+// the source of truth, so retrying them would be wrong work.
+//
+// Returns nil (not empty slice) when no active requirements exist so the
+// payload's `omitempty` JSON tag drops the field cleanly. Logs a warning
+// in that case — a plan reaching reviewing_qa with zero active
+// requirements shouldn't happen but if it does the auto-accept watcher
+// correctly bails (its len>0 filter rejects) and the recovery PlanDecision
+// requires manual acceptance.
+func (c *Component) collectActiveRequirementIDsForRecovery(plan *workflow.Plan, verdict workflow.QAVerdict) []string {
+	var affected []string
+	for _, r := range plan.Requirements {
+		if r.Status == "" || r.Status == workflow.RequirementStatusActive {
+			affected = append(affected, r.ID)
+		}
+	}
+	if len(affected) == 0 {
+		c.logger.Warn("QA verdict with zero active requirements — recovery PlanDecision will require manual acceptance",
+			"slug", plan.Slug, "verdict", verdict)
+	}
+	return affected
+}
+
 // emitRecoveryRequested is the test-friendly entry point. In production it
 // delegates to publishRecoveryRequested; in tests c.recoveryPublisher is set
 // to a capturing stub so assertions can verify the wire fires at every
@@ -1018,12 +1057,13 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 	// concrete diagnosis (e.g., "replace time.Sleep with active polling").
 	if req.Verdict == workflow.QAVerdictNeedsChanges || req.Verdict == workflow.QAVerdictRejected {
 		c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
-			RecoveryID:          uuid.New().String(),
-			Layer:               payloads.RecoveryLayerPhaseLocal,
-			Slug:                req.Slug,
-			EscalationReason:    fmt.Sprintf("QA verdict %s at level %s", req.Verdict, req.Level),
-			LastFailureFeedback: req.Summary,
-			TraceID:             req.TraceID,
+			RecoveryID:             uuid.New().String(),
+			Layer:                  payloads.RecoveryLayerPhaseLocal,
+			Slug:                   req.Slug,
+			EscalationReason:       fmt.Sprintf("QA verdict %s at level %s", req.Verdict, req.Level),
+			LastFailureFeedback:    req.Summary,
+			TraceID:                req.TraceID,
+			AffectedRequirementIDs: c.collectActiveRequirementIDsForRecovery(plan, req.Verdict),
 		})
 	}
 

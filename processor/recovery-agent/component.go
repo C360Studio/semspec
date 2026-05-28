@@ -717,15 +717,14 @@ func recoveryActionToPlanDecisionKind(action payloads.RecoveryActionKind) workfl
 	}
 }
 
-// emitPlanDecision sends a workflow.PlanDecision via plan.mutation.
-// plan_decision.add (same wire shape used by qa-reviewer + req-executor).
-// Best-effort: failure logs but does not block subsequent recovery work.
-func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool) {
-	if c.natsClient == nil {
-		return
-	}
-
-	now := time.Now()
+// buildRecoveryPlanDecision is the pure-function shape of the recovery
+// PlanDecision construction. Extracted so unit tests can verify the
+// AffectedReqIDs propagation contract (plan-scoped list preferred over
+// single requirement ID, both empty leaves field nil for human review)
+// without needing a real natsClient. Called only from emitPlanDecision in
+// production. now is passed in rather than taking time.Now() inside so
+// tests get deterministic CreatedAt values.
+func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool, now time.Time) workflow.PlanDecision {
 	kind := recoveryActionToPlanDecisionKind(action)
 
 	title := fmt.Sprintf("Recovery: %s", action)
@@ -735,14 +734,24 @@ func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.Recovery
 
 	rationale := buildRecoveryRationale(req, loop, action, diagnosis, succeeded)
 
+	// Prefer the plan-scoped affected list (populated by plan-manager on QA
+	// verdict wedges where the qa-reviewer's verdict applies to all
+	// assembled requirements) over the single requirement ID (populated by
+	// execution-manager iteration exhaustion). Both empty leaves
+	// AffectedReqIDs nil — the auto-accept watcher then leaves the decision
+	// for human review (the correct outcome for plan-review wedges where
+	// the plan itself is wrong, not any specific requirement).
 	var affectedReqs []string
-	if req.RequirementID != "" {
+	switch {
+	case len(req.AffectedRequirementIDs) > 0:
+		affectedReqs = append(affectedReqs, req.AffectedRequirementIDs...)
+	case req.RequirementID != "":
 		affectedReqs = []string{req.RequirementID}
 	}
 
 	decisionID := fmt.Sprintf("plan-decision.%s.recovery.%s", req.Slug, req.RecoveryID[:8])
 
-	decision := workflow.PlanDecision{
+	return workflow.PlanDecision{
 		ID:             decisionID,
 		PlanID:         workflow.PlanEntityID(req.Slug),
 		Kind:           kind,
@@ -753,6 +762,17 @@ func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.Recovery
 		AffectedReqIDs: affectedReqs,
 		CreatedAt:      now,
 	}
+}
+
+// emitPlanDecision sends a workflow.PlanDecision via plan.mutation.
+// plan_decision.add (same wire shape used by qa-reviewer + req-executor).
+// Best-effort: failure logs but does not block subsequent recovery work.
+func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool) {
+	if c.natsClient == nil {
+		return
+	}
+
+	decision := buildRecoveryPlanDecision(req, loop, action, diagnosis, succeeded, time.Now())
 
 	addReq := struct {
 		Slug     string                `json:"slug"`
@@ -790,10 +810,10 @@ func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.Recovery
 	c.logger.Info("Emitted recovery PlanDecision",
 		"slug", req.Slug,
 		"recovery_id", req.RecoveryID,
-		"decision_id", decisionID,
-		"kind", kind,
+		"decision_id", decision.ID,
+		"kind", decision.Kind,
 		"action", action,
-		"affected_reqs", affectedReqs)
+		"affected_reqs", decision.AffectedReqIDs)
 }
 
 // buildRecoveryRationale assembles the PlanDecision Rationale text. The
