@@ -399,16 +399,27 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 	// Load project config for test command (language-aware default).
 	pc := workflow.LoadProjectConfigFromDisk(c.resolveRepoRoot())
 
-	// Ensure .github/workflows/qa.yml exists in the workspace before
-	// publishing QARequestedEvent. project-manager scaffolds the file at
-	// /init time, but e2e fixtures (hand-authored) skip that flow; without
-	// this guard qa-runner fails on missing workflow with an opaque act
-	// error. Language-aware template — picks Java/Python/Node/Rust/Go
-	// based on project config primary language. Non-fatal on write error
-	// (qa-runner will surface a clearer act-side error than we can here).
-	if err := projectmanager.EnsureQAWorkflow(c.resolveRepoRoot(), pc, c.logger); err != nil {
-		c.logger.Warn("Failed to scaffold qa.yml before QA dispatch — qa-runner may fail with missing workflow",
-			"slug", plan.Slug, "error", err)
+	// Render the qa.yml. Two paths:
+	//
+	//   1. ADR-039 Phase 1c — when the plan's architecture selected
+	//      services-orchestrated harness profiles and the operator did not
+	//      opt out via qa_skip_service_injection, overwrite the workspace
+	//      qa.yml with a catalog-injected workflow. The injection bundles the
+	//      catalog-derived `services:` block with the act DooD-required
+	//      `container:` block on the integration job
+	//      ([[act-dood-services-require-container-block]]).
+	//
+	//   2. Fallback — call EnsureQAWorkflow, which writes the language-aware
+	//      scaffold only when no qa.yml exists. Preserves operator-owned
+	//      workflows and matches pre-Phase-1c behaviour.
+	//
+	// Both paths are non-fatal: a render or write failure logs a warning and
+	// lets qa-runner surface the clearer act-side error.
+	if !c.maybeRenderQAWithServices(plan, pc) {
+		if err := projectmanager.EnsureQAWorkflow(c.resolveRepoRoot(), pc, c.logger); err != nil {
+			c.logger.Warn("Failed to scaffold qa.yml before QA dispatch — qa-runner may fail with missing workflow",
+				"slug", plan.Slug, "error", err)
+		}
 	}
 
 	req := &payloads.QARequestedPayload{

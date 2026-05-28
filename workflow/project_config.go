@@ -64,6 +64,13 @@ type ProjectConfig struct {
 	// Empty means "infer from primary language" — see EffectiveTestCommand.
 	// Examples: "go test ./...", "npm test", "pytest", "cargo test".
 	QATestCommand string `json:"qa_test_command,omitempty"`
+
+	// QASkipServiceInjection, when true, disables ADR-039 catalog-driven
+	// service injection into the workspace qa.yml. Operators who hand-author
+	// the workflow file and want full control over the `services:` /
+	// `container:` blocks set this to opt out. Plan-manager then falls back
+	// to the existing write-only-if-missing scaffold (BuildQAWorkflow).
+	QASkipServiceInjection bool `json:"qa_skip_service_injection,omitempty"`
 }
 
 // EffectiveQALevel returns the project's QA level, defaulting to synthesis
