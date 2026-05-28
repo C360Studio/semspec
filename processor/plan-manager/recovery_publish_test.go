@@ -80,6 +80,79 @@ func TestHandleQAVerdictMutation_NeedsChangesFiresRecoveryRequested(t *testing.T
 	}
 }
 
+// TestHandleQAVerdictMutation_NeedsChangesPopulatesAffectedRequirementIDs
+// is the autonomy contract: recovery-agent's emitted PlanDecision needs
+// AffectedReqIDs non-empty for the auto-accept watcher
+// (plan-decision-handler/recovery_autoaccept.go) to fire without operator
+// intervention. plan-manager populates AffectedRequirementIDs from the
+// plan's active requirements; recovery-agent's emitPlanDecision threads
+// the list into PlanDecision.AffectedReqIDs.
+//
+// This test verifies the plan-manager half of that contract by setting up
+// a plan with three requirements in mixed lifecycle states and asserting
+// that only the active ones (including empty-string default) land in the
+// payload.
+func TestHandleQAVerdictMutation_NeedsChangesPopulatesAffectedRequirementIDs(t *testing.T) {
+	ctx := context.Background()
+	c := setupTestComponent(t)
+	publisher, fetch := captureRecoveryPublisher()
+	c.recoveryPublisher = publisher
+
+	slug := "qa-affected-req-ids"
+	plan := &workflow.Plan{
+		ID:     workflow.PlanEntityID(slug),
+		Slug:   slug,
+		Title:  slug,
+		Status: workflow.StatusReviewingQA,
+		Requirements: []workflow.Requirement{
+			{ID: "req-active-explicit", Status: workflow.RequirementStatusActive},
+			{ID: "req-active-default"}, // empty Status — the "active by default" path
+			{ID: "req-deprecated", Status: workflow.RequirementStatusDeprecated},
+			{ID: "req-superseded", Status: workflow.RequirementStatusSuperseded},
+		},
+	}
+	if err := c.plans.save(ctx, plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	event := workflow.QAVerdictEvent{
+		Slug:    slug,
+		Level:   workflow.QALevelIntegration,
+		Verdict: workflow.QAVerdictNeedsChanges,
+		Summary: "Coverage gap on the 5xx path.",
+		TraceID: "trace-qa-affected",
+	}
+	data, _ := json.Marshal(event)
+
+	resp := c.handleQAVerdictMutation(ctx, data)
+	if !resp.Success {
+		t.Fatalf("mutation failed: %s", resp.Error)
+	}
+
+	got := fetch()
+	if len(got) != 1 {
+		t.Fatalf("expected 1 RecoveryRequested publish, got %d", len(got))
+	}
+	r := got[0]
+	if len(r.AffectedRequirementIDs) != 2 {
+		t.Fatalf("AffectedRequirementIDs length = %d, want 2 active reqs only; got %v",
+			len(r.AffectedRequirementIDs), r.AffectedRequirementIDs)
+	}
+	wantSet := map[string]bool{"req-active-explicit": false, "req-active-default": false}
+	for _, id := range r.AffectedRequirementIDs {
+		if _, ok := wantSet[id]; !ok {
+			t.Errorf("unexpected ID in AffectedRequirementIDs: %q (deprecated/superseded reqs should be excluded)", id)
+			continue
+		}
+		wantSet[id] = true
+	}
+	for id, seen := range wantSet {
+		if !seen {
+			t.Errorf("missing expected ID in AffectedRequirementIDs: %q", id)
+		}
+	}
+}
+
 func TestHandleQAVerdictMutation_RejectedFiresRecoveryRequested(t *testing.T) {
 	ctx := context.Background()
 	c := setupTestComponent(t)
