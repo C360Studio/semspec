@@ -128,6 +128,42 @@ func TestRenderRejectsServicesProfileWithoutImages(t *testing.T) {
 	}
 }
 
+// TestRenderRealCatalogMixedSelection is the cross-package integration shape
+// for ADR-039 Phase 1a: load the real built-in catalog, select a services
+// profile and a pure-fixture profile in the same call, and verify the renderer
+// emits a services block for the former and skips the latter without error.
+// Mirrors what Phase 1c will actually receive at qa.yml emission time.
+func TestRenderRealCatalogMixedSelection(t *testing.T) {
+	selections := mustResolve(t,
+		"mavlink.raw-mavlink-direct",    // pure-fixture, no images
+		"mavlink.px4-sitl.mavsdk-smoke", // services, images present
+		"mavlink.ardupilot-sitl.compat", // services, images present
+	)
+	got, err := RenderYAML(selections, Options{PortOffset: 12000})
+	if err != nil {
+		t.Fatalf("RenderYAML() error = %v", err)
+	}
+	if got == "" {
+		t.Fatal("RenderYAML() returned empty string; want services block")
+	}
+	if strings.Contains(got, "mavlink-raw-mavlink-direct") {
+		t.Errorf("pure-fixture profile leaked into output:\n%s", got)
+	}
+	for _, want := range []string{
+		"mavlink-px4-sitl-mavsdk-smoke:",
+		"image: px4io/px4-sitl:latest",
+		"- 26540:14540/udp",
+		"mavlink-ardupilot-sitl-compat:",
+		"image: ardupilot/ardupilot:latest",
+		"- 26550:14550/udp",
+		"PX4_SIM_MODEL: iris",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestServiceNameReplacesDots(t *testing.T) {
 	cases := map[string]string{
 		"mavlink.px4-sitl.mavsdk-smoke": "mavlink-px4-sitl-mavsdk-smoke",
