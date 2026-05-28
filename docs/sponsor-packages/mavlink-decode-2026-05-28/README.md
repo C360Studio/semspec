@@ -161,7 +161,29 @@ The user-facing question that should land in any sponsor briefing
 on this run: **was the agent's code actually tested?** Mostly yes, but
 with sharp limits worth surfacing.
 
-### What ran during the run
+### UPDATE 2026-05-28 PM — Phase 1c shipped, qa-runner verified end-to-end
+
+The original AM run below was at `qa.level=synthesis` (default — LLM
+verdict only, no test execution at QA stage). ADR-039 Phase 1c (PRs
+[#22](https://github.com/C360Studio/semspec/pull/22), [#23](https://github.com/C360Studio/semspec/pull/23), [#24](https://github.com/C360Studio/semspec/pull/24), [#25](https://github.com/C360Studio/semspec/pull/25)) shipped the qa.yml emission pathway,
+and PR [#26](https://github.com/C360Studio/semspec/pull/26) pinned the fixture to `qa.level=integration` so
+qa-runner actually invokes act on the rendered workflow. A second
+gemini mavlink-decode run on 2026-05-28 PM exercised the full pipeline
+through `reviewing_qa` for the first time:
+
+- Architect picked `mavlink.raw-mavlink-direct` (orchestration=pure-fixture) again — same correct choice as the AM run.
+- Phase 1c's renderer correctly skipped service injection: `Skipping qa.yml service injection reason="no services-orchestrated harness profiles selected"`, then scaffolded the standard Go workflow (no `services:` block, no `container:` block — exactly right for pure-fixture scope).
+- qa-runner invoked act, which ran `go test ./... -tags=integration -v` inside the act runner container.
+- Integration test failed (exit code 1).
+- qa-reviewer rendered an informed verdict: *"Test execution failed in the CI environment (act exited with code 1). The implementation meets functionality requirements and correctly uses the gomavlib library. However, the integration test suffers from severe flakiness due to hardcoded `time.Sleep` delays for UDP initialization and message processing. This timing dependency likely caused the CI failure and needs to be replaced with active polling or proper synchronization."*
+
+That verdict shape — concrete root cause, not "tests failed, please retry" — is the substantive lift Phase 1c was built to enable. The synthesis-only path can only ever surface what the LLM reasoned about static code; the integration path lets qa-reviewer interpret real CI output. The plan ended at `rejected` (no auto-retry from QA today — see the qa-rejection follow-up below) but the verdict surface is what a human reviewer would write.
+
+**Sandbox process-group bug surfaced and fixed in the same window.** The first PM run wedged in `implementing` because `cmd/sandbox/exec.go:execCommand` didn't actually deliver SIGKILL to the bash process group on timeout — children inheriting the stdout pipe FDs kept the parent shell's pipes open, blocking `Wait()`, and 14 zombie processes accumulated. Fixed in PR [#27](https://github.com/C360Studio/semspec/pull/27). The second PM run sat at 0 zombies through the full pipeline. PR #27 also adds a developer-role prompt circuit-breaker for bash-failure retry patterns; the second run's clean dev cycles didn't exercise it (so it's verified-safe but not yet verified-helpful).
+
+The rest of this section below describes the AM run for historical context. The "designed-for but not built-or-tested" framing in the WHERE SITL WOULD HAVE BELONGED subsection is now narrower: compatibility-tier integration is shipped and verified; required-tier SITL hard-gate is still untested.
+
+### What ran during the AM run (qa.level=synthesis)
 
 | Gate | What ran | Where in pipeline | Tests exercised |
 |---|---|---|---|
@@ -246,18 +268,24 @@ inside its own container. To run PX4 SITL on top of that:
   doesn't have a "pending external verdict" stage. Adding it is a
   meaningful design change to PLAN_STATES, not a small wire.
 
-**Where this leaves things:** the catalog metadata is correct and the
-architect's selection logic respects tier semantics. The wiring from
-required-tier profile selection through qa-runner SITL execution is
-**designed-for but not built-or-tested**. The next step is either:
+**Where this leaves things (UPDATED 2026-05-28 PM):** the catalog
+metadata is correct and the architect's selection logic respects tier
+semantics. The wiring from **compatibility-tier** profile selection
+through qa-runner integration-test execution is now **shipped and
+verified end-to-end on real LLM** (gemini mavlink-decode PM run,
+ADR-039 Phase 1c via PR #25). The wiring from **required-tier** profile
+selection through qa-runner SITL execution remains **designed-for but
+not built-or-tested** — that's the next gate-of-realness. The next steps:
 
 1. A scenario specifically targeting `mavlink.px4-sitl.mavsdk-smoke`
    selection, with a fixture that pre-stages the SITL image, to verify
    the required-tier hard-gate doesn't false-fail when SITL is
-   available. (Most valuable as proof of design soundness.)
-2. The deep-qa tier design (Option B above) as a separate ADR if we
-   conclude that per-cycle SITL is structurally too expensive for the
-   inner dev loop.
+   available. (Most valuable as proof of design soundness; ADR-039
+   Phase 3 explicitly scopes this.)
+2. The deep-qa tier design (Option B above) was explicitly ruled OUT
+   of ADR-039 — semspec's product shape is opinionated issue-to-PR
+   autonomy, not a CI orchestration platform. See ADR-039 §Alternative E
+   for the framing.
 
 Today, neither is gated on this run. This run's value is that we now
 KNOW the architect picks the right tier for a given scope — and that
