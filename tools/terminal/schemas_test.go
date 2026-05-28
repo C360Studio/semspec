@@ -121,13 +121,16 @@ func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 	requireFieldsPresent(t, "component_boundaries.items.required",
 		[]string{"upstream_refs"}, cbRequired)
 
-	// Testcontainers-tier additions (2026-05-15) on upstream_resolutions.items:
-	// role + test_harness. Mirrors the take-28 wedge prevention.
+	// Integration-target role remains on upstream_resolutions; runnable harness
+	// topology moved to architecture.harness_profiles.
 	requireFieldsPresent(t, "upstream_resolutions.items.required",
-		[]string{"role", "test_harness"}, urRequired)
+		[]string{"role"}, urRequired)
+	if _, ok := urItemProps["test"+"_harness"]; ok {
+		t.Fatal("upstream_resolutions.items must not expose legacy harness field")
+	}
 
 	assertRoleEnum(t, urItemProps)
-	assertTestHarnessShape(t, urItemProps)
+	assertHarnessProfileShape(t, props)
 }
 
 // assertRoleEnum validates the role property is a constrained enum.
@@ -153,22 +156,25 @@ func assertRoleEnum(t *testing.T, urItemProps map[string]any) {
 	}
 }
 
-// assertTestHarnessShape validates the test_harness property is a nullable
-// object so resolutions with role != integration_target can satisfy
-// "required" with null.
-func assertTestHarnessShape(t *testing.T, urItemProps map[string]any) {
+func assertHarnessProfileShape(t *testing.T, props map[string]any) {
 	t.Helper()
-	th, _ := urItemProps["test_harness"].(map[string]any)
-	if th == nil {
-		t.Fatal("upstream_resolutions.items.test_harness property missing")
+	hp, _ := props["harness_profiles"].(map[string]any)
+	if hp == nil {
+		t.Fatal("architecture schema missing harness_profiles property")
 	}
-	thType, _ := th["type"].([]any)
-	if len(thType) != 2 || thType[0] != "object" || thType[1] != "null" {
-		t.Errorf("test_harness.type = %v, want [object, null] for nullable strict-mode shape", th["type"])
+	if hp["type"] != "array" {
+		t.Errorf("harness_profiles.type = %v, want array", hp["type"])
 	}
-	thRequired, _ := th["required"].([]string)
-	requireFieldsPresent(t, "test_harness.required",
-		[]string{"library", "image", "access_method"}, thRequired)
+	items, _ := hp["items"].(map[string]any)
+	required, _ := items["required"].([]string)
+	requireFieldsPresent(t, "harness_profiles.items.required",
+		[]string{"profile_id", "used_by", "purpose", "covers"}, required)
+	itemProps, _ := items["properties"].(map[string]any)
+	for _, key := range []string{"profile_id", "used_by", "purpose", "covers"} {
+		if itemProps[key] == nil {
+			t.Errorf("harness_profiles.items.properties missing %q", key)
+		}
+	}
 }
 
 func TestToolsForDeliverable_SwapsSubmitWork(t *testing.T) {

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/c360studio/semspec/prompt"
@@ -413,6 +414,7 @@ func renderArchitectPrompt(p *prompt.ArchitectPromptContext) string {
 			fmt.Fprintf(&reqSection, "%d. **%s**: %s\n", i+1, r.Title, r.Description)
 		}
 	}
+	harnessSection := renderArchitectHarnessCards(p.HarnessProfiles)
 
 	prevErr := ""
 	if p.PreviousError != "" {
@@ -453,11 +455,13 @@ The previous round was reviewed and rejected. Read every finding before deciding
 - Exclude: %s
 - Protected (do not touch): %s
 %s
+%s
 ## Your Task
 
 1. Use bash and graph tools to explore the codebase — understand the existing technology stack, project structure, and patterns already in use.
 2. Identify technology choices, component boundaries, data flows, and key architecture decisions.
-3. Call submit_work with a summary and a structured deliverable.
+3. Select test harness profiles from the catalog by profile_id when an upstream resolution is an integration_target; do not author images, ports, env, startup order, or readiness inline.
+4. Call submit_work with a summary and a structured deliverable.
 
 **Guidelines:**
 - Reuse existing technology stack where possible — do not propose new frameworks when the project already has one
@@ -472,6 +476,7 @@ The previous round was reviewed and rejected. Read every finding before deciding
 
 - **actors**: array of {name, type, triggers[], permissions[]?} — who or what initiates actions in the system (type: human | system | scheduler | event). Every trigger the system responds to must map to an actor. scenario-generator reads this to seed e2e scenarios.
 - **integrations**: array of {name, direction, protocol, contract?, error_mode?} — external boundaries the system touches (direction: inbound | outbound | bidirectional; protocol: http | nats | grpc | db | filesystem). Include error_mode when failure behavior matters. scenario-generator reads this to seed integration scenarios.
+- **harness_profiles**: array of {profile_id, used_by[], purpose, covers[]?} — catalog profile selections that prove integration_target upstreams. Use profile IDs from the catalog section only. Every upstream_resolutions[] entry with role="integration_target" must be covered by at least one selected profile, either by covers[] naming the target/facet or used_by[] naming the component that reaches it.
 - **test_surface**: object describing the test coverage your architecture implies. execution-manager uses it to guide developer agents; qa-reviewer uses it to judge whether actual coverage matches the architectural expectation.
   - **integration_flows**: array of {name, components_involved[], description, scenario_refs[]?} — each integration[] (especially inbound/bidirectional) deserves one integration flow with a real fixture. components_involved references component_boundaries[].name when those exist.
   - **e2e_flows**: array of {actor, steps[], success_criteria[]} — each human/system actor that drives a user-visible outcome deserves one end-to-end flow.
@@ -489,7 +494,121 @@ The previous round was reviewed and rejected. Read every finding before deciding
 - Walk actors[]: each human or system actor with a trigger that produces user-visible output needs one e2e_flow. Scheduler and event actors only need e2e coverage if the flow touches the UI or external systems; otherwise integration coverage is sufficient.
 - It's fine for test_surface.integration_flows to reference requirement scenarios via scenario_refs — reviewers use this to verify the test authors wrote tests that actually implement the declared surface.
 %s`, p.Goal, p.PlanContext, scopeInclude, scopeExclude, scopeProtected,
-		reqSection.String(), prevErr)
+		reqSection.String(), harnessSection, prevErr)
+}
+
+func renderArchitectHarnessCards(cards []prompt.HarnessProfileCard) string {
+	if len(cards) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Available test harness profiles\n\n")
+	sb.WriteString("Select by profile_id only. These profiles are system-owned; do not invent or copy their images, ports, env vars, startup order, readiness probes, or evidence anchors into the architecture document.\n\n")
+	for _, card := range cards {
+		fmt.Fprintf(&sb, "### %s\n\n", card.ID)
+		fmt.Fprintf(&sb, "- **Tier:** `%s`\n", card.Tier)
+		if card.Cost != "" {
+			fmt.Fprintf(&sb, "- **Cost:** %s\n", card.Cost)
+		}
+		writeJoinedLine(&sb, "Proves", card.Proves)
+		writeCoversLine(&sb, card.Covers)
+		writeJoinedLine(&sb, "Runner support", card.RunnerSupport)
+		writeJoinedLine(&sb, "Constraints", card.Constraints)
+		writeJoinedLine(&sb, "Required assertions", card.RequiredAssertions)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func writeJoinedLine(sb *strings.Builder, label string, vals []string) {
+	if len(vals) == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "- **%s:** %s\n", label, strings.Join(vals, "; "))
+}
+
+func writeCoversLine(sb *strings.Builder, covers map[string][]string) {
+	if len(covers) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(covers))
+	for key := range covers {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, strings.Join(covers[key], ", ")))
+	}
+	fmt.Fprintf(sb, "- **Covers:** %s\n", strings.Join(parts, "; "))
+}
+
+func renderResolvedHarnessProfiles(title string, profiles []prompt.ResolvedHarnessProfileContext) string {
+	if len(profiles) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString(title)
+	sb.WriteString("\n\n")
+	sb.WriteString("Use these details when your node touches the selected integration. Keep orchestration in project test code; do not edit GitHub Actions services for these profiles.\n\n")
+	for _, p := range profiles {
+		fmt.Fprintf(&sb, "### %s (%s)\n\n", p.ProfileID, p.Tier)
+		writeJoinedLine(&sb, "Used by", p.UsedBy)
+		if p.Purpose != "" {
+			fmt.Fprintf(&sb, "- **Purpose:** %s\n", p.Purpose)
+		}
+		writeJoinedLine(&sb, "Covers", p.Covers)
+		writeJoinedLine(&sb, "Proves", p.Proves)
+		writeJoinedLine(&sb, "Runner support", p.RunnerSupport)
+		if p.Cost != "" {
+			fmt.Fprintf(&sb, "- **Cost:** %s\n", p.Cost)
+		}
+		writeJoinedLine(&sb, "Constraints", p.Constraints)
+		writeJoinedLine(&sb, "Required assertions", p.RequiredAssertions)
+		writeJoinedLine(&sb, "Evidence anchors", p.EvidenceAnchors)
+		if len(p.Images) > 0 {
+			sb.WriteString("- **Images:** ")
+			parts := make([]string, 0, len(p.Images))
+			for _, img := range p.Images {
+				if img.Purpose == "" {
+					parts = append(parts, img.Name)
+				} else {
+					parts = append(parts, fmt.Sprintf("%s (%s)", img.Name, img.Purpose))
+				}
+			}
+			sb.WriteString(strings.Join(parts, "; "))
+			sb.WriteString("\n")
+		}
+		if len(p.Ports) > 0 {
+			sb.WriteString("- **Ports:** ")
+			parts := make([]string, 0, len(p.Ports))
+			for _, port := range p.Ports {
+				value := fmt.Sprintf("%s/%d/%s", port.Name, port.ContainerPort, port.Protocol)
+				if port.Purpose != "" {
+					value = fmt.Sprintf("%s (%s)", value, port.Purpose)
+				}
+				parts = append(parts, value)
+			}
+			sb.WriteString(strings.Join(parts, "; "))
+			sb.WriteString("\n")
+		}
+		if len(p.Env) > 0 {
+			keys := make([]string, 0, len(p.Env))
+			for key := range p.Env {
+				keys = append(keys, key)
+			}
+			sort.Strings(keys)
+			parts := make([]string, 0, len(keys))
+			for _, key := range keys {
+				parts = append(parts, fmt.Sprintf("%s=%s", key, p.Env[key]))
+			}
+			fmt.Fprintf(&sb, "- **Env:** %s\n", strings.Join(parts, "; "))
+		}
+		writeJoinedLine(&sb, "Readiness", p.Readiness)
+		writeJoinedLine(&sb, "Test guidance", p.TestGuidance)
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // renderPlanReviewerPrompt produces the plan-reviewer agent's user message.
@@ -792,7 +911,7 @@ const planReviewerCompletenessR2 = "## Completeness Criteria (Round 2 — Requir
 	"6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent, component boundaries must not overlap, actors must have distinct trigger sets, and integration points must not contradict component boundaries. (phase: \"architecture\")\n" +
 	"7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Requirements involving external systems should map to declared integration points. Requirements triggered by user actions should map to declared actors. Flag requirements that conflict with architectural decisions. (phase: \"requirements\", target_id: the conflicting requirement ID)\n" +
 	"7a. **Upstream resolution discipline** — When the architecture references an external library, API, or framework (anywhere in technology_choices, integrations, or component_boundaries), the architect MUST have populated `architecture.upstream_resolutions[]` with the resolved coordinate + the API surface the developer will integrate against. The dev no longer has a research sub-agent (shelved 2026-05-15) — the architect's resolutions are the developer's pre-loaded reading list, and missing resolutions reproduce the take-23 wedge (35 external file reads, 0 worktree writes, iter budget exhausted on re-discovery). Apply the following STRUCTURAL checks; emit Path B-shape findings (action + target_field + target_value) so the architect's revision is unambiguous: (a) For every external library named in technology_choices, integrations, or any component_boundaries[].dependencies entry that is NOT also a component_boundaries[].name (i.e., it points outside the system), there MUST be a matching `architecture.upstream_resolutions[]` entry whose `name` matches. Missing resolution → action=\"add\", target_field=\"architecture.upstream_resolutions\", target_value=\"<lib-name> with coordinate, source_ref, and apis from the canonical docs you fetched in inspection step 4\". (b) Every `upstream_resolutions[]` entry MUST have non-empty `coordinate` (machine-resolvable: groupId:artifactId:version, name@version, github URL@tag — vague hints like \"OSH 2.x\" do NOT satisfy), non-empty `source_ref` (the URL or file path proving the coordinate), and at least one `apis[]` entry. Missing field → action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].<field>\", target_value=\"<concrete value to populate from your inspection notes>\". (c) Every `apis[]` entry MUST have non-empty `citation` (file path or URL where the signature was verified). An uncited surface is a guess; mark it action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].apis[<symbol>].citation\", target_value=\"<URL or path>\". (d) Bidirectional invariant: for every `component_boundaries[].upstream_refs` entry, the named resolution MUST exist in `upstream_resolutions[]`. For every `upstream_resolutions[].used_by` entry, the named component MUST exist in `component_boundaries[]` AND that component's `upstream_refs[]` MUST list the resolution back. Mismatch → action=\"add\", target_field=\"architecture.<the side missing the back-link>\", target_value=\"<the name to add>\". (e) Goodhart guard: do NOT reject for \"the apis section seems short\" or \"more notes would help\" — those are subjective and unenforceable. Only reject for STRUCTURAL violations (missing field, missing citation, missing back-link, vague coordinate). If you cannot name the SPECIFIC missing field per Path B's directive shape, the finding doesn't pass the bar. (phase: \"architecture\", target_id: the upstream_resolutions entry name OR the component name OR \"<missing>\" when the entry doesn't exist yet)\n" +
-	"7b. **Integration-target test_harness discipline** — Every `upstream_resolutions[]` entry whose `role` field is \"integration_target\" MUST carry a populated `test_harness` block with three concrete fields. This is the Testcontainers-led integration tier's structural anchor: it's what lets the dev's TDD loop spin up the real upstream container via Testcontainers, and it's what prevents the take-19 / take-29 stub-JAR fabrication shape from re-emerging (dev wrote tests against fabricated 55-byte JARs, reviewer approved, qa-runner had no anchor to detect because nothing in the deliverable named the real integration target). Apply Path B-shape findings: (a) For every entry with `role == \"integration_target\"` and missing-or-null `test_harness`: action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].test_harness\", target_value=\"{library: <testcontainers-X>, image: <repo/name:tag>, access_method: <protocol:port>}\". (b) Inside any present `test_harness`, every field (`library`, `image`, `access_method`) MUST be non-empty. Missing field → action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].test_harness.<field>\", target_value=\"<concrete value cited from upstream's docker docs>\". (c) `test_harness.image` MUST be a concrete registry coordinate — contains a tag (\":<tag>\") and a repo path (e.g., \"meshtastic/meshtasticd:latest\", \"postgres:16-alpine\"). Vague values like \"latest\", \"the official image\", \"a docker container\" do NOT satisfy. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].test_harness.image\", target_value=\"<concrete repo/name:tag from Docker Hub or GHCR>\". (d) `test_harness.access_method` MUST match shape \"<protocol>:<port>\" with a numeric port (e.g., \"tcp:4403\", \"http:8080\", \"grpc:9000\"). Reject \"the standard port\", \"whichever port it exposes\", etc. (e) Inverse goodhart guard: do NOT reject `runtime_dep` or `build_dep` resolutions for missing test_harness — those roles correctly emit `test_harness: null`. Only flag the integration_target shape. (f) Architect bias correction: when the architect classifies as `runtime_dep` something that's clearly a separate process (database driver, message-queue client library, gRPC stub for a remote service), the role is wrong. Heuristic: if the upstream's docs include a \"running it\" or \"docker compose\" section, it's an integration_target — not a runtime_dep. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].role\", target_value=\"integration_target\" + a paired add for test_harness. (phase: \"architecture\", target_id: the upstream_resolutions entry name)\n" +
+	"7b. **Integration-target harness profile discipline** — Every `upstream_resolutions[]` entry whose `role` field is \"integration_target\" MUST be covered by at least one valid `architecture.harness_profiles[]` selection. The catalog is the Testcontainers/SITL integration tier's structural anchor: the architect selects a profile ID and the developer resolves system-owned images, ports, readiness, evidence anchors, and runner compatibility from the catalog. Apply Path B-shape findings: (a) Unknown profile ID → action=\"replace\", target_field=\"architecture.harness_profiles[<profile_id>].profile_id\", target_value=\"<valid catalog profile_id>\". Do not accept invented IDs or inline runner topology. (b) Missing coverage for an integration_target → action=\"add\", target_field=\"architecture.harness_profiles\", target_value=\"{profile_id: <catalog profile_id>, used_by: [<component>], purpose: <why this proves the integration>, covers: [<integration_target name or facet>]}\". (c) `harness_profiles[]` entries MUST have non-empty `profile_id`, `used_by`, and `purpose`; `covers` is optional but SHOULD name the integration target, protocol facet, plugin group, or scenario when the mapping is not obvious. (d) The architect MUST NOT author `image`, `port`, `access_method`, `env`, startup order, or readiness fields in architecture JSON; those details belong only to the catalog and are rendered downstream for developers. (e) Inverse goodhart guard: do NOT reject `runtime_dep` or `build_dep` resolutions for missing harness profiles. Only flag the integration_target shape. (f) Architect bias correction: when the architect classifies as `runtime_dep` something that's clearly a separate process (database driver, message-queue client library, gRPC stub for a remote service, MAVLink SITL/autopilot endpoint), the role is wrong. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].role\", target_value=\"integration_target\" plus a paired harness profile selection. (phase: \"architecture\", target_id: the upstream_resolutions entry name OR the harness_profiles entry profile_id)\n" +
 	"8. **Scenario-actor coverage** — Scenarios should reference the actors declared in the architecture. If the architecture declares an actor (e.g., a \"scheduler\" or \"event\" type) but no scenario has a Given/When involving that actor's triggers, flag as a warning — the plan may have blind spots for that actor's behavior. (phase: \"scenarios\")\n" +
 	"9. **Scenario-integration coverage** — Scenarios should exercise the integration points declared in the architecture. If the architecture declares an integration (e.g., an outbound HTTP API or a database) but no scenario verifies that integration's behavior or error handling, flag as a warning — untested integration boundaries are a common source of production failures. (phase: \"scenarios\")\n\n"
 
@@ -859,6 +978,12 @@ func renderTaskDecomposerPrompt(d *prompt.DecomposerPromptContext) string {
 		sb.WriteString("\nEvery scenario ID above MUST appear in at least one node's scenario_ids array. ")
 		sb.WriteString("This is how failed-scenario retries route back to the right node. ")
 		sb.WriteString("A DAG that leaves any scenario ID uncovered will be rejected and you will re-run.\n")
+	}
+
+	if len(d.HarnessProfiles) > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(renderResolvedHarnessProfiles("## Harness Profiles (resolved catalog details)", d.HarnessProfiles))
+		sb.WriteString("When a requirement touches one of these integration profiles, create a node that makes the developer write the real test fixture and include the relevant evidence anchors in that node prompt.\n")
 	}
 
 	return sb.String()

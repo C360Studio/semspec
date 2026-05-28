@@ -98,9 +98,9 @@ What changed between the two runs was structural, not model-side:
 
 - `GITHUB_TOKEN` passthrough so the sandbox can authenticate against
   GitHub Packages.
-- Architect schema gained `role` + `test_harness` fields so integration
+- Architect schema gained `role` + `harness_profiles` fields so integration
   targets must be declared, not assumed.
-- Three deterministic detectors (TestHarness completeness check,
+- Three deterministic detectors (harness profile completeness check,
   dev-test/integration-target cross-check, stub-jar size detector)
   added as regression guards.
 
@@ -172,7 +172,7 @@ data will produce the first defensible cost figure.
 
 ### Detector firing rate unknown
 
-The three fabrication detectors (TestHarness completeness, dev-test
+The three fabrication detectors (harness profile completeness, dev-test
 cross-check, stub-jar size) were added as regression guards. They
 didn't fire on take-30. We have not yet deliberately introduced a
 fabrication vector to confirm they trigger. That's the next

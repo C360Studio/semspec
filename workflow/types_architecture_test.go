@@ -51,6 +51,14 @@ func TestArchitectureDocument_UpstreamResolutionsRoundTrip(t *testing.T) {
 				UsedBy: []string{"driver"},
 			},
 		},
+		HarnessProfiles: []HarnessProfileSelection{
+			{
+				ProfileID: "mavlink.px4-sitl.mavsdk-smoke",
+				UsedBy:    []string{"driver"},
+				Purpose:   "prove MAVSDK control and telemetry against real PX4 SITL",
+				Covers:    []string{"Meshtastic daemon"},
+			},
+		},
 	}
 
 	data, err := json.Marshal(&doc)
@@ -79,6 +87,13 @@ func TestArchitectureDocument_UpstreamResolutionsRoundTrip(t *testing.T) {
 	if len(parsed.ComponentBoundaries) != 1 || len(parsed.ComponentBoundaries[0].UpstreamRefs) != 2 {
 		t.Errorf("ComponentDef.UpstreamRefs lost: %+v", parsed.ComponentBoundaries[0])
 	}
+	if len(parsed.HarnessProfiles) != 1 {
+		t.Fatalf("HarnessProfiles count = %d, want 1", len(parsed.HarnessProfiles))
+	}
+	h := parsed.HarnessProfiles[0]
+	if h.ProfileID != "mavlink.px4-sitl.mavsdk-smoke" || h.Purpose == "" || len(h.UsedBy) != 1 || len(h.Covers) != 1 {
+		t.Errorf("HarnessProfileSelection fields lost: %+v", h)
+	}
 }
 
 // TestArchitectureDocument_NewFieldsOmittedWhenEmpty verifies the
@@ -103,17 +118,18 @@ func TestArchitectureDocument_NewFieldsOmittedWhenEmpty(t *testing.T) {
 	if strings.Contains(got, `"upstream_resolutions"`) {
 		t.Errorf("upstream_resolutions should be omitted when empty: %s", got)
 	}
+	if strings.Contains(got, `"harness_profiles"`) {
+		t.Errorf("harness_profiles should be omitted when empty: %s", got)
+	}
 	if strings.Contains(got, `"upstream_refs"`) {
 		t.Errorf("component upstream_refs should be omitted when empty: %s", got)
 	}
 }
 
-// TestUpstreamResolution_TestHarnessRoundTrip locks in the
-// Testcontainers-tier additions from 2026-05-15. Role +
-// TestHarness must survive marshal/unmarshal so the reviewer's
-// cross-check (declared integration_target ⇒ non-nil TestHarness with
-// real image coordinate) has reliable structural data to evaluate.
-func TestUpstreamResolution_TestHarnessRoundTrip(t *testing.T) {
+// TestUpstreamResolution_RoleRoundTrip verifies the integration_target role
+// survives marshal/unmarshal now that runnable harness details live in
+// ArchitectureDocument.HarnessProfiles rather than upstream_resolutions[].
+func TestUpstreamResolution_RoleRoundTrip(t *testing.T) {
 	resolution := UpstreamResolution{
 		Name:       "Meshtastic daemon",
 		Coordinate: "github.com/meshtastic/firmware",
@@ -128,11 +144,6 @@ func TestUpstreamResolution_TestHarnessRoundTrip(t *testing.T) {
 		},
 		UsedBy: []string{"driver"},
 		Role:   "integration_target",
-		TestHarness: &TestHarness{
-			Library:      "testcontainers-java",
-			Image:        "meshtastic/meshtasticd:latest",
-			AccessMethod: "tcp:4403",
-		},
 	}
 
 	data, err := json.Marshal(&resolution)
@@ -147,38 +158,24 @@ func TestUpstreamResolution_TestHarnessRoundTrip(t *testing.T) {
 	if parsed.Role != "integration_target" {
 		t.Errorf("Role lost: %q", parsed.Role)
 	}
-	if parsed.TestHarness == nil {
-		t.Fatal("TestHarness lost — must round-trip non-nil for integration_target")
-	}
-	if got, want := parsed.TestHarness.Library, "testcontainers-java"; got != want {
-		t.Errorf("TestHarness.Library = %q, want %q", got, want)
-	}
-	if got, want := parsed.TestHarness.Image, "meshtastic/meshtasticd:latest"; got != want {
-		t.Errorf("TestHarness.Image = %q, want %q", got, want)
-	}
-	if got, want := parsed.TestHarness.AccessMethod, "tcp:4403"; got != want {
-		t.Errorf("TestHarness.AccessMethod = %q, want %q", got, want)
-	}
 }
 
-// TestUpstreamResolution_TestHarnessOmittedForRuntimeDep verifies that
-// a runtime_dep resolution (the common case — a library the dev imports
-// rather than a service it talks to) omits test_harness from the JSON
-// output. omitempty on the pointer field is what makes this work.
-func TestUpstreamResolution_TestHarnessOmittedForRuntimeDep(t *testing.T) {
+// TestUpstreamResolution_OmitsLegacyHarnessField verifies the old freeform
+// harness field is no longer emitted from upstream_resolutions[].
+func TestUpstreamResolution_OmitsLegacyHarnessField(t *testing.T) {
 	resolution := UpstreamResolution{
 		Name:       "OpenSensorHub Core",
 		Coordinate: "org.sensorhub:sensorhub-core:2.0.0",
 		SourceRef:  "https://central.sonatype.com/artifact/org.sensorhub/sensorhub-core",
-		Role:       "runtime_dep",
+		Role:       "integration_target",
 	}
 	data, err := json.Marshal(&resolution)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	got := string(data)
-	if strings.Contains(got, `"test_harness"`) {
-		t.Errorf("test_harness should be omitted for runtime_dep: %s", got)
+	if strings.Contains(got, `"test`+`_harness"`) {
+		t.Errorf("legacy harness field should never be emitted: %s", got)
 	}
 }
 
@@ -201,6 +198,9 @@ func TestArchitectureDocument_BackwardCompat(t *testing.T) {
 	}
 	if parsed.UpstreamResolutions != nil {
 		t.Errorf("expected nil UpstreamResolutions on legacy doc, got %v", parsed.UpstreamResolutions)
+	}
+	if parsed.HarnessProfiles != nil {
+		t.Errorf("expected nil HarnessProfiles on legacy doc, got %v", parsed.HarnessProfiles)
 	}
 	if parsed.ComponentBoundaries[0].UpstreamRefs != nil {
 		t.Errorf("expected nil UpstreamRefs on legacy component, got %v", parsed.ComponentBoundaries[0].UpstreamRefs)

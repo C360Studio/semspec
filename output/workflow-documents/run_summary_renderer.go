@@ -79,8 +79,10 @@ func renderRunCounts(b *strings.Builder, plan *workflow.Plan) {
 	scenCount := len(plan.Scenarios)
 	upstreamCount := 0
 	integrationTargets := 0
+	harnessProfiles := 0
 	if plan.Architecture != nil {
 		upstreamCount = len(plan.Architecture.UpstreamResolutions)
+		harnessProfiles = len(plan.Architecture.HarnessProfiles)
 		for _, r := range plan.Architecture.UpstreamResolutions {
 			if r.Role == "integration_target" {
 				integrationTargets++
@@ -91,9 +93,10 @@ func renderRunCounts(b *strings.Builder, plan *workflow.Plan) {
 	b.WriteString(fmt.Sprintf("- Scenarios: **%d**\n", scenCount))
 	b.WriteString(fmt.Sprintf("- Upstream resolutions: **%d**", upstreamCount))
 	if integrationTargets > 0 {
-		b.WriteString(fmt.Sprintf(" (of which **%d** are integration_targets with declared TestHarness)", integrationTargets))
+		b.WriteString(fmt.Sprintf(" (of which **%d** are integration_targets)", integrationTargets))
 	}
 	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("- Harness profiles selected: **%d**\n", harnessProfiles))
 	if plan.ReviewIteration > 0 {
 		b.WriteString(fmt.Sprintf("- Plan-review iterations: **%d**\n", plan.ReviewIteration))
 	}

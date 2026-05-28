@@ -392,31 +392,40 @@ func architectureSchema() map[string]any {
 						},
 						"role": map[string]any{
 							"type":        "string",
-							"description": "How this dep is consumed at test time. 'build_dep' = compile-time only (annotation processor, type stubs, codegen). 'runtime_dep' = library/framework called in-process; unit tests use it directly. 'integration_target' = separate process the dev talks to over a wire protocol (daemon, broker, database); REQUIRES test_harness so the dev's tests spawn a real container via Testcontainers and exercise the real wire format. Default to 'runtime_dep' when uncertain — it's the most common case.",
+							"description": "How this dep is consumed at test time. 'build_dep' = compile-time only (annotation processor, type stubs, codegen). 'runtime_dep' = library/framework called in-process; unit tests use it directly. 'integration_target' = separate process the dev talks to over a wire protocol (daemon, broker, database, SITL/autopilot endpoint); requires a selected architecture.harness_profiles[] entry that covers it. Default to 'runtime_dep' when uncertain — it's the most common case.",
 							"enum":        []string{"build_dep", "runtime_dep", "integration_target"},
 						},
-						"test_harness": map[string]any{
-							"type":        []any{"object", "null"},
-							"description": "REQUIRED when role == 'integration_target'; set null otherwise. Tells the dev which Testcontainers binding to import and which public image to spawn. Goodhart-resistant: if the image doesn't exist on the registry, Testcontainers.start() fails at test time and the dev cannot fabricate a stub the way they can with a flat-dir JAR.",
-							"properties": map[string]any{
-								"library": map[string]any{
-									"type":        "string",
-									"description": "Testcontainers binding for the project's language. Examples: 'testcontainers-java' (Maven/Gradle), 'testcontainers-go' (Go), 'testcontainers-python' (pytest), 'testcontainers-node' (vitest/jest), 'testcontainers-dotnet', 'testcontainers-rust'.",
-								},
-								"image": map[string]any{
-									"type":        "string",
-									"description": "Public container image coordinate. Format 'repo/name:tag' or 'library/name:tag' on Docker Hub. Cite this from the upstream project's docker docs (web_search for '{project} docker image' or the project's docker-compose example). Examples: 'meshtastic/meshtasticd:latest', 'redis:7-alpine', 'postgres:16-alpine', 'confluentinc/cp-kafka:7.5.0'.",
-								},
-								"access_method": map[string]any{
-									"type":        "string",
-									"description": "Protocol and container port the dev's code connects to. Format '<protocol>:<port>'. Testcontainers exposes the port on a host-mapped random port; the dev calls GetMappedPort(<port>) at test time. Examples: 'tcp:4403', 'http:8080', 'grpc:9000', 'amqp:5672'.",
-								},
-							},
-							"required":             []string{"library", "image", "access_method"},
-							"additionalProperties": false,
+					},
+					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by", "role"},
+					"additionalProperties": false,
+				},
+			},
+			"harness_profiles": map[string]any{
+				"type":        "array",
+				"description": "Catalog-backed test harness profile selections. Populate with profile IDs from the harness catalog only. The catalog owns images, ports, readiness, evidence anchors, and runner compatibility. Emit [] when no integration_target upstreams need a harness.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"profile_id": map[string]any{
+							"type":        "string",
+							"description": "Stable harness catalog profile ID, for example 'mavlink.px4-sitl.mavsdk-smoke'. Do not invent IDs.",
+						},
+						"used_by": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "component_boundaries[].name entries that should use this profile.",
+						},
+						"purpose": map[string]any{
+							"type":        "string",
+							"description": "Why this profile is selected for this architecture.",
+						},
+						"covers": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Integration targets, protocol facets, plugin groups, or scenario names this profile covers. Emit [] when used_by is sufficient.",
 						},
 					},
-					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by", "role", "test_harness"},
+					"required":             []string{"profile_id", "used_by", "purpose", "covers"},
 					"additionalProperties": false,
 				},
 			},
@@ -458,7 +467,7 @@ func architectureSchema() map[string]any {
 				"additionalProperties": false,
 			},
 		},
-		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "test_surface"},
+		"required":             []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "harness_profiles", "test_surface"},
 		"additionalProperties": false,
 	}
 }

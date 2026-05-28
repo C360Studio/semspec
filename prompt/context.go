@@ -163,6 +163,12 @@ type TaskContext struct {
 	// struct + prompt; Phase 5.1 wires the value through execution-manager.
 	TestSurface *workflow.TestSurface
 
+	// HarnessProfiles are the selected catalog profiles resolved to full
+	// developer-facing details (images, ports, readiness, evidence anchors,
+	// runner compatibility, and test guidance). Architects select IDs only;
+	// developers consume this resolved view when writing integration tests.
+	HarnessProfiles []ResolvedHarnessProfileContext
+
 	// WorktreePath is the absolute path to the per-task git worktree the
 	// agent's bash will use as cwd. When non-empty, developer prompts
 	// render an explicit "Your worktree path: X / DO NOT cd /workspace"
@@ -173,6 +179,41 @@ type TaskContext struct {
 	// that bypasses the diff gate (see
 	// .semspec/investigation-diff-gate-2026-05-12.md).
 	WorktreePath string
+}
+
+// ResolvedHarnessProfileContext is a prompt-safe projection of a selected
+// harness catalog profile plus the architect's task-specific selection intent.
+type ResolvedHarnessProfileContext struct {
+	ProfileID          string
+	Tier               string
+	UsedBy             []string
+	Purpose            string
+	Covers             []string
+	Proves             []string
+	RunnerSupport      []string
+	Cost               string
+	Constraints        []string
+	RequiredAssertions []string
+	EvidenceAnchors    []string
+	Images             []HarnessImageContext
+	Ports              []HarnessPortContext
+	Env                map[string]string
+	Readiness          []string
+	TestGuidance       []string
+}
+
+// HarnessImageContext is a developer-facing image reference.
+type HarnessImageContext struct {
+	Name    string
+	Purpose string
+}
+
+// HarnessPortContext is a developer-facing container endpoint reference.
+type HarnessPortContext struct {
+	Name          string
+	ContainerPort int
+	Protocol      string
+	Purpose       string
 }
 
 // PlanContext carries data for planner prompts.

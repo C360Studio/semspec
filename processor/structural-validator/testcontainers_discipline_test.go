@@ -8,156 +8,113 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 )
 
-func TestCheckTestcontainersDiscipline_NoIntegrationTargets(t *testing.T) {
-	result := CheckTestcontainersDiscipline(t.TempDir(), []string{"src/Foo.java"}, nil)
+func TestCheckHarnessProfileDiscipline_NoSelections(t *testing.T) {
+	catalog := mustCatalog(t)
+	result := CheckHarnessProfileDiscipline(t.TempDir(), []string{"src/Foo.java"}, nil, catalog)
 	if !result.Passed {
-		t.Errorf("greenfield project (no integration_targets) should pass, got: %s", result.Stdout)
+		t.Errorf("greenfield project (no harness profiles) should pass, got: %s", result.Stdout)
 	}
-	if result.Name != "testcontainers-discipline" {
-		t.Errorf("Name = %q, want testcontainers-discipline", result.Name)
+	if result.Name != "harness-profile-discipline" {
+		t.Errorf("Name = %q, want harness-profile-discipline", result.Name)
 	}
 }
 
-func TestCheckTestcontainersDiscipline_NoTestFilesModified(t *testing.T) {
-	targets := []workflow.UpstreamResolution{
-		integrationTargetFixture("Postgres", "postgres:16-alpine", "testcontainers-java"),
+func TestCheckHarnessProfileDiscipline_NoTestFilesModified(t *testing.T) {
+	catalog := mustCatalog(t)
+	selections := []workflow.HarnessProfileSelection{
+		{ProfileID: "mavlink.px4-sitl.mavsdk-smoke", Purpose: "prove SITL"},
 	}
-	// filesModified has only production code — no test files.
-	result := CheckTestcontainersDiscipline(t.TempDir(), []string{"src/main/java/Repo.java", "build.gradle"}, targets)
+
+	result := CheckHarnessProfileDiscipline(t.TempDir(), []string{"src/main/java/Driver.java", "build.gradle"}, selections, catalog)
 	if !result.Passed {
 		t.Errorf("scenarios producing no tests should pass (other scenarios cover integration): %s", result.Stdout)
 	}
 }
 
-func TestCheckTestcontainersDiscipline_BindingAndImagePresent(t *testing.T) {
+func TestCheckHarnessProfileDiscipline_RequiredEvidencePresent(t *testing.T) {
 	dir := t.TempDir()
-	testFile := writeTestFile(t, dir, "src/test/java/RepoTest.java", `
+	testFile := writeTestFile(t, dir, "src/test/java/MavlinkDriverTest.java", `
 package com.example;
-import org.testcontainers.containers.PostgreSQLContainer;
-import org.junit.jupiter.api.Test;
 
-public class RepoTest {
-    @Test void connects() {
-        var pg = new PostgreSQLContainer<>("postgres:16-alpine");
-        pg.start();
+class MavlinkDriverTest {
+    static final String PROFILE = "mavlink.px4-sitl.mavsdk-smoke";
+    static final String IMAGE = "px4io/px4-sitl:latest";
+    static final int PORT = 14540;
+    void smoke() {
+        assert true : "mavsdk_core_connected";
+        assert true : "HEARTBEAT";
     }
 }
 `)
-	targets := []workflow.UpstreamResolution{
-		integrationTargetFixture("Postgres", "postgres:16-alpine", "testcontainers-java"),
+	selections := []workflow.HarnessProfileSelection{
+		{ProfileID: "mavlink.px4-sitl.mavsdk-smoke", Purpose: "prove SITL"},
 	}
-	result := CheckTestcontainersDiscipline(dir, []string{testFile}, targets)
+
+	result := CheckHarnessProfileDiscipline(dir, []string{testFile}, selections, mustCatalog(t))
 	if !result.Passed {
-		t.Errorf("test file with binding + image should pass: %s", result.Stdout)
+		t.Errorf("test file with required profile evidence should pass: %s", result.Stdout)
 	}
 }
 
-func TestCheckTestcontainersDiscipline_BindingButNoImage(t *testing.T) {
+func TestCheckHarnessProfileDiscipline_RequiredEvidenceMissing(t *testing.T) {
 	dir := t.TempDir()
-	testFile := writeTestFile(t, dir, "src/test/java/RepoTest.java", `
+	testFile := writeTestFile(t, dir, "src/test/java/MavlinkDriverTest.java", `
 package com.example;
-import org.testcontainers.containers.PostgreSQLContainer;
-
-public class RepoTest {
-    void connects() {
-        // Wrong image — fabricated stub instead of architect-declared coordinate.
-        var pg = new PostgreSQLContainer<>("acme/fake-postgres:1.0");
-    }
+class MavlinkDriverTest {
+    static final String PROFILE = "mavlink.px4-sitl.mavsdk-smoke";
+    // Missing image, port, and connection/assertion anchors.
 }
 `)
-	targets := []workflow.UpstreamResolution{
-		integrationTargetFixture("Postgres", "postgres:16-alpine", "testcontainers-java"),
+	selections := []workflow.HarnessProfileSelection{
+		{ProfileID: "mavlink.px4-sitl.mavsdk-smoke", Purpose: "prove SITL"},
 	}
-	result := CheckTestcontainersDiscipline(dir, []string{testFile}, targets)
+
+	result := CheckHarnessProfileDiscipline(dir, []string{testFile}, selections, mustCatalog(t))
 	if result.Passed {
-		t.Errorf("test file with wrong image should fail (catches stub-substitution): %s", result.Stdout)
+		t.Errorf("test file missing required evidence should fail: %s", result.Stdout)
 	}
-	if !strings.Contains(result.Stdout, "postgres:16-alpine") {
-		t.Errorf("failure message should name the missing image coordinate: %s", result.Stdout)
+	if !result.Required {
+		t.Error("missing required profile evidence should be a hard failure")
+	}
+	for _, want := range []string{"px4io/px4-sitl", "14540", "mavsdk_core_connected", "HEARTBEAT"} {
+		if !strings.Contains(result.Stdout, want) {
+			t.Errorf("failure should name missing anchor %q: %s", want, result.Stdout)
+		}
 	}
 }
 
-func TestCheckTestcontainersDiscipline_ImageButNoBinding(t *testing.T) {
+func TestCheckHarnessProfileDiscipline_CompatibilityProfileDoesNotHardFail(t *testing.T) {
 	dir := t.TempDir()
-	testFile := writeTestFile(t, dir, "src/test/java/RepoTest.java", `
-package com.example;
-public class RepoTest {
-    // Image string present but no Testcontainers import — agent likely
-    // hard-coded the image into a config file without actually using
-    // Testcontainers to spawn it.
-    static final String IMAGE = "postgres:16-alpine";
-}
-`)
-	targets := []workflow.UpstreamResolution{
-		integrationTargetFixture("Postgres", "postgres:16-alpine", "testcontainers-java"),
+	testFile := writeTestFile(t, dir, "src/test/java/CompatTest.java", `class CompatTest {}`)
+	selections := []workflow.HarnessProfileSelection{
+		{ProfileID: "mavlink.ardupilot-sitl.compat", Purpose: "compatibility sweep"},
 	}
-	result := CheckTestcontainersDiscipline(dir, []string{testFile}, targets)
-	if result.Passed {
-		t.Errorf("test file with image but no Testcontainers binding should fail: %s", result.Stdout)
-	}
-	if !strings.Contains(result.Stdout, "org.testcontainers") {
-		t.Errorf("failure message should name the missing binding: %s", result.Stdout)
-	}
-}
 
-func TestCheckTestcontainersDiscipline_NilTestHarnessSkipped(t *testing.T) {
-	dir := t.TempDir()
-	testFile := writeTestFile(t, dir, "src/test/java/RepoTest.java", `// no tests yet`)
-	// integration_target declared but TestHarness nil — criterion 7b
-	// catches that at the reviewer; this check shouldn't double-flag.
-	targets := []workflow.UpstreamResolution{
-		{Name: "Postgres", Coordinate: "postgres:16-alpine", Role: "integration_target", TestHarness: nil},
-	}
-	result := CheckTestcontainersDiscipline(dir, []string{testFile}, targets)
+	result := CheckHarnessProfileDiscipline(dir, []string{testFile}, selections, mustCatalog(t))
 	if !result.Passed {
-		t.Errorf("nil TestHarness should be skipped (reviewer's responsibility), got fail: %s", result.Stdout)
+		t.Errorf("compatibility-only profile should not hard-fail developer validation: %s", result.Stdout)
 	}
 }
 
-func TestCheckTestcontainersDiscipline_MultipleTargetsOneMissing(t *testing.T) {
+func TestCheckHarnessProfileDiscipline_UnknownProfileHardFails(t *testing.T) {
 	dir := t.TempDir()
-	testFile := writeTestFile(t, dir, "src/test/java/RepoTest.java", `
-import org.testcontainers.containers.PostgreSQLContainer;
-class RepoTest {
-    void t() { new PostgreSQLContainer<>("postgres:16-alpine").start(); }
-}
-`)
-	targets := []workflow.UpstreamResolution{
-		integrationTargetFixture("Postgres", "postgres:16-alpine", "testcontainers-java"),
-		integrationTargetFixture("Kafka", "confluentinc/cp-kafka:7.5.0", "testcontainers-java"),
+	testFile := writeTestFile(t, dir, "src/test/java/MavlinkDriverTest.java", `class MavlinkDriverTest {}`)
+	selections := []workflow.HarnessProfileSelection{
+		{ProfileID: "mavlink.not-real", Purpose: "bad selection"},
 	}
-	result := CheckTestcontainersDiscipline(dir, []string{testFile}, targets)
+
+	result := CheckHarnessProfileDiscipline(dir, []string{testFile}, selections, mustCatalog(t))
 	if result.Passed {
-		t.Errorf("Kafka missing from test should fail: %s", result.Stdout)
+		t.Errorf("unknown harness profile should fail: %s", result.Stdout)
 	}
-	if !strings.Contains(result.Stdout, "Kafka") {
-		t.Errorf("failure should name the uncovered target: %s", result.Stdout)
+	if !result.Required {
+		t.Error("unknown harness profile should be a hard failure")
 	}
-}
-
-func TestCheckTestcontainersDiscipline_GoTestcontainers(t *testing.T) {
-	dir := t.TempDir()
-	testFile := writeTestFile(t, dir, "internal/repo/repo_test.go", `
-package repo
-
-import (
-	"testing"
-	"github.com/testcontainers/testcontainers-go"
-)
-
-func TestConnects(t *testing.T) {
-	req := testcontainers.ContainerRequest{Image: "postgres:16-alpine"}
-	_ = req
-}
-`)
-	targets := []workflow.UpstreamResolution{
-		integrationTargetFixture("Postgres", "postgres:16-alpine", "testcontainers-go"),
-	}
-	result := CheckTestcontainersDiscipline(dir, []string{testFile}, targets)
-	if !result.Passed {
-		t.Errorf("Go test with testcontainers-go binding + image should pass: %s", result.Stdout)
+	if !strings.Contains(result.Stdout, "unknown harness profile") {
+		t.Errorf("failure should name unknown profile: %s", result.Stdout)
 	}
 }
 
@@ -190,35 +147,17 @@ func TestIsTestFileMultilang(t *testing.T) {
 	}
 }
 
-func TestLibraryToImportNeedle(t *testing.T) {
-	cases := map[string]string{
-		"testcontainers-java":   "org.testcontainers",
-		"testcontainers-go":     "testcontainers-go",
-		"testcontainers-python": "testcontainers",
-		"testcontainers-node":   "testcontainers",
-		"testcontainers-dotnet": "Testcontainers",
-		"testcontainers-rust":   "testcontainers",
-		"unknown-library":       "unknown-library",
-	}
-	for lib, want := range cases {
-		got := libraryToImportNeedle(lib)
-		if got != want {
-			t.Errorf("libraryToImportNeedle(%q) = %q, want %q", lib, got, want)
-		}
-	}
-}
-
-func TestLoadIntegrationTargets_ReadsPlanFromDisk(t *testing.T) {
+func TestLoadHarnessProfiles_ReadsPlanFromDisk(t *testing.T) {
 	dir := t.TempDir()
 	plan := workflow.Plan{
 		Slug: "test-slug",
 		Architecture: &workflow.ArchitectureDocument{
 			UpstreamResolutions: []workflow.UpstreamResolution{
-				{Name: "Postgres", Role: "integration_target", TestHarness: &workflow.TestHarness{
-					Library: "testcontainers-java", Image: "postgres:16-alpine", AccessMethod: "tcp:5432",
-				}},
+				{Name: "PX4 SITL", Role: "integration_target"},
 				{Name: "OSH Core", Role: "runtime_dep"},
-				{Name: "Annotation processor", Role: "build_dep"},
+			},
+			HarnessProfiles: []workflow.HarnessProfileSelection{
+				{ProfileID: "mavlink.px4-sitl.mavsdk-smoke", Purpose: "prove SITL"},
 			},
 		},
 	}
@@ -234,24 +173,24 @@ func TestLoadIntegrationTargets_ReadsPlanFromDisk(t *testing.T) {
 		t.Fatalf("write plan.json: %v", err)
 	}
 
-	targets := loadIntegrationTargets(dir, "test-slug")
-	if len(targets) != 1 {
-		t.Fatalf("expected 1 integration_target, got %d (must filter runtime_dep + build_dep)", len(targets))
+	selections := loadHarnessProfiles(dir, "test-slug")
+	if len(selections) != 1 {
+		t.Fatalf("expected 1 harness profile, got %d", len(selections))
 	}
-	if targets[0].Name != "Postgres" {
-		t.Errorf("got target %q, want Postgres", targets[0].Name)
+	if selections[0].ProfileID != "mavlink.px4-sitl.mavsdk-smoke" {
+		t.Errorf("got profile %q, want mavlink.px4-sitl.mavsdk-smoke", selections[0].ProfileID)
 	}
 }
 
-func TestLoadIntegrationTargets_MissingPlanReturnsNil(t *testing.T) {
+func TestLoadHarnessProfiles_MissingPlanReturnsNil(t *testing.T) {
 	dir := t.TempDir()
-	targets := loadIntegrationTargets(dir, "nonexistent-slug")
-	if targets != nil {
-		t.Errorf("missing plan should return nil targets, got %v", targets)
+	selections := loadHarnessProfiles(dir, "nonexistent-slug")
+	if selections != nil {
+		t.Errorf("missing plan should return nil selections, got %v", selections)
 	}
 }
 
-func TestLoadIntegrationTargets_NoArchitectureReturnsNil(t *testing.T) {
+func TestLoadHarnessProfiles_NoArchitectureReturnsNil(t *testing.T) {
 	dir := t.TempDir()
 	plan := workflow.Plan{Slug: "test-slug"} // no Architecture
 	planDir := filepath.Join(dir, ".semspec", "plans", "test-slug")
@@ -262,29 +201,23 @@ func TestLoadIntegrationTargets_NoArchitectureReturnsNil(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(planDir, "plan.json"), data, 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	targets := loadIntegrationTargets(dir, "test-slug")
-	if targets != nil {
-		t.Errorf("plan without architecture should return nil, got %v", targets)
+	selections := loadHarnessProfiles(dir, "test-slug")
+	if selections != nil {
+		t.Errorf("plan without architecture should return nil, got %v", selections)
 	}
 }
 
-// integrationTargetFixture builds a populated integration_target for tests.
-func integrationTargetFixture(name, image, library string) workflow.UpstreamResolution {
-	return workflow.UpstreamResolution{
-		Name:       name,
-		Coordinate: image,
-		SourceRef:  "https://hub.docker.com/_/" + name,
-		Role:       "integration_target",
-		TestHarness: &workflow.TestHarness{
-			Library:      library,
-			Image:        image,
-			AccessMethod: "tcp:5432",
-		},
+func mustCatalog(t *testing.T) *harnesscatalog.Catalog {
+	t.Helper()
+	catalog, err := harnesscatalog.LoadBuiltIn()
+	if err != nil {
+		t.Fatalf("LoadBuiltIn: %v", err)
 	}
+	return catalog
 }
 
-// writeTestFile writes a test file inside dir and returns the relative
-// path the caller should pass in filesModified.
+// writeTestFile writes a test file inside dir and returns the relative path
+// the caller should pass in filesModified.
 func writeTestFile(t *testing.T, dir, relPath, content string) string {
 	t.Helper()
 	abs := filepath.Join(dir, relPath)

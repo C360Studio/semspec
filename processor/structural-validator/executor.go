@@ -13,6 +13,7 @@ import (
 
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
@@ -134,18 +135,27 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		results = append(results, antiMockResult)
 	}
 
-	// Advisory Testcontainers discipline check — fires whenever modified
+	// Catalog-backed harness profile discipline check — fires whenever modified
 	// files include test files in ANY supported language (not just Go).
-	// Verifies that the architect's integration_targets are referenced by
-	// the dev's tests (binding import + image coordinate). Pairs with
-	// plan-reviewer criterion 7b — architect-side discipline + dev-side
-	// enforcement together close the take-19/take-29 stub-JAR pattern.
-	// Loads integration_targets from .semspec/plans/<slug>/plan.json on
-	// disk; greenfield projects (no architecture) trivially pass.
+	// Verifies that selected required catalog profiles are evidenced by the
+	// dev's tests. The catalog owns images, ports, readiness, and assertions;
+	// qa.yml remains generic and project tests own Testcontainers/SITL startup.
+	// Loads selections from .semspec/plans/<slug>/plan.json on disk;
+	// greenfield projects (no architecture) trivially pass.
 	if len(filterTestFiles(trigger.FilesModified)) > 0 {
-		targets := loadIntegrationTargets(e.repoPath, trigger.Slug)
-		tcResult := CheckTestcontainersDiscipline(workDir, trigger.FilesModified, targets)
-		results = append(results, tcResult)
+		selections := loadHarnessProfiles(e.repoPath, trigger.Slug)
+		catalog, err := harnesscatalog.Load(e.repoPath)
+		if err != nil {
+			results = append(results, payloads.CheckResult{
+				Name:     "harness-profile-discipline",
+				Passed:   false,
+				Required: true,
+				Command:  "harness-profile-discipline (internal)",
+				Stdout:   fmt.Sprintf("load harness catalog: %v", err),
+			})
+		} else {
+			results = append(results, CheckHarnessProfileDiscipline(workDir, trigger.FilesModified, selections, catalog))
+		}
 	}
 
 	// Deterministic stub-artifact detector — runs whenever .jar files

@@ -38,7 +38,7 @@ plan that downstream roles can act on.
 - **Architecture generator (architect)** — Produces the
   `ArchitectureDocument`: technology choices, component boundaries,
   data flow, decisions, actors, integrations, **upstream resolutions
-  with TestHarness**, and the implied test surface. This is the role
+  with harness profile selections**, and the implied test surface. This is the role
   that reads upstream documentation (via `web_search` + `http_request`)
   to discover Maven coordinates, container images, protocol details
   — the role take-30's success hinges on most. The architect also
@@ -139,7 +139,7 @@ visible in the watch log timestamps (see `evidence/watch.log`).
         v
    StatusReviewingScenarios     ← plan-reviewer applies criteria 1–9
         |                          incl. 7a (upstream_resolutions) and
-        |                          7b (TestHarness discipline)
+        |                          7b (harness profile discipline)
         v
    StatusScenariosReviewed
         |
@@ -197,7 +197,7 @@ tool call before the deliverable is ever accepted.
 - This session added: empty integrations + human actor declared (lazy
   architect); empty test_surface + integrations declared (no coverage
   for declared boundaries); UpstreamResolution with `role: integration_target`
-  + missing `test_harness` block (the TestHarness discipline)
+  + missing `harness_profiles` selection (the harness profile discipline)
 
 **Failure mode:** the submit_work call is rejected; the agent must
 re-emit. No state transitions on failure.
@@ -231,12 +231,12 @@ hit.
   library named anywhere must have a corresponding
   `upstream_resolutions[]` entry with concrete coordinate, source_ref,
   and API surfaces with citations
-- **Criterion 7b: TestHarness discipline (this session)** — every
-  resolution with `role: integration_target` must have a populated
-  `test_harness` (library + image with concrete repo:tag +
-  access_method as protocol:port). Catches the goodhart shape where
-  the architect declares the target but doesn't specify how to test
-  against it.
+- **Criterion 7b: harness profile discipline (this session)** — every
+  resolution with `role: integration_target` must be covered by a valid
+  `harness_profiles[]` selection. The profile ID resolves to system-owned
+  runner details, evidence anchors, and required assertions. Catches the
+  goodhart shape where the architect declares the target but doesn't bind
+  it to a testable harness.
 
 **Failure mode:** revision iteration triggers regen with the
 findings inlined into the next prompt as Action directives.
@@ -284,12 +284,12 @@ triggering.
   take-21's missing-test slip).
 - `CheckAntiMock` (advisory): rejects when mock-type declarations
   outnumber test functions.
-- **`CheckTestcontainersDiscipline` (this session, advisory)**: for
-  each architect-declared `integration_target`, the dev's modified
-  test files must reference both the Testcontainers binding (e.g.,
-  `org.testcontainers` for testcontainers-java) and the architect's
-  declared image coordinate. Catches the goodhart pattern where the
-  architect names the right harness but the dev silently skips it.
+- **`CheckHarnessProfileDiscipline` (catalog-backed required-profile evidence)**: for
+  each selected required harness profile, the dev's modified test files
+  must reference the catalog evidence anchors (profile ID plus the
+  image/port/assertion strings the profile owns). Catches the goodhart
+  pattern where the architect selects the right harness but the dev
+  silently skips it.
 - **`CheckStubArtifacts` (this session, required: true, hard
   rejection)**: any `.jar` file in the modified set is opened as a
   zip; rejected if it has <2 KiB total uncompressed size, zero
@@ -361,7 +361,7 @@ LLM-dependent, bottom is most deterministic):
 |---|---|---|
 | 6: Operator SOPs | yes | Standard compliance review on each phase |
 | 5: QA gate | yes | Final clean-room re-run of all tests; passed |
-| 4: Structural-validator | yes | `gradle dependencies` + `gradle test` per scenario; stub-detector and testcontainers-discipline armed but never triggered |
+| 4: Structural-validator | yes | `gradle dependencies` + `gradle test` per scenario; stub-detector and harness-profile-discipline armed but never triggered |
 | 3: Tool-call governance | yes | No `cd /workspace` / docker-escape attempts logged |
 | 2: Plan-reviewer criteria | yes | Architecture / requirements / scenarios approved on first iteration, no 7a/7b violations |
 | 1: Wire-shape validators | yes | All submissions passed wire-shape on first attempt |

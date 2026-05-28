@@ -162,7 +162,7 @@ Specifically:
   don't yet have a cost-per-take number we'd defend.
 
 - **Defense-in-depth unmeasured.** This run shipped three deterministic
-  detectors (stub-artifact, testcontainers-discipline, structural QA
+  detectors (stub-artifact, harness-profile-discipline, structural QA
   gate) that *didn't fire* because the primary fix worked. We don't
   know yet whether they'd correctly catch a regression — the next
   meaningful experiment is to deliberately introduce a fabrication
@@ -241,7 +241,7 @@ sponsor-package/
 
 The agent's architect role produced a structured plan that names every
 external dependency, classifies its role, and (for service-style
-dependencies) declares the test harness. Excerpt from
+dependencies) declares the catalog-backed harness profile. Excerpt from
 `architecture/architecture-deliverable.json`:
 
 ```json
@@ -250,25 +250,28 @@ dependencies) declares the test harness. Excerpt from
     "name": "OpenSensorHub Core",
     "coordinate": "org.sensorhub:sensorhub-core:2.0.0",
     "role": "runtime_dep",
-    "test_harness": null,
     "apis": [...]
   },
   {
     "name": "Meshtastic Daemon",
     "coordinate": "meshtastic/meshtasticd:daily-alpine",
-    "role": "integration_target",
-    "test_harness": {
-      "library": "testcontainers-java",
-      "image": "meshtastic/meshtasticd:daily-alpine",
-      "access_method": "tcp:4403"
-    }
+    "role": "integration_target"
+  }
+],
+"harness_profiles": [
+  {
+    "profile_id": "custom.meshtasticd.testcontainers",
+    "used_by": ["driver"],
+    "purpose": "prove the OSH driver exercises a real Meshtastic daemon over TCP/protobuf",
+    "covers": ["Meshtastic Daemon", "TCP API", "meshtastic/meshtasticd:daily-alpine", "tcp:4403"]
   }
 ]
 ```
 
 The architect found Meshtastic's TCP port (4403), identified the official
-Docker Hub image, chose the daily-alpine stable tag, and specified the
-exact testing library — all from cold-start, with no fixture hints.
+Docker Hub image, chose the daily-alpine stable tag, and selected the
+test harness profile that downstream tests resolve — all from cold-start,
+with no fixture hints.
 
 ## What's significant about the code
 

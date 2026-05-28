@@ -15,8 +15,7 @@ import (
 //
 // Sections rendered: technology_choices, component_boundaries (with
 // upstream_refs), data_flow, decisions, actors, integrations,
-// upstream_resolutions (with role + TestHarness when integration_target),
-// test_surface. Mirrors the structure the sponsor package's
+// upstream_resolutions, harness_profiles, test_surface. Mirrors the structure the sponsor package's
 // architecture.md uses, but rendered inline as a per-phase artifact
 // at the architecture_generated milestone.
 func RenderArchitecture(plan *workflow.Plan) string {
@@ -34,6 +33,7 @@ func RenderArchitecture(plan *workflow.Plan) string {
 	renderArchActors(&b, arch.Actors)
 	renderArchIntegrations(&b, arch.Integrations)
 	renderArchUpstreamResolutions(&b, arch.UpstreamResolutions)
+	renderArchHarnessProfiles(&b, arch.HarnessProfiles)
 	renderArchTestSurface(&b, arch.TestSurface)
 
 	return b.String()
@@ -154,7 +154,7 @@ func renderArchUpstreamResolutions(b *strings.Builder, ur []workflow.UpstreamRes
 		return
 	}
 	b.WriteString("## Upstream resolutions\n\n")
-	b.WriteString("Every external library, API, or framework the implementation depends on. The architect classifies each one's role and (for service-style integrations) declares the test-harness contract.\n\n")
+	b.WriteString("Every external library, API, or framework the implementation depends on. The architect classifies each one's role; service-style integrations are covered by catalog-backed harness profiles.\n\n")
 	for _, r := range ur {
 		b.WriteString(fmt.Sprintf("### %s\n\n", r.Name))
 		b.WriteString(fmt.Sprintf("- **Coordinate:** `%s`\n", r.Coordinate))
@@ -163,10 +163,6 @@ func renderArchUpstreamResolutions(b *strings.Builder, ur []workflow.UpstreamRes
 		}
 		if r.SourceRef != "" {
 			b.WriteString(fmt.Sprintf("- **Source ref:** %s\n", r.SourceRef))
-		}
-		if r.TestHarness != nil {
-			b.WriteString(fmt.Sprintf("- **Test harness:** `%s` against image `%s` on `%s`\n",
-				r.TestHarness.Library, r.TestHarness.Image, r.TestHarness.AccessMethod))
 		}
 		if len(r.UsedBy) > 0 {
 			b.WriteString(fmt.Sprintf("- **Used by:** %s\n", strings.Join(r.UsedBy, ", ")))
@@ -196,6 +192,29 @@ func renderArchUpstreamResolutions(b *strings.Builder, ur []workflow.UpstreamRes
 		}
 		b.WriteString("\n")
 	}
+}
+
+func renderArchHarnessProfiles(b *strings.Builder, profiles []workflow.HarnessProfileSelection) {
+	b.WriteString("## Harness profiles\n\n")
+	if len(profiles) == 0 {
+		b.WriteString("*None selected — no catalog-backed integration harness needed for this architecture.*\n\n")
+		return
+	}
+	b.WriteString("| Profile ID | Used by | Purpose | Covers |\n")
+	b.WriteString("|---|---|---|---|\n")
+	for _, p := range profiles {
+		usedBy := "—"
+		if len(p.UsedBy) > 0 {
+			usedBy = strings.Join(p.UsedBy, ", ")
+		}
+		covers := "—"
+		if len(p.Covers) > 0 {
+			covers = strings.Join(p.Covers, ", ")
+		}
+		b.WriteString(fmt.Sprintf("| `%s` | %s | %s | %s |\n",
+			escapePipe(p.ProfileID), escapePipe(usedBy), escapePipe(p.Purpose), escapePipe(covers)))
+	}
+	b.WriteString("\n")
 }
 
 func renderArchTestSurface(b *strings.Builder, ts *workflow.TestSurface) {

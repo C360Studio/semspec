@@ -8,86 +8,72 @@ import (
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
-// CheckTestcontainersDiscipline scans modified test files for evidence
-// that the architect's declared integration_targets are exercised via
-// Testcontainers. For each upstream_resolutions entry with
-// role=="integration_target", at least one modified test file in this
-// validation run must reference BOTH:
-//   - The Testcontainers binding for the project's language (e.g.,
-//     "org.testcontainers" for testcontainers-java).
-//   - The architect's declared image coordinate as a substring (so a
-//     fabricated stub image cannot satisfy the check — the agent must
-//     use the real coordinate).
-//
-// Closes the take-19 / take-29 stub-JAR fabrication shape on the dev
-// side: the architect declared an integration_target (criterion 7a),
-// the reviewer enforced TestHarness completeness (criterion 7b), and
-// now the dev must actually exercise that target via Testcontainers
-// or the scenario fails structural validation.
+// CheckHarnessProfileDiscipline scans modified test files for evidence that
+// selected required harness profiles are actually exercised. The architect
+// selects catalog profile IDs; the catalog owns the strings that must appear in
+// tests (profile ID, image/port/assertion anchors, etc.).
 //
 // No-op cases (pass without enforcement):
-//   - No integration_targets declared (greenfield / runtime_dep-only).
+//   - No harness profiles selected (greenfield / runtime_dep-only).
 //   - filesModified contains no test files (non-test scenarios;
 //     integration coverage is verified by other scenarios that DO
 //     produce tests).
 //
-// Advisory (Required: false) initially so real-world hit rates can be
-// measured before promoting to hard reject. Pair with criterion 7b
-// in plan-reviewer.
-func CheckTestcontainersDiscipline(workDir string, filesModified []string, integrationTargets []workflow.UpstreamResolution) payloads.CheckResult {
-	if len(integrationTargets) == 0 {
-		return passResult("no integration_targets declared — nothing to enforce")
+// Unknown profile IDs and missing required-profile evidence are hard failures.
+func CheckHarnessProfileDiscipline(workDir string, filesModified []string, selections []workflow.HarnessProfileSelection, catalog *harnesscatalog.Catalog) payloads.CheckResult {
+	if len(selections) == 0 {
+		return passHarnessResult("no harness profiles selected — nothing to enforce")
+	}
+	required, err := catalog.RequiredProfiles(selections)
+	if err != nil {
+		return failHarnessResult(err.Error())
+	}
+	if len(required) == 0 {
+		return passHarnessResult("no required harness profiles selected — compatibility/heavy profiles are advisory")
 	}
 
 	testFiles := filterTestFiles(filesModified)
 	if len(testFiles) == 0 {
-		return passResult("no test files in this scenario — integration coverage deferred to other scenarios")
+		return passHarnessResult("no test files in this scenario — integration coverage deferred to other scenarios")
 	}
 
 	contents := loadTestContents(workDir, testFiles)
 
 	var violations []string
-	for _, t := range integrationTargets {
-		if t.TestHarness == nil {
-			// Reviewer criterion 7b catches this — defensive skip here so we
-			// don't double-report the same defect.
-			continue
-		}
-		bindingFound := containsAny(contents, libraryToImportNeedle(t.TestHarness.Library))
-		imageFound := containsAny(contents, t.TestHarness.Image)
-
-		if !bindingFound || !imageFound {
-			violations = append(violations, formatTcViolation(t, bindingFound, imageFound))
+	for _, r := range required {
+		missing := missingEvidenceAnchors(contents, r.Profile.EvidenceAnchors)
+		if len(missing) > 0 {
+			violations = append(violations, formatHarnessViolation(r, missing))
 		}
 	}
 
 	if len(violations) == 0 {
 		return payloads.CheckResult{
-			Name:     "testcontainers-discipline",
+			Name:     "harness-profile-discipline",
 			Passed:   true,
-			Required: false,
-			Command:  "testcontainers-discipline (internal)",
-			Stdout:   fmt.Sprintf("integration_targets covered in modified tests: %d", len(integrationTargets)),
+			Required: true,
+			Command:  "harness-profile-discipline (internal)",
+			Stdout:   fmt.Sprintf("required harness profiles covered in modified tests: %d", len(required)),
 		}
 	}
 
 	return payloads.CheckResult{
-		Name:     "testcontainers-discipline",
+		Name:     "harness-profile-discipline",
 		Passed:   false,
-		Required: false,
-		Command:  "testcontainers-discipline (internal)",
+		Required: true,
+		Command:  "harness-profile-discipline (internal)",
 		Stdout:   strings.Join(violations, "\n"),
 	}
 }
 
-// loadIntegrationTargets reads the plan.json for the given slug and
-// returns the architect's role=="integration_target" resolutions.
-// Returns nil when the plan, architecture, or resolutions are absent
-// (greenfield project, pre-architecture phase, runtime_dep-only).
-func loadIntegrationTargets(repoPath, slug string) []workflow.UpstreamResolution {
+// loadHarnessProfiles reads the plan.json for the given slug and returns the
+// architect-selected harness profiles. Returns nil when the plan or architecture
+// is absent.
+func loadHarnessProfiles(repoPath, slug string) []workflow.HarnessProfileSelection {
 	if repoPath == "" || slug == "" {
 		return nil
 	}
@@ -103,13 +89,7 @@ func loadIntegrationTargets(repoPath, slug string) []workflow.UpstreamResolution
 	if plan.Architecture == nil {
 		return nil
 	}
-	var targets []workflow.UpstreamResolution
-	for _, r := range plan.Architecture.UpstreamResolutions {
-		if r.Role == "integration_target" {
-			targets = append(targets, r)
-		}
-	}
-	return targets
+	return plan.Architecture.HarnessProfiles
 }
 
 // filterTestFiles returns the subset of files whose names match common
@@ -176,37 +156,6 @@ func loadTestContents(workDir string, testFiles []string) []string {
 	return contents
 }
 
-// libraryToImportNeedle maps a TestHarness.Library value to the
-// substring an import statement would contain for that binding.
-// Conservative: prefers the unique fragment that identifies the
-// binding without over-constraining the syntactic shape.
-func libraryToImportNeedle(lib string) string {
-	switch lib {
-	case "testcontainers-java":
-		// import org.testcontainers.{containers,...}
-		return "org.testcontainers"
-	case "testcontainers-go":
-		// "github.com/testcontainers/testcontainers-go" or "/modules/<x>"
-		return "testcontainers-go"
-	case "testcontainers-python":
-		// from testcontainers.<modules> import ...
-		return "testcontainers"
-	case "testcontainers-node":
-		// import { GenericContainer } from "testcontainers"
-		return "testcontainers"
-	case "testcontainers-dotnet":
-		// using Testcontainers.Containers;
-		return "Testcontainers"
-	case "testcontainers-rust":
-		// use testcontainers::Container;
-		return "testcontainers"
-	default:
-		// Best-effort fallback for novel bindings.
-		return lib
-	}
-}
-
-// containsAny returns true when ANY content blob contains the needle.
 func containsAny(contents []string, needle string) bool {
 	if needle == "" {
 		return false
@@ -219,29 +168,45 @@ func containsAny(contents []string, needle string) bool {
 	return false
 }
 
-// formatTcViolation builds a directive-shape violation message
-// identifying what the dev's tests must reference to satisfy the
-// integration_target.
-func formatTcViolation(t workflow.UpstreamResolution, bindingFound, imageFound bool) string {
+func missingEvidenceAnchors(contents []string, anchors []string) []string {
 	var missing []string
-	if !bindingFound {
-		missing = append(missing, fmt.Sprintf("Testcontainers binding (substring %q from library=%q)",
-			libraryToImportNeedle(t.TestHarness.Library), t.TestHarness.Library))
+	for _, anchor := range anchors {
+		if !containsAny(contents, anchor) {
+			missing = append(missing, anchor)
+		}
 	}
-	if !imageFound {
-		missing = append(missing, fmt.Sprintf("image coordinate %q", t.TestHarness.Image))
-	}
-	return fmt.Sprintf("integration_target %q has TestHarness but no modified test file references %s",
-		t.Name, strings.Join(missing, " and "))
+	return missing
 }
 
-// passResult is a tiny helper to keep the no-op pass branches readable.
-func passResult(stdout string) payloads.CheckResult {
+func formatHarnessViolation(r harnesscatalog.ResolvedSelection, missing []string) string {
+	return fmt.Sprintf("required harness profile %q is selected but no modified test file contains required evidence anchors: %s",
+		r.Profile.ID, strings.Join(quoteStrings(missing), ", "))
+}
+
+func quoteStrings(vals []string) []string {
+	out := make([]string, 0, len(vals))
+	for _, v := range vals {
+		out = append(out, fmt.Sprintf("%q", v))
+	}
+	return out
+}
+
+func passHarnessResult(stdout string) payloads.CheckResult {
 	return payloads.CheckResult{
-		Name:     "testcontainers-discipline",
+		Name:     "harness-profile-discipline",
 		Passed:   true,
-		Required: false,
-		Command:  "testcontainers-discipline (internal)",
+		Required: true,
+		Command:  "harness-profile-discipline (internal)",
+		Stdout:   stdout,
+	}
+}
+
+func failHarnessResult(stdout string) payloads.CheckResult {
+	return payloads.CheckResult{
+		Name:     "harness-profile-discipline",
+		Passed:   false,
+		Required: true,
+		Command:  "harness-profile-discipline (internal)",
 		Stdout:   stdout,
 	}
 }
