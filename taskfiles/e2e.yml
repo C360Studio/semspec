@@ -499,7 +499,12 @@ tasks:
       # real capability test. WITH_EPIC=1 mounts /sources/ as an optional
       # speedup for runs that want cached upstream artifacts instead.
       FIXTURE_DIR:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
+        sh: |
+          case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
+            hard) echo 'osh-driver-meshtastic' ;;
+            mavlink-decode) echo 'mavlink-heartbeat-go' ;;
+            *) echo 'go-project' ;;
+          esac
       EPIC_OVERLAY:
         sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
       EPIC_ON:
@@ -587,7 +592,12 @@ tasks:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
       E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
       FIXTURE_DIR:
-        sh: if [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo 'osh-driver-meshtastic'; else echo 'go-project'; fi
+        sh: |
+          case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
+            hard) echo 'osh-driver-meshtastic' ;;
+            mavlink-decode) echo 'mavlink-heartbeat-go' ;;
+            *) echo 'go-project' ;;
+          esac
       # Epic overlay (e2e-epic.yml) is opt-in via WITH_EPIC=1 — default OFF.
       # The fixture is self-contained (no /sources/ refs), so the agent's
       # default behaviour is to discover upstream coordinates via web_search
@@ -748,11 +758,37 @@ tasks:
             --nats nats://localhost:4223 \
             --nats-monitor http://localhost:8223 || echo "[WATCH:LLM] bundle capture failed (continuing)"
         ignore_error: true
+      # Snapshot the sandbox workspace before the cleanup defer tears it down.
+      # Without this, the agent's generated source code dies with the
+      # container — the bundle preserves trajectories + KV state but the
+      # WORKING TREE the agent produced is gone. Recovering files from
+      # trajectory heredocs is a fragile ~30-line script that misses any
+      # writes done by tools other than `cat << EOF`. `docker cp` keeps the
+      # actual on-disk artifacts for post-mortem inspection regardless of
+      # how they got there. ~5MB for hello-world, scales with project size.
+      # Caught 2026-05-28 mavlink-decode run where we needed to reconstruct
+      # main.go from heredoc tool args after the stack was already gone.
+      - cmd: |
+          echo "[WATCH:LLM] Snapshotting sandbox workspace..."
+          # docker cp exits non-zero if the container is gone (e.g., failed
+          # before sandbox came up). Drop the failure to stderr quietly and
+          # remove the empty/partial tarball so the run-summary skips it.
+          if docker cp ui-sandbox-1:/workspace - 2>/dev/null | gzip > {{.OUT_DIR}}/workspace.tar.gz; then
+            echo "[WATCH:LLM] workspace -> {{.OUT_DIR}}/workspace.tar.gz"
+          else
+            rm -f {{.OUT_DIR}}/workspace.tar.gz
+            echo "[WATCH:LLM] sandbox container not available — workspace snapshot skipped"
+          fi
+        ignore_error: true
       - cmd: |
           echo ""
           echo "[WATCH:LLM] Run summary:"
           echo "  watch log:    {{.OUT_DIR}}/watch.log"
           echo "  final bundle: {{.OUT_DIR}}/bundle.tar.gz"
+          if [ -f {{.OUT_DIR}}/workspace.tar.gz ]; then
+            WSIZE=$(du -h {{.OUT_DIR}}/workspace.tar.gz 2>/dev/null | cut -f1)
+            echo "  workspace:    {{.OUT_DIR}}/workspace.tar.gz (${WSIZE})"
+          fi
           SNAPSHOTS=$(ls -1 {{.OUT_DIR}}/snapshot-*.tar.gz 2>/dev/null | wc -l | tr -d ' ')
           if [ "${SNAPSHOTS}" != "0" ]; then
             LATEST=$(ls -1 {{.OUT_DIR}}/snapshot-*.tar.gz 2>/dev/null | tail -1)
@@ -772,6 +808,12 @@ tasks:
             echo ""
             echo "[WATCH:LLM] First few alerts:"
             grep '^ALERT:' {{.OUT_DIR}}/watch.log | head -5 | sed 's/^/  /'
+          fi
+          if [ -z "$DEBUG" ]; then
+            echo ""
+            echo "[WATCH:LLM] Tip: rerun with DEBUG=1 to keep the stack alive after the test"
+            echo "            for live inspection (docker exec, curl localhost:3000, etc.)."
+            echo "            Tear down manually with: task e2e:ui:down"
           fi
           echo ""
         ignore_error: true
