@@ -14,6 +14,7 @@ import (
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -54,6 +55,15 @@ type Component struct {
 	startTime time.Time
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
+
+	// recoveryPublisher is the seam tests use to intercept RecoveryRequested
+	// publishes without needing a real natsClient. Nil means "use the real
+	// publishRecoveryRequested method." Production code never sets this; tests
+	// install a stub that captures the payload for assertion. Closes the
+	// pre-existing coverage gap surfaced 2026-05-28 — without this seam there
+	// is no way to assert publishRecoveryRequested actually fires at the
+	// revision-cap / iteration-exhaustion / QA-rejection trigger points.
+	recoveryPublisher func(ctx context.Context, req *payloads.RecoveryRequested)
 }
 
 // loadPlanCached loads a plan from the store (cache → KV → graph fallback).

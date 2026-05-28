@@ -656,7 +656,7 @@ func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *w
 		"iteration", plan.ReviewIteration,
 		"max", maxIterations)
 
-	c.publishRecoveryRequested(ctx, &payloads.RecoveryRequested{
+	c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
 		RecoveryID:          uuid.New().String(),
 		Layer:               payloads.RecoveryLayerPhaseLocal,
 		Slug:                req.Slug,
@@ -666,6 +666,20 @@ func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *w
 	})
 
 	return MutationResponse{Success: true}
+}
+
+// emitRecoveryRequested is the test-friendly entry point. In production it
+// delegates to publishRecoveryRequested; in tests c.recoveryPublisher is set
+// to a capturing stub so assertions can verify the wire fires at every
+// trigger site. The seam closes the pre-existing coverage gap: before this
+// indirection, escalation tests asserted plan-state changes but had no way
+// to verify the RecoveryRequested NATS publish actually happened.
+func (c *Component) emitRecoveryRequested(ctx context.Context, req *payloads.RecoveryRequested) {
+	if c.recoveryPublisher != nil {
+		c.recoveryPublisher(ctx, req)
+		return
+	}
+	c.publishRecoveryRequested(ctx, req)
 }
 
 // publishRecoveryRequested fires an ADR-037 stage-1 phase-local recovery
@@ -988,6 +1002,29 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan after QA verdict", "slug", req.Slug, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	// Fire phase-local recovery for non-approved verdicts. Mirrors the
+	// revision-cap-exhaustion path at handleRevisionEscalationMutation —
+	// every other wedge-shaped state transition published RecoveryRequested
+	// except this one until 2026-05-28 (verified on the gemini mavlink-
+	// decode run where qa-reviewer correctly diagnosed flaky time.Sleep
+	// timing but the plan terminated at rejected with no retry).
+	//
+	// EscalationReason carries the verdict kind so recovery-agent's prompt
+	// can distinguish "the tests failed and we should try again" from
+	// "the plan is structurally unsalvageable." LastFailureFeedback carries
+	// the qa-reviewer's actionable summary so the recovery agent sees the
+	// concrete diagnosis (e.g., "replace time.Sleep with active polling").
+	if req.Verdict == workflow.QAVerdictNeedsChanges || req.Verdict == workflow.QAVerdictRejected {
+		c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
+			RecoveryID:          uuid.New().String(),
+			Layer:               payloads.RecoveryLayerPhaseLocal,
+			Slug:                req.Slug,
+			EscalationReason:    fmt.Sprintf("QA verdict %s at level %s", req.Verdict, req.Level),
+			LastFailureFeedback: req.Summary,
+			TraceID:             req.TraceID,
+		})
 	}
 
 	return MutationResponse{Success: true}

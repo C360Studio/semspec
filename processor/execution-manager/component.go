@@ -178,6 +178,15 @@ type Component struct {
 	errors              atomic.Int64
 	lastActivityMu      sync.RWMutex
 	lastActivity        time.Time
+
+	// recoveryPublisher is the seam tests use to intercept RecoveryRequested
+	// publishes without needing a real natsClient. Nil means "use the real
+	// publishRecoveryRequested method." Production code never sets this; tests
+	// install a stub that captures the payload for assertion. Closes the
+	// pre-existing coverage gap surfaced 2026-05-28 — the iteration-exhaustion
+	// trigger at markEscalatedLocked had no unit-level proof that the publish
+	// actually happens with the expected payload shape.
+	recoveryPublisher func(ctx context.Context, req *payloads.RecoveryRequested)
 }
 
 // NewComponent creates a new execution-orchestrator from raw JSON config.
@@ -1295,9 +1304,17 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 		"tdd_cycle", exec.TDDCycle,
 		"reason", reason,
 	)
-	trajectory.LogSummary(ctx, c.logger, c.natsClient, exec.DeveloperLoopID, "tdd-escalated", 0)
+	// trajectory.LogSummary requires a real natsClient — guard against the
+	// typed-nil interface case (a nil *natsclient.Client wrapped in a non-nil
+	// Requester interface, where Fetch's `client == nil` check returns false
+	// and Request panics on the unset client). Mirrors the nil-guard inside
+	// publishRecoveryRequested. Surfaced 2026-05-28 during recovery-publish
+	// test authoring.
+	if c.natsClient != nil {
+		trajectory.LogSummary(ctx, c.logger, c.natsClient, exec.DeveloperLoopID, "tdd-escalated", 0)
+	}
 
-	c.publishRecoveryRequested(ctx, &payloads.RecoveryRequested{
+	c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
 		RecoveryID:          uuid.New().String(),
 		Layer:               payloads.RecoveryLayerPhaseLocal,
 		Slug:                exec.Slug,
@@ -1313,6 +1330,18 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseEscalated).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
+}
+
+// emitRecoveryRequested is the test-friendly entry point. In production it
+// delegates to publishRecoveryRequested; in tests c.recoveryPublisher is set
+// to a capturing stub so assertions can verify the wire fires at the
+// iteration-exhaustion trigger site (markEscalatedLocked).
+func (c *Component) emitRecoveryRequested(ctx context.Context, req *payloads.RecoveryRequested) {
+	if c.recoveryPublisher != nil {
+		c.recoveryPublisher(ctx, req)
+		return
+	}
+	c.publishRecoveryRequested(ctx, req)
 }
 
 // publishRecoveryRequested fires an ADR-037 stage-1 phase-local recovery
