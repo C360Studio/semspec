@@ -30,6 +30,20 @@ const (
 	TierHeavy = "heavy"
 )
 
+const (
+	// OrchestrationServices profiles declare an invariant integration stack the
+	// qa-runner renders into qa.yml services from images/ports/env/readiness.
+	OrchestrationServices = "services"
+	// OrchestrationTestcontainers profiles need per-test or dynamic stack
+	// orchestration the dev agent expresses with testcontainers-go (or an
+	// equivalent in-test fixture). The qa renderer emits no services for these.
+	OrchestrationTestcontainers = "testcontainers"
+	// OrchestrationPureFixture profiles need no container — captured frames,
+	// in-process peers, or pure-unit fixtures. The qa renderer emits no
+	// services for these.
+	OrchestrationPureFixture = "pure-fixture"
+)
+
 // Catalog is the merged set of built-in and workspace harness profiles.
 type Catalog struct {
 	Profiles map[string]Profile
@@ -53,6 +67,23 @@ type Profile struct {
 	Env                map[string]string   `yaml:"env" json:"env,omitempty"`
 	Readiness          []string            `yaml:"readiness" json:"readiness,omitempty"`
 	TestGuidance       []string            `yaml:"test_guidance" json:"test_guidance,omitempty"`
+	// Orchestration declares how the qa-runner brings up this profile's
+	// integration stack. Empty defaults to OrchestrationServices when Images
+	// is non-empty and OrchestrationPureFixture otherwise; callers should read
+	// EffectiveOrchestration() rather than this raw field.
+	Orchestration string `yaml:"orchestration" json:"orchestration,omitempty"`
+}
+
+// EffectiveOrchestration returns Orchestration if set, otherwise the inferred
+// default: services when the profile declares images, pure-fixture otherwise.
+func (p Profile) EffectiveOrchestration() string {
+	if o := strings.TrimSpace(p.Orchestration); o != "" {
+		return o
+	}
+	if len(p.Images) > 0 {
+		return OrchestrationServices
+	}
+	return OrchestrationPureFixture
 }
 
 // ImageRef is a container image a profile expects tests to start.
@@ -258,6 +289,10 @@ func validateProfile(p Profile) error {
 		return fmt.Errorf("profile %q cost is required", p.ID)
 	case !validTier(p.Tier):
 		return fmt.Errorf("profile %q has malformed tier %q", p.ID, p.Tier)
+	case !validOrchestration(p.Orchestration):
+		return fmt.Errorf("profile %q has malformed orchestration %q", p.ID, p.Orchestration)
+	case p.Orchestration == OrchestrationServices && len(p.Images) == 0:
+		return fmt.Errorf("profile %q orchestration is services but images is empty", p.ID)
 	case len(p.Proves) == 0:
 		return fmt.Errorf("profile %q proves is required", p.ID)
 	case len(p.Covers) == 0:
@@ -323,6 +358,17 @@ func validateNonEmptyList(profileID, field string, vals []string) error {
 func validTier(tier string) bool {
 	switch tier {
 	case TierRequired, TierCompatibility, TierHeavy:
+		return true
+	default:
+		return false
+	}
+}
+
+// validOrchestration accepts the empty string (caller falls back to inference)
+// or any of the declared orchestration constants.
+func validOrchestration(o string) bool {
+	switch strings.TrimSpace(o) {
+	case "", OrchestrationServices, OrchestrationTestcontainers, OrchestrationPureFixture:
 		return true
 	default:
 		return false

@@ -3,6 +3,7 @@ profiles:
     domain: mavlink
     tier: required
     summary: PX4 SITL smoke profile for MAVSDK-backed control and telemetry tests.
+    orchestration: services
     proves:
       - MAVSDK can connect to a real MAVLink-speaking autopilot.
       - Command/control plugins can perform health-gated actions against SITL.
@@ -25,12 +26,12 @@ profiles:
         - failure
     runner_support:
       - local-docker
-      - github-actions-via-testcontainers
+      - github-actions
       - act
     cost: medium
     constraints:
-      - Start SITL inside project tests with Testcontainers or an equivalent test fixture.
-      - Do not add GitHub Actions services; qa.yml remains generic.
+      - qa-runner brings up px4io/px4-sitl as a qa.yml service from this profile; tests connect to mavlink-udp at the rendered host port.
+      - Tests must not start their own SITL container — the rendered service is authoritative for this profile.
       - Gate control assertions on MAVSDK health/connection state before issuing commands.
     required_assertions:
       - Observe a MAVLink heartbeat from the SITL target.
@@ -56,13 +57,14 @@ profiles:
       - Wait for MAVLink HEARTBEAT frames on UDP 14540.
       - Wait for MAVSDK connection state to become connected.
     test_guidance:
-      - Keep SITL startup inside test code so qa-runner and GitHub Actions stay portable.
+      - Read the SITL endpoint from the env/host the qa-runner injects rather than hard-coding localhost or a fixed port.
       - Record the profile ID near the integration test setup so structural validation can bind evidence to the catalog entry.
 
   - id: mavlink.ardupilot-sitl.compat
     domain: mavlink
     tier: compatibility
     summary: ArduPilot SITL compatibility profile for MAVLink dialect and autopilot variance.
+    orchestration: services
     proves:
       - Driver logic is not hard-coded to PX4-only MAVLink behavior.
       - Telemetry parsing tolerates ArduPilot heartbeat/autopilot metadata.
@@ -74,12 +76,12 @@ profiles:
         - common
     runner_support:
       - local-docker
-      - github-actions-via-testcontainers
+      - github-actions
       - act
     cost: medium
     constraints:
+      - qa-runner brings up ardupilot/ardupilot as a qa.yml service from this profile; tests connect to the rendered endpoint.
       - Run as an optional compatibility suite unless the architecture explicitly depends on ArduPilot behavior.
-      - Keep the fixture in project tests, not in qa.yml services.
     required_assertions:
       - Observe an ArduPilot MAVLink heartbeat.
       - Verify at least one telemetry stream parses without PX4-specific assumptions.
@@ -105,6 +107,7 @@ profiles:
     domain: mavlink
     tier: compatibility
     summary: Raw MAVLink direct-wire profile for message encode/decode and fallback coverage.
+    orchestration: pure-fixture
     proves:
       - The implementation can handle MAVLink messages without depending exclusively on MAVSDK plugin abstractions.
       - Low-level command, heartbeat, and telemetry frames round-trip through the parser/serializer.
@@ -119,13 +122,13 @@ profiles:
         - SYS_STATUS
     runner_support:
       - local-docker
-      - github-actions-via-testcontainers
+      - github-actions
       - act
       - pure-unit-fixture
     cost: low
     constraints:
-      - Prefer captured frames or a small in-process MAVLink peer for pure parser tests.
-      - Use a SITL-backed peer when proving behavior that depends on autopilot state.
+      - qa-runner renders no services for this profile; the test fixture owns the MAVLink peer (captured frames or an in-process peer).
+      - If a test needs a live SITL peer for autopilot-state-dependent behavior, select a services-orchestrated profile instead of widening this one.
     required_assertions:
       - Decode HEARTBEAT from a real or captured MAVLink frame.
       - Round-trip at least one command frame and assert the expected ACK or parser result.
@@ -136,7 +139,7 @@ profiles:
       - MAVLink
     readiness:
       - In-process fixtures are ready after the peer binds.
-      - SITL-backed fixtures wait for HEARTBEAT before assertions.
+      - Captured-frame fixtures need no readiness signal.
     test_guidance:
       - Select this when the task claims native MAVLink coverage beyond MAVSDK plugin calls.
 
@@ -144,6 +147,7 @@ profiles:
     domain: mavlink
     tier: heavy
     summary: PX4 plus simulator peripherals profile for camera, gimbal, and richer sensor streams.
+    orchestration: services
     proves:
       - Peripheral-heavy plugins behave with simulator-backed camera/gimbal/sensor traffic.
       - Higher-cost data streams can be exercised without changing qa-runner orchestration.
@@ -161,6 +165,7 @@ profiles:
       - dedicated-ci-runner
     cost: high
     constraints:
+      - qa-runner brings up px4io/px4-sitl with peripheral support as a qa.yml service from this profile.
       - Requires substantially more CPU/GPU and wall-clock than the default smoke profile.
       - Do not require this profile by default for ordinary MAVLink driver work.
     required_assertions:

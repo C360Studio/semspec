@@ -1144,6 +1144,7 @@ func resolvedHarnessProfilesToPrompt(resolved []harnesscatalog.ResolvedSelection
 		out = append(out, prompt.ResolvedHarnessProfileContext{
 			ProfileID:          p.ID,
 			Tier:               p.Tier,
+			Orchestration:      p.EffectiveOrchestration(),
 			UsedBy:             append([]string(nil), r.Selection.UsedBy...),
 			Purpose:            r.Selection.Purpose,
 			Covers:             append([]string(nil), r.Selection.Covers...),
