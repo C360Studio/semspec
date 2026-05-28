@@ -704,6 +704,14 @@ type ArchitectureDocument struct {
 	// lib named has a paired resolution" lands in a follow-up commit so
 	// architect adoption can be measured before enforcement gates plans.
 	UpstreamResolutions []UpstreamResolution `json:"upstream_resolutions,omitempty"`
+
+	// HarnessProfiles records the system-owned test harness catalog profiles
+	// the architect selected for this architecture. The architect chooses
+	// profile IDs and states intent; the catalog owns images, ports, readiness,
+	// evidence anchors, and runner compatibility. Developers resolve selected
+	// profiles from the catalog when authoring tests, and validators enforce
+	// required profile evidence in modified test files.
+	HarnessProfiles []HarnessProfileSelection `json:"harness_profiles,omitempty"`
 }
 
 // TestSurface describes the test coverage implied by an ArchitectureDocument.
@@ -782,6 +790,28 @@ type IntegrationPoint struct {
 	ErrorMode string `json:"error_mode,omitempty"` // what happens on failure
 }
 
+// HarnessProfileSelection is the architect's selection of a system-owned test
+// harness profile. The profile_id resolves through workflow/harnesscatalog;
+// the architect must not author images, ports, env vars, startup order, or
+// readiness probes inline in the architecture document.
+type HarnessProfileSelection struct {
+	// ProfileID is the stable catalog identifier, for example
+	// "mavlink.px4-sitl.mavsdk-smoke".
+	ProfileID string `json:"profile_id"`
+
+	// UsedBy names component_boundaries entries whose implementation or tests
+	// should use this harness profile.
+	UsedBy []string `json:"used_by,omitempty"`
+
+	// Purpose is the architect's task-specific reason for selecting the
+	// profile, written for downstream decomposer/developer context.
+	Purpose string `json:"purpose"`
+
+	// Covers optionally names the integration targets, protocol facets, plugin
+	// groups, or scenarios this selection covers.
+	Covers []string `json:"covers,omitempty"`
+}
+
 // UpstreamResolution is the architect's structural record of a single
 // external dependency the project integrates with. Coordinate is the
 // machine-resolvable identifier (Maven `groupId:artifactId:version`,
@@ -842,66 +872,17 @@ type UpstreamResolution struct {
 	//     stubs, codegen). No test-harness obligation.
 	//   - "runtime_dep": linked and called in-process. Library or
 	//     framework whose API is exercised directly in unit tests; no
-	//     Testcontainers needed.
+	//     catalog harness profile needed.
 	//   - "integration_target": a separate process the dev's code talks
-	//     to over a wire protocol (daemon, broker, database). REQUIRES
-	//     a non-nil TestHarness so the dev's integration tests spawn a
-	//     real container via Testcontainers and exercise the real wire
-	//     format — closes the take-19/take-29 stub-JAR fabrication
-	//     pattern at the TDD-loop layer rather than at the QA gate.
+	//     to over a wire protocol (daemon, broker, database). Requires at
+	//     least one selected ArchitectureDocument.HarnessProfiles entry whose
+	//     catalog profile covers the integration. The catalog, not this
+	//     upstream entry, owns runner topology and evidence anchors.
 	//
 	// Empty string is treated as "runtime_dep" (the most common case).
-	// Added 2026-05-15 alongside the Testcontainers-led integration
-	// tier — see [[testcontainers-led-integration-tier]].
+	// Added 2026-05-15 alongside the integration-target discipline and
+	// migrated to catalog-backed harness profiles in 2026-05.
 	Role string `json:"role,omitempty"`
-
-	// TestHarness describes how the dev's integration tests reach a
-	// service-style upstream dep. REQUIRED when Role ==
-	// "integration_target" and IGNORED otherwise. Reviewer cross-checks
-	// this — declared integration_target with nil TestHarness is the
-	// canonical incomplete shape.
-	TestHarness *TestHarness `json:"test_harness,omitempty"`
-}
-
-// TestHarness describes how the dev's integration tests reach a
-// service-style upstream dep at test time. Populated on every
-// UpstreamResolution whose Role == "integration_target"; nil otherwise.
-//
-// Goodhart resistance: Image is a coordinate the docker daemon pulls at
-// test time. If the agent fabricates a non-existent image,
-// Testcontainers.start() fails and the test goes red immediately —
-// the dev cannot silently substitute a stub the way they could with a
-// fabricated JAR in a local-maven-repo flat-dir.
-//
-// Added 2026-05-15 alongside the Testcontainers-led integration tier.
-type TestHarness struct {
-	// Library is the Testcontainers binding the dev imports.
-	// Pick the binding that matches the project's test stack:
-	//   - "testcontainers-java": Maven/Gradle JVM projects.
-	//   - "testcontainers-go": Go projects.
-	//   - "testcontainers-python": pytest/unittest.
-	//   - "testcontainers-node": vitest/jest.
-	//   - "testcontainers-dotnet": NUnit/xUnit/MSTest.
-	//   - "testcontainers-rust": cargo test.
-	Library string `json:"library"`
-
-	// Image is the public container image coordinate Testcontainers
-	// spawns. Format "repo/name:tag" or "library/name:tag" for Docker
-	// Hub. Architect cites this from the upstream project's docs
-	// (web_search for "{project} docker image" or the project's
-	// docker-compose example).
-	//
-	// Examples: "meshtastic/meshtasticd:latest", "redis:7-alpine",
-	// "postgres:16-alpine", "confluentinc/cp-kafka:7.5.0".
-	Image string `json:"image"`
-
-	// AccessMethod tells the dev how their code reaches the spawned
-	// container. Format "<protocol>:<port>" — Testcontainers exposes
-	// the port on a host-mapped random port; the dev calls
-	// GetMappedPort(<port>) at test time.
-	//
-	// Examples: "tcp:4403", "http:8080", "grpc:9000", "amqp:5672".
-	AccessMethod string `json:"access_method"`
 }
 
 // APISurface is a single resolved external symbol — a class, method,

@@ -7,7 +7,7 @@ All times UTC. Total wallclock: ~78 minutes from `plan created` to `9/9 pass`.
 | 00:00 | Plan created | Goal accepted: "Design and implement a Meshtastic driver for OSH..." |
 | 00:00:15 | Plan review approved | Plan body (goal, context, scope) validated |
 | 00:01:00 | Requirements generated | 6 requirements partitioned the work across the driver |
-| 00:04:00 | Architecture generated | Deliverable populated. Architect ran `curl` against Docker Hub to verify meshtasticd image existed (3,341 tags returned); chose `daily-alpine`. TestHarness declared. |
+| 00:04:00 | Architecture generated | Deliverable populated. Architect ran `curl` against Docker Hub to verify meshtasticd image existed (3,341 tags returned); chose `daily-alpine`. Harness profile selected. |
 | 00:08:00 | Scenarios generated + reviewed | ~7 scenarios per requirement, reviewer passed |
 | 00:08:01 | Execution triggered | Plan transitioned to `implementing` |
 | 00:08:01 → 01:16 | Execution phase | Developer agent ran multiple TDD cycles per requirement, against real OSH source extracted from authenticated Maven |

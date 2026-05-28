@@ -41,7 +41,7 @@ const stubJarSizeThreshold = 2048
 // backstop that doesn't depend on persona compliance.
 //
 // Closes deferred item (c) from take-19 forensics. Pairs with
-// CheckTestcontainersDiscipline (item d-equivalent: reviewer test-body
+// CheckHarnessProfileDiscipline (item d-equivalent: reviewer test-body
 // mismatch) for two-layer defense.
 func CheckStubArtifacts(workDir string, filesModified []string) payloads.CheckResult {
 	jars := filterJarFiles(filesModified)

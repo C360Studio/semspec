@@ -108,7 +108,6 @@
       "name": "OpenSensorHub Core",
       "role": "runtime_dep",
       "source_ref": "https://raw.githubusercontent.com/opensensorhub/osh-core/master/common.gradle",
-      "test_harness": null,
       "used_by": [
         "driver"
       ]
@@ -128,7 +127,6 @@
       "name": "OpenSensorHub Service Consys",
       "role": "runtime_dep",
       "source_ref": "https://raw.githubusercontent.com/opensensorhub/osh-core/master/common.gradle",
-      "test_harness": null,
       "used_by": [
         "driver"
       ]
@@ -148,13 +146,23 @@
       "name": "Meshtastic Daemon",
       "role": "integration_target",
       "source_ref": "https://hub.docker.com/r/meshtastic/meshtasticd/tags",
-      "test_harness": {
-        "access_method": "tcp:4403",
-        "image": "meshtastic/meshtasticd:daily-alpine",
-        "library": "testcontainers-java"
-      },
       "used_by": [
         "driver"
+      ]
+    }
+  ],
+  "harness_profiles": [
+    {
+      "profile_id": "custom.meshtasticd.testcontainers",
+      "used_by": [
+        "driver"
+      ],
+      "purpose": "prove the OSH driver exercises a real Meshtastic daemon over TCP/protobuf",
+      "covers": [
+        "Meshtastic Daemon",
+        "TCP API",
+        "meshtastic/meshtasticd:daily-alpine",
+        "tcp:4403"
       ]
     }
   ]

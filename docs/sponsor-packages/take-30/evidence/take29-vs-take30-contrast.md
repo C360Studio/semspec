@@ -70,13 +70,13 @@ Real artifacts resolved, real classpath populated.
   the docker-compose stack into the sandbox container. With these set,
   the agent's Gradle build authenticates against GitHub Packages
   instead of receiving 401 and falling back to fabrication.
-- **`12671af`** (this session): Adds `role` + `test_harness` fields to
+- **`12671af`** (this session): Adds `role` + `harness_profiles` fields to
   the architect's deliverable schema. Forces the architect to classify
   every external dependency and declare how integration tests will
   exercise service-style upstreams.
 - **`2e5e321`, `afef4f0`, `73d82a5`** (this session): Three deterministic
   defense-in-depth detectors — plan-reviewer checks the architect's
-  TestHarness completeness; structural-validator cross-checks dev tests
+  harness profile completeness; structural-validator cross-checks dev tests
   against declared integration targets; structural-validator's stub-jar
   detector hard-rejects any JAR smaller than 2 KiB or with zero
   `.class` entries.

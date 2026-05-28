@@ -4,7 +4,7 @@ These markdown documents are **rendered from the run's captured trajectory + str
 
 ## Files
 
-- **`architecture.md`** — Technology choices, component boundaries, data flow, architectural decisions, actors, upstream resolutions with TestHarness, test surface. Generated from `../architecture/architecture-deliverable.json`.
+- **`architecture.md`** — Technology choices, component boundaries, data flow, architectural decisions, actors, upstream resolutions with catalog-backed harness profiles, test surface. Generated from `../architecture/architecture-deliverable.json`.
 - **`requirements.md`** — 3 requirements with files_owned + dependencies. Generated from `requirement-generator` role's trajectory submissions.
 - **`scenarios.md`** — 13 BDD-style scenarios (Given/When/Then). Generated from `scenario-generator` role's trajectory submissions.
 
@@ -20,4 +20,4 @@ Tracking as a follow-up; see the project task list.
 
 ## Honest framing for the sponsor
 
-The structured data exists end-to-end. The agent emits typed deliverables (TechChoice, ComponentDef, ArchDecision, UpstreamResolution, TestHarness, Requirement, Scenario, QAVerdict). What the system doesn't yet do is auto-render those into the markdown forms a human reviewer (or another agent following BMAD/OpenSpec) wants to consume. That rendering is mechanical given the captured data — the work is wiring it as a workflow-documents output at each phase transition, not generating it. The render-from-JSON script that produced these three documents is ~150 lines of Python.
+The structured data exists end-to-end. The agent emits typed deliverables (TechChoice, ComponentDef, ArchDecision, UpstreamResolution, HarnessProfileSelection, Requirement, Scenario, QAVerdict). What the system doesn't yet do is auto-render those into the markdown forms a human reviewer (or another agent following BMAD/OpenSpec) wants to consume. That rendering is mechanical given the captured data — the work is wiring it as a workflow-documents output at each phase transition, not generating it. The render-from-JSON script that produced these three documents is ~150 lines of Python.

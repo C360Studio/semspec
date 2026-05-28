@@ -36,7 +36,7 @@ func EnsureQAWorkflow(workspacePath string, projectConfig *workflow.ProjectConfi
 		return fmt.Errorf("write qa.yml: %w", err)
 	}
 	if logger != nil {
-		logger.Info("Scaffolded default QA workflow — customize at .github/workflows/qa.yml to add integration test services",
+		logger.Info("Scaffolded default QA workflow — keep catalog harness orchestration in project tests",
 			"path", workflowPath, "language", primaryLanguage(projectConfig))
 	}
 	return nil
@@ -279,9 +279,9 @@ func goQAWorkflow(pc *workflow.ProjectConfig) string {
 # qa_level=integration so the e2e job is skipped for faster feedback. At
 # qa_level=full act runs the full workflow, exercising both jobs.
 #
-# Customize by adding integration test services (databases, message brokers,
-# etc.) as GitHub Actions `+"`services:`"+` entries. See:
-# https://docs.github.com/en/actions/using-containerized-services
+# Catalog harness profiles are test-code responsibilities, not GitHub Actions
+# services: entries. Keep Testcontainers/SITL orchestration in the project test
+# suite so qa-runner, act, and GitHub-hosted runners execute the same path.
 on: [push, pull_request]
 jobs:
   integration:

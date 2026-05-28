@@ -30,6 +30,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -332,13 +333,14 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	}
 
 	archCtx := &prompt.ArchitectPromptContext{
-		Goal:           plan.Goal,
-		PlanContext:    plan.Context,
-		ScopeInclude:   plan.Scope.Include,
-		ScopeExclude:   plan.Scope.Exclude,
-		ScopeProtected: plan.Scope.DoNotTouch,
-		Requirements:   reqSummaries,
-		PreviousError:  previousError,
+		Goal:            plan.Goal,
+		PlanContext:     plan.Context,
+		ScopeInclude:    plan.Scope.Include,
+		ScopeExclude:    plan.Scope.Exclude,
+		ScopeProtected:  plan.Scope.DoNotTouch,
+		Requirements:    reqSummaries,
+		HarnessProfiles: c.harnessProfileCards(),
+		PreviousError:   previousError,
 	}
 	if len(reviewFindings) > 0 {
 		archCtx.ReviewFindings = reviewFindings[0]
@@ -451,6 +453,40 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		"model", modelName,
 		"fragments", len(assembled.FragmentsUsed),
 		"system_chars", assembled.SystemMessageChars)
+}
+
+func (c *Component) harnessProfileCards() []prompt.HarnessProfileCard {
+	catalog, err := harnesscatalog.Load("")
+	if err != nil {
+		c.logger.Warn("Failed to load harness catalog for architect prompt", "error", err)
+		return nil
+	}
+	profiles := catalog.ProfilesSorted()
+	cards := make([]prompt.HarnessProfileCard, 0, len(profiles))
+	for _, p := range profiles {
+		cards = append(cards, prompt.HarnessProfileCard{
+			ID:                 p.ID,
+			Tier:               p.Tier,
+			Proves:             append([]string(nil), p.Proves...),
+			Covers:             cloneStringMap(p.Covers),
+			RunnerSupport:      append([]string(nil), p.RunnerSupport...),
+			Cost:               p.Cost,
+			Constraints:        append([]string(nil), p.Constraints...),
+			RequiredAssertions: append([]string(nil), p.RequiredAssertions...),
+		})
+	}
+	return cards
+}
+
+func cloneStringMap(in map[string][]string) map[string][]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string][]string, len(in))
+	for k, v := range in {
+		out[k] = append([]string(nil), v...)
+	}
+	return out
 }
 
 // ---------------------------------------------------------------------------

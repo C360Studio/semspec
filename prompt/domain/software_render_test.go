@@ -374,6 +374,68 @@ func TestRenderPlanReviewerPrompt_R2IncludesUpstreamResolutionCriterion(t *testi
 	}
 }
 
+func TestRenderPlanReviewerPrompt_R2IncludesHarnessProfileCriterion(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x"}`,
+		Round:       2,
+	})
+
+	required := []string{
+		"7b.",
+		"Integration-target harness profile discipline",
+		"harness_profiles",
+		"profile_id",
+		"valid catalog profile_id",
+		"integration_target",
+	}
+	for _, want := range required {
+		if !strings.Contains(out, want) {
+			t.Errorf("R2 reviewer prompt missing %q (criterion 7b regressed?)\nFull prompt:\n%s", want, out)
+		}
+	}
+	for _, old := range []string{"test" + "_harness", "Test" + "Harness"} {
+		if strings.Contains(out, old) {
+			t.Errorf("R2 reviewer prompt still contains legacy %q\nFull prompt:\n%s", old, out)
+		}
+	}
+}
+
+func TestRenderArchitectPrompt_UsesHarnessProfileCatalogCards(t *testing.T) {
+	out := renderArchitectPrompt(&prompt.ArchitectPromptContext{
+		Goal:        "support MAVLink",
+		PlanContext: "greenfield driver",
+		HarnessProfiles: []prompt.HarnessProfileCard{
+			{
+				ID:                 "mavlink.px4-sitl.mavsdk-smoke",
+				Tier:               "required",
+				Proves:             []string{"MAVSDK connects"},
+				Covers:             map[string][]string{"mavsdk_plugins": []string{"action", "telemetry"}},
+				RunnerSupport:      []string{"act"},
+				Cost:               "medium",
+				Constraints:        []string{"keep orchestration in tests"},
+				RequiredAssertions: []string{"observe HEARTBEAT"},
+			},
+		},
+	})
+
+	required := []string{
+		"Available test harness profiles",
+		"mavlink.px4-sitl.mavsdk-smoke",
+		"Select by profile_id only",
+		"harness_profiles",
+		"do not author images, ports, env",
+	}
+	for _, want := range required {
+		if !strings.Contains(out, want) {
+			t.Errorf("architect prompt missing %q\nFull prompt:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "test"+"_harness") {
+		t.Errorf("architect prompt still contains legacy harness field\nFull prompt:\n%s", out)
+	}
+}
+
 // TestRenderPlanReviewerPrompt_PriorRoundInjectsFindings pins the take-22
 // fix: on revision rounds (ReviewIteration > 0), the reviewer must see its
 // own previous findings + iteration context. Without this the reviewer is

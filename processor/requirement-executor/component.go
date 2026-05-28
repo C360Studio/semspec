@@ -39,6 +39,7 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -1009,7 +1010,7 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		MaxTokens:         maxTokens,
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleTaskGenerator),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
-		Decomposer:        buildDecomposerPromptContext(exec, exec.DecomposerLastError),
+		Decomposer:        c.buildDecomposerPromptContext(ctx, exec, exec.DecomposerLastError),
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
@@ -1058,6 +1059,12 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 // consumes. Replaces the legacy hand-rolled buildDecomposerPrompt that
 // returned a complete string — see dispatchDecomposerLocked for the
 // wire-up rationale.
+func (c *Component) buildDecomposerPromptContext(ctx context.Context, exec *requirementExecution, previousError string) *prompt.DecomposerPromptContext {
+	pctx := buildDecomposerPromptContext(exec, previousError)
+	pctx.HarnessProfiles = c.loadPlanHarnessProfiles(ctx, exec.Slug)
+	return pctx
+}
+
 func buildDecomposerPromptContext(exec *requirementExecution, previousError string) *prompt.DecomposerPromptContext {
 	ctx := &prompt.DecomposerPromptContext{
 		RequirementTitle:       exec.Title,
@@ -1092,6 +1099,100 @@ func buildDecomposerPromptContext(exec *requirementExecution, previousError stri
 		}
 	}
 	return ctx
+}
+
+func (c *Component) loadPlanHarnessProfiles(ctx context.Context, slug string) []prompt.ResolvedHarnessProfileContext {
+	if c.natsClient == nil || slug == "" {
+		return nil
+	}
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil
+	}
+	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	if err != nil {
+		return nil
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil
+	}
+	if plan.Architecture == nil || len(plan.Architecture.HarnessProfiles) == 0 {
+		return nil
+	}
+	catalog, err := harnesscatalog.Load("")
+	if err != nil {
+		c.logger.Warn("Failed to load harness catalog for decomposer context", "slug", slug, "error", err)
+		return nil
+	}
+	resolved, err := catalog.ResolveSelections(plan.Architecture.HarnessProfiles)
+	if err != nil {
+		c.logger.Warn("Invalid harness profile selection in plan", "slug", slug, "error", err)
+		return nil
+	}
+	return resolvedHarnessProfilesToPrompt(resolved)
+}
+
+func resolvedHarnessProfilesToPrompt(resolved []harnesscatalog.ResolvedSelection) []prompt.ResolvedHarnessProfileContext {
+	out := make([]prompt.ResolvedHarnessProfileContext, 0, len(resolved))
+	for _, r := range resolved {
+		p := r.Profile
+		out = append(out, prompt.ResolvedHarnessProfileContext{
+			ProfileID:          p.ID,
+			Tier:               p.Tier,
+			UsedBy:             append([]string(nil), r.Selection.UsedBy...),
+			Purpose:            r.Selection.Purpose,
+			Covers:             append([]string(nil), r.Selection.Covers...),
+			Proves:             append([]string(nil), p.Proves...),
+			RunnerSupport:      append([]string(nil), p.RunnerSupport...),
+			Cost:               p.Cost,
+			Constraints:        append([]string(nil), p.Constraints...),
+			RequiredAssertions: append([]string(nil), p.RequiredAssertions...),
+			EvidenceAnchors:    append([]string(nil), p.EvidenceAnchors...),
+			Images:             harnessImagesToPrompt(p.Images),
+			Ports:              harnessPortsToPrompt(p.Ports),
+			Env:                cloneStringStringMap(p.Env),
+			Readiness:          append([]string(nil), p.Readiness...),
+			TestGuidance:       append([]string(nil), p.TestGuidance...),
+		})
+	}
+	return out
+}
+
+func harnessImagesToPrompt(images []harnesscatalog.ImageRef) []prompt.HarnessImageContext {
+	out := make([]prompt.HarnessImageContext, 0, len(images))
+	for _, img := range images {
+		out = append(out, prompt.HarnessImageContext{Name: img.Name, Purpose: img.Purpose})
+	}
+	return out
+}
+
+func harnessPortsToPrompt(ports []harnesscatalog.PortRef) []prompt.HarnessPortContext {
+	out := make([]prompt.HarnessPortContext, 0, len(ports))
+	for _, port := range ports {
+		out = append(out, prompt.HarnessPortContext{
+			Name:          port.Name,
+			ContainerPort: port.ContainerPort,
+			Protocol:      port.Protocol,
+			Purpose:       port.Purpose,
+		})
+	}
+	return out
+}
+
+func cloneStringStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // retryOrFailDecomposerLocked re-dispatches the decomposer with the previous

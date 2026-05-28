@@ -1,0 +1,187 @@
+profiles:
+  - id: mavlink.px4-sitl.mavsdk-smoke
+    domain: mavlink
+    tier: required
+    summary: PX4 SITL smoke profile for MAVSDK-backed control and telemetry tests.
+    proves:
+      - MAVSDK can connect to a real MAVLink-speaking autopilot.
+      - Command/control plugins can perform health-gated actions against SITL.
+      - Telemetry/data stream plugins receive live heartbeat and vehicle state.
+    covers:
+      integration_targets:
+        - PX4 SITL
+        - MAVSDK server
+      mavsdk_plugins:
+        - action
+        - telemetry
+        - mission
+        - offboard
+        - param
+        - manual_control
+        - gimbal
+        - camera
+        - info
+        - shell
+        - failure
+    runner_support:
+      - local-docker
+      - github-actions-via-testcontainers
+      - act
+    cost: medium
+    constraints:
+      - Start SITL inside project tests with Testcontainers or an equivalent test fixture.
+      - Do not add GitHub Actions services; qa.yml remains generic.
+      - Gate control assertions on MAVSDK health/connection state before issuing commands.
+    required_assertions:
+      - Observe a MAVLink heartbeat from the SITL target.
+      - Assert MAVSDK reports a connected vehicle before plugin calls run.
+      - Exercise at least one control plugin and one telemetry/data-stream plugin path.
+    evidence_anchors:
+      - mavlink.px4-sitl.mavsdk-smoke
+      - px4io/px4-sitl
+      - 14540
+      - mavsdk_core_connected
+      - HEARTBEAT
+    images:
+      - name: px4io/px4-sitl:latest
+        purpose: PX4 software-in-the-loop autopilot target.
+    ports:
+      - name: mavlink-udp
+        container_port: 14540
+        protocol: udp
+        purpose: MAVLink UDP endpoint used by MAVSDK.
+    env:
+      PX4_SIM_MODEL: iris
+    readiness:
+      - Wait for MAVLink HEARTBEAT frames on UDP 14540.
+      - Wait for MAVSDK connection state to become connected.
+    test_guidance:
+      - Keep SITL startup inside test code so qa-runner and GitHub Actions stay portable.
+      - Record the profile ID near the integration test setup so structural validation can bind evidence to the catalog entry.
+
+  - id: mavlink.ardupilot-sitl.compat
+    domain: mavlink
+    tier: compatibility
+    summary: ArduPilot SITL compatibility profile for MAVLink dialect and autopilot variance.
+    proves:
+      - Driver logic is not hard-coded to PX4-only MAVLink behavior.
+      - Telemetry parsing tolerates ArduPilot heartbeat/autopilot metadata.
+    covers:
+      integration_targets:
+        - ArduPilot SITL
+      mavlink_dialects:
+        - ardupilotmega
+        - common
+    runner_support:
+      - local-docker
+      - github-actions-via-testcontainers
+      - act
+    cost: medium
+    constraints:
+      - Run as an optional compatibility suite unless the architecture explicitly depends on ArduPilot behavior.
+      - Keep the fixture in project tests, not in qa.yml services.
+    required_assertions:
+      - Observe an ArduPilot MAVLink heartbeat.
+      - Verify at least one telemetry stream parses without PX4-specific assumptions.
+    evidence_anchors:
+      - mavlink.ardupilot-sitl.compat
+      - ardupilot/ardupilot
+      - 14550
+      - HEARTBEAT
+    images:
+      - name: ardupilot/ardupilot:latest
+        purpose: ArduPilot SITL autopilot target.
+    ports:
+      - name: mavlink-udp
+        container_port: 14550
+        protocol: udp
+        purpose: MAVLink UDP endpoint used by compatibility tests.
+    readiness:
+      - Wait for MAVLink HEARTBEAT frames on UDP 14550.
+    test_guidance:
+      - Use this profile for compatibility claims, not as the default MAVSDK smoke gate.
+
+  - id: mavlink.raw-mavlink-direct
+    domain: mavlink
+    tier: compatibility
+    summary: Raw MAVLink direct-wire profile for message encode/decode and fallback coverage.
+    proves:
+      - The implementation can handle MAVLink messages without depending exclusively on MAVSDK plugin abstractions.
+      - Low-level command, heartbeat, and telemetry frames round-trip through the parser/serializer.
+    covers:
+      integration_targets:
+        - raw MAVLink endpoint
+      mavlink_messages:
+        - HEARTBEAT
+        - COMMAND_LONG
+        - COMMAND_ACK
+        - GLOBAL_POSITION_INT
+        - SYS_STATUS
+    runner_support:
+      - local-docker
+      - github-actions-via-testcontainers
+      - act
+      - pure-unit-fixture
+    cost: low
+    constraints:
+      - Prefer captured frames or a small in-process MAVLink peer for pure parser tests.
+      - Use a SITL-backed peer when proving behavior that depends on autopilot state.
+    required_assertions:
+      - Decode HEARTBEAT from a real or captured MAVLink frame.
+      - Round-trip at least one command frame and assert the expected ACK or parser result.
+    evidence_anchors:
+      - mavlink.raw-mavlink-direct
+      - HEARTBEAT
+      - COMMAND_ACK
+      - MAVLink
+    readiness:
+      - In-process fixtures are ready after the peer binds.
+      - SITL-backed fixtures wait for HEARTBEAT before assertions.
+    test_guidance:
+      - Select this when the task claims native MAVLink coverage beyond MAVSDK plugin calls.
+
+  - id: mavlink.px4-gazebo-peripherals
+    domain: mavlink
+    tier: heavy
+    summary: PX4 plus simulator peripherals profile for camera, gimbal, and richer sensor streams.
+    proves:
+      - Peripheral-heavy plugins behave with simulator-backed camera/gimbal/sensor traffic.
+      - Higher-cost data streams can be exercised without changing qa-runner orchestration.
+    covers:
+      integration_targets:
+        - PX4 SITL
+        - Gazebo simulator
+      mavsdk_plugins:
+        - camera
+        - gimbal
+        - camera_server
+        - tracking_server
+    runner_support:
+      - local-docker
+      - dedicated-ci-runner
+    cost: high
+    constraints:
+      - Requires substantially more CPU/GPU and wall-clock than the default smoke profile.
+      - Do not require this profile by default for ordinary MAVLink driver work.
+    required_assertions:
+      - Assert simulator peripheral streams reach the driver.
+      - Assert at least one camera or gimbal command path returns an expected result.
+    evidence_anchors:
+      - mavlink.px4-gazebo-peripherals
+      - px4io/px4-sitl
+      - gazebo
+      - camera
+      - gimbal
+    images:
+      - name: px4io/px4-sitl:latest
+        purpose: PX4 SITL target with simulator integration.
+    ports:
+      - name: mavlink-udp
+        container_port: 14540
+        protocol: udp
+        purpose: MAVLink UDP endpoint.
+    readiness:
+      - Wait for simulator process readiness.
+      - Wait for MAVLink HEARTBEAT frames and peripheral stream availability.
+    test_guidance:
+      - Use as an explicit heavy profile only when the requirement names peripherals.

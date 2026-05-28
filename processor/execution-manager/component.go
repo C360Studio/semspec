@@ -46,6 +46,7 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/parseincident"
@@ -437,6 +438,92 @@ func (c *Component) readPlanTestSurface(ctx context.Context, slug string) *workf
 		return nil
 	}
 	return plan.Architecture.TestSurface
+}
+
+func (c *Component) readPlanHarnessProfiles(ctx context.Context, slug string) []prompt.ResolvedHarnessProfileContext {
+	if c.planBucket == nil || slug == "" {
+		return nil
+	}
+	entry, err := c.planBucket.Get(ctx, slug)
+	if err != nil {
+		return nil
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil
+	}
+	if plan.Architecture == nil || len(plan.Architecture.HarnessProfiles) == 0 {
+		return nil
+	}
+	catalog, err := harnesscatalog.Load("")
+	if err != nil {
+		c.logger.Warn("Failed to load harness catalog for task context", "slug", slug, "error", err)
+		return nil
+	}
+	resolved, err := catalog.ResolveSelections(plan.Architecture.HarnessProfiles)
+	if err != nil {
+		c.logger.Warn("Invalid harness profile selection in plan", "slug", slug, "error", err)
+		return nil
+	}
+	return resolvedHarnessProfilesToPrompt(resolved)
+}
+
+func resolvedHarnessProfilesToPrompt(resolved []harnesscatalog.ResolvedSelection) []prompt.ResolvedHarnessProfileContext {
+	out := make([]prompt.ResolvedHarnessProfileContext, 0, len(resolved))
+	for _, r := range resolved {
+		p := r.Profile
+		out = append(out, prompt.ResolvedHarnessProfileContext{
+			ProfileID:          p.ID,
+			Tier:               p.Tier,
+			UsedBy:             append([]string(nil), r.Selection.UsedBy...),
+			Purpose:            r.Selection.Purpose,
+			Covers:             append([]string(nil), r.Selection.Covers...),
+			Proves:             append([]string(nil), p.Proves...),
+			RunnerSupport:      append([]string(nil), p.RunnerSupport...),
+			Cost:               p.Cost,
+			Constraints:        append([]string(nil), p.Constraints...),
+			RequiredAssertions: append([]string(nil), p.RequiredAssertions...),
+			EvidenceAnchors:    append([]string(nil), p.EvidenceAnchors...),
+			Images:             harnessImagesToPrompt(p.Images),
+			Ports:              harnessPortsToPrompt(p.Ports),
+			Env:                cloneStringStringMap(p.Env),
+			Readiness:          append([]string(nil), p.Readiness...),
+			TestGuidance:       append([]string(nil), p.TestGuidance...),
+		})
+	}
+	return out
+}
+
+func harnessImagesToPrompt(images []harnesscatalog.ImageRef) []prompt.HarnessImageContext {
+	out := make([]prompt.HarnessImageContext, 0, len(images))
+	for _, img := range images {
+		out = append(out, prompt.HarnessImageContext{Name: img.Name, Purpose: img.Purpose})
+	}
+	return out
+}
+
+func harnessPortsToPrompt(ports []harnesscatalog.PortRef) []prompt.HarnessPortContext {
+	out := make([]prompt.HarnessPortContext, 0, len(ports))
+	for _, port := range ports {
+		out = append(out, prompt.HarnessPortContext{
+			Name:          port.Name,
+			ContainerPort: port.ContainerPort,
+			Protocol:      port.Protocol,
+			Purpose:       port.Purpose,
+		})
+	}
+	return out
+}
+
+func cloneStringStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // lookupRecoveryHint returns the req.RecoveryHint string for the given
@@ -1459,14 +1546,15 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 	if role == prompt.RoleDeveloper ||
 		role == prompt.RoleValidator || role == prompt.RoleReviewer {
 		asmCtx.TaskContext = &prompt.TaskContext{
-			PlanGoal:      exec.Title,
-			IsRetry:       exec.TDDCycle > 0,
-			Feedback:      exec.Feedback,
-			Iteration:     exec.TDDCycle + 1, // 1-based for display
-			MaxIterations: exec.MaxTDDCycles,
-			Checklist:     c.checklist,
-			TestSurface:   c.readPlanTestSurface(ctx, exec.Slug),
-			WorktreePath:  exec.WorktreePath,
+			PlanGoal:        exec.Title,
+			IsRetry:         exec.TDDCycle > 0,
+			Feedback:        exec.Feedback,
+			Iteration:       exec.TDDCycle + 1, // 1-based for display
+			MaxIterations:   exec.MaxTDDCycles,
+			Checklist:       c.checklist,
+			TestSurface:     c.readPlanTestSurface(ctx, exec.Slug),
+			HarnessProfiles: c.readPlanHarnessProfiles(ctx, exec.Slug),
+			WorktreePath:    exec.WorktreePath,
 		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0

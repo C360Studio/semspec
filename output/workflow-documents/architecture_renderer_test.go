@@ -43,12 +43,15 @@ func TestRenderArchitecture_FullDeliverable(t *testing.T) {
 					Name:       "Meshtastic Daemon",
 					Coordinate: "meshtastic/meshtasticd:daily-alpine",
 					Role:       "integration_target",
-					TestHarness: &workflow.TestHarness{
-						Library:      "testcontainers-java",
-						Image:        "meshtastic/meshtasticd:daily-alpine",
-						AccessMethod: "tcp:4403",
-					},
-					UsedBy: []string{"driver"},
+					UsedBy:     []string{"driver"},
+				},
+			},
+			HarnessProfiles: []workflow.HarnessProfileSelection{
+				{
+					ProfileID: "mavlink.px4-sitl.mavsdk-smoke",
+					UsedBy:    []string{"driver"},
+					Purpose:   "prove real MAVLink control and telemetry",
+					Covers:    []string{"Meshtastic Daemon", "telemetry"},
 				},
 			},
 			TestSurface: &workflow.TestSurface{
@@ -80,9 +83,9 @@ func TestRenderArchitecture_FullDeliverable(t *testing.T) {
 		"## Upstream resolutions":              true,
 		"### Meshtastic Daemon":                true,
 		"`integration_target`":                 true,
-		"testcontainers-java":                  true,
-		"meshtastic/meshtasticd:daily-alpine":  true,
-		"tcp:4403":                             true,
+		"## Harness profiles":                  true,
+		"mavlink.px4-sitl.mavsdk-smoke":        true,
+		"prove real MAVLink control":           true,
 		"## Test surface":                      true,
 		"frame-roundtrip":                      true,
 	}
@@ -110,14 +113,13 @@ func TestRenderArchitecture_PureLibraryEmptyIntegrations(t *testing.T) {
 	}
 }
 
-func TestRenderArchitecture_RuntimeDepNoTestHarness(t *testing.T) {
+func TestRenderArchitecture_RuntimeDepNoHarnessProfile(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "rt-dep",
 		Architecture: &workflow.ArchitectureDocument{
 			UpstreamResolutions: []workflow.UpstreamResolution{
 				{
 					Name: "Lib X", Coordinate: "x:1.0", Role: "runtime_dep",
-					// no TestHarness
 				},
 			},
 		},
@@ -126,7 +128,10 @@ func TestRenderArchitecture_RuntimeDepNoTestHarness(t *testing.T) {
 	if !strings.Contains(md, "`runtime_dep`") {
 		t.Error("missing role rendering")
 	}
-	if strings.Contains(md, "Test harness:") {
-		t.Errorf("runtime_dep should not render Test harness section. got:\n%s", md)
+	if !strings.Contains(md, "## Harness profiles") {
+		t.Errorf("architecture should render harness profile section. got:\n%s", md)
+	}
+	if strings.Contains(md, "Test harness:") || strings.Contains(md, "Test"+"Harness") {
+		t.Errorf("legacy harness wording should not render. got:\n%s", md)
 	}
 }

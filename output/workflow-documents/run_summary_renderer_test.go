@@ -36,8 +36,10 @@ func TestRenderRunSummary_CompletePlan(t *testing.T) {
 		Architecture: &workflow.ArchitectureDocument{
 			UpstreamResolutions: []workflow.UpstreamResolution{
 				{Name: "Lib X", Role: "runtime_dep"},
-				{Name: "Daemon Y", Role: "integration_target",
-					TestHarness: &workflow.TestHarness{Library: "testcontainers-java", Image: "y:latest", AccessMethod: "tcp:8080"}},
+				{Name: "Daemon Y", Role: "integration_target"},
+			},
+			HarnessProfiles: []workflow.HarnessProfileSelection{
+				{ProfileID: "mavlink.px4-sitl.mavsdk-smoke", Purpose: "prove SITL path"},
 			},
 		},
 		QARun: &workflow.QARun{
@@ -60,6 +62,7 @@ func TestRenderRunSummary_CompletePlan(t *testing.T) {
 		"Scenarios: **3**":                       true,
 		"Upstream resolutions: **2**":            true,
 		"**1** are integration_targets":          true,
+		"Harness profiles selected: **1**":       true,
 		"## QA outcome":                          true,
 		"**Executor verdict:** PASSED":           true,
 		"30.0s":                                  true,

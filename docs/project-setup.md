@@ -137,7 +137,7 @@ plan at creation so policy changes don't retroactively affect in-flight work.
 | `none` | — | No QA gate; plan goes straight to `complete` | Doc-only hotfixes |
 | `synthesis` | qa-reviewer only | LLM verdict on plan artifacts, no test execution | Default; fast, content-based check |
 | `unit` | sandbox | `go test ./...` (or language default) against the merged worktree | Most projects |
-| `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — typically tagged integration tests with real service dependencies | Projects with integration suites |
+| `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — typically tagged integration tests with real service dependencies started by test code | Projects with integration suites |
 | `full` | qa-runner + `act` | Both `integration` + `e2e` jobs — adds Playwright browser flows | Projects with UI + browser tests |
 
 Configure via `.semspec/project.json`:
@@ -164,8 +164,10 @@ container semspec uses for per-task structural validation. **qa-runner**
 (level=integration/full) invokes nektos/act against `.github/workflows/qa.yml`
 using the host Docker daemon via a mounted socket — tests run in real GitHub
 Actions runner images (catthehacker/ubuntu:act-latest). The qa.yml template is
-scaffolded by `POST /project-manager/init` when missing; customize jobs, add
-`services:` entries for databases, or change runner images as needed.
+scaffolded by `POST /project-manager/init` when missing. Catalog-backed harness
+profiles are test-code responsibilities: start SITL, databases, brokers, or other
+fixtures from the project tests (for example via Testcontainers) rather than
+adding GitHub Actions `services:` entries for semspec-owned profiles.
 
 Artifacts from every QA run land at `.semspec/qa-artifacts/{plan-slug}/{run-id}/`:
 - `act.log` — combined act stdout+stderr

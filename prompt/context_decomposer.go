@@ -66,6 +66,11 @@ type DecomposerPromptContext struct {
 	// coverage check.
 	Scenarios []DecomposerScenario
 
+	// HarnessProfiles are selected catalog profiles resolved to full
+	// test-authoring details. The decomposer should allocate explicit test
+	// nodes when a requirement touches one of these profiles.
+	HarnessProfiles []ResolvedHarnessProfileContext
+
 	// RetryFeedback is the prior decomposer attempt's failure reason,
 	// when retrying. Empty on the first attempt. Renderer prepends this
 	// to the prompt so the LLM is primed to correct the specific
