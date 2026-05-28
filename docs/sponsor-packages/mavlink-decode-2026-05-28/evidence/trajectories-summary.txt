@@ -1,0 +1,26 @@
+TRAJECTORY SUMMARY (mavlink-decode 2026-05-28)
+============================================================
+
+0ad4f5db  steps= 17  bash=  7  models=  9  terminal=submit_work
+1e3ee63c  steps=  7  bash=  2  models=  4  terminal=submit_work
+249e26af  steps=  5  bash=  1  models=  3  terminal=submit_work
+26b0627d  steps=  9  bash=  2  models=  5  terminal=submit_work
+2aa12f56  steps=  3  bash=  0  models=  2  terminal=submit_work
+2c7c0044  steps=  5  bash=  1  models=  3  terminal=submit_work
+3083aaa2  steps=  3  bash=  0  models=  2  terminal=decompose_task
+4c7bbf9d  steps=  3  bash=  0  models=  2  terminal=submit_work
+4e917672  steps= 45  bash= 19  models= 23  terminal=submit_work
+5104aed2  steps=  9  bash=  3  models=  5  terminal=submit_work
+57331de2  steps= 49  bash= 23  models= 23  terminal=submit_work
+6f225e41  steps=  7  bash=  2  models=  4  terminal=submit_work
+754d84ea  steps=  3  bash=  0  models=  2  terminal=submit_work
+76847ac2  steps= 56  bash= 25  models= 27  terminal=submit_work
+8131d5df  steps= 15  bash=  6  models=  8  terminal=submit_work
+8e8aab31  steps= 15  bash=  6  models=  8  terminal=submit_work
+c59553cb  steps= 13  bash=  6  models=  6  terminal=submit_work
+d9a9c880  steps=  3  bash=  0  models=  2  terminal=submit_work
+e62ce8e3  steps=  3  bash=  0  models=  2  terminal=submit_work
+f045aaa6  steps=  3  bash=  0  models=  2  terminal=submit_work
+f2cfcf24  steps= 67  bash= 33  models= 33  terminal=submit_work
+
+21 trajectories total  |  340 steps total

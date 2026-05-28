@@ -1,0 +1,172 @@
+{
+  "actors": [
+    {
+      "name": "UAV",
+      "permissions": [],
+      "triggers": [
+        "MAVLink HEARTBEAT over UDP"
+      ],
+      "type": "system"
+    },
+    {
+      "name": "GCS",
+      "permissions": [],
+      "triggers": [
+        "GET /heartbeat"
+      ],
+      "type": "system"
+    }
+  ],
+  "component_boundaries": [
+    {
+      "dependencies": [],
+      "name": "MAVLink Listener",
+      "responsibility": "Listens on UDP port 14540, parses MAVLink v2 frames, and updates shared state with the latest HEARTBEAT.",
+      "upstream_refs": [
+        "gomavlib",
+        "Raw MAVLink Endpoint"
+      ]
+    },
+    {
+      "dependencies": [
+        "MAVLink Listener"
+      ],
+      "name": "HTTP API",
+      "responsibility": "Exposes the latest HEARTBEAT as JSON at GET /heartbeat.",
+      "upstream_refs": []
+    }
+  ],
+  "data_flow": "Raw MAVLink Endpoint -> MAVLink Listener (gomavlib over UDP) -> In-memory struct -> HTTP API (JSON over HTTP) -> Client",
+  "decisions": [
+    {
+      "decision": "Use github.com/bluenviron/gomavlib/v3/pkg/dialects/minimal for decoding HEARTBEAT instead of common.",
+      "id": "ARCH-001",
+      "rationale": "The minimal dialect contains MessageHeartbeat which defines all required fields (https://pkg.go.dev/github.com/bluenviron/gomavlib/v3/pkg/dialects/minimal#MessageHeartbeat)",
+      "title": "Use minimal dialect for HEARTBEAT"
+    }
+  ],
+  "harness_profiles": [
+    {
+      "covers": [
+        "Raw MAVLink Endpoint"
+      ],
+      "profile_id": "mavlink.raw-mavlink-direct",
+      "purpose": "Proves the service can decode HEARTBEAT from raw MAVLink frames.",
+      "used_by": [
+        "MAVLink Listener"
+      ]
+    }
+  ],
+  "integrations": [
+    {
+      "contract": "MAVLink v2 HEARTBEAT",
+      "direction": "inbound",
+      "error_mode": "Silent drop on decode error",
+      "name": "MAVLink Network",
+      "protocol": "UDP/MAVLink"
+    },
+    {
+      "contract": "GET /heartbeat -> JSON",
+      "direction": "inbound",
+      "error_mode": "503 if no heartbeat received yet",
+      "name": "HTTP Heartbeat API",
+      "protocol": "HTTP"
+    }
+  ],
+  "technology_choices": [
+    {
+      "category": "mavlink_library",
+      "choice": "github.com/bluenviron/gomavlib/v3",
+      "rationale": "Required by project plan"
+    }
+  ],
+  "test_surface": {
+    "e2e_flows": [
+      {
+        "actor": "GCS",
+        "steps": [
+          "1. Send MAVLink HEARTBEAT to UDP port 14540",
+          "2. GET /heartbeat"
+        ],
+        "success_criteria": [
+          "Returns 200 OK",
+          "JSON contains system_id, component_id, autopilot_type, base_mode, and received_at matching the sent heartbeat"
+        ]
+      }
+    ],
+    "integration_flows": [
+      {
+        "components_involved": [
+          "MAVLink Listener"
+        ],
+        "description": "Send raw MAVLink HEARTBEAT frames to the UDP listener and verify they are decoded correctly into the shared state.",
+        "name": "decode-heartbeat-udp",
+        "scenario_refs": []
+      }
+    ]
+  },
+  "upstream_resolutions": [
+    {
+      "apis": [
+        {
+          "citation": "https://pkg.go.dev/github.com/bluenviron/gomavlib/v3#Node.Initialize",
+          "kind": "method",
+          "lifecycle": "Node{} -> Initialize() -> Events() -> Close()",
+          "notes": "Instantiates the UDP listener using Endpoints config.",
+          "signature": "func (n *Node) Initialize() error",
+          "symbol": "gomavlib.Node.Initialize"
+        },
+        {
+          "citation": "https://pkg.go.dev/github.com/bluenviron/gomavlib/v3#EndpointUDPServer",
+          "kind": "type",
+          "lifecycle": null,
+          "notes": "Endpoint definition for listening on UDP 14540",
+          "signature": "type EndpointUDPServer struct { Address string }",
+          "symbol": "gomavlib.EndpointUDPServer"
+        },
+        {
+          "citation": "https://pkg.go.dev/github.com/bluenviron/gomavlib/v3#EventFrame",
+          "kind": "interface",
+          "lifecycle": null,
+          "notes": "Provides SystemID() and ComponentID(), and Message()",
+          "signature": "type EventFrame interface { ... }",
+          "symbol": "gomavlib.EventFrame"
+        },
+        {
+          "citation": "https://pkg.go.dev/github.com/bluenviron/gomavlib/v3/pkg/dialects/minimal#MessageHeartbeat",
+          "kind": "type",
+          "lifecycle": null,
+          "notes": "The concrete type of the Message when a HEARTBEAT is received.",
+          "signature": "type MessageHeartbeat struct { Type MAV_TYPE, Autopilot MAV_AUTOPILOT, BaseMode MAV_MODE_FLAG, CustomMode uint32, SystemStatus MAV_STATE, MavlinkVersion uint8 }",
+          "symbol": "minimal.MessageHeartbeat"
+        }
+      ],
+      "coordinate": "github.com/bluenviron/gomavlib/v3",
+      "name": "gomavlib",
+      "role": "runtime_dep",
+      "source_ref": "https://pkg.go.dev/github.com/bluenviron/gomavlib/v3",
+      "used_by": [
+        "MAVLink Listener"
+      ]
+    },
+    {
+      "apis": [
+        {
+          "citation": "https://mavlink.io/en/messages/common.html#HEARTBEAT",
+          "kind": "type",
+          "lifecycle": "periodic emission",
+          "notes": "Sent at 1Hz over UDP by MAVLink nodes.",
+          "signature": "MAVLink HEARTBEAT",
+          "symbol": "HEARTBEAT"
+        }
+      ],
+      "coordinate": "mavlink:raw-mavlink-direct",
+      "name": "Raw MAVLink Endpoint",
+      "role": "integration_target",
+      "source_ref": "https://mavlink.io/en/messages/common.html#HEARTBEAT",
+      "used_by": [
+        "MAVLink Listener"
+      ]
+    }
+  ]
+}

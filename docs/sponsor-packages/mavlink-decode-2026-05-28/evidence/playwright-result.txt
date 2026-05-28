@@ -1,0 +1,23 @@
+[t2] › e2e/plan-lifecycle-llm-mavlink.spec.ts:103:2 › @t2 @mavlink-decode plan-lifecycle-llm-mavlink
+
+  ✓ 1 plan created with goal                              (8ms)
+  ✓ 2 plan reviewed and approved                          (9.1s)
+  ✓ 3 requirements generated                              (6.0s)
+  ✓ 4 architecture generated with harness profile selection (27.1s)
+  ✓ 5 scenarios generated and reviewed                    (27.0s)
+  ✓ 6 execution triggered                                 (87ms)
+  ✓ 7 execution completes                                 (14.6m)
+  ✓ 8 trajectories exist after execution                  (14ms)
+
+  8 passed (20.4m)
+
+Architect's harness_profiles selection (from trajectory 4e917672):
+  - profile_id: mavlink.raw-mavlink-direct
+    used_by:    ["MAVLink Listener"]
+    purpose:    "Proves the service can decode HEARTBEAT from raw MAVLink frames."
+    covers:     ["Raw MAVLink Endpoint"]
+
+Stage transitions:
+  (start) → implementing       at t+0s
+  implementing → reviewing_qa  at t+866s   (TDD cycles complete)
+  reviewing_qa → complete      at t+878s   (qa.level=synthesis verdict)
