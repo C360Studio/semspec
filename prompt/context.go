@@ -186,6 +186,7 @@ type TaskContext struct {
 type ResolvedHarnessProfileContext struct {
 	ProfileID          string
 	Tier               string
+	Orchestration      string
 	UsedBy             []string
 	Purpose            string
 	Covers             []string

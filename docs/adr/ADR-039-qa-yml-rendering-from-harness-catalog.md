@@ -82,13 +82,31 @@ the qa-runner's host Docker socket, synchronously gate the
 
 Mechanically:
 
-1. **Catalog renderer.** A new internal package (working name
-   `workflow/harnesscatalog/qarender`) converts a list of
+1. **Catalog renderer.** A new internal package
+   (`workflow/harnesscatalog/qarender`) converts a list of
    `ResolvedSelection` entries into a `services:` block compatible with
    GitHub Actions / nektos/act. Each profile entry's `images[0]`
    becomes a service; `ports[]` map to GHA `ports:` syntax;
    `env`/`readiness`/`test_guidance` thread into the rendered service
    metadata.
+
+   **Per-profile orchestration (added during Phase 1a implementation,
+   2026-05-28).** The original framing put GHA `services:` as the
+   primary mechanism with testcontainers as a fallback. Implementation
+   surfaced a cleaner shape: the choice is per-profile, declared by a
+   first-class `orchestration` field on the catalog `Profile` struct.
+   Values are `services` (renderer emits a qa.yml service block from
+   `images`/`ports`/`env`/`readiness`), `testcontainers` (renderer
+   skips; dev agent owns the integration stack in test code), or
+   `pure-fixture` (renderer skips; in-process or captured-frame
+   fixtures, no container). When the field is empty the renderer infers
+   `services` if `images[]` is non-empty and `pure-fixture` otherwise.
+   This makes the orchestration choice visible to the architect at
+   profile-selection time rather than hidden in the rendered output.
+   Alternative B below (testcontainers) remains the right tool for
+   profiles whose stack genuinely varies per test; the field just
+   surfaces that choice in metadata rather than treating it as a
+   fallback.
 
 2. **qa-runner socket mount.** `docker/compose/qa-runner.yml` (or
    wherever the qa-runner is defined) mounts `/var/run/docker.sock`

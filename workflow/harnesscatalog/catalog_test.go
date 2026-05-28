@@ -171,6 +171,57 @@ func TestResolveSelectionsRejectsUnknownAndSplitsRequired(t *testing.T) {
 	}
 }
 
+func TestEffectiveOrchestrationInfersFromImages(t *testing.T) {
+	withImage := Profile{Images: []ImageRef{{Name: "x"}}}
+	if got := withImage.EffectiveOrchestration(); got != OrchestrationServices {
+		t.Errorf("profile with images: got %q, want %q", got, OrchestrationServices)
+	}
+	withoutImage := Profile{}
+	if got := withoutImage.EffectiveOrchestration(); got != OrchestrationPureFixture {
+		t.Errorf("profile without images: got %q, want %q", got, OrchestrationPureFixture)
+	}
+	explicit := Profile{Orchestration: OrchestrationTestcontainers, Images: []ImageRef{{Name: "x"}}}
+	if got := explicit.EffectiveOrchestration(); got != OrchestrationTestcontainers {
+		t.Errorf("explicit orchestration: got %q, want %q", got, OrchestrationTestcontainers)
+	}
+}
+
+func TestLoadRejectsMalformedOrchestrationAndServicesWithoutImages(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "malformed orchestration",
+			body: strings.ReplaceAll(validProfileYAML, "tier: required", "tier: required\n    orchestration: sometimes"),
+			want: "malformed orchestration",
+		},
+		{
+			name: "services without images",
+			body: strings.ReplaceAll(validProfileYAML, "tier: required", "tier: required\n    orchestration: services"),
+			want: "orchestration is services but images is empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			dir := filepath.Join(root, ".semspec", "harness-catalog")
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			body := strings.ReplaceAll(tt.body, "$ID", "custom.bad")
+			if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(root)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Load() error = %v, want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
 const validProfileYAML = `
 profiles:
   - id: $ID

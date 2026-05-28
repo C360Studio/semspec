@@ -543,6 +543,8 @@ func writeCoversLine(sb *strings.Builder, covers map[string][]string) {
 	fmt.Fprintf(sb, "- **Covers:** %s\n", strings.Join(parts, "; "))
 }
 
+const harnessProfilesIntro = "Use these details when your node touches the selected integration. For `services`-orchestrated profiles, qa-runner brings the stack up as qa.yml services from this catalog metadata — read the endpoint from the host/env qa-runner injects rather than starting your own container. For `testcontainers` or `pure-fixture` profiles, the test fixture owns the integration peer.\n\n"
+
 func renderResolvedHarnessProfiles(title string, profiles []prompt.ResolvedHarnessProfileContext) string {
 	if len(profiles) == 0 {
 		return ""
@@ -550,65 +552,83 @@ func renderResolvedHarnessProfiles(title string, profiles []prompt.ResolvedHarne
 	var sb strings.Builder
 	sb.WriteString(title)
 	sb.WriteString("\n\n")
-	sb.WriteString("Use these details when your node touches the selected integration. Keep orchestration in project test code; do not edit GitHub Actions services for these profiles.\n\n")
+	sb.WriteString(harnessProfilesIntro)
 	for _, p := range profiles {
-		fmt.Fprintf(&sb, "### %s (%s)\n\n", p.ProfileID, p.Tier)
-		writeJoinedLine(&sb, "Used by", p.UsedBy)
-		if p.Purpose != "" {
-			fmt.Fprintf(&sb, "- **Purpose:** %s\n", p.Purpose)
-		}
-		writeJoinedLine(&sb, "Covers", p.Covers)
-		writeJoinedLine(&sb, "Proves", p.Proves)
-		writeJoinedLine(&sb, "Runner support", p.RunnerSupport)
-		if p.Cost != "" {
-			fmt.Fprintf(&sb, "- **Cost:** %s\n", p.Cost)
-		}
-		writeJoinedLine(&sb, "Constraints", p.Constraints)
-		writeJoinedLine(&sb, "Required assertions", p.RequiredAssertions)
-		writeJoinedLine(&sb, "Evidence anchors", p.EvidenceAnchors)
-		if len(p.Images) > 0 {
-			sb.WriteString("- **Images:** ")
-			parts := make([]string, 0, len(p.Images))
-			for _, img := range p.Images {
-				if img.Purpose == "" {
-					parts = append(parts, img.Name)
-				} else {
-					parts = append(parts, fmt.Sprintf("%s (%s)", img.Name, img.Purpose))
-				}
-			}
-			sb.WriteString(strings.Join(parts, "; "))
-			sb.WriteString("\n")
-		}
-		if len(p.Ports) > 0 {
-			sb.WriteString("- **Ports:** ")
-			parts := make([]string, 0, len(p.Ports))
-			for _, port := range p.Ports {
-				value := fmt.Sprintf("%s/%d/%s", port.Name, port.ContainerPort, port.Protocol)
-				if port.Purpose != "" {
-					value = fmt.Sprintf("%s (%s)", value, port.Purpose)
-				}
-				parts = append(parts, value)
-			}
-			sb.WriteString(strings.Join(parts, "; "))
-			sb.WriteString("\n")
-		}
-		if len(p.Env) > 0 {
-			keys := make([]string, 0, len(p.Env))
-			for key := range p.Env {
-				keys = append(keys, key)
-			}
-			sort.Strings(keys)
-			parts := make([]string, 0, len(keys))
-			for _, key := range keys {
-				parts = append(parts, fmt.Sprintf("%s=%s", key, p.Env[key]))
-			}
-			fmt.Fprintf(&sb, "- **Env:** %s\n", strings.Join(parts, "; "))
-		}
-		writeJoinedLine(&sb, "Readiness", p.Readiness)
-		writeJoinedLine(&sb, "Test guidance", p.TestGuidance)
-		sb.WriteString("\n")
+		renderHarnessProfile(&sb, p)
 	}
 	return sb.String()
+}
+
+func renderHarnessProfile(sb *strings.Builder, p prompt.ResolvedHarnessProfileContext) {
+	fmt.Fprintf(sb, "### %s (%s)\n\n", p.ProfileID, p.Tier)
+	if p.Orchestration != "" {
+		fmt.Fprintf(sb, "- **Orchestration:** %s\n", p.Orchestration)
+	}
+	writeJoinedLine(sb, "Used by", p.UsedBy)
+	if p.Purpose != "" {
+		fmt.Fprintf(sb, "- **Purpose:** %s\n", p.Purpose)
+	}
+	writeJoinedLine(sb, "Covers", p.Covers)
+	writeJoinedLine(sb, "Proves", p.Proves)
+	writeJoinedLine(sb, "Runner support", p.RunnerSupport)
+	if p.Cost != "" {
+		fmt.Fprintf(sb, "- **Cost:** %s\n", p.Cost)
+	}
+	writeJoinedLine(sb, "Constraints", p.Constraints)
+	writeJoinedLine(sb, "Required assertions", p.RequiredAssertions)
+	writeJoinedLine(sb, "Evidence anchors", p.EvidenceAnchors)
+	renderHarnessImages(sb, p.Images)
+	renderHarnessPorts(sb, p.Ports)
+	renderHarnessEnv(sb, p.Env)
+	writeJoinedLine(sb, "Readiness", p.Readiness)
+	writeJoinedLine(sb, "Test guidance", p.TestGuidance)
+	sb.WriteString("\n")
+}
+
+func renderHarnessImages(sb *strings.Builder, images []prompt.HarnessImageContext) {
+	if len(images) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(images))
+	for _, img := range images {
+		if img.Purpose == "" {
+			parts = append(parts, img.Name)
+		} else {
+			parts = append(parts, fmt.Sprintf("%s (%s)", img.Name, img.Purpose))
+		}
+	}
+	fmt.Fprintf(sb, "- **Images:** %s\n", strings.Join(parts, "; "))
+}
+
+func renderHarnessPorts(sb *strings.Builder, ports []prompt.HarnessPortContext) {
+	if len(ports) == 0 {
+		return
+	}
+	parts := make([]string, 0, len(ports))
+	for _, port := range ports {
+		value := fmt.Sprintf("%s/%d/%s", port.Name, port.ContainerPort, port.Protocol)
+		if port.Purpose != "" {
+			value = fmt.Sprintf("%s (%s)", value, port.Purpose)
+		}
+		parts = append(parts, value)
+	}
+	fmt.Fprintf(sb, "- **Ports:** %s\n", strings.Join(parts, "; "))
+}
+
+func renderHarnessEnv(sb *strings.Builder, env map[string]string) {
+	if len(env) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s=%s", key, env[key]))
+	}
+	fmt.Fprintf(sb, "- **Env:** %s\n", strings.Join(parts, "; "))
 }
 
 // renderPlanReviewerPrompt produces the plan-reviewer agent's user message.

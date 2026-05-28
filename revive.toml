@@ -16,11 +16,15 @@ warningCode = 0
 [rule.error-strings]
 [rule.error-naming]
 [rule.exported]
+  # Sponsor-pack code is fossilized agent-generated output preserved verbatim
+  # as a historical artifact; do not retroactively add doc comments to it.
+  exclude = ["**/docs/sponsor-packages/**"]
 [rule.if-return]
 [rule.increment-decrement]
 [rule.var-naming]
 [rule.var-declaration]
 [rule.package-comments]
+  exclude = ["**/docs/sponsor-packages/**"]
 [rule.range]
 [rule.receiver-naming]
 [rule.time-naming]
