@@ -15,12 +15,24 @@ import (
 // code. Output is capped at maxOutputBytes per stream.
 //
 // The subprocess is run in its own process group so that a timeout kill reaches
-// all child processes, not just the immediate shell.
+// all child processes, not just the immediate shell. On deadline we eagerly
+// SIGKILL the entire process group BEFORE waiting for the leader to exit —
+// otherwise, when a child inherits the stdout/stderr pipe FDs and never closes
+// them (e.g. a backgrounded `go run` that hangs in time.Sleep), Wait blocks
+// indefinitely because the pipe stays open as long as any descendant holds it.
+// Without the eager group-kill, the deadline path never executes and child
+// processes leak into the sandbox container, accumulating across calls
+// (verified empirically 2026-05-28 during the gemini mavlink-decode run: a
+// dev agent's `go run generator.go` hangs left 14 zombie processes over
+// 33 minutes of accumulation).
 func execCommand(ctx context.Context, dir, cmd string, timeout time.Duration, maxOutputBytes int) (stdout, stderr string, exitCode int, timedOut bool) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	c := exec.CommandContext(ctx, "/bin/sh", "-c", cmd)
+	// Build a bare exec.Command (not CommandContext) so we control cancellation
+	// ourselves — CommandContext only SIGKILLs the leader, which is the bug
+	// this function exists to fix.
+	c := exec.Command("/bin/sh", "-c", cmd)
 	c.Dir = dir
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	c.Env = []string{
@@ -37,15 +49,27 @@ func execCommand(ctx context.Context, dir, cmd string, timeout time.Duration, ma
 	c.Stdout = &outBuf
 	c.Stderr = &errBuf
 
-	runErr := c.Run()
+	if err := c.Start(); err != nil {
+		errBuf.Write([]byte(err.Error()))
+		return outBuf.String(), errBuf.String(), 1, false
+	}
 
-	// Determine whether we hit the deadline.
-	if ctx.Err() == context.DeadlineExceeded {
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- c.Wait() }()
+
+	var runErr error
+	select {
+	case runErr = <-waitErr:
+		// Process exited on its own (success, failure, or self-imposed signal).
+	case <-ctx.Done():
+		// Deadline. Kill the entire process group — leader plus every child
+		// holding the inherited stdout/stderr pipe FDs. Wait() returns once
+		// the kernel reaps them and the pipes close.
 		timedOut = true
-		// Kill the entire process group.
 		if c.Process != nil {
 			_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
 		}
+		runErr = <-waitErr
 	}
 
 	// Extract exit code.

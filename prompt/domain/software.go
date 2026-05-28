@@ -237,6 +237,40 @@ Scope is mandatory, not advisory:
 			},
 		},
 		{
+			// Bash-failure recovery rule. Added after the gemini mavlink-decode
+			// run on 2026-05-28 where the dev hit 4 consecutive bash timeouts
+			// (and used bash for ALL 8 tool calls — 0 scratchpad, 0 write_todos,
+			// 0 web_search) while iterating on shell-process-management tricks
+			// instead of diagnosing the underlying program. Existing prompt
+			// guidance says "use scratchpad for non-trivial work" — too
+			// general to fire as a circuit-breaker. This fragment names a
+			// concrete trigger condition (timeout or 2nd similar failure) so
+			// the recovery path is unambiguous. Kept narrow on purpose:
+			// scenario-specific patterns (generator-must-terminate, daemon-
+			// API misuse, etc.) belong in the role-scoped lessons system
+			// where they fire on signal match, not in the base prompt where
+			// they become dead weight for unrelated dev work.
+			ID:       "software.developer.bash-failure-recovery",
+			Category: prompt.CategoryRoleContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Content: `BASH FAILURE IS A DIAGNOSTIC SIGNAL — not infrastructure noise.
+
+A bash timeout, non-zero exit, or [command timed out] message is the system telling you something is wrong with EITHER your program OR your invocation. Three causes, three different fixes:
+
+1. Your program won't terminate (deadlock, infinite loop, daemon-style API used for one-shot work). Re-read the source you wrote and find what's preventing exit. Do NOT try a different shell wrapping of the same hung program.
+2. The command genuinely needs more time (large compile, large test suite). Split the work or explicitly extend the timeout; don't blind-retry.
+3. The command is waiting on input you didn't provide (heredoc missing EOF, prompt expecting stdin). Provide the input or change approach.
+
+CIRCUIT BREAKER — when bash fails twice in a row on functionally similar work:
+
+STOP. Do not issue a third bash call. Instead:
+
+- Call scratchpad and write one paragraph: "Attempt 1 did X, failed with Y. Attempt 2 did X', failed with Y'. The pattern suggests the issue is in (program source / command structure / environment). Next I will try Z because W."
+- If the diagnosis points at your program source, re-read it with bash('cat path/to/file') and fix the specific lines preventing success BEFORE the next bash-test.
+- If the diagnosis points at an external library you're misusing, call web_search or http_request for the official docs of the specific API surface. 30 seconds of lookup saves a 3-minute timeout retry.
+- If you cannot diagnose after the scratchpad pause, call ask_question with a concrete hypothesis. Clean blockers are cheaper than 10 more iterations of bash-roulette.`,
+		},
+		{
 			ID:       "software.developer.test-surface",
 			Category: prompt.CategoryRoleContext,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
