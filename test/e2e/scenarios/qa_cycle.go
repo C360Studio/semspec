@@ -42,6 +42,13 @@ type QACycleScenario struct {
 	qaLevel string
 	// name is the scenario name; also the mock-llm fixture subdirectory.
 	name string
+	// customQAYAML, when non-empty, pre-seeds the workspace qa.yml during
+	// stageSetupWorkspace so the project-manager auto-scaffold leaves it
+	// untouched (EnsureQAWorkflow only writes when no file exists). Used by
+	// the qa-cycle-services variant to ship a services-enriched qa.yml that
+	// exercises act's sibling-container spawn via the mounted Docker socket
+	// (ADR-039 Phase 1b).
+	customQAYAML string
 }
 
 // NewQACycleScenario creates a new QA cycle scenario at qa_level=unit.
@@ -56,6 +63,81 @@ func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
 func NewQACycleIntegrationScenario(cfg *config.Config) *QACycleScenario {
 	return &QACycleScenario{config: cfg, qaLevel: "integration", name: "qa-cycle-integration"}
 }
+
+// NewQACycleServicesScenario creates a qa-cycle variant at qa_level=
+// integration that pre-seeds a services-enriched qa.yml in the workspace.
+// Verifies ADR-039 Phase 1b: qa-runner's host Docker socket mount lets act
+// spawn sibling service containers (nginx:alpine on port 80) that the job
+// steps can reach by service name. A readiness probe (wget --spider) gates
+// the integration test step so a workflow-passing run proves the sibling
+// container actually came up — not just that the syntax parsed.
+//
+// Differs from qa-cycle-integration in exactly two places: the customQAYAML
+// override below, and the scenario name (which selects the mock-LLM fixture
+// directory). The mock-LLM fixtures are an unchanged clone of qa-cycle-
+// integration's because Phase 1b is about the qa-runner substrate, not the
+// orchestration above it.
+func NewQACycleServicesScenario(cfg *config.Config) *QACycleScenario {
+	return &QACycleScenario{
+		config:       cfg,
+		qaLevel:      "integration",
+		name:         "qa-cycle-services",
+		customQAYAML: servicesEnrichedQAYAML,
+	}
+}
+
+// servicesEnrichedQAYAML is the Phase 1b proof workflow. It declares one
+// service (nginx:alpine, port 80) and probes its reachability before running
+// integration tests. If qa-runner's Docker socket mount or act's services
+// support is broken, the readiness probe fails and the workflow exits non-
+// zero — qa-runner reports QACompletedEvent.Passed=false and the scenario
+// fails in stageAssertQACompleted with diagnostic logs in the act archive.
+//
+// Why the `container:` block: nektos/act creates a per-job bridge network
+// for service containers but only attaches the JOB container to that
+// network when the job declares a `container:` block (see act
+// pkg/runner/run_context.go networkName()/jobContainer() — the
+// `containerImage(ctx) != ""` branch). Without it, the job falls back to
+// `network=host` and can't resolve service names by DNS. Empirically
+// validated 2026-05-28 during ADR-039 Phase 1b: omitting `container:` made
+// `wget --spider http://nginx-service:80` time out from inside the job.
+// This is a load-bearing finding for Phase 1c — the catalog renderer must
+// emit a `container:` block alongside any `services:` block.
+//
+// Phase 1c will replace this hand-authored yaml with output from
+// workflow/harnesscatalog/qarender; for now the literal yaml stays in scope.
+const servicesEnrichedQAYAML = `name: QA
+on: [push, pull_request]
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    container:
+      image: catthehacker/ubuntu:act-latest
+    services:
+      nginx-service:
+        image: nginx:alpine
+        ports:
+          - 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: false
+      - name: Wait for nginx-service sibling container
+        run: |
+          for i in $(seq 1 30); do
+            if wget -q --spider http://nginx-service:80; then
+              echo "[OK] nginx-service reachable on attempt $i"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "[FAIL] nginx-service unreachable after 30 attempts"
+          exit 1
+      - name: Integration tests
+        run: go test ./... -tags=integration -v
+`
 
 // Name implements Scenario.
 func (s *QACycleScenario) Name() string { return s.name }
@@ -203,6 +285,13 @@ func (s *QACycleScenario) stageSetupWorkspace(_ context.Context, result *Result)
 		// templates a Go workflow because project.json's primary language is Go).
 		// The scenario relies on that auto-scaffold — pre-seeding here was the
 		// pre-2026-05-15 shape, removed to exercise the real wiring end-to-end.
+	}
+
+	// qa-cycle-services pre-seeds a services-enriched qa.yml so the auto-
+	// scaffold leaves it alone (EnsureQAWorkflow respects existing files).
+	// See servicesEnrichedQAYAML for the substrate-proof rationale.
+	if s.customQAYAML != "" {
+		files[".github/workflows/qa.yml"] = s.customQAYAML
 	}
 
 	for path, content := range files {
