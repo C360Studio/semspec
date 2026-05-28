@@ -1,0 +1,273 @@
+2026/05/28 09:31:35 INFO Connecting to NATS urls=nats://localhost:4223
+2026/05/28 09:31:35 INFO Successfully connected to NATS urls=nats://localhost:4223
+semspec watch --live · interval=10s · http=http://localhost:3000 · snapshot=1m0s→/tmp/semspec-watch-gemini-mavlink-decode-20260528-093035
+[09:31:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=0
+[09:31:45] plans=1 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=0
+[09:31:55] plans=1 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=0
+[09:32:05] plans=1 loops=1 msgs=7 active_loops=1 ctx_util=0.00 errors=0
+[09:32:15] plans=1 loops=1 msgs=15 active_loops=1 ctx_util=0.00 errors=0
+[09:32:25] plans=1 loops=3 msgs=22 active_loops=1 ctx_util=0.00 errors=0
+[09:32:35] plans=1 loops=5 msgs=29 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-133235.tar.gz (plans=1 loops=5 trajectories=3)
+[09:32:45] plans=1 loops=5 msgs=29 active_loops=1 ctx_util=0.00 errors=0
+[09:32:55] plans=1 loops=5 msgs=29 active_loops=1 ctx_util=0.00 errors=0
+[09:33:05] plans=1 loops=7 msgs=40 active_loops=1 ctx_util=0.01 errors=0
+[09:33:15] plans=1 loops=7 msgs=40 active_loops=1 ctx_util=0.01 errors=0
+[09:33:25] plans=1 loops=7 msgs=40 active_loops=1 ctx_util=0.01 errors=0
+[09:33:35] plans=1 loops=7 msgs=40 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-133335.tar.gz (plans=1 loops=7 trajectories=4)
+[09:33:45] plans=1 loops=7 msgs=52 active_loops=1 ctx_util=0.01 errors=0
+[09:33:55] plans=1 loops=7 msgs=56 active_loops=1 ctx_util=0.01 errors=0
+[09:34:05] plans=1 loops=7 msgs=60 active_loops=1 ctx_util=0.02 errors=0
+[09:34:15] plans=1 loops=7 msgs=64 active_loops=1 ctx_util=0.02 errors=0
+[09:34:25] plans=1 loops=7 msgs=64 active_loops=1 ctx_util=0.02 errors=0
+[09:34:35] plans=1 loops=9 msgs=70 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-133435.tar.gz (plans=1 loops=9 trajectories=5)
+[09:34:45] plans=1 loops=11 msgs=86 active_loops=1 ctx_util=0.00 errors=0
+[09:34:55] plans=1 loops=11 msgs=86 active_loops=1 ctx_util=0.00 errors=0
+[09:35:05] plans=1 loops=11 msgs=86 active_loops=1 ctx_util=0.00 errors=0
+[09:35:15] plans=1 loops=13 msgs=93 active_loops=1 ctx_util=0.01 errors=0
+[09:35:25] plans=1 loops=13 msgs=105 active_loops=1 ctx_util=0.01 errors=0
+[09:35:35] plans=1 loops=13 msgs=117 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-133535.tar.gz (plans=1 loops=13 trajectories=7)
+[09:35:45] plans=1 loops=13 msgs=129 active_loops=1 ctx_util=0.01 errors=0
+[09:35:55] plans=1 loops=13 msgs=137 active_loops=1 ctx_util=0.01 errors=0
+[09:36:05] plans=1 loops=13 msgs=149 active_loops=1 ctx_util=0.01 errors=0
+[09:36:15] plans=1 loops=13 msgs=159 active_loops=1 ctx_util=0.01 errors=0
+ALERT: RepeatToolFailure severity=critical evidence_id=4e917672-da2e-4b22-a9ad-3b3912edbed5 remediation="Loop is calling tool bash with the same error class (exit code 1) 3+ times in a row — the model is not reading the tool's error response. Classic instruction-following failure under example-anchoring bias. Fix shapes, in order: (a) auto-fill / soften the validator if the missing field has an obvious safe default; (b) hoist the missing field into the tool's persona JSON example as a populated first-class key (prose rules lose to JSON examples for mid-tier models); (c) inject the validator error with a 'RETRY HINT:' prefix so it stands out from happy-path tool results. Continuing the run wastes tokens and budget — terminate or remediate."
+[09:36:25] plans=1 loops=13 msgs=165 active_loops=1 ctx_util=0.01 errors=0
+[09:36:35] plans=1 loops=13 msgs=169 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260528-133636.tar.gz (plans=1 loops=13 trajectories=7)
+[09:36:45] plans=1 loops=13 msgs=177 active_loops=1 ctx_util=0.02 errors=0
+[09:36:55] plans=1 loops=13 msgs=177 active_loops=1 ctx_util=0.02 errors=0
+[09:37:05] plans=1 loops=15 msgs=188 active_loops=1 ctx_util=0.00 errors=0
+[09:37:15] plans=1 loops=17 msgs=195 active_loops=1 ctx_util=0.01 errors=0
+[09:37:25] plans=1 loops=19 msgs=202 active_loops=1 ctx_util=0.00 errors=0
+[09:37:35] plans=1 loops=19 msgs=202 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-133736.tar.gz (plans=1 loops=19 trajectories=10)
+[09:37:45] plans=1 loops=21 msgs=209 active_loops=1 ctx_util=0.01 errors=0
+[09:37:55] plans=1 loops=21 msgs=221 active_loops=1 ctx_util=0.01 errors=0
+[09:38:05] plans=1 loops=21 msgs=229 active_loops=1 ctx_util=0.01 errors=0
+[09:38:15] plans=1 loops=21 msgs=241 active_loops=1 ctx_util=0.01 errors=0
+[09:38:25] plans=1 loops=21 msgs=249 active_loops=1 ctx_util=0.01 errors=0
+[09:38:36] plans=1 loops=21 msgs=259 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-133836.tar.gz (plans=1 loops=21 trajectories=11)
+[09:38:46] plans=1 loops=21 msgs=259 active_loops=1 ctx_util=0.01 errors=0
+[09:38:56] plans=1 loops=21 msgs=261 active_loops=1 ctx_util=0.01 errors=0
+[09:39:06] plans=1 loops=21 msgs=273 active_loops=1 ctx_util=0.01 errors=0
+[09:39:16] plans=1 loops=21 msgs=281 active_loops=1 ctx_util=0.01 errors=0
+[09:39:26] plans=1 loops=21 msgs=289 active_loops=1 ctx_util=0.01 errors=0
+[09:39:36] plans=1 loops=21 msgs=293 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-133936.tar.gz (plans=1 loops=21 trajectories=11)
+[09:39:46] plans=1 loops=21 msgs=301 active_loops=1 ctx_util=0.01 errors=0
+[09:39:56] plans=1 loops=21 msgs=309 active_loops=1 ctx_util=0.01 errors=0
+[09:40:06] plans=1 loops=23 msgs=293 active_loops=1 ctx_util=0.01 errors=0
+[09:40:16] plans=1 loops=23 msgs=302 active_loops=1 ctx_util=0.01 errors=0
+[09:40:26] plans=1 loops=23 msgs=282 active_loops=1 ctx_util=0.01 errors=0
+[09:40:36] plans=1 loops=25 msgs=291 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-134036.tar.gz (plans=1 loops=25 trajectories=13)
+[09:40:46] plans=1 loops=26 msgs=295 active_loops=0 ctx_util=0.00 errors=0
+[09:40:56] plans=1 loops=26 msgs=283 active_loops=0 ctx_util=0.00 errors=0
+[09:41:06] plans=1 loops=26 msgs=282 active_loops=0 ctx_util=0.00 errors=0
+[09:41:16] plans=1 loops=26 msgs=281 active_loops=0 ctx_util=0.00 errors=0
+[09:41:25] plans=1 loops=26 msgs=244 active_loops=0 ctx_util=0.00 errors=0
+[09:41:35] plans=1 loops=26 msgs=244 active_loops=0 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-134136.tar.gz (plans=1 loops=26 trajectories=13)
+[09:41:45] plans=1 loops=26 msgs=244 active_loops=0 ctx_util=0.00 errors=0
+[09:41:55] plans=1 loops=27 msgs=215 active_loops=1 ctx_util=0.01 errors=0
+[09:42:05] plans=1 loops=27 msgs=225 active_loops=1 ctx_util=0.01 errors=0
+[09:42:15] plans=1 loops=27 msgs=229 active_loops=1 ctx_util=0.01 errors=0
+[09:42:25] plans=1 loops=27 msgs=231 active_loops=1 ctx_util=0.02 errors=0
+[09:42:35] plans=1 loops=27 msgs=235 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260528-134236.tar.gz (plans=1 loops=27 trajectories=14)
+[09:42:45] plans=1 loops=27 msgs=235 active_loops=1 ctx_util=0.02 errors=0
+[09:42:55] plans=1 loops=27 msgs=231 active_loops=1 ctx_util=0.02 errors=0
+[09:43:05] plans=1 loops=27 msgs=235 active_loops=1 ctx_util=0.02 errors=0
+[09:43:15] plans=1 loops=27 msgs=235 active_loops=1 ctx_util=0.02 errors=0
+[09:43:25] plans=1 loops=27 msgs=227 active_loops=1 ctx_util=0.02 errors=0
+[09:43:35] plans=1 loops=27 msgs=227 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260528-134336.tar.gz (plans=1 loops=27 trajectories=14)
+[09:43:45] plans=1 loops=27 msgs=228 active_loops=1 ctx_util=0.02 errors=0
+[09:43:55] plans=1 loops=27 msgs=216 active_loops=1 ctx_util=0.02 errors=0
+[09:44:05] plans=1 loops=27 msgs=219 active_loops=1 ctx_util=0.02 errors=0
+[09:44:15] plans=1 loops=27 msgs=227 active_loops=1 ctx_util=0.02 errors=0
+[09:44:25] plans=1 loops=27 msgs=201 active_loops=1 ctx_util=0.02 errors=0
+[09:44:35] plans=1 loops=27 msgs=209 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260528-134436.tar.gz (plans=1 loops=27 trajectories=14)
+[09:44:45] plans=1 loops=27 msgs=209 active_loops=1 ctx_util=0.02 errors=0
+[09:44:55] plans=1 loops=27 msgs=205 active_loops=1 ctx_util=0.02 errors=0
+[09:45:05] plans=1 loops=27 msgs=207 active_loops=1 ctx_util=0.02 errors=0
+[09:45:15] plans=1 loops=29 msgs=161 active_loops=1 ctx_util=0.00 errors=0
+[09:45:25] plans=1 loops=29 msgs=161 active_loops=1 ctx_util=0.00 errors=0
+[09:45:35] plans=1 loops=29 msgs=161 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-134536.tar.gz (plans=1 loops=29 trajectories=15)
+[09:45:45] plans=1 loops=29 msgs=161 active_loops=1 ctx_util=0.00 errors=0
+[09:45:55] plans=1 loops=29 msgs=141 active_loops=1 ctx_util=0.00 errors=0
+[09:46:05] plans=1 loops=29 msgs=149 active_loops=1 ctx_util=0.01 errors=0
+[09:46:15] plans=1 loops=29 msgs=149 active_loops=1 ctx_util=0.01 errors=0
+[09:46:25] plans=1 loops=31 msgs=118 active_loops=1 ctx_util=0.01 errors=0
+[09:46:35] plans=1 loops=32 msgs=122 active_loops=0 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-134636.tar.gz (plans=1 loops=32 trajectories=16)
+[09:46:45] plans=1 loops=32 msgs=122 active_loops=0 ctx_util=0.00 errors=0
+[09:46:55] plans=1 loops=32 msgs=121 active_loops=0 ctx_util=0.00 errors=0
+[09:47:05] plans=1 loops=32 msgs=121 active_loops=0 ctx_util=0.00 errors=0
+[09:47:15] plans=1 loops=32 msgs=121 active_loops=0 ctx_util=0.00 errors=0
+[09:47:25] plans=1 loops=33 msgs=121 active_loops=1 ctx_util=0.01 errors=0
+[09:47:35] plans=1 loops=33 msgs=131 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-134736.tar.gz (plans=1 loops=33 trajectories=17)
+[09:47:45] plans=1 loops=33 msgs=139 active_loops=1 ctx_util=0.01 errors=0
+[09:47:55] plans=1 loops=33 msgs=117 active_loops=1 ctx_util=0.01 errors=0
+[09:48:05] plans=1 loops=33 msgs=129 active_loops=1 ctx_util=0.01 errors=0
+[09:48:15] plans=1 loops=33 msgs=137 active_loops=1 ctx_util=0.01 errors=0
+[09:48:25] plans=1 loops=33 msgs=133 active_loops=1 ctx_util=0.01 errors=0
+[09:48:35] plans=1 loops=33 msgs=137 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-134836.tar.gz (plans=1 loops=33 trajectories=17)
+[09:48:45] plans=1 loops=33 msgs=149 active_loops=1 ctx_util=0.01 errors=0
+[09:48:55] plans=1 loops=33 msgs=153 active_loops=1 ctx_util=0.01 errors=0
+[09:49:05] plans=1 loops=33 msgs=161 active_loops=1 ctx_util=0.01 errors=0
+[09:49:15] plans=1 loops=33 msgs=165 active_loops=1 ctx_util=0.01 errors=0
+[09:49:25] plans=1 loops=33 msgs=157 active_loops=1 ctx_util=0.01 errors=0
+[09:49:35] plans=1 loops=33 msgs=161 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260528-134936.tar.gz (plans=1 loops=33 trajectories=17)
+[09:49:45] plans=1 loops=33 msgs=171 active_loops=1 ctx_util=0.01 errors=0
+[09:49:55] plans=1 loops=33 msgs=154 active_loops=1 ctx_util=0.01 errors=0
+[09:50:05] plans=1 loops=35 msgs=161 active_loops=1 ctx_util=0.00 errors=0
+[09:50:15] plans=1 loops=35 msgs=177 active_loops=1 ctx_util=0.00 errors=0
+[09:50:25] plans=1 loops=35 msgs=170 active_loops=1 ctx_util=0.00 errors=0
+[09:50:35] plans=1 loops=37 msgs=173 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-135036.tar.gz (plans=1 loops=37 trajectories=19)
+[09:50:45] plans=1 loops=37 msgs=173 active_loops=1 ctx_util=0.00 errors=0
+[09:50:55] plans=1 loops=38 msgs=173 active_loops=0 ctx_util=0.00 errors=0
+[09:51:05] plans=1 loops=38 msgs=173 active_loops=0 ctx_util=0.00 errors=0
+[09:51:15] plans=1 loops=38 msgs=173 active_loops=0 ctx_util=0.00 errors=0
+[09:51:25] plans=1 loops=38 msgs=173 active_loops=0 ctx_util=0.00 errors=0
+[09:51:35] plans=1 loops=39 msgs=180 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260528-135136.tar.gz (plans=1 loops=39 trajectories=20)
+[09:51:45] plans=1 loops=40 msgs=191 active_loops=0 ctx_util=0.00 errors=0
+[09:51:55] plans=1 loops=42 msgs=146 active_loops=0 ctx_util=0.00 errors=0
+[09:52:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=6 [new: kv:AGENT_LOOPS,kv:PLAN_STATES,messages:agent.*,messages:tool.*,metrics,trajectories]
+[09:52:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=6
+[09:52:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7 [new: jetstream]
+[09:52:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:52:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:52:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:53:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:53:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:53:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:53:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:53:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:53:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:54:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:54:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:54:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:54:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:54:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:54:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:55:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:55:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:55:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:55:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:55:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:55:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:56:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:56:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:56:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:56:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:56:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:56:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:57:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:57:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:57:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:57:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:57:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:57:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:58:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:58:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:58:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:58:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:58:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:58:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:59:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:59:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:59:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:59:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[09:59:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[09:59:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:00:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:00:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:00:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:00:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:00:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:00:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:01:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:01:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:01:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:01:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:01:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:01:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:02:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:02:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:02:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:02:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:02:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:02:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:03:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:03:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:03:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:03:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:03:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:03:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:04:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:04:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:04:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:04:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:04:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:04:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:05:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:05:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:05:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:05:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:05:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:05:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:06:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:06:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:06:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:06:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:06:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:06:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:07:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:07:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:07:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:07:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:07:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:07:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:08:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:08:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:08:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:08:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:08:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:08:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:09:05] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:09:15] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:09:25] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:09:35] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[10:09:45] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[10:09:55] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
