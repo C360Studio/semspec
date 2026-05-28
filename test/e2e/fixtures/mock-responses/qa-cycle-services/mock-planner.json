@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"goal\": \"Add a Sub function to pkg/math returning the difference of two integers, mirroring Add's shape with a parallel unit test.\", \"context\": \"The project is a small Go module (example.com/qa-cycle-project). pkg/math/math.go declares the Add function; pkg/math/math_test.go covers it with TestAdd. We add Sub as a parallel arithmetic primitive in a new file. The Makefile test target runs go test ./...; project SOPs require every new function to have at least one passing unit test.\", \"scope\": {\"include\": [\"pkg/math/math.go\", \"pkg/math/math_test.go\"], \"create\": [\"pkg/math/sub.go\", \"pkg/math/sub_test.go\"], \"exclude\": [], \"do_not_touch\": [\"README.md\", \"Makefile\", \"go.mod\"]}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
