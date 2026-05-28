@@ -1,0 +1,16 @@
+{
+  "name": "mavlink heartbeat go",
+  "org": "semspec",
+  "platform": "local",
+  "version": "1.0.0",
+  "initialized_at": "2026-05-28T12:00:00.000000000Z",
+  "languages": [
+    {
+      "name": "Go",
+      "version": null,
+      "primary": true
+    }
+  ],
+  "tooling": {},
+  "repository": {}
+}
