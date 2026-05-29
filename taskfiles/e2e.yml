@@ -568,6 +568,23 @@ tasks:
             # timeout > request_timeout + fallback budget = ~15min.
             GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=7200000 PLAYWRIGHT_TIMEOUT=7200000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.TIER}}" = "mavlink-decode" ]; then
+            # 80min cap for @mavlink-decode — the autonomous QA-rejection
+            # recovery chain (PRs #29/#30/#33/#34) lets a plan re-enter
+            # implementing after the first qa-reviewer needs_changes verdict.
+            # Each cycle adds ~10-15min: decomposer + dev + reviewer + new
+            # QA round. ProjectConfig.max_recovery_restarts=2 on this config
+            # allows up to two such cycles before the budget gate refuses
+            # further auto-accepts. Baseline (no recovery) is ~25min; budget
+            # leaves ~55min for 2 recovery cycles' worth of dev/review/QA
+            # activity. Run #5 verified the chain end-to-end and surfaced
+            # that the default 40min was tight for even 1 cycle.
+            #
+            # Pairs with allowRecoveryCycles: 2 in the Playwright spec
+            # (ui/e2e/plan-lifecycle-llm-mavlink.spec.ts) — both budgets
+            # must be set; whichever bites first terminates the test.
+            CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=4800000 PLAYWRIGHT_TIMEOUT=4800000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
@@ -743,6 +760,23 @@ tasks:
             # was tight against gemini-pro's own 300s request_timeout. Goal
             # timeout > request_timeout + fallback budget = ~15min.
             GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=7200000 PLAYWRIGHT_TIMEOUT=7200000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.TIER}}" = "mavlink-decode" ]; then
+            # 80min cap for @mavlink-decode — the autonomous QA-rejection
+            # recovery chain (PRs #29/#30/#33/#34) lets a plan re-enter
+            # implementing after the first qa-reviewer needs_changes verdict.
+            # Each cycle adds ~10-15min: decomposer + dev + reviewer + new
+            # QA round. ProjectConfig.max_recovery_restarts=2 on this config
+            # allows up to two such cycles before the budget gate refuses
+            # further auto-accepts. Baseline (no recovery) is ~25min; budget
+            # leaves ~55min for 2 recovery cycles' worth of dev/review/QA
+            # activity. Run #5 verified the chain end-to-end and surfaced
+            # that the default 40min was tight for even 1 cycle.
+            #
+            # Pairs with allowRecoveryCycles: 2 in the Playwright spec
+            # (ui/e2e/plan-lifecycle-llm-mavlink.spec.ts) — both budgets
+            # must be set; whichever bites first terminates the test.
+            CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=4800000 PLAYWRIGHT_TIMEOUT=4800000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \

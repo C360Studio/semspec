@@ -647,7 +647,7 @@
         "max_decomposer_retries": 2,
         "defer_terminal_on_recovery": true,
         "recovery_timeout_seconds": 60,
-        "max_recovery_restarts": 1
+        "max_recovery_restarts": 2
       }
     },
     "structural-validator": {

@@ -161,7 +161,68 @@ The user-facing question that should land in any sponsor briefing
 on this run: **was the agent's code actually tested?** Mostly yes, but
 with sharp limits worth surfacing.
 
-### UPDATE 2026-05-28 PM — Phase 1c shipped, qa-runner verified end-to-end
+### UPDATE 2026-05-29 — Autonomous QA-rejection recovery chain verified end-to-end
+
+A gemini mavlink-decode run on 2026-05-29 morning exercised the entire
+autonomous retry loop on real-LLM for the first time. Every link in the
+chain fired correctly and was timestamped in `semspec.log`:
+
+```
+11:29:09.756  QA verdict needs_changes  — "tests fail due to time.Sleep
+                                          flakiness, replace with polling"
+11:29:09.860  Recovery requested (phase-local)                  [PR #29]
+11:29:34.718  Plan decision added affected=[req.1]              [PR #30]
+11:29:34.719  Plan decision accepted via mutation auto:recovery [auto-accept watcher]
+11:29:34.723  Resuming completed requirement from QA-recovery   [PR #34]
+              prior_stage=terminal
+11:29:34.727  Resuming requirement from awaiting-recovery — re-decomposing
+              recovery_restart=1 max_recovery_restarts=1
+```
+
+End-to-end QA-verdict → decomposer re-dispatch: **25 seconds**. The req
+re-entered execution, the dev got the qa-reviewer's "use polling"
+guidance as `RecoveryHint` revision context, and the agent rebuilt the
+implementation from scratch (DAG reset, branch recreated from HEAD).
+
+**What the run also surfaced (good news both ways):**
+
+- The PR #34 budget gate fired exactly as designed on the second recovery
+  attempt:
+  `Recovery restart budget exhausted recovery_restarts=1 max_recovery_restarts=1`.
+  That's the system correctly refusing a runaway retry loop after the
+  configured budget.
+- The second-cycle PlanDecision landed as `kind=execution_exhausted`
+  (terminal classification from the recovery-agent), which the
+  auto-accept watcher correctly leaves at `status=proposed` for human
+  review — not all wedges should auto-retry.
+- The model-capability finding: gemini-pro couldn't reliably fix the
+  time.Sleep timing within one recovery cycle on this scope. That's a
+  prompt-engineering / model-tier story, not a plumbing story. Hybrid
+  (claude-dev) is the comparison run we'd recommend before sponsor demo.
+
+**What's now turn-key autonomous:**
+
+| Layer | Status before today | Status now |
+|---|---|---|
+| `qa-runner` invokes act, executes integration tests | Shipped 2026-05-28 PM (Phase 1c) | Shipped |
+| qa-reviewer renders concrete actionable verdict | Shipped 2026-05-28 PM | Shipped |
+| QA verdict triggers recovery dispatch | Designed-for, not built | **Shipped 2026-05-29 (PR #29)** |
+| Recovery-agent emits PlanDecision targeting affected reqs | Designed-for, not built | **Shipped (PRs #30 + #34)** |
+| Auto-accept watcher applies recovery PlanDecisions | Was watcher-only; required upstream wiring | **Wired end-to-end** |
+| Completed reqs get re-implemented on QA recovery | **Wedge** — chain hung at "PlanDecision accepted, nothing downstream" | **Closed (PR #34)** |
+| Budget gate prevents runaway retry loops | n/a | **Shipped (PR #34)** |
+| Playwright spec models the recovery cycle | Spec treated `rejected` as immediate terminal | **Shipped (PR #33)** |
+
+**Configuration tunings shipped alongside:**
+
+- `configs/e2e-gemini.json` `max_recovery_restarts: 1 → 2` so the easy
+  mavlink-decode scope gets a realistic retry budget that matches the
+  Playwright spec's `allowRecoveryCycles: 2`.
+- `taskfiles/e2e.yml` mavlink-decode tier gets its own
+  `EXECUTION_TIMEOUT=80min` (was the generic 40min default — too tight
+  for even one recovery cycle to play out).
+
+### Earlier 2026-05-28 PM — Phase 1c shipped, qa-runner verified end-to-end
 
 The original AM run below was at `qa.level=synthesis` (default — LLM
 verdict only, no test execution at QA stage). ADR-039 Phase 1c (PRs
@@ -268,21 +329,34 @@ inside its own container. To run PX4 SITL on top of that:
   doesn't have a "pending external verdict" stage. Adding it is a
   meaningful design change to PLAN_STATES, not a small wire.
 
-**Where this leaves things (UPDATED 2026-05-28 PM):** the catalog
-metadata is correct and the architect's selection logic respects tier
-semantics. The wiring from **compatibility-tier** profile selection
-through qa-runner integration-test execution is now **shipped and
-verified end-to-end on real LLM** (gemini mavlink-decode PM run,
-ADR-039 Phase 1c via PR #25). The wiring from **required-tier** profile
-selection through qa-runner SITL execution remains **designed-for but
-not built-or-tested** — that's the next gate-of-realness. The next steps:
+**Where this leaves things (UPDATED 2026-05-29):** the catalog
+metadata is correct, the architect's selection logic respects tier
+semantics, and the QA pipeline now closes the loop autonomously
+through one recovery cycle. Specifically:
 
-1. A scenario specifically targeting `mavlink.px4-sitl.mavsdk-smoke`
+- **Compatibility-tier integration** through qa-runner is **shipped and
+  verified end-to-end on real LLM** (gemini mavlink-decode PM run
+  2026-05-28, ADR-039 Phase 1c via PR #25).
+- **Autonomous recovery cycle** triggered by qa-reviewer `needs_changes`
+  is **shipped and verified end-to-end on real LLM** (gemini
+  mavlink-decode 2026-05-29 morning, full chain logged at 25 seconds
+  from QA verdict to dev re-dispatch).
+- **Required-tier SITL hard-gate** remains **designed-for but not
+  built-or-tested** — that's the remaining gate-of-realness.
+
+The next steps:
+
+1. **Hybrid (claude-dev) mavlink-decode run** to characterize the model-
+   capability gap surfaced 2026-05-29: gemini-pro couldn't reliably fix
+   the time.Sleep timing within one recovery cycle. Want a comparison
+   data point on claude-dev's first-cycle success rate on the same
+   verdict shape before adjusting prompt strategy.
+2. A scenario specifically targeting `mavlink.px4-sitl.mavsdk-smoke`
    selection, with a fixture that pre-stages the SITL image, to verify
    the required-tier hard-gate doesn't false-fail when SITL is
    available. (Most valuable as proof of design soundness; ADR-039
    Phase 3 explicitly scopes this.)
-2. The deep-qa tier design (Option B above) was explicitly ruled OUT
+3. The deep-qa tier design (Option B above) was explicitly ruled OUT
    of ADR-039 — semspec's product shape is opinionated issue-to-PR
    autonomy, not a CI orchestration platform. See ADR-039 §Alternative E
    for the framing.
