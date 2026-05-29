@@ -150,6 +150,17 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 // dispatch via execution-manager.lookupRecoveryHint, so the manager
 // guidance reaches the wedged role through the existing channel.
 //
+// Two callers as of 2026-05-28:
+//   - handlePlanDecisionAccepted via the existing iteration-exhaustion
+//     path (exec was mid-cycle when markEscalatedLocked deferred it).
+//   - resumeTerminalForRecoveryLocked via the QA-recovery path (exec was
+//     terminal-stage in KV when the plan-level QA verdict rejected; the
+//     wrapper re-marks it awaiting before calling here).
+//
+// The function is identical for both — the only difference upstream is
+// how the exec got into activeExecs (cache-resident vs. KV-loaded then
+// reinserted).
+//
 // Caller must hold exec.mu.
 func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirementExecution) {
 	if exec.recoveryTimer != nil {
@@ -288,19 +299,68 @@ func (c *Component) handlePlanDecisionAccepted(lifecycleCtx, msgCtx context.Cont
 	}
 
 	for _, reqID := range evt.AffectedRequirementIDs {
-		exec := c.findAwaitingByRequirement(evt.Slug, reqID)
-		if exec == nil {
+		// First, the existing awaiting-recovery resume path: covers the
+		// iteration-exhaustion wedge (exec was mid-cycle, got marked
+		// awaiting_recovery by markEscalatedLocked, now we resume it).
+		if exec := c.findAwaitingByRequirement(evt.Slug, reqID); exec != nil {
+			c.logger.Info("Resuming exec on accepted PlanDecision",
+				"slug", evt.Slug,
+				"requirement_id", reqID,
+				"proposal_id", evt.ProposalID,
+			)
+			exec.mu.Lock()
+			c.resumeFromRecoveryLocked(lifecycleCtx, exec)
+			exec.mu.Unlock()
 			continue
 		}
-		c.logger.Info("Resuming exec on accepted PlanDecision",
-			"slug", evt.Slug,
-			"requirement_id", reqID,
-			"proposal_id", evt.ProposalID,
-		)
+
+		// Second, the QA-recovery path: covers the case where the
+		// requirement's per-req gates approved (dev + reviewer signed off,
+		// exec reached completed) but the plan-level QA verdict rejected.
+		// The completed exec was removed from activeExecs at cleanup, so
+		// findAwaitingByRequirement misses it. Without this branch, the
+		// recovery chain hangs at "PlanDecision accepted, nothing happens
+		// downstream" — empirically caught 2026-05-28 on gemini mavlink-
+		// decode run #4 where qa-reviewer rejected for flaky time.Sleep
+		// timing, recovery-agent emitted a refined_prompt PlanDecision,
+		// auto-accept watcher accepted it, but the plan stayed at
+		// `rejected` because no exec was in awaiting_recovery to resume.
+		exec, err := c.loadTerminalReqExecFromKV(msgCtx, evt.Slug, reqID)
+		if err != nil {
+			c.logger.Warn("Failed to load terminal req exec from KV for QA-recovery",
+				"slug", evt.Slug, "requirement_id", reqID, "error", err)
+			continue
+		}
+		if exec == nil {
+			// No match anywhere — the event also fires for non-recovery
+			// proposals and for proposals affecting reqs we never tracked.
+			continue
+		}
+
+		// Budget gate. recoveryRestarts is not persisted on
+		// workflow.RequirementExecution, so rebuildExecFromKV always sets
+		// it to zero — the per-exec gate in deferToAwaitingRecoveryLocked
+		// can never bite on the QA-recovery path. Count accepted
+		// recovery-agent PlanDecisions for this req on the plan instead;
+		// the just-accepted proposal is one of them, so the gate fires
+		// when subsequent retries try to land on top of an exhausted
+		// budget.
+		cycles := c.countAcceptedRecoveryCyclesForReq(msgCtx, evt.Slug, reqID)
+		if cycles > c.maxRecoveryRestarts() {
+			c.logger.Warn("QA-recovery budget exhausted; refusing to resume completed requirement",
+				"slug", evt.Slug,
+				"requirement_id", reqID,
+				"proposal_id", evt.ProposalID,
+				"cycles_observed", cycles,
+				"max_recovery_restarts", c.maxRecoveryRestarts(),
+			)
+			continue
+		}
+
+		c.activeExecs.Set(exec.EntityID, exec)
 		exec.mu.Lock()
-		c.resumeFromRecoveryLocked(lifecycleCtx, exec)
+		c.resumeTerminalForRecoveryLocked(lifecycleCtx, exec, evt.ProposalID)
 		exec.mu.Unlock()
 	}
 	_ = msg.Ack()
-	_ = msgCtx // suppress unused-arg warning in builds where the handler shape changes
 }
