@@ -23,7 +23,22 @@ export interface PlanResponse {
 	review_summary?: string;
 	architecture?: { technology_choices?: unknown[]; component_boundaries?: unknown[]; [key: string]: unknown };
 	execution_summary?: ExecutionSummary;
+	plan_decisions?: PlanDecisionSummary[];
 	[key: string]: unknown;
+}
+
+/**
+ * PlanDecisionSummary is the subset of workflow.PlanDecision the spec reads
+ * for recovery-cycle detection. The full type lives in workflow/types.go;
+ * we only need proposed_by + status + id + created_at to recognize an
+ * in-flight recovery PlanDecision emitted by recovery-agent.
+ */
+export interface PlanDecisionSummary {
+	id: string;
+	proposed_by: string;
+	status: string;
+	kind: string;
+	created_at: string;
 }
 
 export async function createPlan(description: string): Promise<PlanResponse> {

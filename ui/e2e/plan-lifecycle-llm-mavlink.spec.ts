@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createPlan, deletePlan, executePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
-import type { PlanResponse } from './helpers/api';
+import type { PlanResponse, PlanDecisionSummary } from './helpers/api';
 
 /**
  * @mavlink-decode tier: verifies PR #18 catalog-backed harness-profile
@@ -32,24 +32,123 @@ const POLL_INTERVAL = 3_000;
 
 const TERMINAL_FAILURE_STAGES = ['rejected', 'failed'];
 
+/**
+ * REJECTED_GRACE_PERIOD_MS bounds how long the spec keeps polling after
+ * seeing stage='rejected' without an in-flight recovery PlanDecision yet
+ * showing up on the plan. Covers the race window: plan-manager sets
+ * plan.status=rejected and publishes RecoveryRequested in the same
+ * mutation; recovery-agent's LLM dispatch lands a PlanDecision on the
+ * plan ~5-60s later. During that window plan.stage is rejected with
+ * plan_decisions empty (of a recovery-shaped entry); declaring terminal
+ * immediately would race the recovery wire we just merged in PR #29.
+ *
+ * After this window expires, "rejected with no recovery decision" is
+ * accepted as actually terminal.
+ */
+const REJECTED_GRACE_PERIOD_MS = 90_000;
+
+interface WaitForStageOptions {
+	/**
+	 * allowRecoveryCycles caps how many distinct recovery PlanDecisions the
+	 * spec will wait through before declaring the plan terminally failed.
+	 * 0 (the default) keeps the original behavior — any TERMINAL_FAILURE_STAGES
+	 * value is immediately terminal. Set on the `execution completes` test to
+	 * let the autonomous qa-rejection retry chain (PR #29 + #30) actually
+	 * run to verdict, which can include multiple QA round-trips.
+	 */
+	allowRecoveryCycles?: number;
+}
+
+interface ActiveRecoveryDecision {
+	id: string;
+	status: string;
+}
+
+/**
+ * findActiveRecoveryDecision returns the most-recent recovery-agent-emitted
+ * PlanDecision when it's in a not-yet-resolved state (proposed = waiting on
+ * auto-accept / human review; accepted = cascade in flight, plan should
+ * transition back out of rejected shortly). Anything else (no proposals,
+ * decisions all rejected/superseded) returns null so the caller declares
+ * terminal.
+ */
+function findActiveRecoveryDecision(plan: PlanResponse): ActiveRecoveryDecision | null {
+	const decisions = (plan.plan_decisions ?? []) as PlanDecisionSummary[];
+	const recovery = decisions
+		.filter((d) => d.proposed_by === 'recovery-agent')
+		.sort((a, b) => b.created_at.localeCompare(a.created_at));
+	if (recovery.length === 0) return null;
+	const latest = recovery[0];
+	if (latest.status === 'proposed' || latest.status === 'accepted') {
+		return { id: latest.id, status: latest.status };
+	}
+	return null;
+}
+
 async function waitForStage(
 	slug: string,
 	targetStages: string[],
 	timeoutMs: number,
-	label: string
+	label: string,
+	options: WaitForStageOptions = {}
 ): Promise<PlanResponse> {
 	const start = Date.now();
+	const allowRecoveryCycles = options.allowRecoveryCycles ?? 0;
 	let lastStage = '';
+	let firstSeenTerminalAt: number | null = null;
+	let recoveryCyclesObserved = 0;
+	let lastSeenRecoveryDecisionID: string | null = null;
 
 	while (Date.now() - start < timeoutMs) {
 		const plan = await getPlan(slug);
 
 		if (plan.stage !== lastStage) {
 			console.log(`[mavlink:${label}] Stage: ${lastStage || '(start)'} -> ${plan.stage} (${((Date.now() - start) / 1000).toFixed(0)}s)`);
+			// Plan recovered out of a terminal stage — clear the grace timer so
+			// a subsequent QA rejection gets a fresh window.
+			if (!TERMINAL_FAILURE_STAGES.includes(plan.stage)) {
+				firstSeenTerminalAt = null;
+			}
 			lastStage = plan.stage;
 		}
 
 		if (TERMINAL_FAILURE_STAGES.includes(plan.stage)) {
+			// Recovery-aware terminal handling. When the caller opted in via
+			// allowRecoveryCycles, the spec waits for the autonomous chain
+			// (qa-reviewer needs_changes → recovery-agent → auto-accept →
+			// requirement-executor resume) to actually finish before declaring
+			// the plan dead. See PRs #29 + #30 for the wire that this models.
+			if (allowRecoveryCycles > 0) {
+				if (firstSeenTerminalAt === null) firstSeenTerminalAt = Date.now();
+
+				const recoveryDecision = findActiveRecoveryDecision(plan);
+				if (recoveryDecision !== null) {
+					// Track distinct PlanDecisions as cycle boundaries — a new
+					// decision ID means recovery-agent has been re-invoked
+					// after a previous cycle resolved without reaching the
+					// target stage.
+					if (recoveryDecision.id !== lastSeenRecoveryDecisionID) {
+						recoveryCyclesObserved++;
+						lastSeenRecoveryDecisionID = recoveryDecision.id;
+						console.log(`[mavlink:${label}] Recovery cycle ${recoveryCyclesObserved}/${allowRecoveryCycles}: PlanDecision ${recoveryDecision.id.slice(-12)} status=${recoveryDecision.status}`);
+					}
+					if (recoveryCyclesObserved > allowRecoveryCycles) {
+						throw new Error(`Plan exhausted ${allowRecoveryCycles} recovery cycles at stage '${plan.stage}' without reaching [${targetStages}]`);
+					}
+					await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+					continue;
+				}
+
+				// Terminal stage but no recovery-agent PlanDecision yet — give
+				// the dispatch its grace window before declaring dead.
+				if (Date.now() - firstSeenTerminalAt < REJECTED_GRACE_PERIOD_MS) {
+					await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+					continue;
+				}
+
+				throw new Error(`Plan stuck at '${plan.stage}' for ${((Date.now() - firstSeenTerminalAt) / 1000).toFixed(0)}s with no recovery PlanDecision; recovery wire may be broken or recovery-agent not running`);
+			}
+
 			const diag = JSON.stringify({
 				stage: plan.stage,
 				review_verdict: plan.review_verdict,
@@ -205,11 +304,21 @@ test.describe('@t2 @mavlink-decode plan-lifecycle-llm-mavlink', () => {
 	});
 
 	test('execution completes', async () => {
+		// allowRecoveryCycles: 2 — the @mavlink-decode tier runs at
+		// qa_level=integration with real act execution, and gemini-pro
+		// has shipped flaky-timing implementations on both prior runs
+		// (run #2 2026-05-28 PM: hardcoded time.Sleep; run #3 2026-05-28
+		// later: extraneous test.go redeclaring main). The autonomous
+		// recovery chain wired in PR #29 + #30 emits a PlanDecision and
+		// cascades back to implementing on those rejections. 2 cycles
+		// covers one rejection + one successful retry, plus one more
+		// for sampling variance.
 		const plan = await waitForStage(
 			slug,
 			['complete'],
 			EXECUTION_TIMEOUT,
-			'execution'
+			'execution',
+			{ allowRecoveryCycles: 2 }
 		);
 
 		expect(plan.stage).toBe('complete');
