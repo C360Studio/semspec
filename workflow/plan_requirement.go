@@ -113,25 +113,37 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 //     the earlier one's merge commit. Without that depends_on edge, parallel
 //     branches both rewrite the same file and the plan-level merge stalls.
 //
-// Single-requirement plans skip the whole check (no possible overlap).
+// Mode 1 (empty files_owned) ALWAYS fires regardless of requirement count —
+// a code requirement with no FilesOwned isn't a code requirement. Single-req
+// plans previously skipped this and produced a gap where ADR-040 Move 2's
+// docs-only / orphan rules also couldn't fire (no files to inspect). Lifting
+// the exemption closes the gap; the docs-only and orphan rules in
+// plan_capability.go assume every code req has a FilesOwned entry to reason about.
+//
+// Mode 2 (overlap-without-depends_on) still skips single-req plans because
+// overlap is structurally impossible with one requirement.
 //
 // Background: 2026-04-29 Gemini @easy run found the previous lenient version
 // (skip-if-empty) silently accepted requirements with files_owned=null and
 // stalled at reviewing_qa with a merge conflict. See
 // project_gemini_easy_2026_04_29 memory.
 func ValidateFileOwnershipPartition(requirements []Requirement) error {
-	if len(requirements) < 2 {
+	if len(requirements) == 0 {
 		return nil
 	}
-	// Mode 1: every requirement must declare files_owned when there's more
-	// than one in play. Catches generators that ignore the prompt.
+	// Mode 1: every requirement must declare files_owned. Catches generators
+	// that ignore the prompt, AND single-req plans where the docs-only rule
+	// couldn't reason about file types without FilesOwned to inspect.
 	for i := range requirements {
 		if len(requirements[i].FilesOwned) == 0 {
 			return fmt.Errorf(
-				"%w: requirement %q has empty files_owned — every requirement in a multi-requirement plan must declare the workspace-relative paths it modifies, so the validator can detect overlap and force depends_on. Regenerate with files_owned set",
+				"%w: requirement %q has empty files_owned — every requirement must declare the workspace-relative paths it modifies. Regenerate with files_owned set",
 				ErrInvalidFileOwnership, requirements[i].ID,
 			)
 		}
+	}
+	if len(requirements) < 2 {
+		return nil
 	}
 	ancestors := transitiveAncestors(requirements)
 	for i := range requirements {
@@ -293,6 +305,9 @@ func SaveRequirements(ctx context.Context, tw *graphutil.TripleWriter, requireme
 		if err := writeRequirementTriples(ctx, tw, &requirements[i]); err != nil {
 			return fmt.Errorf("save requirement %s: %w", requirements[i].ID, err)
 		}
+		// ADR-040: emit requirement → capability edge when CapabilityName
+		// is set (empty for legacy plans with no Exploration).
+		writeRequirementCapabilityTriple(ctx, tw, &requirements[i], slug)
 	}
 
 	return nil
@@ -331,4 +346,17 @@ func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, re
 	}
 
 	return nil
+}
+
+// writeRequirementCapabilityTriple emits the requirement→capability edge.
+// Separate from writeRequirementTriples because it needs the plan slug
+// (to derive the Capability's 6-part EntityID). Called from SaveRequirements
+// after the per-requirement triples land.
+func writeRequirementCapabilityTriple(ctx context.Context, tw *graphutil.TripleWriter, req *Requirement, planSlug string) {
+	if tw == nil || req.CapabilityName == "" || planSlug == "" {
+		return
+	}
+	entityID := RequirementEntityID(req.ID)
+	capEntityID := CapabilityEntityID(planSlug, req.CapabilityName)
+	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementCapability, capEntityID)
 }

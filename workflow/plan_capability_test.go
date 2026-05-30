@@ -178,6 +178,142 @@ func TestPlanFromTripleMap_NoExplorationTriple(t *testing.T) {
 	}
 }
 
+func TestValidateRequirementCapabilityCoverage(t *testing.T) {
+	tests := []struct {
+		name    string
+		exp     *Exploration
+		reqs    []Requirement
+		wantErr string
+	}{
+		{
+			name: "happy path: every cap has a req and every req has a valid cap",
+			exp: &Exploration{
+				Capabilities: []Capability{
+					{Name: "user-auth", Lifecycle: CapabilityNew, Description: "Auth."},
+					{Name: "session-store", Lifecycle: CapabilityNew, Description: "Sessions."},
+				},
+			},
+			reqs: []Requirement{
+				{ID: "r1", CapabilityName: "user-auth"},
+				{ID: "r2", CapabilityName: "session-store"},
+			},
+		},
+		{
+			name: "nil exploration: legacy path, no validation",
+			exp:  nil,
+			reqs: []Requirement{{ID: "r1"}},
+		},
+		{
+			name: "all-empty cap names: legacy mid-cascade, no validation",
+			exp: &Exploration{
+				Capabilities: []Capability{
+					{Name: "x", Lifecycle: CapabilityNew, Description: "X."},
+				},
+			},
+			reqs: []Requirement{{ID: "r1"}, {ID: "r2"}},
+		},
+		{
+			name: "mixed state: some reqs with cap, others without — inconsistency rejected",
+			exp: &Exploration{
+				Capabilities: []Capability{
+					{Name: "x", Lifecycle: CapabilityNew, Description: "X."},
+				},
+			},
+			reqs: []Requirement{
+				{ID: "r1", CapabilityName: "x"},
+				{ID: "r2"},
+			},
+			wantErr: "inconsistent capability linkage",
+		},
+		{
+			name: "orphan req cap: cap name doesn't resolve",
+			exp: &Exploration{
+				Capabilities: []Capability{
+					{Name: "x", Lifecycle: CapabilityNew, Description: "X."},
+				},
+			},
+			reqs: []Requirement{
+				{ID: "r1", CapabilityName: "ghost"},
+			},
+			wantErr: "not declared in Plan.Exploration",
+		},
+		{
+			name: "orphan capability: cap with no implementing req",
+			exp: &Exploration{
+				Capabilities: []Capability{
+					{Name: "covered", Lifecycle: CapabilityNew, Description: "Covered."},
+					{Name: "uncovered", Lifecycle: CapabilityNew, Description: "Uncovered."},
+				},
+			},
+			reqs: []Requirement{
+				{ID: "r1", CapabilityName: "covered"},
+			},
+			wantErr: "capability_orphan",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRequirementCapabilityCoverage(tt.exp, tt.reqs)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected success, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Errorf("expected error containing %q, got nil", tt.wantErr)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestFindDocsOnlyCapabilities(t *testing.T) {
+	exp := &Exploration{
+		Capabilities: []Capability{
+			{Name: "docs-cap", Lifecycle: CapabilityNew, Description: "Docs only."},
+			{Name: "mixed-cap", Lifecycle: CapabilityNew, Description: "Mixed files."},
+			{Name: "impl-cap", Lifecycle: CapabilityNew, Description: "Impl only."},
+			{Name: "no-req-cap", Lifecycle: CapabilityNew, Description: "Orphan."},
+		},
+	}
+	reqs := []Requirement{
+		{ID: "r1", CapabilityName: "docs-cap", FilesOwned: []string{"README.md", "docs/x.md"}},
+		{ID: "r2", CapabilityName: "mixed-cap", FilesOwned: []string{"x.go", "x.md"}},
+		{ID: "r3", CapabilityName: "impl-cap", FilesOwned: []string{"impl.go"}},
+		// no-req-cap has no req — caught by orphan check, not docs-only
+	}
+	got := FindDocsOnlyCapabilities(exp, reqs)
+	if len(got) != 1 || got[0] != "docs-cap" {
+		t.Errorf("expected [docs-cap], got %v", got)
+	}
+}
+
+func TestIsDocumentationPath(t *testing.T) {
+	tests := map[string]bool{
+		"README.md":              true,
+		"docs/coverage.md":       true,
+		"src/lib.go":             false,
+		"package.json":           false,
+		"LICENSE":                true,
+		"contributing":           true,
+		"path/to/CHANGELOG":      true,
+		"src/foo.adoc":           true,
+		"path/with/dir/file.txt": true,
+	}
+	for path, want := range tests {
+		t.Run(path, func(t *testing.T) {
+			if got := isDocumentationPath(path); got != want {
+				t.Errorf("isDocumentationPath(%q) = %v, want %v", path, got, want)
+			}
+		})
+	}
+}
+
 func TestExploration_FindCapability(t *testing.T) {
 	exp := &Exploration{
 		Capabilities: []Capability{

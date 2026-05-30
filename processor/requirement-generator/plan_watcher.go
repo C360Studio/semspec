@@ -8,7 +8,7 @@ package requirementgenerator
 // generation.
 //
 // "approved" triggers full requirement generation for a new plan.
-// "changed" triggers partial regeneration ��� only deprecated requirements are
+// "changed" triggers partial regeneration — only deprecated requirements are
 // replaced, while active requirements are preserved.
 
 import (
@@ -102,6 +102,12 @@ func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Pl
 	if len(plan.Scope.Include) > 0 || len(plan.Scope.Exclude) > 0 || len(plan.Scope.DoNotTouch) > 0 {
 		scope := plan.Scope
 		trigger.Scope = &scope
+	}
+	// ADR-040 Move 2: carry the analyst sub-phase's capability list into
+	// the dispatch payload so John produces 1 Requirement per capability.
+	if plan.Exploration != nil && len(plan.Exploration.Capabilities) > 0 {
+		exp := *plan.Exploration
+		trigger.Exploration = &exp
 	}
 
 	// Partial regen: if plan has deprecated requirements, only regenerate those.

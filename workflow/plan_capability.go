@@ -3,6 +3,8 @@ package workflow
 import (
 	"context"
 	"fmt"
+	"path"
+	"strings"
 
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow/graphutil"
@@ -158,6 +160,191 @@ func detectCapabilityCycle(caps []Capability) error {
 		}
 	}
 	return nil
+}
+
+// ValidateRequirementCapabilityCoverage enforces the ADR-040 Move 2 rule:
+// every Requirement's CapabilityName must resolve to a declared Capability,
+// and every Capability must own at least one Requirement. Called from
+// plan-manager's handleRequirementsMutation when Plan.Exploration is set.
+//
+// Skipped when exploration is nil — legacy plans without analyst sub-phase
+// have no capabilities to validate against. Skipped also when ALL
+// requirements have empty CapabilityName: the heuristic is "if the
+// requirement-generator was wired for capabilities, every req has one;
+// mixed states are a regression and surfaced".
+//
+// Returns three error categories so plan-reviewer rules can distinguish
+// them (and so retry feedback can point at the right fix):
+//   - orphan_capability: a Capability with no implementing Requirement
+//   - orphan_requirement_cap: a Requirement.CapabilityName not in exploration
+//   - inconsistent: mixed state (some reqs with cap, others without)
+func ValidateRequirementCapabilityCoverage(exp *Exploration, requirements []Requirement) error {
+	if exp == nil || len(exp.Capabilities) == 0 {
+		return nil
+	}
+	if len(requirements) == 0 {
+		return nil
+	}
+
+	withCap := 0
+	for _, r := range requirements {
+		if r.CapabilityName != "" {
+			withCap++
+		}
+	}
+	if withCap == 0 {
+		// All requirements pre-date capability wiring (e.g. mid-cascade
+		// upgrade of an in-flight plan). Don't fail — let the operator
+		// run regen if they want capability linkage.
+		return nil
+	}
+	if withCap < len(requirements) {
+		return fmt.Errorf("inconsistent capability linkage: %d of %d requirements have CapabilityName set (must be all-or-none)",
+			withCap, len(requirements))
+	}
+
+	declared := make(map[string]bool, len(exp.Capabilities))
+	for _, c := range exp.Capabilities {
+		declared[c.Name] = true
+	}
+
+	// Orphan requirement check: every CapabilityName must resolve.
+	for _, r := range requirements {
+		if !declared[r.CapabilityName] {
+			return fmt.Errorf("requirement %s references capability %q which is not declared in Plan.Exploration",
+				r.ID, r.CapabilityName)
+		}
+	}
+
+	// Orphan capability check: every capability must own ≥1 requirement.
+	covered := make(map[string]bool, len(exp.Capabilities))
+	for _, r := range requirements {
+		covered[r.CapabilityName] = true
+	}
+	for _, c := range exp.Capabilities {
+		if !covered[c.Name] {
+			return fmt.Errorf("capability %q has no implementing requirement (capability_orphan)", c.Name)
+		}
+	}
+
+	return nil
+}
+
+// FindUncoveredCapabilities returns the names of capabilities in the
+// exploration that have zero implementing requirements. Used by
+// plan-reviewer's capability_orphan rule to produce per-capability findings
+// rather than the all-or-nothing error from ValidateRequirementCapabilityCoverage.
+//
+// Empty exploration or empty requirements returns nil.
+func FindUncoveredCapabilities(exp *Exploration, requirements []Requirement) []string {
+	if exp == nil || len(exp.Capabilities) == 0 {
+		return nil
+	}
+	covered := make(map[string]bool, len(exp.Capabilities))
+	for _, r := range requirements {
+		if r.CapabilityName != "" {
+			covered[r.CapabilityName] = true
+		}
+	}
+	var uncovered []string
+	for _, c := range exp.Capabilities {
+		if !covered[c.Name] {
+			uncovered = append(uncovered, c.Name)
+		}
+	}
+	return uncovered
+}
+
+// FindOrphanRequirementCapabilities returns requirements whose CapabilityName
+// doesn't resolve to a declared capability. Used by plan-reviewer.
+func FindOrphanRequirementCapabilities(exp *Exploration, requirements []Requirement) []Requirement {
+	if exp == nil {
+		return nil
+	}
+	declared := make(map[string]bool, len(exp.Capabilities))
+	for _, c := range exp.Capabilities {
+		declared[c.Name] = true
+	}
+	var orphans []Requirement
+	for _, r := range requirements {
+		if r.CapabilityName != "" && !declared[r.CapabilityName] {
+			orphans = append(orphans, r)
+		}
+	}
+	return orphans
+}
+
+// FindDocsOnlyCapabilities returns capabilities whose owning Requirements
+// only touch documentation files (e.g. *.md, *.txt, README*). This is the
+// run-#3 failure mode: the planner generates a "capability" but the
+// requirement-generator produces only docs requirements for it, no
+// implementation code. Used by plan-reviewer's capability_orphan rule.
+//
+// "Documentation-only" means: at least one FilesOwned entry, AND every
+// FilesOwned entry matches a documentation pattern. A capability with NO
+// FilesOwned at all is flagged by FindUncoveredCapabilities (orphan), not
+// here.
+func FindDocsOnlyCapabilities(exp *Exploration, requirements []Requirement) []string {
+	if exp == nil || len(exp.Capabilities) == 0 {
+		return nil
+	}
+	// Group requirements by capability
+	reqsByCap := make(map[string][]Requirement, len(exp.Capabilities))
+	for _, r := range requirements {
+		if r.CapabilityName == "" {
+			continue
+		}
+		reqsByCap[r.CapabilityName] = append(reqsByCap[r.CapabilityName], r)
+	}
+
+	var docsOnly []string
+	for _, c := range exp.Capabilities {
+		reqs := reqsByCap[c.Name]
+		if len(reqs) == 0 {
+			continue // orphan, not docs-only
+		}
+		allDocs := true
+		hasAnyFiles := false
+		for _, r := range reqs {
+			for _, f := range r.FilesOwned {
+				hasAnyFiles = true
+				if !isDocumentationPath(f) {
+					allDocs = false
+					break
+				}
+			}
+			if !allDocs {
+				break
+			}
+		}
+		if hasAnyFiles && allDocs {
+			docsOnly = append(docsOnly, c.Name)
+		}
+	}
+	return docsOnly
+}
+
+// isDocumentationPath reports whether a workspace-relative path looks like
+// pure documentation. Loose heuristic — false negatives are fine (a
+// docs-only capability that escapes this filter is still caught by
+// downstream phases that need actual implementation code).
+func isDocumentationPath(p string) bool {
+	lower := strings.ToLower(p)
+	suffixes := []string{".md", ".txt", ".rst", ".adoc"}
+	for _, s := range suffixes {
+		if strings.HasSuffix(lower, s) {
+			return true
+		}
+	}
+	// Common readme-shaped filenames without extension.
+	bases := []string{"readme", "license", "contributing", "changelog"}
+	base := path.Base(lower)
+	for _, b := range bases {
+		if base == b {
+			return true
+		}
+	}
+	return false
 }
 
 func joinNames(names []string) string {

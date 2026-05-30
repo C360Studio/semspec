@@ -133,9 +133,17 @@ func TestValidateFileOwnershipPartition(t *testing.T) {
 			errContains: "empty files_owned",
 		},
 		{
-			// Single-req plans skip the whole check — no possible overlap.
-			name: "single requirement with empty files_owned passes",
-			reqs: []Requirement{req("solo", nil, nil)},
+			// ADR-040 Move 2 (go-reviewer PR 2): single-req plans now
+			// also reject empty files_owned. Previously the validator
+			// short-circuited on single-req to skip overlap detection,
+			// but that left a gap where the docs-only / orphan rules in
+			// plan_capability.go couldn't reason about file types.
+			// Empty-files now always rejects; overlap-detection still
+			// short-circuits on single-req.
+			name:        "single requirement with empty files_owned rejects",
+			reqs:        []Requirement{req("solo", nil, nil)},
+			wantErr:     true,
+			errContains: "empty files_owned",
 		},
 		{
 			// The exact bug from 2026-04-28 Gemini @easy: two parallel reqs

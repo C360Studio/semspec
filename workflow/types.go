@@ -1235,6 +1235,16 @@ type Requirement struct {
 	Status     RequirementStatus `json:"status,omitempty"`
 	DependsOn  []string          `json:"depends_on,omitempty"`  // IDs of prerequisite requirements
 	FilesOwned []string          `json:"files_owned,omitempty"` // workspace-relative paths this requirement owns; two requirements that both list the same path must have a DependsOn edge between them or the plan-level merge will conflict
+
+	// CapabilityName links the Requirement to the Capability that owns it
+	// (ADR-040 Move 2). One Requirement per Capability after the analyst
+	// sub-phase lands. Empty when the plan ran the legacy single-pass path
+	// (Plan.Exploration nil) — back-compat is preserved.
+	//
+	// Validated by ValidateRequirementCapabilityCoverage when Plan.Exploration
+	// is non-nil: every requirement's CapabilityName must resolve to a
+	// declared capability, and every capability must own ≥1 requirement.
+	CapabilityName string `json:"capability_name,omitempty"`
 	// RecoveryHint is supplementary feedback applied by ADR-037 stage-1
 	// recovery when a recovery PlanDecision is accepted (cascade re-runs
 	// the affected req). When non-empty, execution-manager prepends it

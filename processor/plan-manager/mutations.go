@@ -234,6 +234,15 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → requirements_generated", current)}
 	}
 
+	// ADR-040 Move 2: when the plan ran the analyst sub-phase, every
+	// capability must own ≥1 requirement and every requirement's
+	// CapabilityName must resolve. Validation is permissive on legacy
+	// plans (Exploration nil) and mixed-state regressions are surfaced
+	// rather than silently accepted.
+	if err := workflow.ValidateRequirementCapabilityCoverage(plan.Exploration, req.Requirements); err != nil {
+		return MutationResponse{Success: false, Error: err.Error()}
+	}
+
 	// Replace requirements inline and advance plan status.
 	// The KV write IS the event — watchers (coordinator, SSE) react automatically.
 	plan.Requirements = req.Requirements

@@ -337,11 +337,23 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
+	// ADR-040 Move 2: merge deterministic capability findings before the
+	// verdict is acted on. The LLM reviewer might miss a docs-only capability
+	// or a depends_on cycle; the structural rules don't. NormalizeVerdict in
+	// merge bumps "approved" to "needs_changes" when any error finding lands.
+	if planForRules, loadErr := c.loadPlanForRules(ctx, slug); loadErr == nil {
+		mergeCapabilityFindings(planForRules, result)
+	} else {
+		c.logger.Warn("Skipping capability rules — plan load failed",
+			"slug", slug, "error", loadErr)
+	}
+
 	c.logger.Info("Review agent complete",
 		"slug", slug,
 		"round", round,
 		"verdict", result.Verdict,
-		"summary", result.Summary)
+		"summary", result.Summary,
+		"findings", len(result.Findings))
 
 	// Clear retry state AFTER the mutation is dispatched, not after parse.
 	// Mutations on the verdict path don't currently surface validator
@@ -639,6 +651,22 @@ func (c *Component) retryOrFail(ctx context.Context, slug string, round reviewRo
 		"previous_error", errorMsg)
 
 	c.dispatchReviewer(ctx, slug, payload.planContent, payload.round, errorMsg)
+}
+
+// loadPlanForRules reads a plan from PLAN_STATES and unmarshals it for the
+// ADR-040 capability rules. Returns the parsed Plan or an error if KV/parse
+// fails. Caller falls back to "skip rules, log warning" semantics so a
+// transient KV blip doesn't break the review flow.
+func (c *Component) loadPlanForRules(ctx context.Context, slug string) (*workflow.Plan, error) {
+	planJSON, err := c.loadPlanContentFromKV(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan: %w", err)
+	}
+	return &plan, nil
 }
 
 // loadPlanContentFromKV reads a plan from PLAN_STATES and returns its JSON

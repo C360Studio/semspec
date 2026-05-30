@@ -588,7 +588,7 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 }
 
 Required: goal (string), context (string), scope (object with include/create/exclude/do_not_touch arrays — emit empty arrays for unused fields, never omit).`,
-				`CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
+					`CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
 scope.create is for files the plan intends to CREATE that don't exist yet.
 Putting a not-yet-existing file in include will be flagged as a hallucinated
 path and the plan will be rejected. Putting an existing file in create is
@@ -1180,6 +1180,7 @@ Required fields per requirement:
 - description (string)
 - files_owned (array of workspace-relative paths) — MANDATORY. Empty arrays are not acceptable. If a requirement modifies no files, it isn't a code requirement.
 - depends_on (array of titles) — optional, use when one requirement must follow another or when sharing a file with another requirement.
+- capability_name (kebab-case string) — REQUIRED when a "## Capabilities" block appears above in this prompt (ADR-040 Move 2). Must exactly match one of the listed capability names. Omitted when no capabilities are provided (legacy plans).
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 			),

@@ -45,6 +45,38 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 		fmt.Fprintf(&sb, "**Do Not Touch**: %s\n\n", strings.Join(rg.ScopeDoNotTouch, ", "))
 	}
 
+	// ADR-040 Move 2: when the analyst sub-phase ran, render the capability
+	// list so John produces 1 Requirement per Capability with capability_name
+	// set. Absent on legacy plans (no analyst sub-phase) — back-compat path
+	// renders the same as before.
+	//
+	// SKIPPED on partial-regen flows (ReplaceRequirementIDs populated). The
+	// existing-approved requirements block doesn't surface CapabilityName
+	// today, so the LLM can't reconcile "produce one per capability" with
+	// "regenerate only rejected IDs" — go-reviewer flagged this in PR 2.
+	// Follow-up: extend ExistingRequirementSummary with CapabilityName and
+	// reframe the directive so partial regen preserves capability discipline.
+	// Until then, partial regen runs without the Capabilities block; the
+	// plan-manager and plan-reviewer rules still catch missing coverage.
+	if len(rg.Capabilities) > 0 && len(rg.ReplaceRequirementIDs) == 0 {
+		sb.WriteString("## Capabilities (one Requirement per capability)\n\n")
+		sb.WriteString("The analyst classified the user's request into these capabilities. Produce EXACTLY ONE Requirement per capability and set the requirement's `capability_name` field to the capability's `name`.\n\n")
+		for _, c := range rg.Capabilities {
+			fmt.Fprintf(&sb, "- **%s** (`lifecycle: %s`): %s", c.Name, c.Lifecycle, c.Description)
+			if len(c.DependsOn) > 0 {
+				fmt.Fprintf(&sb, " *(depends_on: %s)*", strings.Join(c.DependsOn, ", "))
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\nRules:\n")
+		sb.WriteString("- ONE Requirement per capability — no merging two capabilities into one Requirement, no splitting one capability across multiple Requirements.\n")
+		sb.WriteString("- `capability_name` is REQUIRED on every Requirement; it MUST exactly match one of the capability names above.\n")
+		sb.WriteString("- Each Requirement owns a focused `files_owned` set (≤5 paths). If a capability's scope would require more than 5 files, flag `capability_too_broad` in your output and stop — the analyst will re-split.\n")
+		sb.WriteString("- Use SHALL or MUST in the Requirement title and description (RFC 2119 normative language).\n")
+		sb.WriteString("- Documentation content (READMEs, coverage matrices, tradeoff write-ups) is NOT a standalone Requirement. It attaches as scenarios under the implementation Requirement that produces the documented behavior.\n")
+		sb.WriteString("- Capability `depends_on` relationships translate to Requirement `depends_on` automatically — set the Requirement's `depends_on` to the requirement IDs of the capabilities it depends on (preserve the DAG).\n\n")
+	}
+
 	if len(rg.ReplaceRequirementIDs) > 0 {
 		sb.WriteString("## Existing Approved Requirements (DO NOT regenerate these)\n\n")
 		// Status filter mirrors the legacy builder — only Active surviving

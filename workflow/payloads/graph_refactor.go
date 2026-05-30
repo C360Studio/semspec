@@ -32,6 +32,12 @@ type RequirementGeneratorRequest struct {
 	// ExistingRequirements carries approved requirements for partial regen context.
 	// The generator preserves these and only regenerates the IDs in ReplaceRequirementIDs.
 	ExistingRequirements []workflow.Requirement `json:"existing_requirements,omitempty"`
+
+	// Exploration carries the analyst sub-phase's capability list (ADR-040
+	// Move 2). When populated, the requirement-generator produces ONE
+	// Requirement per capability with CapabilityName set. Nil for legacy
+	// plans (no analyst sub-phase) — back-compat preserved.
+	Exploration *workflow.Exploration `json:"exploration,omitempty"`
 }
 
 // Schema implements message.Payload.

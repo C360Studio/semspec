@@ -119,10 +119,11 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 // requirementItem is the agent-generated JSON shape for a single requirement.
 // The agent is instructed to output an array of these objects.
 type requirementItem struct {
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	DependsOn   []string `json:"depends_on,omitempty"`  // titles of prerequisite requirements (resolved to IDs at build time)
-	FilesOwned  []string `json:"files_owned,omitempty"` // workspace-relative paths this requirement may modify
+	Title          string   `json:"title"`
+	Description    string   `json:"description"`
+	DependsOn      []string `json:"depends_on,omitempty"`      // titles of prerequisite requirements (resolved to IDs at build time)
+	FilesOwned     []string `json:"files_owned,omitempty"`     // workspace-relative paths this requirement may modify
+	CapabilityName string   `json:"capability_name,omitempty"` // ADR-040 Move 2: links to Plan.Exploration.Capabilities[].Name
 }
 
 // pendingDispatch records metadata for an in-flight requirement-generation dispatch.
@@ -456,6 +457,17 @@ func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGenerat
 		rg.ScopeExclude = trigger.Scope.Exclude
 		rg.ScopeDoNotTouch = trigger.Scope.DoNotTouch
 	}
+	if trigger.Exploration != nil && len(trigger.Exploration.Capabilities) > 0 {
+		rg.Capabilities = make([]prompt.CapabilityCard, 0, len(trigger.Exploration.Capabilities))
+		for _, c := range trigger.Exploration.Capabilities {
+			rg.Capabilities = append(rg.Capabilities, prompt.CapabilityCard{
+				Name:        c.Name,
+				Lifecycle:   string(c.Lifecycle),
+				Description: c.Description,
+				DependsOn:   c.DependsOn,
+			})
+		}
+	}
 	if len(trigger.ExistingRequirements) > 0 {
 		rg.ExistingRequirements = make([]prompt.ExistingRequirementSummary, 0, len(trigger.ExistingRequirements))
 		for _, r := range trigger.ExistingRequirements {
@@ -741,14 +753,15 @@ func buildRequirementsFromItems(slug string, trigger *payloads.RequirementGenera
 		id := fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1)
 		titleToID[item.Title] = id // new wins; downstream validators catch dup-title cases
 		out = append(out, workflow.Requirement{
-			ID:          id,
-			PlanID:      planID,
-			Title:       item.Title,
-			Description: item.Description,
-			FilesOwned:  workflow.NormalizeFilePaths(item.FilesOwned),
-			Status:      workflow.RequirementStatusActive,
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:             id,
+			PlanID:         planID,
+			Title:          item.Title,
+			Description:    item.Description,
+			FilesOwned:     workflow.NormalizeFilePaths(item.FilesOwned),
+			Status:         workflow.RequirementStatusActive,
+			CapabilityName: item.CapabilityName, // ADR-040 Move 2
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		})
 	}
 	for i, item := range items {

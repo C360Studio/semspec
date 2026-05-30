@@ -51,4 +51,22 @@ type RequirementGeneratorContext struct {
 	// fix. Empty for greenfield or when sandbox is unavailable; the
 	// renderer silently omits the section.
 	ProjectFileTree string
+
+	// Capabilities is the ADR-040 Move 2 input: the analyst sub-phase's
+	// classified capability list. When non-empty, the renderer instructs
+	// John to produce ONE Requirement per capability with capability_name
+	// set, and the parser will populate Requirement.CapabilityName.
+	// Empty for plans that ran the legacy single-pass planner (no
+	// analyst sub-phase) — back-compat preserved.
+	Capabilities []CapabilityCard
+}
+
+// CapabilityCard is the minimal capability projection the
+// requirement-generator user prompt renders. Mirrors the workflow.Capability
+// fields the LLM needs to produce one requirement per capability.
+type CapabilityCard struct {
+	Name        string   `json:"name"`
+	Lifecycle   string   `json:"lifecycle"`
+	Description string   `json:"description"`
+	DependsOn   []string `json:"depends_on,omitempty"`
 }
