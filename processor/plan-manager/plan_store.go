@@ -213,6 +213,55 @@ func (s *planStore) create(ctx context.Context, slug, title string, qaLevel work
 	return plan, nil
 }
 
+// createImported persists a fully-formed Plan in one shot — used by the
+// from-spec import handler (ADR-040 Move 4). Unlike create+save, which
+// briefly leaves the plan at status="" between the two KV writes, this
+// single-write path guarantees the first KV update already carries the
+// translated Status/Goal/Context/Exploration/Requirements/Scenarios.
+//
+// Critical for race-freedom: the planner component's PLAN_STATES watcher
+// (processor/planner/component.go::routePlanStateEntry) reads the first
+// KV entry it sees for a slug. If that entry has status="", it claims the
+// plan for analyst sub-phase dispatch. Imports MUST land status=explored
+// on the first write so the planner watcher routes them to routeExplored
+// (which dispatches the planner sub-phase, NOT the analyst).
+//
+// Per go-reviewer PR 4 audit blocker #2.
+func (s *planStore) createImported(ctx context.Context, plan *workflow.Plan, qaLevel workflow.QALevel, autoRejectOverride *bool) error {
+	if err := workflow.ValidateSlug(plan.Slug); err != nil {
+		return err
+	}
+	if plan.Title == "" {
+		return workflow.ErrTitleRequired
+	}
+	if s.exists(plan.Slug) {
+		return fmt.Errorf("%w: %s", workflow.ErrPlanExists, plan.Slug)
+	}
+	if qaLevel == "" {
+		qaLevel = workflow.QALevelSynthesis
+	}
+	now := time.Now()
+	if plan.ID == "" {
+		plan.ID = workflow.PlanEntityID(plan.Slug)
+	}
+	if plan.ProjectID == "" {
+		plan.ProjectID = workflow.ProjectEntityID(workflow.DefaultProjectSlug)
+	}
+	if plan.CreatedAt.IsZero() {
+		plan.CreatedAt = now
+	}
+	plan.QALevel = qaLevel
+	plan.AutoRejectOnExhaustion = autoRejectOverride
+	// Imports default to unapproved; the operator runs the normal approval
+	// flow on the imported plan.
+	plan.Approved = false
+
+	if err := s.save(ctx, plan); err != nil {
+		return fmt.Errorf("save imported plan: %w", err)
+	}
+	return nil
+}
+
 // save persists a plan through all three layers in order:
 // cache → KV bucket → graph triples.
 // KV write failures are logged but do not abort the operation — cache and

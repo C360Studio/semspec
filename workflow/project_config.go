@@ -632,6 +632,35 @@ type DetectionResult struct {
 	// ProposedChecklist is the deterministic set of quality gate checks
 	// derived from the detected languages and tooling.
 	ProposedChecklist []Check `json:"proposed_checklist"`
+
+	// OpenSpecChanges lists discovered openspec/changes/<name>/ directories
+	// the operator could import via POST /plan-manager/plans/from-spec
+	// (ADR-040 Move 4). Empty when the repo has no OpenSpec layout.
+	OpenSpecChanges []DetectedOpenSpecChange `json:"openspec_changes,omitempty"`
+}
+
+// DetectedOpenSpecChange describes one openspec/changes/<name>/ directory
+// suitable for import. The operator picks a change from this list and the
+// from-spec handler runs the structural check + translator against it.
+type DetectedOpenSpecChange struct {
+	// Name is the directory name (kebab-case identifier).
+	Name string `json:"name"`
+
+	// Path is the absolute filesystem path to the change directory.
+	Path string `json:"path"`
+
+	// HasProposal is true when proposal.md exists in this directory.
+	HasProposal bool `json:"has_proposal"`
+
+	// HasDesign is true when design.md exists.
+	HasDesign bool `json:"has_design,omitempty"`
+
+	// HasTasks is true when tasks.md exists.
+	HasTasks bool `json:"has_tasks,omitempty"`
+
+	// SpecCapabilities lists capability subdirectory names found under
+	// specs/. Empty when no specs/ dir is present.
+	SpecCapabilities []string `json:"spec_capabilities,omitempty"`
 }
 
 // DetectedLanguage describes a language found in the repository.

@@ -44,9 +44,48 @@ func (d *FileSystemDetector) Detect(repoRoot string) (*DetectionResult, error) {
 	d.detectFrameworks(repoRoot, result)
 	d.detectTooling(repoRoot, result)
 	d.detectDocs(repoRoot, result)
+	d.detectOpenSpecChanges(repoRoot, result)
 	result.ProposedChecklist = d.buildProposedChecklist(repoRoot, result)
 
 	return result, nil
+}
+
+// detectOpenSpecChanges scans openspec/changes/ for change directories
+// importable via POST /plan-manager/plans/from-spec (ADR-040 Move 4).
+// Each direct subdirectory under openspec/changes/ is reported as a
+// candidate; the actual structural validation runs at import time via
+// workflow/specimport/structural_check.go.
+//
+// No-op when openspec/changes/ doesn't exist (most repos).
+func (d *FileSystemDetector) detectOpenSpecChanges(repoRoot string, result *DetectionResult) {
+	changesDir := filepath.Join(repoRoot, "openspec", "changes")
+	entries, err := os.ReadDir(changesDir)
+	if err != nil {
+		return // directory absent or unreadable — no OpenSpec changes
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		changePath := filepath.Join(changesDir, entry.Name())
+		change := DetectedOpenSpecChange{
+			Name:        entry.Name(),
+			Path:        changePath,
+			HasProposal: fileExists(filepath.Join(changePath, "proposal.md")),
+			HasDesign:   fileExists(filepath.Join(changePath, "design.md")),
+			HasTasks:    fileExists(filepath.Join(changePath, "tasks.md")),
+		}
+		// Enumerate capability subdirs under specs/.
+		specsDir := filepath.Join(changePath, "specs")
+		if specEntries, err := os.ReadDir(specsDir); err == nil {
+			for _, s := range specEntries {
+				if s.IsDir() {
+					change.SpecCapabilities = append(change.SpecCapabilities, s.Name())
+				}
+			}
+		}
+		result.OpenSpecChanges = append(result.OpenSpecChanges, change)
+	}
 }
 
 // excludedSubdirs lists directory names to skip when scanning subdirectories for

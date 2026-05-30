@@ -41,6 +41,7 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 
 	// Workflow endpoints
 	mux.HandleFunc(prefix+"plans", c.handlePlans)
+	mux.HandleFunc(prefix+"plans/from-spec", c.handleCreatePlanFromSpec)
 	mux.HandleFunc(prefix+"plans/", c.handlePlansWithSlug)
 
 	// Workspace browser (proxied to sandbox server)
