@@ -634,10 +634,22 @@ Respond ONLY via the submit_work tool call. No markdown, no preamble, no explana
 			},
 		},
 		{
+			// ADR-040: gated on ctx.AnalystPrompt == nil so the planner-shape
+			// process description doesn't contaminate the analyst sub-phase
+			// system prompt. Without this gate, the analyst LLM sees
+			// "Produce Goal/Context/Scope structure" AND the analyst persona's
+			// "Output ONLY the capability list" simultaneously, and weaker
+			// models (gemini-3-flash) resolve the conflict toward
+			// goal/context/scope because it's repeated more often. Caught
+			// 2026-05-30 by real-LLM smoke (gemini @ easy run #1).
 			ID:       "software.planner.role-context",
 			Category: prompt.CategoryRoleContext,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `Process
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				if ctx.AnalystPrompt != nil {
+					return "" // analyst persona provides its own process guidance
+				}
+				return `Process
 
 If starting from an exploration:
 1. Review the exploration's Goal/Context/Scope
@@ -663,17 +675,26 @@ Guidelines:
 - Goal should be specific enough to derive tasks from
 - Context should explain the "why" not just the "what"
 - Scope boundaries are enforced during task generation
-- Protected files (do_not_touch) cannot appear in any task`,
+- Protected files (do_not_touch) cannot appear in any task`
+			},
 		},
 
 		// =====================================================================
 		// Planner behavioral gate (workspace exploration before planning)
+		// ADR-040: gated on ctx.AnalystPrompt == nil so the "fill in goal,
+		// context, and scope" directive doesn't contaminate the analyst
+		// sub-phase. Same root cause as software.planner.role-context above.
 		// =====================================================================
 		{
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content:  `Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`,
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				if ctx.AnalystPrompt != nil {
+					return `Identify capabilities efficiently — read enough of the codebase to know whether each capability is new vs modified, then call submit_work with the kebab-case capability list. Do NOT propose files, scope, or implementation steps; the next sub-phase handles those.`
+				}
+				return `Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`
+			},
 		},
 
 		// =====================================================================

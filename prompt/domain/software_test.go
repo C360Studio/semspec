@@ -1118,3 +1118,100 @@ func TestSoftwareReviewerRetryFragment(t *testing.T) {
 		t.Error("plan-reviewer must use its own prior-round fragment, not the code-reviewer retry-directive")
 	}
 }
+
+// TestAnalystSubPhasePromptIsNotContaminatedByPlannerFragments pins the
+// 2026-05-30 real-LLM smoke fix. The analyst sub-phase user prompt builds
+// under RolePlanner with ctx.AnalystPrompt set. Two RolePlanner fragments
+// (role-context + behavioral-gates) used to fire unconditionally, telling
+// the model to "produce Goal/Context/Scope structure" and "fill in goal,
+// context, and scope" — which conflicted with the analyst persona's
+// "output ONLY the capability list". Gemini-3-flash resolved the conflict
+// toward goal/context/scope, breaking the analyst sub-phase on real LLM.
+//
+// Both fragments are now gated on ctx.AnalystPrompt == nil. This test
+// pins the gate by asserting the analyst-context assembly does NOT
+// contain planner-shape directives.
+func TestAnalystSubPhasePromptIsNotContaminatedByPlannerFragments(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	res := a.Assemble(&prompt.AssemblyContext{
+		Role:   prompt.RolePlanner,
+		Domain: "software",
+		AnalystPrompt: &prompt.AnalystPromptContext{
+			Title:       "Add /health endpoint",
+			Description: "Return uptime and version as JSON.",
+		},
+		SupportsTools: true,
+		Persona: &prompt.AgentPersona{
+			DisplayName:  "Mary",
+			SystemPrompt: "You are Mary in analyst mode. Output ONLY the capability list.",
+		},
+	})
+	system := res.SystemMessage
+
+	// Planner-shape directives that MUST NOT appear in the analyst sub-phase.
+	forbidden := []string{
+		"Produce Goal/Context/Scope structure",
+		"fill in goal, context, and scope",
+		"Review the exploration's Goal/Context/Scope",
+	}
+	for _, phrase := range forbidden {
+		if strings.Contains(system, phrase) {
+			t.Errorf("analyst sub-phase system prompt leaks planner directive %q\nFragments used: %v\nSystem (first 800 chars): %s",
+				phrase, res.FragmentsUsed, clipLocal(system, 800))
+		}
+	}
+
+	// Sanity: analyst persona prompt IS present.
+	if !strings.Contains(system, "Mary in analyst mode") {
+		t.Errorf("expected analyst persona to be injected, got: %s", clipLocal(system, 400))
+	}
+	// Sanity: the analyst-specific behavioral-gate IS present.
+	if !strings.Contains(system, "Identify capabilities efficiently") {
+		t.Errorf("expected analyst behavioral-gate variant to be injected, got: %s", clipLocal(system, 400))
+	}
+}
+
+// TestPlannerSubPhasePromptRetainsPlannerFragments is the companion test:
+// when AnalystPrompt is nil (planner sub-phase), the planner fragments
+// MUST still fire. Without this, the planner sub-phase loses its
+// process description + behavioral-gate after the analyst gate change.
+func TestPlannerSubPhasePromptRetainsPlannerFragments(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	res := a.Assemble(&prompt.AssemblyContext{
+		Role:   prompt.RolePlanner,
+		Domain: "software",
+		PlannerPrompt: &prompt.PlannerPromptContext{
+			Title: "Add /health endpoint",
+		},
+		SupportsTools: true,
+	})
+	system := res.SystemMessage
+
+	// Planner-shape directives MUST be present.
+	required := []string{
+		"Produce Goal/Context/Scope structure",
+		"fill in goal, context, and scope",
+	}
+	for _, phrase := range required {
+		if !strings.Contains(system, phrase) {
+			t.Errorf("planner sub-phase missing required directive %q\nSystem (first 800 chars): %s",
+				phrase, clipLocal(system, 800))
+		}
+	}
+}
+
+// clipLocal mirrors clip from software_render_test.go for diagnostics
+// inside this file. Defined locally so the two test files don't depend
+// on each other.
+func clipLocal(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
