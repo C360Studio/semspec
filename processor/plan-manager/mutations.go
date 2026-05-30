@@ -18,6 +18,7 @@ import (
 // Mutation subjects — generators use request/reply to return results.
 // Plan-manager is the single writer; the KV write IS the event (twofer).
 const (
+	mutationExplored              = "plan.mutation.explored"
 	mutationDrafted               = "plan.mutation.drafted"
 	mutationReviewed              = "plan.mutation.reviewed"
 	mutationApproved              = "plan.mutation.approved"
@@ -54,6 +55,16 @@ type ScenariosMutationRequest struct {
 	RequirementID string              `json:"requirement_id"`
 	Scenarios     []workflow.Scenario `json:"scenarios"`
 	TraceID       string              `json:"trace_id,omitempty"`
+}
+
+// ExploredMutationRequest is sent by the planner component after the
+// ADR-040 analyst sub-phase produces an Exploration document. plan-manager
+// persists Plan.Exploration to PLAN_STATES, emits Capability triples to
+// ENTITY_STATES, and transitions exploring → explored.
+type ExploredMutationRequest struct {
+	Slug        string               `json:"slug"`
+	Exploration workflow.Exploration `json:"exploration"`
+	TraceID     string               `json:"trace_id,omitempty"`
 }
 
 // DraftedMutationRequest is sent by the planner after focus/synthesis.
@@ -141,6 +152,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		subject string
 		handler func(context.Context, []byte) MutationResponse
 	}{
+		{mutationExplored, c.handleExploredMutation},
 		{mutationDrafted, c.handleDraftedMutation},
 		{mutationReviewed, c.handleReviewedMutation},
 		{mutationApproved, c.handleApprovedMutation},
@@ -396,6 +408,55 @@ func (c *Component) handleGenerationFailedMutation(ctx context.Context, data []b
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
+	return MutationResponse{Success: true}
+}
+
+// handleExploredMutation persists the analyst sub-phase Exploration to
+// PLAN_STATES and transitions exploring → explored (ADR-040 Move 1). The
+// writeChildTriples path emits Capability entities + plan-level exploration
+// triples as part of the save.
+func (c *Component) handleExploredMutation(ctx context.Context, data []byte) MutationResponse {
+	var req ExploredMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+	if len(req.Exploration.Capabilities) == 0 {
+		return MutationResponse{Success: false, Error: "exploration must declare at least one capability"}
+	}
+	if err := workflow.ValidateCapabilitySet(req.Exploration.Capabilities); err != nil {
+		return MutationResponse{Success: false, Error: err.Error()}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusExplored) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → explored", current)}
+	}
+
+	exp := req.Exploration
+	plan.Exploration = &exp
+	plan.Status = workflow.StatusExplored
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save exploration via mutation", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan exploration committed",
+		"slug", req.Slug,
+		"capabilities", len(exp.Capabilities),
+		"open_questions", len(exp.OpenQuestions))
 	return MutationResponse{Success: true}
 }
 

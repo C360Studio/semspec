@@ -45,8 +45,20 @@ const (
 	// stepDrafting is the workflow step for plan drafting (coordinator + focused planners).
 	stepDrafting = "drafting"
 
+	// stepExploring is the workflow step for the ADR-040 analyst sub-phase.
+	// Distinct from stepDrafting so watchLoopCompletions can route results
+	// to the right handler (Exploration JSON vs PlanContent JSON).
+	stepExploring = "exploring"
+
 	// subjectPlanningTask is the NATS subject for planning agent tasks.
 	subjectPlanningTask = "agent.task.planning"
+
+	// mutationExploredSubject is the request/reply subject plan-manager
+	// listens on to commit the analyst sub-phase Exploration to PLAN_STATES
+	// (ADR-040). Transitions exploring → explored on success.
+	// (mutationDraftedSubject is declared lower in this file where the
+	// drafted-mutation handler also lives.)
+	mutationExploredSubject = "plan.mutation.explored"
 )
 
 // planDispatchContext holds the dispatch parameters needed to retry a planner
@@ -238,39 +250,93 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 			if err := json.Unmarshal(entry.Value(), &plan); err != nil {
 				continue
 			}
-
-			// Only trigger on new plans (status empty or "created").
-			if plan.Status != "" && plan.Status != workflow.StatusCreated {
-				continue
-			}
 			if plan.Slug == "" {
 				continue
 			}
 
-			// Claim the plan to prevent re-trigger on KV replay or concurrent watchers.
-			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusDrafting, c.logger) {
-				continue
-			}
-
-			// Detect revision mode: if the plan already has a Goal and ReviewFindings,
-			// this is an R1 retry (ADR-029). The planner should refine the existing
-			// draft rather than starting from scratch.
-			if plan.Goal != "" && len(plan.ReviewFindings) > 0 {
-				planJSON, _ := json.Marshal(plan)
-				findings := plan.ReviewFormattedFindings
-				if findings == "" {
-					findings = plan.ReviewSummary
-				}
-				revisionPrompt := fmt.Sprintf("## REVISION REQUEST (iteration %d)\n\nThe reviewer rejected your previous plan. Address ALL findings below.\n\n%s", plan.ReviewIteration, findings)
-				c.logger.Info("Detected revision plan — dispatching in refinement mode",
-					"slug", plan.Slug,
-					"review_iteration", plan.ReviewIteration)
-				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, true, string(planJSON), revisionPrompt, "")
-			} else {
-				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "", "")
-			}
+			c.routePlanStateEntry(ctx, &plan)
 		}
 	}
+}
+
+// routePlanStateEntry dispatches the appropriate planner sub-phase based on
+// the plan's current status. ADR-040: the analyst sub-phase runs first
+// (created → exploring → explored), then the planner sub-phase
+// (explored → drafting → drafted). Revision plans skip analyst.
+func (c *Component) routePlanStateEntry(ctx context.Context, plan *workflow.Plan) {
+	status := plan.Status
+	switch {
+	case status == "" || status == workflow.StatusCreated:
+		c.routeCreated(ctx, plan)
+	case status == workflow.StatusExplored:
+		c.routeExplored(ctx, plan)
+	}
+}
+
+// routeCreated handles plans in StatusCreated (or empty status). When the
+// analyst sub-phase is enabled AND the plan has no Exploration yet AND
+// it's not a revision (revision plans have Goal + ReviewFindings), claim
+// to StatusExploring and dispatch the analyst sub-phase. Otherwise claim
+// to StatusDrafting and dispatch the planner sub-phase directly (legacy
+// path or revision path or back-compat with AnalystSubPhase=false).
+func (c *Component) routeCreated(ctx context.Context, plan *workflow.Plan) {
+	isRevision := plan.Goal != "" && len(plan.ReviewFindings) > 0
+	wantAnalyst := c.config.IsAnalystSubPhaseEnabled() && plan.Exploration == nil && !isRevision
+
+	if wantAnalyst {
+		if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusExploring, c.logger) {
+			return
+		}
+		c.logger.Info("Dispatching analyst sub-phase (ADR-040)", "slug", plan.Slug, "title", plan.Title)
+		go c.dispatchAnalyst(ctx, plan.Slug, plan.Title, "", "")
+		return
+	}
+
+	// Legacy / revision / analyst-disabled path: claim drafting and dispatch
+	// the planner sub-phase directly.
+	if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusDrafting, c.logger) {
+		return
+	}
+	if isRevision {
+		planJSON, _ := json.Marshal(plan)
+		findings := plan.ReviewFormattedFindings
+		if findings == "" {
+			findings = plan.ReviewSummary
+		}
+		revisionPrompt := fmt.Sprintf("## REVISION REQUEST (iteration %d)\n\nThe reviewer rejected your previous plan. Address ALL findings below.\n\n%s", plan.ReviewIteration, findings)
+		c.logger.Info("Detected revision plan — dispatching in refinement mode",
+			"slug", plan.Slug,
+			"review_iteration", plan.ReviewIteration)
+		go c.dispatchPlanner(ctx, plan.Slug, plan.Title, true, string(planJSON), revisionPrompt, "")
+	} else {
+		go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "", "")
+	}
+}
+
+// routeExplored handles plans in StatusExplored — the analyst sub-phase
+// has completed and the planner sub-phase needs to consume the Exploration
+// and produce Goal/Context/Scope. Claims to StatusDrafting and dispatches
+// the planner sub-phase. The planner reads Plan.Exploration from KV at
+// dispatch time via the existing user-prompt path (no changes needed
+// downstream — the analyst's capabilities are part of the plan state the
+// planner already loads).
+func (c *Component) routeExplored(ctx context.Context, plan *workflow.Plan) {
+	// Defensive: status=explored implies Exploration was set by
+	// handleExploredMutation, but a stale KV entry or a future state-machine
+	// refactor could violate the invariant. Skip rather than panic so
+	// observability stays intact and the operator can intervene.
+	if plan.Exploration == nil {
+		c.logger.Warn("routeExplored: plan in explored status but Exploration is nil — skipping",
+			"slug", plan.Slug)
+		return
+	}
+	if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusDrafting, c.logger) {
+		return
+	}
+	c.logger.Info("Dispatching planner sub-phase after analyst completion (ADR-040)",
+		"slug", plan.Slug,
+		"capabilities", len(plan.Exploration.Capabilities))
+	go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "", "")
 }
 
 // watchLoopCompletions watches the AGENT_LOOPS KV bucket for planning agent
@@ -321,7 +387,10 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 		if loop.WorkflowSlug != workflow.WorkflowSlugPlanning {
 			continue
 		}
-		if loop.WorkflowStep != stepDrafting {
+		// ADR-040 routing: handle both analyst sub-phase (stepExploring)
+		// and planner sub-phase (stepDrafting). Anything else is owned by
+		// a different component.
+		if loop.WorkflowStep != stepDrafting && loop.WorkflowStep != stepExploring {
 			continue
 		}
 
@@ -334,11 +403,16 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 		// before the restart.
 		if !replayDone {
 			c.logger.Debug("Replay: skipping completed planning loop",
-				"slug", slug, "loop_id", loop.ID)
+				"slug", slug, "loop_id", loop.ID, "step", loop.WorkflowStep)
 			continue
 		}
 
-		c.handleLoopCompletion(ctx, &loop, slug)
+		switch loop.WorkflowStep {
+		case stepExploring:
+			c.handleAnalystCompletion(ctx, &loop, slug)
+		case stepDrafting:
+			c.handleLoopCompletion(ctx, &loop, slug)
+		}
 	}
 }
 
@@ -521,6 +595,392 @@ func (c *Component) fetchProjectFileTree(ctx context.Context) string {
 		return ""
 	}
 	return strings.TrimSpace(result.Stdout)
+}
+
+// exploredMutationRequest is sent to plan-manager after the analyst sub-phase
+// produces an Exploration document. plan-manager persists Plan.Exploration,
+// emits capability triples, and transitions exploring → explored.
+type exploredMutationRequest struct {
+	Slug        string               `json:"slug"`
+	Exploration workflow.Exploration `json:"exploration"`
+	TraceID     string               `json:"trace_id,omitempty"`
+}
+
+// handleAnalystCompletion processes a terminated analyst sub-phase loop:
+// parses the Exploration JSON, validates it, and sends an explored mutation
+// to plan-manager. On failure routes through retry/fail like the planner
+// sub-phase handler.
+func (c *Component) handleAnalystCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
+	c.updateLastActivity()
+
+	if c.retry.IsStaleLoop(slug, loop.TaskID) {
+		c.logger.Debug("Dropping stale analyst loop completion (task ID mismatch)",
+			"slug", slug, "loop_task_id", loop.TaskID, "loop_id", loop.ID)
+		return
+	}
+
+	if loop.Outcome != agentic.OutcomeSuccess {
+		errMsg := loop.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("analyst loop ended with outcome %q", loop.Outcome)
+		}
+		c.retryAnalystOrFail(ctx, slug, errMsg)
+		return
+	}
+
+	// Drop stale results if the plan moved past exploring while the loop ran.
+	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
+		status := kvPlan.EffectiveStatus()
+		if status != workflow.StatusExploring {
+			c.logger.Warn("Plan advanced past exploring while analyst was working, discarding stale result",
+				"slug", slug,
+				"current_status", status,
+				"loop_id", loop.ID)
+			c.retry.Clear(slug)
+			return
+		}
+	}
+
+	exp, quirks, err := parseExplorationFromResult(loop.Result)
+	c.emitParseIncident(ctx, loop, quirks, err)
+	if err != nil {
+		c.retryAnalystOrFail(ctx, slug, fmt.Sprintf("analyst output parse failed: %v", err))
+		return
+	}
+
+	mutReq := exploredMutationRequest{
+		Slug:        slug,
+		Exploration: *exp,
+		// TraceID is left unpopulated to match the sibling mutation pattern
+		// (draftedMutationRequest doesn't propagate it either). LoopEntity has
+		// no top-level TraceID field — when semstreams adds one, source it
+		// here in lockstep with the other planner-side mutations.
+	}
+	data, err := json.Marshal(mutReq)
+	if err != nil {
+		c.logger.Error("Failed to marshal explored mutation, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("explored mutation marshal failed: %v", err))
+		return
+	}
+
+	resp, err := c.natsClient.RequestWithRetry(ctx, mutationExploredSubject, data, 10*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		c.logger.Error("Explored mutation request failed, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("explored mutation publish failed: %v", err))
+		return
+	}
+
+	var mutResp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &mutResp); err != nil || !mutResp.Success {
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		} else {
+			errMsg = mutResp.Error
+		}
+		if strings.Contains(errMsg, "invalid transition") {
+			c.logger.Warn("Explored mutation rejected due to plan state advancement, discarding stale result",
+				"slug", slug,
+				"error", errMsg,
+				"loop_id", loop.ID)
+			c.retry.Clear(slug)
+			return
+		}
+		c.logger.Error("Plan-manager rejected explored mutation, rejecting plan", "slug", slug, "error", errMsg)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("explored mutation rejected: %s", errMsg))
+		return
+	}
+
+	c.retry.Clear(slug)
+	c.logger.Info("Analyst sub-phase complete; Exploration committed",
+		"slug", slug,
+		"capabilities", len(exp.Capabilities),
+		"open_questions", len(exp.OpenQuestions),
+		"loop_id", loop.ID)
+}
+
+// retryAnalystOrFail re-dispatches the analyst sub-phase with the failure
+// reason on the next attempt, or rejects the plan when retries are exhausted.
+// Mirrors retryOrFail's dispatchretry.State pattern (Snapshot / Track / Tick)
+// but feeds the analyst dispatch path.
+func (c *Component) retryAnalystOrFail(ctx context.Context, slug, errMsg string) {
+	if _, ok := c.retry.Snapshot(slug); !ok {
+		// Cold start: reconstruct minimal context. Analyst doesn't carry
+		// revision context — the title is all the analyst dispatch needs.
+		title, _ := c.recoverAnalystTitle(ctx, slug)
+		c.retry.Track(slug, &planDispatchContext{Title: title})
+	}
+
+	entry, retryOK := c.retry.Tick(ctx, slug)
+	if entry == nil {
+		if ctx.Err() != nil {
+			c.logger.Debug("retryAnalystOrFail aborted during backoff", "slug", slug, "error", ctx.Err())
+			return
+		}
+		c.logger.Warn("retryAnalystOrFail: lost retry context, failing immediately", "slug", slug)
+		c.generationsFailed.Add(1)
+		c.sendGenerationFailed(ctx, slug, errMsg)
+		return
+	}
+
+	pdc, _ := entry.Payload.(*planDispatchContext)
+	if pdc == nil {
+		pdc = &planDispatchContext{}
+	}
+
+	if !retryOK {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Analyst sub-phase failed after max retries",
+			"slug", slug,
+			"max_retries", c.config.MaxGenerationRetries,
+			"error", errMsg)
+		c.sendGenerationFailed(ctx, slug, errMsg)
+		return
+	}
+
+	c.logger.Warn("Retrying analyst sub-phase",
+		"slug", slug,
+		"attempt", entry.Count,
+		"max", c.config.MaxGenerationRetries,
+		"reason", errMsg)
+	go c.dispatchAnalyst(ctx, slug, pdc.Title, "", errMsg)
+}
+
+// recoverAnalystTitle reads PLAN_STATES to recover a plan's title when
+// retry fires after a restart wiped in-memory state. Returns "" when the
+// plan isn't found; callers fall back to a generation-failed signal in
+// that case rather than continuing with an empty title.
+func (c *Component) recoverAnalystTitle(ctx context.Context, slug string) (string, error) {
+	plan, err := c.loadPlanFromKV(ctx, slug)
+	if err != nil {
+		return "", err
+	}
+	return plan.Title, nil
+}
+
+// parseExplorationFromResult extracts Exploration JSON from an analyst loop
+// result string. Matches the contract baked into renderAnalystPrompt and
+// the analyst sub-phase output-format schema.
+func parseExplorationFromResult(result string) (*workflow.Exploration, []jsonutil.QuirkID, error) {
+	if result == "" {
+		return nil, nil, fmt.Errorf("empty analyst result")
+	}
+
+	// Happy path: direct unmarshal of clean JSON.
+	var exp workflow.Exploration
+	if err := json.Unmarshal([]byte(result), &exp); err == nil && len(exp.Capabilities) > 0 {
+		if err := validateExploration(&exp); err != nil {
+			return nil, nil, err
+		}
+		return &exp, nil, nil
+	}
+
+	// Fallback through jsonutil.ParseStrict for fence/comment/comma quirks.
+	parsed := jsonutil.ParseStrict(result)
+	if parsed.JSON == "" {
+		return nil, parsed.QuirksFired, fmt.Errorf("no JSON found in analyst result")
+	}
+	var quirkExp workflow.Exploration
+	if err := json.Unmarshal([]byte(parsed.JSON), &quirkExp); err != nil {
+		return nil, parsed.QuirksFired, fmt.Errorf("parse analyst JSON: %w", err)
+	}
+	if err := validateExploration(&quirkExp); err != nil {
+		return nil, parsed.QuirksFired, err
+	}
+	return &quirkExp, parsed.QuirksFired, nil
+}
+
+// validateExploration enforces analyst output discipline: at least one
+// capability, kebab-case names, valid lifecycle values, depends_on refs
+// to capabilities that exist in the same exploration.
+func validateExploration(exp *workflow.Exploration) error {
+	if exp == nil || len(exp.Capabilities) == 0 {
+		return fmt.Errorf("exploration must declare at least one capability")
+	}
+	names := make(map[string]struct{}, len(exp.Capabilities))
+	for i, cap := range exp.Capabilities {
+		if cap.Name == "" {
+			return fmt.Errorf("capability[%d] missing name", i)
+		}
+		if !isKebabCase(cap.Name) {
+			return fmt.Errorf("capability[%d] name %q must be kebab-case", i, cap.Name)
+		}
+		if !cap.Lifecycle.IsValid() {
+			return fmt.Errorf("capability[%d] (%s) lifecycle %q must be new or modified", i, cap.Name, cap.Lifecycle)
+		}
+		if cap.Description == "" {
+			return fmt.Errorf("capability[%d] (%s) missing description", i, cap.Name)
+		}
+		if _, dup := names[cap.Name]; dup {
+			return fmt.Errorf("capability %q declared more than once", cap.Name)
+		}
+		names[cap.Name] = struct{}{}
+	}
+	// depends_on cross-check: every named dependency must resolve within
+	// this exploration's capability set (plan-reviewer's
+	// capability_dependency_orphan rule lands in PR 2 — but rejecting
+	// trivially malformed deps at parse time is cheap and protects the
+	// downstream pipeline from confusing failure modes).
+	for _, cap := range exp.Capabilities {
+		for _, dep := range cap.DependsOn {
+			if _, ok := names[dep]; !ok {
+				return fmt.Errorf("capability %q depends_on %q which is not declared in this exploration", cap.Name, dep)
+			}
+		}
+	}
+	return nil
+}
+
+// isKebabCase reports whether s is a non-empty lowercase kebab-case token
+// (a-z and 0-9, hyphen-separated, no leading/trailing hyphens).
+func isKebabCase(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// dispatchAnalyst dispatches the ADR-040 analyst sub-phase. The analyst LLM
+// identifies CAPABILITIES from the user's request (no scope, no files, no
+// implementation steps) and submits an Exploration JSON via submit_work.
+// Mirrors dispatchPlanner but routes through stepExploring and the analyst
+// sub-phase persona.
+func (c *Component) dispatchAnalyst(ctx context.Context, slug, title, description, previousError string) {
+	// Gate on semsource readiness — analyst benefits from the same codebase
+	// context the planner does (it needs to distinguish new vs modified
+	// capabilities when openspec/specs/ exists).
+	c.waitForGraphReady(ctx, slug)
+
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+	c.retry.Track(slug, &planDispatchContext{
+		Title: title,
+		// Analyst dispatches don't carry revision context — revision plans
+		// skip the analyst sub-phase entirely (see routeCreated).
+	})
+
+	taskID := fmt.Sprintf("analyst-%s-%s", slug, uuid.New().String())
+	c.retry.SetActiveLoop(slug, taskID)
+
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
+	}
+	modelName := c.modelRegistry.Resolve(capability)
+
+	provider := c.resolveProvider()
+	var (
+		maxTokens int
+		endpoint  *ssmodel.EndpointConfig
+	)
+	if c.modelRegistry != nil {
+		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+			maxTokens = ep.MaxTokens
+			endpoint = ep
+		}
+	}
+	projectFileTree := c.fetchProjectFileTree(ctx)
+
+	asmCtx := &prompt.AssemblyContext{
+		Role:              prompt.RolePlanner,
+		Provider:          provider,
+		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
+		Domain:            "software",
+		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
+		SupportsTools:     true,
+		MaxTokens:         maxTokens,
+		Standards:         prompt.LoadStandardsForRoleFromDisk(prompt.RolePlanner),
+		// ADR-040: route to analyst sub-phase persona. Falls back to top-level
+		// planner persona when no sub-phases are declared (back-compat).
+		Persona:    prompt.GlobalPersonas().ForSubPhase(prompt.RolePlanner, "analyst"),
+		Vocabulary: prompt.GlobalPersonas().Vocabulary(),
+		AnalystPrompt: &prompt.AnalystPromptContext{
+			Title:           title,
+			Description:     description,
+			ProjectFileTree: projectFileTree,
+			PreviousError:   previousError,
+		},
+	}
+
+	if c.lessonWriter != nil {
+		graphCtx := context.WithoutCancel(ctx)
+		if roleLessons, err := c.lessonWriter.RotateLessonsForRole(graphCtx, "planner", 10); err == nil && len(roleLessons) > 0 {
+			tk := &prompt.LessonsLearned{}
+			for _, les := range roleLessons {
+				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{
+					Category:      les.Source,
+					Summary:       les.Summary,
+					InjectionForm: les.InjectionForm,
+					Positive:      les.Positive,
+					Role:          les.Role,
+				})
+			}
+			asmCtx.LessonsLearned = tk
+		}
+	}
+
+	assembled := c.assembler.Assemble(asmCtx)
+	if assembled.RenderError != nil {
+		c.logger.Error("Analyst user-prompt render failed", "slug", slug, "error", assembled.RenderError)
+		return
+	}
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        modelName,
+		Prompt:       assembled.UserMessage,
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "plan", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner)...),
+		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
+		WorkflowSlug: workflow.WorkflowSlugPlanning,
+		WorkflowStep: stepExploring,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug":        slug,
+			"task_id":          "main",
+			"deliverable_type": "exploration",
+			"role":             string(prompt.RolePlanner),
+			"sub_phase":        "analyst",
+			"model":            modelName,
+		},
+		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "plan", c.config.AttachResponseFormat),
+	}
+
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-planner")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to marshal analyst task message, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("analyst dispatch marshal failed: %v", err))
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subjectPlanningTask, data); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to dispatch analyst sub-phase, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("analyst dispatch failed: %v", err))
+		return
+	}
+
+	c.logger.Info("Dispatched analyst sub-phase agent",
+		"slug", slug,
+		"task_id", taskID,
+		"model", modelName,
+		"fragments", len(assembled.FragmentsUsed),
+		"system_chars", assembled.SystemMessageChars)
 }
 
 func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {

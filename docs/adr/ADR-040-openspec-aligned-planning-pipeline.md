@@ -1,8 +1,8 @@
 # ADR-040: OpenSpec Vocabulary Alignment + Bidirectional Compat (SKG-Authoritative)
 
-**Status:** Proposed (2026-05-30, revision 4)
+**Status:** Proposed (2026-05-30, revision 5)
 **Deciders:** Coby, Claude
-**Replaces:** ADR-040 rev 1 (greenfield-replacement framing — rejected 2026-05-30), ADR-040 rev 2 (added implementation/derived capability classification — superseded by vocab-alignment direction), ADR-040 rev 3 (wrong predicate shape — 5+ parts with embedded slugs; corrected in rev 4 to semstreams 6-part EntityID / 3-part predicate convention. `depends_on` upgraded from advisory to hard constraint per operator review.)
+**Replaces:** ADR-040 rev 1 (greenfield-replacement framing — rejected 2026-05-30), ADR-040 rev 2 (added implementation/derived capability classification — superseded by vocab-alignment direction), ADR-040 rev 3 (wrong predicate shape — 5+ parts with embedded slugs; corrected in rev 4 to semstreams 6-part EntityID / 3-part predicate convention. `depends_on` upgraded from advisory to hard constraint per operator review.), ADR-040 rev 4 (predicate surface-syntax over-tightening — corrected in rev 5 to match existing repo convention: underscores allowed in property segment, use full word `requirement` not `req`, all predicates strictly 3-part `domain.category.property`; the load-bearing rule remains "no slugs or instance IDs in predicates"; the only structural violation found in the existing codebase — the `source.git.decision.*` 4-part family — was flattened in PR 1b as part of this rev).
 **Folds in (supersedes):** ADR-038 (OpenSpec Spec Import — Brownfield Plan Bootstrap). ADR-038's inbound design is incorporated as Move 4 of this ADR so the full OpenSpec story (vocab + outbound + inbound) is unified.
 **Builds on:** ADR-029 (plan completeness + retry), ADR-030 (BMAD persona alignment), ADR-037 (wedge recovery), ADR-039 (harness catalog → qa.yml rendering)
 **Does not change:** Plan / PlanState / PLAN_STATES, ENTITY_STATES, the semstreams substrate, the harness catalog, the SKG, the dev → validator → reviewer → QA pipeline, the autonomous recovery cascade, the existing BMAD-shaped outputs in `output/workflow-documents/`.
@@ -123,7 +123,7 @@ Delta specs map to PlanDecisions per ADR-038 unchanged. Identity bridge via `ext
 Semstreams enforces two foundational conventions this ADR must honor:
 
 - **6-part dotted EntityID**: `{org}.{platform}.wf.{domain}.{type}.{hash}` — last segment is `HashInstanceID(logical-id)`. Logical IDs surface as triples on the entity. Semspec already ships `Plan`, `Spec`, `Req`, `Scenario`, `Tasks`, `Task`, `Phase`, `Phases`, `Project`, `Config` entity types in `workflow/entity.go`.
-- **3-part dotted predicate**: `{domain}.{category}.{property}` — lowercase, no underscores, no camelCase, no embedded slugs or instance IDs. Example: `semspec.plan.title`. Example: `sensor.measurement.celsius`.
+- **3-part dotted predicate**: `{domain}.{category}.{property}` — lowercase, no camelCase, no embedded slugs or instance IDs. Underscores in the property segment are accepted per existing repo convention (`semspec.requirement.depends_on`, `semspec.plan.scope_include`, `semspec.plan.created_at`); hyphens too (`semspec.plan.github-epic`). The load-bearing rule is the no-slugs-no-instance-IDs constraint — surface syntax in the property segment follows what the rest of the codebase already uses. Example: `semspec.plan.title`. Example: `semspec.capability.depends_on`.
 
 In `workflow/types.go`:
 
@@ -182,18 +182,18 @@ All predicates live in `vocabulary/spec/` and follow `domain.category.property`.
 | `semspec.capability.lifecycle` | `…wf.plan.capability.{hash}` | `"new"` or `"modified"` | 1 | OpenSpec lifecycle |
 | `semspec.capability.description` | `…wf.plan.capability.{hash}` | string | 1 | 1-3 sentences |
 | `semspec.capability.plan` | `…wf.plan.capability.{hash}` | `…wf.plan.plan.{hash}` | 1 | Capability → owning Plan |
-| `semspec.capability.dependency` | `…wf.plan.capability.{hash}` | `…wf.plan.capability.{hash}` | N | Capability → capability it depends on (hard constraint) |
+| `semspec.capability.depends_on` | `…wf.plan.capability.{hash}` | `…wf.plan.capability.{hash}` | N | Capability → capability it depends on (hard constraint). Underscore in property segment matches existing `semspec.requirement.depends_on` convention. |
 | `semspec.plan.exploration` | `…wf.plan.plan.{hash}` | string (JSON blob) | 0 or 1 | Plan's exploration document |
-| `semspec.plan.open.question` | `…wf.plan.plan.{hash}` | string | N | One predicate per question |
-| `semspec.req.capability` | `…wf.plan.req.{hash}` | `…wf.plan.capability.{hash}` | 1 | Requirement → its owning Capability |
-| `semspec.req.external.spec` | `…wf.plan.req.{hash}` | external entity ID | 0 or 1 | (from folded ADR-038) imported requirement provenance |
-| `semspec.capability.external.spec` | `…wf.plan.capability.{hash}` | external entity ID | 0 or 1 | imported capability provenance for round-trip |
+| `semspec.plan.open_questions` | `…wf.plan.plan.{hash}` | string | N | One predicate per question (multi-valued; matches `semspec.plan.execution_trace_id` repo pattern) |
+| `semspec.requirement.capability` | `…wf.plan.req.{hash}` | `…wf.plan.capability.{hash}` | 1 | Requirement → its owning Capability. Full word `requirement` matches the existing `semspec.requirement.*` family (rev 4 said `semspec.req.*`; rev 5 corrects to match repo). |
+| `semspec.requirement.external_spec` | `…wf.plan.req.{hash}` | external entity ID | 0 or 1 | (from folded ADR-038) imported requirement provenance |
+| `semspec.capability.external_spec` | `…wf.plan.capability.{hash}` | external entity ID | 0 or 1 | imported capability provenance for round-trip |
 
 Why this shape works:
 - Every predicate is exactly three dotted segments (`domain.category.property`)
 - Subjects and objects are 6-part federated entity IDs (or primitive values for terminal properties)
 - NATS wildcard queries like `semspec.capability.*` work — find every fact about capabilities
-- The harness catalog (ADR-039) can query `semspec.capability.name = "mavsdk-bootstrap"` to find the capability entity, then traverse `semspec.req.capability` reverse-edges to find owning requirements, then map to catalog profiles. All via standard graph traversal.
+- The harness catalog (ADR-039) can query `semspec.capability.name = "mavsdk-bootstrap"` to find the capability entity, then traverse `semspec.requirement.capability` reverse-edges to find owning requirements, then map to catalog profiles. All via standard graph traversal.
 
 Written through plan-manager (single writer) per the CQRS twofer pattern. No new KV bucket. The `semspec.*.external.spec` predicates enable round-trip identity for the inbound/outbound projections.
 

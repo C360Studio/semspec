@@ -366,6 +366,19 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeCreate, cr)
 	}
 
+	// ADR-040: Exploration snapshot + open question audit trail. The
+	// individual Capability entities are written by writeChildTriples;
+	// this block surfaces plan-level facts so a graph query on the plan
+	// finds the exploration without traversing to capabilities.
+	if plan.Exploration != nil {
+		if blob, err := json.Marshal(plan.Exploration); err == nil {
+			_ = tw.WriteTriple(ctx, entityID, semspec.PlanExploration, string(blob))
+		}
+		for _, q := range plan.Exploration.OpenQuestions {
+			_ = tw.WriteTriple(ctx, entityID, semspec.PlanOpenQuestions, q)
+		}
+	}
+
 	// Execution trace IDs (one triple per ID — avoid JSON arrays as KV keys)
 	for _, traceID := range plan.ExecutionTraceIDs {
 		_ = tw.WriteTriple(ctx, entityID, semspec.PlanExecutionTraceID, traceID)
@@ -377,8 +390,14 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	return nil
 }
 
-// writeChildTriples writes requirement, scenario, and change proposal triples.
+// writeChildTriples writes requirement, scenario, capability, and change proposal triples.
 func (s *planStore) writeChildTriples(ctx context.Context, tw *graphutil.TripleWriter, plan *workflow.Plan) {
+	if plan.Exploration != nil && len(plan.Exploration.Capabilities) > 0 {
+		// ADR-040: Capability entities + edges back to the plan.
+		if err := workflow.SaveCapabilities(ctx, tw, plan.Exploration, plan.Slug); err != nil {
+			s.logger.Warn("Failed to write capability triples", "slug", plan.Slug, "error", err)
+		}
+	}
 	if len(plan.Requirements) > 0 {
 		if err := workflow.SaveRequirements(ctx, tw, plan.Requirements, plan.Slug); err != nil {
 			s.logger.Warn("Failed to write requirement triples", "slug", plan.Slug, "error", err)

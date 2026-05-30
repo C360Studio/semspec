@@ -80,36 +80,36 @@ func TestDecisionTriples(t *testing.T) {
 	}
 
 	// Verify core predicates
-	if predicateValues["source.git.decision.type"] != "feat" {
-		t.Errorf("decision type mismatch: got %v", predicateValues["source.git.decision.type"])
+	if predicateValues["source.git.decision_type"] != "feat" {
+		t.Errorf("decision type mismatch: got %v", predicateValues["source.git.decision_type"])
 	}
-	if predicateValues["source.git.decision.file"] != "path/to/file.go" {
-		t.Errorf("decision file mismatch: got %v", predicateValues["source.git.decision.file"])
+	if predicateValues["source.git.decision_file"] != "path/to/file.go" {
+		t.Errorf("decision file mismatch: got %v", predicateValues["source.git.decision_file"])
 	}
-	if predicateValues["source.git.decision.commit"] != "abc1234" {
-		t.Errorf("decision commit mismatch: got %v", predicateValues["source.git.decision.commit"])
+	if predicateValues["source.git.decision_commit"] != "abc1234" {
+		t.Errorf("decision commit mismatch: got %v", predicateValues["source.git.decision_commit"])
 	}
-	if predicateValues["source.git.decision.message"] != "feat: add new feature" {
-		t.Errorf("decision message mismatch: got %v", predicateValues["source.git.decision.message"])
+	if predicateValues["source.git.decision_message"] != "feat: add new feature" {
+		t.Errorf("decision message mismatch: got %v", predicateValues["source.git.decision_message"])
 	}
-	if predicateValues["source.git.decision.operation"] != "modify" {
-		t.Errorf("decision operation mismatch: got %v", predicateValues["source.git.decision.operation"])
+	if predicateValues["source.git.decision_operation"] != "modify" {
+		t.Errorf("decision operation mismatch: got %v", predicateValues["source.git.decision_operation"])
 	}
-	if predicateValues["source.git.decision.branch"] != "main" {
-		t.Errorf("decision branch mismatch: got %v", predicateValues["source.git.decision.branch"])
+	if predicateValues["source.git.decision_branch"] != "main" {
+		t.Errorf("decision branch mismatch: got %v", predicateValues["source.git.decision_branch"])
 	}
-	if predicateValues["source.git.decision.repository"] != "/path/to/repo" {
-		t.Errorf("decision repository mismatch: got %v", predicateValues["source.git.decision.repository"])
+	if predicateValues["source.git.decision_repository"] != "/path/to/repo" {
+		t.Errorf("decision repository mismatch: got %v", predicateValues["source.git.decision_repository"])
 	}
-	if predicateValues["source.git.decision.agent"] != "agent-456" {
-		t.Errorf("decision agent mismatch: got %v", predicateValues["source.git.decision.agent"])
+	if predicateValues["source.git.decision_agent"] != "agent-456" {
+		t.Errorf("decision agent mismatch: got %v", predicateValues["source.git.decision_agent"])
 	}
-	if predicateValues["source.git.decision.loop"] != "loop-123" {
-		t.Errorf("decision loop mismatch: got %v", predicateValues["source.git.decision.loop"])
+	if predicateValues["source.git.decision_loop"] != "loop-123" {
+		t.Errorf("decision loop mismatch: got %v", predicateValues["source.git.decision_loop"])
 	}
 
 	// Verify timestamp is set
-	if predicateValues["source.git.decision.timestamp"] == nil {
+	if predicateValues["source.git.decision_timestamp"] == nil {
 		t.Error("decision timestamp should be set")
 	}
 
@@ -143,15 +143,15 @@ func TestDecisionTriplesMinimalContext(t *testing.T) {
 		}
 	}
 
-	if predicateValues["source.git.decision.type"] != "fix" {
-		t.Errorf("decision type mismatch: got %v", predicateValues["source.git.decision.type"])
+	if predicateValues["source.git.decision_type"] != "fix" {
+		t.Errorf("decision type mismatch: got %v", predicateValues["source.git.decision_type"])
 	}
 
 	// Should NOT have agent/loop if not set
-	if _, ok := predicateValues["source.git.decision.agent"]; ok {
+	if _, ok := predicateValues["source.git.decision_agent"]; ok {
 		t.Error("agent should not be set when AgentID is empty")
 	}
-	if _, ok := predicateValues["source.git.decision.loop"]; ok {
+	if _, ok := predicateValues["source.git.decision_loop"]; ok {
 		t.Error("loop should not be set when LoopID is empty")
 	}
 }
@@ -178,13 +178,13 @@ func TestDecisionTriplesOptionalFields(t *testing.T) {
 	}
 
 	// Should not have optional predicates
-	if _, ok := predicateValues["source.git.decision.branch"]; ok {
+	if _, ok := predicateValues["source.git.decision_branch"]; ok {
 		t.Error("branch should not be set when empty")
 	}
-	if _, ok := predicateValues["source.git.decision.repository"]; ok {
+	if _, ok := predicateValues["source.git.decision_repository"]; ok {
 		t.Error("repository should not be set when empty")
 	}
-	if _, ok := predicateValues["source.git.decision.operation"]; ok {
+	if _, ok := predicateValues["source.git.decision_operation"]; ok {
 		t.Error("operation should not be set when empty")
 	}
 }

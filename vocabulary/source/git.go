@@ -8,41 +8,48 @@ import "github.com/c360studio/semstreams/vocabulary"
 // Git decision predicates track agent decisions at the file level.
 // Each file changed in a commit creates a decision entity that records
 // the what, why, and context of the change.
+//
+// Predicate format follows the repo convention: 3-part domain.category.property,
+// with underscores allowed in the property segment. Per ADR-040 rev 5: the
+// load-bearing rule is no embedded slugs/instance IDs in predicates — which
+// is honored here — not surface-syntax constraints. Previously this family
+// used a 4-part shape (source.git.decision.type) which violated the 3-part
+// rule; flattened to 3-part with the category combining git + decision.
 const (
 	// DecisionType is the decision category from conventional commit prefix.
 	// Values: feat, fix, refactor, docs, test, chore, perf, ci, build, revert
-	DecisionType = "source.git.decision.type"
+	DecisionType = "source.git.decision_type"
 
 	// DecisionFile is the path of the file that was changed.
-	DecisionFile = "source.git.decision.file"
+	DecisionFile = "source.git.decision_file"
 
 	// DecisionCommit is the git commit hash.
-	DecisionCommit = "source.git.decision.commit"
+	DecisionCommit = "source.git.decision_commit"
 
 	// DecisionMessage is the commit message.
-	DecisionMessage = "source.git.decision.message"
+	DecisionMessage = "source.git.decision_message"
 
 	// DecisionBranch is the branch where the commit was made.
-	DecisionBranch = "source.git.decision.branch"
+	DecisionBranch = "source.git.decision_branch"
 
 	// DecisionAgent is the agent ID that made the commit (if semspec-driven).
-	DecisionAgent = "source.git.decision.agent"
+	DecisionAgent = "source.git.decision_agent"
 
 	// DecisionLoop is the agent loop ID that made the commit (if semspec-driven).
-	DecisionLoop = "source.git.decision.loop"
+	DecisionLoop = "source.git.decision_loop"
 
 	// DecisionProject is the project entity ID.
-	DecisionProject = "source.git.decision.project"
+	DecisionProject = "source.git.decision_project"
 
 	// DecisionTimestamp is when the commit was made (RFC3339).
-	DecisionTimestamp = "source.git.decision.timestamp"
+	DecisionTimestamp = "source.git.decision_timestamp"
 
 	// DecisionRepository is the repository URL or path.
-	DecisionRepository = "source.git.decision.repository"
+	DecisionRepository = "source.git.decision_repository"
 
 	// DecisionOperation is the type of file operation.
 	// Values: add, modify, delete, rename
-	DecisionOperation = "source.git.decision.operation"
+	DecisionOperation = "source.git.decision_operation"
 )
 
 // DecisionTypeValue represents the decision category values.

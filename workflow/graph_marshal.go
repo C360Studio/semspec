@@ -173,5 +173,18 @@ func PlanFromTripleMap(entityID string, triples map[string]string) *Plan {
 		}
 	}
 
+	// ADR-040: Exploration snapshot from triples. Restoring this is what
+	// rescues a plan that hit StatusExplored before its KV bucket was wiped
+	// (first-startup reconcile from ENTITY_STATES, or operator-triggered
+	// rehydrate). Without restoration, EffectiveStatus() would fall back to
+	// StatusCreated and re-run the analyst sub-phase, losing the prior
+	// capability identity.
+	if v := triples[semspec.PlanExploration]; v != "" {
+		var exp Exploration
+		if err := json.Unmarshal([]byte(v), &exp); err == nil {
+			plan.Exploration = &exp
+		}
+	}
+
 	return plan
 }
