@@ -716,7 +716,8 @@
       "enabled": true,
       "config": {
         "max_generation_retries": 2,
-        "sandbox_url": "http://sandbox:8090"
+        "sandbox_url": "http://sandbox:8090",
+        "analyst_sub_phase": true
       }
     },
     "requirement-generator": {

@@ -48,8 +48,26 @@ func mergeCapabilityFindings(plan *workflow.Plan, result *workflow.PlanReviewRes
 		return
 	}
 
+	// The capability_orphan / requirement_orphan / docs_only rules check
+	// cross-entity relationships between Capabilities and Requirements.
+	// They only make sense AFTER requirements are generated (plan-reviewer
+	// R2 round, after req-gen has run). On R1 (drafted plan review,
+	// pre-req-gen), len(plan.Requirements) == 0 and these rules would
+	// flag every capability as orphan, blocking R1 approval entirely.
+	//
+	// Caught 2026-05-30 by mock e2e plan-phase smoke after enabling
+	// analyst_sub_phase. The R1 reviewer ran against a plan with 3
+	// capabilities + 0 requirements and the merge upgraded the LLM's
+	// "approved" verdict to "needs_changes" with 3 orphan findings.
+	//
+	// Cycle + dependency_orphan rules can fire pre-req-gen because they
+	// only inspect Plan.Exploration.Capabilities, not Requirements. We
+	// run them unconditionally; the requirement-coupled rules gate on
+	// len(plan.Requirements) > 0.
 	original := len(result.Findings)
-	result.Findings = append(result.Findings, capabilityOrphanFindings(plan)...)
+	if len(plan.Requirements) > 0 {
+		result.Findings = append(result.Findings, capabilityOrphanFindings(plan)...)
+	}
 	result.Findings = append(result.Findings, capabilityDependencyCycleFindings(plan)...)
 	result.Findings = append(result.Findings, capabilityDependencyOrphanFindings(plan)...)
 

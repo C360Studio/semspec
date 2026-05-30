@@ -7,6 +7,68 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
+// TestMergeCapabilityFindings_R1PreReqGenSkipsOrphanRules pins the fix
+// from the 2026-05-30 mock e2e plan-phase smoke: capability_orphan rules
+// must NOT fire on plans with populated Exploration but zero Requirements
+// (plan-reviewer R1 round, BEFORE req-gen has run). Otherwise R1 reviews
+// reject every analyst-sub-phase plan with N orphan findings, blocking
+// approval entirely. Dependency-only rules (cycle, dep_orphan) can still
+// fire pre-req-gen because they inspect Capability.DependsOn directly.
+func TestMergeCapabilityFindings_R1PreReqGenSkipsOrphanRules(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "r1-test",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{
+				{Name: "a", Lifecycle: workflow.CapabilityNew, Description: "A."},
+				{Name: "b", Lifecycle: workflow.CapabilityNew, Description: "B."},
+			},
+		},
+		Requirements: nil, // R1 review fires BEFORE req-gen
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeCapabilityFindings(plan, result)
+
+	for _, f := range result.Findings {
+		if f.SOPID == "capability.orphan" || f.SOPID == "capability.orphan.docs_only" || f.SOPID == "capability.requirement_orphan" {
+			t.Errorf("R1 pre-req-gen review should not fire requirement-coupled rule %s, got: %+v", f.SOPID, f)
+		}
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("expected R1 approved verdict preserved, got %q", result.Verdict)
+	}
+}
+
+// TestMergeCapabilityFindings_CycleFiresEvenPreReqGen pins that
+// dependency-only rules (which don't need requirements) still fire on
+// R1 reviews — cycle detection has full information from Capabilities
+// alone.
+func TestMergeCapabilityFindings_CycleFiresEvenPreReqGen(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "r1-cycle",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{
+				{Name: "a", Lifecycle: workflow.CapabilityNew, Description: "A.", DependsOn: []string{"b"}},
+				{Name: "b", Lifecycle: workflow.CapabilityNew, Description: "B.", DependsOn: []string{"a"}},
+			},
+		},
+		Requirements: nil,
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeCapabilityFindings(plan, result)
+
+	found := false
+	for _, f := range result.Findings {
+		if f.SOPID == "capability.dependency_cycle" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected dependency_cycle to fire on R1 pre-req-gen, got: %+v", result.Findings)
+	}
+}
+
 // TestMergeCapabilityFindings_NoExplorationIsNoop pins the back-compat
 // contract: legacy plans without the analyst sub-phase produce no
 // structural findings.
