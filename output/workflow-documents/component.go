@@ -36,6 +36,10 @@ type Component struct {
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 
+	// ADR-040 Move 3: per-slug debouncer that coalesces EXECUTION_STATES
+	// updates into one tasks.md re-render per second.
+	openSpecDebouncer *openSpecDebouncer
+
 	// Metrics
 	documentsWritten atomic.Int64
 	writeErrors      atomic.Int64
@@ -72,12 +76,13 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	return &Component{
-		name:            "workflow-documents",
-		config:          config,
-		natsClient:      deps.NATSClient,
-		logger:          deps.GetLogger(),
-		baseDir:         baseDir,
-		planStateBucket: config.PlanStateBucket,
+		name:              "workflow-documents",
+		config:            config,
+		natsClient:        deps.NATSClient,
+		logger:            deps.GetLogger(),
+		baseDir:           baseDir,
+		planStateBucket:   config.PlanStateBucket,
+		openSpecDebouncer: newOpenSpecDebouncer(),
 	}, nil
 }
 
@@ -123,6 +128,10 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	go c.watchPlanStates(watchCtx, js)
+	// ADR-040 Move 3: live tasks.md checkbox flipping. Best-effort —
+	// failure to start the watcher just means tasks.md doesn't update
+	// between PLAN_STATES milestones; static snapshots still land.
+	go c.watchExecutionStates(watchCtx, js)
 
 	c.logger.Info("workflow-documents started",
 		"base_dir", c.baseDir,
@@ -264,6 +273,12 @@ func (c *Component) writePlanDocuments(ctx context.Context, plan *workflow.Plan)
 			writtenFiles = append(writtenFiles, "plan.json")
 		}
 	}
+
+	// ADR-040 Move 3: emit OpenSpec-shaped artifacts alongside the BMAD
+	// ones. Skipped for legacy plans (Plan.Exploration nil) so old plans
+	// don't get half-populated openspec/ directories.
+	openSpecFiles := c.writeOpenSpecArtifacts(plan, planDir)
+	writtenFiles = append(writtenFiles, openSpecFiles...)
 
 	c.documentsWritten.Add(1)
 	c.updateLastActivity()
