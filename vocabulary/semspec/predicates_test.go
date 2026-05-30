@@ -36,6 +36,17 @@ func TestPredicatesRegistered(t *testing.T) {
 		semspec.QuestionFromAgent,
 		semspec.QuestionStatus,
 		semspec.QuestionCreatedAt,
+		// ADR-040: capability + exploration predicates
+		semspec.PlanExploration,
+		semspec.PlanOpenQuestions,
+		semspec.RequirementCapability,
+		semspec.RequirementExternalSpec,
+		semspec.CapabilityName,
+		semspec.CapabilityLifecycle,
+		semspec.CapabilityDescription,
+		semspec.CapabilityPlan,
+		semspec.CapabilityDependsOn,
+		semspec.CapabilityExternalSpec,
 	}
 
 	for _, predicate := range predicates {
@@ -160,6 +171,64 @@ func TestCodePredicateValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.predicate != tc.expected {
 				t.Errorf("got %q, want %q", tc.predicate, tc.expected)
+			}
+		})
+	}
+}
+
+func TestCapabilityPredicateValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		predicate string
+		expected  string
+	}{
+		{"CapabilityName", semspec.CapabilityName, "semspec.capability.name"},
+		{"CapabilityLifecycle", semspec.CapabilityLifecycle, "semspec.capability.lifecycle"},
+		{"CapabilityDescription", semspec.CapabilityDescription, "semspec.capability.description"},
+		{"CapabilityPlan", semspec.CapabilityPlan, "semspec.capability.plan"},
+		{"CapabilityDependsOn", semspec.CapabilityDependsOn, "semspec.capability.depends_on"},
+		{"CapabilityExternalSpec", semspec.CapabilityExternalSpec, "semspec.capability.external_spec"},
+		{"PlanExploration", semspec.PlanExploration, "semspec.plan.exploration"},
+		{"PlanOpenQuestions", semspec.PlanOpenQuestions, "semspec.plan.open_questions"},
+		{"RequirementCapability", semspec.RequirementCapability, "semspec.requirement.capability"},
+		{"RequirementExternalSpec", semspec.RequirementExternalSpec, "semspec.requirement.external_spec"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.predicate != tc.expected {
+				t.Errorf("got %q, want %q", tc.predicate, tc.expected)
+			}
+		})
+	}
+}
+
+// TestCapabilityPredicatesAreThreePart guards against the ADR-040 load-bearing
+// constraint that all new predicates use exactly three dotted segments
+// (domain.category.property) with no embedded slugs or instance IDs.
+func TestCapabilityPredicatesAreThreePart(t *testing.T) {
+	preds := []string{
+		semspec.PlanExploration,
+		semspec.PlanOpenQuestions,
+		semspec.RequirementCapability,
+		semspec.RequirementExternalSpec,
+		semspec.CapabilityName,
+		semspec.CapabilityLifecycle,
+		semspec.CapabilityDescription,
+		semspec.CapabilityPlan,
+		semspec.CapabilityDependsOn,
+		semspec.CapabilityExternalSpec,
+	}
+	for _, p := range preds {
+		t.Run(p, func(t *testing.T) {
+			parts := 1
+			for _, c := range p {
+				if c == '.' {
+					parts++
+				}
+			}
+			if parts != 3 {
+				t.Errorf("predicate %q has %d dotted segments, want 3 (domain.category.property)", p, parts)
 			}
 		})
 	}

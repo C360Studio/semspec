@@ -542,13 +542,21 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			// User-message renderer for the planner. Replaces
 			// processor/planner/buildPlannerUserPrompt + the legacy
 			// workflow/prompts.PlannerPromptWithTitle helper.
+			//
+			// ADR-040 routing: when ctx.AnalystPrompt is set, render the
+			// analyst sub-phase user prompt instead. Both share the
+			// RolePlanner role; the planner component flips contexts when
+			// dispatching the analyst vs planner sub-phase serially.
 			ID:       "software.planner.user-prompt",
 			Category: prompt.CategoryUserPrompt,
 			Roles:    []prompt.Role{prompt.RolePlanner},
 			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				if ctx.AnalystPrompt != nil {
+					return renderAnalystPrompt(ctx.AnalystPrompt), nil
+				}
 				p := ctx.PlannerPrompt
 				if p == nil {
-					return "", fmt.Errorf("planner user-prompt: AssemblyContext.PlannerPrompt is nil")
+					return "", fmt.Errorf("planner user-prompt: AssemblyContext.PlannerPrompt and AnalystPrompt are both nil")
 				}
 				return renderPlannerPrompt(p), nil
 			},
@@ -557,8 +565,16 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			ID:       "software.planner.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			ContentFunc: elideSchemaProse(
-				`When your plan is ready, call the submit_work tool with these JSON fields:
+			// ADR-040: when AnalystPrompt is set, the analyst sub-phase
+			// bakes its capability-shape schema into renderAnalystPrompt's
+			// body (the analyst's user prompt is self-contained). Skip this
+			// fragment in that case to avoid mixing schemas.
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				if ctx.AnalystPrompt != nil {
+					return ""
+				}
+				return elideSchemaProse(
+					`When your plan is ready, call the submit_work tool with these JSON fields:
 
 {
   "goal": "Add /goodbye endpoint with JSON response and tests",
@@ -614,7 +630,8 @@ Examples for goal="Add /health endpoint":
                                                          touch auth — out
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
-			),
+				)(ctx)
+			},
 		},
 		{
 			ID:       "software.planner.role-context",

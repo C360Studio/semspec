@@ -30,6 +30,28 @@ func (r *PersonaRegistry) ForRole(role Role) *AgentPersona {
 	return r.personas[role]
 }
 
+// ForSubPhase returns the sub-phase persona for a role (ADR-040). When the
+// role has no SubPhases declared OR the requested sub-phase key is missing,
+// falls back to ForRole(role) so callers stay back-compat with presets that
+// don't yet declare sub-phases.
+//
+// Example: ForSubPhase(RolePlanner, "analyst") returns the analyst persona
+// when bmad.json declares personas.planner.sub_phases.analyst, otherwise
+// returns the top-level planner persona.
+func (r *PersonaRegistry) ForSubPhase(role Role, subPhase string) *AgentPersona {
+	if r == nil {
+		return nil
+	}
+	parent := r.personas[role]
+	if parent == nil || parent.SubPhases == nil {
+		return parent
+	}
+	if sub, ok := parent.SubPhases[subPhase]; ok && sub != nil {
+		return sub
+	}
+	return parent
+}
+
 // Vocabulary returns the loaded vocabulary, or nil when no preset is loaded.
 func (r *PersonaRegistry) Vocabulary() *Vocabulary {
 	if r == nil {

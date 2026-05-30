@@ -62,6 +62,10 @@ const (
 	// starting work. Plan-manager's single-writer serialization ensures only one
 	// claim succeeds per transition. Prevents KV watcher re-triggers on partial saves.
 
+	// StatusExploring indicates the planner component has claimed plan creation
+	// to run the analyst sub-phase (ADR-040 Move 1). Analyst output —
+	// Plan.Exploration — is written before the planner sub-phase runs.
+	StatusExploring Status = "exploring"
 	// StatusDrafting indicates a planner has claimed plan creation.
 	StatusDrafting Status = "drafting"
 	// StatusReviewingDraft indicates plan-reviewer R1 has claimed the drafted plan.
@@ -80,6 +84,12 @@ const (
 	// StatusArchitectureGenerated indicates the architecture phase has completed.
 	// This is a terminal for the architecture phase (not in-progress).
 	StatusArchitectureGenerated Status = "architecture_generated"
+
+	// StatusExplored indicates the analyst sub-phase has completed and the
+	// Plan has an Exploration document populated. The planner sub-phase
+	// (ADR-040 Move 1) is ready to claim and produce Goal/Context/Scope.
+	// Terminal for the analyst sub-phase (not in-progress).
+	StatusExplored Status = "explored"
 )
 
 // String returns the string representation of the status.
@@ -147,6 +157,7 @@ func (s Status) IsValid() bool {
 		StatusReadyForExecution,
 		StatusImplementing, StatusReviewingRollup, StatusAwaitingReview, StatusComplete, StatusArchived, StatusRejected,
 		StatusChanged, StatusReadyForQA, StatusReviewingQA,
+		StatusExploring, StatusExplored,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
@@ -159,7 +170,8 @@ func (s Status) IsValid() bool {
 // claimed by a watcher before starting work.
 func (s Status) IsInProgress() bool {
 	switch s {
-	case StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
+	case StatusExploring,
+		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
 	default:
@@ -171,6 +183,20 @@ func (s Status) IsInProgress() bool {
 func (s Status) CanTransitionTo(target Status) bool {
 	switch s {
 	case StatusCreated:
+		// created → exploring (ADR-040: planner component claims for analyst sub-phase)
+		// created → drafting (legacy single-pass planner OR AnalystSubPhase=false)
+		// created → drafted (revision shortcut paths)
+		// created → rejected (escalation)
+		return target == StatusExploring || target == StatusDrafting ||
+			target == StatusDrafted || target == StatusRejected
+	case StatusExploring:
+		// exploring → explored (analyst sub-phase complete, Exploration populated)
+		// exploring → rejected (analyst LLM exhausted retries or invalid output)
+		return target == StatusExplored || target == StatusRejected
+	case StatusExplored:
+		// explored → drafting (planner sub-phase claims, ADR-040 happy path)
+		// explored → drafted (legacy/skip path if planner sub-phase produces inline)
+		// explored → rejected (escalation)
 		return target == StatusDrafting || target == StatusDrafted || target == StatusRejected
 	case StatusDrafting:
 		return target == StatusDrafted || target == StatusRejected
@@ -546,6 +572,16 @@ type Plan struct {
 
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
+
+	// Exploration is the analyst sub-phase output produced before Goal/Context/Scope
+	// are drafted. It enumerates the CAPABILITIES this plan introduces or modifies
+	// (OpenSpec-aligned: kebab-case names + new|modified lifecycle) and any open
+	// questions the analyst flagged for the planner sub-phase to resolve.
+	//
+	// Optional for back-compat with plans persisted before ADR-040 landed; nil
+	// means the legacy single-pass planner ran. New plans have Exploration set
+	// by the analyst sub-phase before the planner sub-phase consumes it.
+	Exploration *Exploration `json:"exploration,omitempty"`
 
 	// ExecutionTraceIDs tracks trace IDs from workflow executions.
 	// Used by trajectory-api to aggregate LLM metrics per workflow.
@@ -1009,6 +1045,11 @@ func (p *Plan) EffectiveStatus() Status {
 	if p.Goal != "" && p.Context != "" {
 		return StatusDrafted
 	}
+	// ADR-040: a plan with Exploration but no Goal yet is in the analyst-done
+	// state. The planner sub-phase hasn't run.
+	if p.Exploration != nil {
+		return StatusExplored
+	}
 	return StatusCreated
 }
 
@@ -1038,6 +1079,96 @@ type Scope struct {
 	// repeatedly-flagged hallucination — the reviewer's prose suggestion
 	// even hallucinated a scope.create field by name.
 	Create []string `json:"create,omitempty"`
+}
+
+// CapabilityLifecycle classifies whether a capability is new to the project
+// or modifies an existing OpenSpec-aligned specification. Values mirror
+// OpenSpec's proposal.md section headers ("New Capabilities" / "Modified
+// Capabilities") so the outbound emitter (ADR-040 Move 3) maps directly.
+type CapabilityLifecycle string
+
+const (
+	// CapabilityNew indicates the capability does not exist in the project's
+	// openspec/specs/ directory and will be created.
+	CapabilityNew CapabilityLifecycle = "new"
+
+	// CapabilityModified indicates the capability extends an existing spec.
+	CapabilityModified CapabilityLifecycle = "modified"
+)
+
+// String returns the string representation of the capability lifecycle.
+func (l CapabilityLifecycle) String() string {
+	return string(l)
+}
+
+// IsValid reports whether the lifecycle is one of the defined values.
+func (l CapabilityLifecycle) IsValid() bool {
+	switch l {
+	case CapabilityNew, CapabilityModified:
+		return true
+	default:
+		return false
+	}
+}
+
+// Capability is a named unit of system behavior owned by a plan. The analyst
+// sub-phase produces capabilities from the user prompt; the planner sub-phase
+// derives scope from them; the requirement-generator produces one Requirement
+// per capability. See ADR-040.
+//
+// Name is kebab-case to match OpenSpec's spec directory naming (each capability
+// will become `openspec/specs/<name>/spec.md` when emitted).
+//
+// DependsOn is a HARD CONSTRAINT — plan-reviewer rejects cycles and orphan
+// refs (capability_dependency_cycle, capability_dependency_orphan rules).
+// requirement-executor serializes execution along the depends_on DAG when
+// capabilities own conflicting applies_to globs.
+type Capability struct {
+	// Name is the kebab-case capability identifier (e.g. "mavsdk-bootstrap").
+	Name string `json:"name"`
+
+	// Lifecycle distinguishes new from modified specs (OpenSpec-aligned).
+	Lifecycle CapabilityLifecycle `json:"lifecycle"`
+
+	// Description is a 1-3 sentence summary of what the capability covers.
+	Description string `json:"description"`
+
+	// DependsOn names other capabilities by Name that this capability requires.
+	// Hard constraint: cycles and orphan references are rejected at plan-review.
+	DependsOn []string `json:"depends_on,omitempty"`
+}
+
+// Exploration is the analyst sub-phase output. It is the structured input
+// the planner sub-phase consumes when drafting Goal/Context/Scope, and the
+// content source for the OpenSpec outbound emitter (ADR-040 Move 3).
+//
+// Open questions are flagged by the analyst when ambiguity in the user prompt
+// could be resolved multiple reasonable ways. The planner sub-phase chooses a
+// reasonable resolution and notes it in Context; the UI surfaces the same
+// questions to the operator in human-review mode.
+type Exploration struct {
+	// Capabilities is the analyst-identified list of named capabilities this
+	// plan introduces or modifies. Length is the count of Requirements the
+	// downstream requirement-generator will produce (one per capability).
+	Capabilities []Capability `json:"capabilities"`
+
+	// OpenQuestions captures analyst-flagged ambiguities for the planner
+	// sub-phase to resolve. Empty when the user prompt is unambiguous.
+	OpenQuestions []string `json:"open_questions,omitempty"`
+}
+
+// FindCapability returns a pointer into e.Capabilities and its index by Name.
+// Returns nil, -1 when the capability is not found.
+func (e *Exploration) FindCapability(name string) (*Capability, int) {
+	if e == nil {
+		return nil, -1
+	}
+	for i := range e.Capabilities {
+		if e.Capabilities[i].Name == name {
+			return &e.Capabilities[i], i
+		}
+	}
+	return nil, -1
 }
 
 // TaskType classifies the kind of work a task represents.

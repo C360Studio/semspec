@@ -84,6 +84,12 @@ type AssemblyContext struct {
 	// planner component before assembly; nil for any other role.
 	PlannerPrompt *PlannerPromptContext
 
+	// AnalystPrompt carries data for the ADR-040 analyst sub-phase user prompt.
+	// Set by the planner component when dispatching the analyst sub-phase.
+	// When non-nil, planner-role user-prompt and output-format fragments
+	// route to the analyst variants instead of the planner variants.
+	AnalystPrompt *AnalystPromptContext
+
 	// ScenarioGeneratorPrompt carries data for the scenario-generator user
 	// prompt. Set by the scenario-generator component before assembly.
 	ScenarioGeneratorPrompt *ScenarioGeneratorPromptContext

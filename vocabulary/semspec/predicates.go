@@ -119,6 +119,16 @@ const (
 
 	// PlanLLMCallHistory is the JSON-encoded LLM call history for review iterations.
 	PlanLLMCallHistory = "semspec.plan.llm_call_history"
+
+	// PlanExploration is the JSON-encoded Exploration document produced by the
+	// analyst sub-phase (ADR-040 Move 1). Capability identity surfaces as
+	// separate Capability entities; this predicate is the human-readable audit
+	// blob plus the content source for the OpenSpec outbound emitter (Move 3).
+	PlanExploration = "semspec.plan.exploration"
+
+	// PlanOpenQuestions records analyst-flagged ambiguities for the planner
+	// sub-phase to resolve. Multi-valued — one triple per question.
+	PlanOpenQuestions = "semspec.plan.open_questions"
 )
 
 // Project config predicates define attributes for project initialization config files.
@@ -645,6 +655,50 @@ const (
 	// allowed to modify. Multi-valued — written as one triple per path.
 	// Used to detect parallel-merge conflicts at planning time.
 	RequirementFilesOwned = "semspec.requirement.files_owned"
+
+	// RequirementCapability links a Requirement to the Capability that owns it.
+	// One requirement per capability after ADR-040 Move 2.
+	RequirementCapability = "semspec.requirement.capability"
+
+	// RequirementExternalSpec records the external entity ID a Requirement was
+	// imported from (OpenSpec spec.md requirement). Reserved for ADR-040 Move 4
+	// (inbound import). Empty for requirements authored inside semspec.
+	RequirementExternalSpec = "semspec.requirement.external_spec"
+)
+
+// Capability predicates define attributes for plan-level capabilities
+// (ADR-040). A capability is a named unit of system behavior; the analyst
+// sub-phase produces capabilities from the user prompt and the
+// requirement-generator produces one Requirement per capability.
+//
+// Naming aligns with OpenSpec — kebab-case Name + new|modified Lifecycle map
+// directly to OpenSpec's spec directory + proposal.md "New/Modified
+// Capabilities" sections.
+const (
+	// CapabilityName is the kebab-case capability identifier (e.g. "mavsdk-bootstrap").
+	CapabilityName = "semspec.capability.name"
+
+	// CapabilityLifecycle distinguishes new vs modified specs.
+	// Values: "new", "modified"
+	CapabilityLifecycle = "semspec.capability.lifecycle"
+
+	// CapabilityDescription is the 1-3 sentence summary of the capability.
+	CapabilityDescription = "semspec.capability.description"
+
+	// CapabilityPlan links the capability to its owning plan entity.
+	// Format: {prefix}.wf.plan.plan.{hash}
+	CapabilityPlan = "semspec.capability.plan"
+
+	// CapabilityDependsOn links to a prerequisite Capability entity.
+	// Multi-valued — one triple per dependency. HARD CONSTRAINT: cycles and
+	// orphan refs are rejected by plan-reviewer (capability_dependency_cycle
+	// and capability_dependency_orphan rules — Move 2).
+	CapabilityDependsOn = "semspec.capability.depends_on"
+
+	// CapabilityExternalSpec records the external entity ID this Capability
+	// was imported from. Reserved for ADR-040 Move 4 (inbound import).
+	// Empty for capabilities authored inside semspec.
+	CapabilityExternalSpec = "semspec.capability.external_spec"
 )
 
 // Scenario predicates define attributes for behavioral contracts.
@@ -1126,6 +1180,16 @@ func registerTaskPredicates() {
 		vocabulary.WithDescription("Per-iteration LLM call history (JSON)"),
 		vocabulary.WithDataType("json"),
 		vocabulary.WithIRI(Namespace+"planLlmCallHistory"))
+
+	vocabulary.Register(PlanExploration,
+		vocabulary.WithDescription("Analyst sub-phase Exploration document (JSON) — ADR-040 Move 1"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planExploration"))
+
+	vocabulary.Register(PlanOpenQuestions,
+		vocabulary.WithDescription("Analyst-flagged open question (multi-valued, one triple per question)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planOpenQuestions"))
 
 	// Register loop predicates
 	vocabulary.Register(PredicateLoopStatus,
@@ -1828,6 +1892,43 @@ func init() {
 	registerReviewPredicates()
 	registerErrorCategoryPredicates()
 	registerAgentPredicates()
+	registerCapabilityPredicates()
+}
+
+// registerCapabilityPredicates registers predicate metadata for Capability
+// entities (ADR-040). Capability is a first-class entity that the analyst
+// sub-phase produces and the requirement-generator consumes; one Requirement
+// is generated per Capability.
+func registerCapabilityPredicates() {
+	vocabulary.Register(CapabilityName,
+		vocabulary.WithDescription("Kebab-case capability identifier (matches OpenSpec spec dir name)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"capabilityName"))
+
+	vocabulary.Register(CapabilityLifecycle,
+		vocabulary.WithDescription("Capability lifecycle: new or modified (OpenSpec-aligned)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"capabilityLifecycle"))
+
+	vocabulary.Register(CapabilityDescription,
+		vocabulary.WithDescription("1-3 sentence summary of the capability"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"capabilityDescription"))
+
+	vocabulary.Register(CapabilityPlan,
+		vocabulary.WithDescription("Link to the plan that owns this Capability"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"capabilityPlan"))
+
+	vocabulary.Register(CapabilityDependsOn,
+		vocabulary.WithDescription("Link to a prerequisite Capability entity (DAG edge, hard constraint)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"capabilityDependsOn"))
+
+	vocabulary.Register(CapabilityExternalSpec,
+		vocabulary.WithDescription("External entity ID this Capability was imported from (ADR-040 Move 4)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"capabilityExternalSpec"))
 }
 
 func registerRequirementPredicates() {
@@ -1880,6 +1981,16 @@ func registerRequirementPredicates() {
 		vocabulary.WithDescription("Workspace-relative path this requirement is allowed to modify"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"requirementFilesOwned"))
+
+	vocabulary.Register(RequirementCapability,
+		vocabulary.WithDescription("Link to the Capability that owns this Requirement (ADR-040 Move 2)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"requirementCapability"))
+
+	vocabulary.Register(RequirementExternalSpec,
+		vocabulary.WithDescription("External entity ID this Requirement was imported from (ADR-040 Move 4)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"requirementExternalSpec"))
 
 	vocabulary.Register(TaskScenario,
 		vocabulary.WithDescription("Link to scenarios this task satisfies (SATISFIES edge)"),

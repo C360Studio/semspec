@@ -118,6 +118,64 @@ to dispute it.
 `
 }
 
+// renderAnalystPrompt produces the analyst sub-phase user message (ADR-040
+// Move 1). Mary's job here is to identify CAPABILITIES from the user's
+// request; her system prompt already carries the persona-specific instructions
+// (kebab-case naming, new|modified lifecycle, anti-pattern guards). This
+// renderer supplies the per-dispatch title/description grounding plus the
+// project file tree so Mary can distinguish new vs modified capabilities
+// when an openspec/specs/ directory exists.
+func renderAnalystPrompt(p *prompt.AnalystPromptContext) string {
+	var sb strings.Builder
+	writeProjectFileTree(&sb, p.ProjectFileTree)
+
+	if p.Title == "" {
+		return ""
+	}
+
+	fmt.Fprintf(&sb, `Identify the CAPABILITIES this change will introduce or modify.
+
+**Title:** %s
+`, p.Title)
+	if p.Description != "" {
+		fmt.Fprintf(&sb, "\n**User request:**\n%s\n", p.Description)
+	}
+
+	sb.WriteString(`
+## Output schema (REQUIRED)
+
+When your capability list is ready, call submit_work with these JSON fields:
+
+` + "```json" + `
+{
+  "capabilities": [
+    {"name": "mavsdk-bootstrap", "lifecycle": "new", "description": "Boot mavsdk_server and manage peer connection lifecycle."},
+    {"name": "telemetry-stream", "lifecycle": "new", "description": "Surface MAVSDK telemetry as a CS API DataStream."}
+  ],
+  "open_questions": ["Should the coverage matrix be runtime-checked or static?"]
+}
+` + "```" + `
+
+Rules:
+- capabilities is REQUIRED, non-empty.
+- name MUST be kebab-case (lowercase, hyphen-separated).
+- lifecycle MUST be exactly "new" or "modified".
+- description is 1-3 sentences.
+- open_questions is optional; emit empty array or omit when the user's request is unambiguous.
+
+Do NOT propose files, scope, requirements, or implementation steps — the planner sub-phase derives all of that from your capabilities.
+
+Respond ONLY via the submit_work tool call. No markdown, no preamble.
+`)
+
+	if p.PreviousError != "" {
+		sb.WriteString("\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n")
+		sb.WriteString(p.PreviousError)
+		sb.WriteString("\n\nPlease try again, addressing the issue above.")
+	}
+	return sb.String()
+}
+
 // renderPlannerPrompt produces the planner agent's user message. Two paths:
 // fresh creation (Title only) and revision-after-rejection (PreviousPlanJSON
 // + RevisionPrompt). PreviousError is appended to either path as a retry note.

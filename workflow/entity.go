@@ -77,6 +77,22 @@ func RequirementEntityID(id string) string {
 	return fmt.Sprintf("%s.wf.plan.req.%s", EntityPrefix(), HashInstanceID(id))
 }
 
+// CapabilityEntityID returns the entity ID for a capability owned by a plan.
+// Format: {org}.{platform}.wf.plan.capability.{hash}
+//
+// The logical pair (planSlug, capabilityName) is hashed into the instance
+// segment so two different plans can both declare a capability with the same
+// name (e.g. "mavsdk-bootstrap") without entity-ID collision. The logical
+// values surface as triples on the entity (semspec.capability.name,
+// semspec.capability.plan) so reverse lookups stay queryable.
+//
+// Added 2026-05-30 for ADR-040 (OpenSpec vocabulary alignment + bidirectional
+// compat). Capability is a first-class entity — it owns triples and can be
+// referenced from Requirement entities via semspec.requirement.capability.
+func CapabilityEntityID(planSlug, capabilityName string) string {
+	return fmt.Sprintf("%s.wf.plan.capability.%s", EntityPrefix(), HashInstanceID(planSlug, capabilityName))
+}
+
 // ScenarioEntityID returns the entity ID for a scenario.
 // Format: {org}.{platform}.wf.plan.scenario.{hash}
 func ScenarioEntityID(id string) string {

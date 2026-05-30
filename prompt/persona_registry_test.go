@@ -30,6 +30,78 @@ func TestPersonaRegistryForRole(t *testing.T) {
 	}
 }
 
+func TestPersonaRegistryForSubPhase(t *testing.T) {
+	reg := NewPersonaRegistry()
+	reg.personas[RolePlanner] = &AgentPersona{
+		DisplayName:  "Mary",
+		SystemPrompt: "planner-default",
+		SubPhases: map[string]*AgentPersona{
+			"analyst": {
+				DisplayName:  "Mary",
+				SystemPrompt: "analyst-prompt",
+			},
+			"planner": {
+				DisplayName:  "Mary",
+				SystemPrompt: "planner-subphase-prompt",
+			},
+		},
+	}
+
+	// Sub-phase lookup returns the sub-phase persona.
+	p := reg.ForSubPhase(RolePlanner, "analyst")
+	if p == nil || p.SystemPrompt != "analyst-prompt" {
+		t.Fatalf("expected analyst sub-phase persona, got %+v", p)
+	}
+
+	// Unknown sub-phase falls back to parent.
+	p = reg.ForSubPhase(RolePlanner, "unknown")
+	if p == nil || p.SystemPrompt != "planner-default" {
+		t.Errorf("expected fallback to parent persona, got %+v", p)
+	}
+
+	// Role with no sub-phases falls back to ForRole behavior.
+	reg.personas[RoleDeveloper] = &AgentPersona{DisplayName: "Amelia", SystemPrompt: "dev"}
+	p = reg.ForSubPhase(RoleDeveloper, "analyst")
+	if p == nil || p.SystemPrompt != "dev" {
+		t.Errorf("expected fallback for role with no sub-phases, got %+v", p)
+	}
+
+	// Unknown role returns nil.
+	if reg.ForSubPhase(Role("nonexistent"), "analyst") != nil {
+		t.Error("expected nil for unknown role")
+	}
+
+	// Nil registry is safe.
+	var nilReg *PersonaRegistry
+	if nilReg.ForSubPhase(RolePlanner, "analyst") != nil {
+		t.Error("expected nil from nil registry")
+	}
+}
+
+func TestLoadPresetFromFileSubPhases(t *testing.T) {
+	path := filepath.Join("..", "configs", "presets", "bmad.json")
+	reg, err := LoadPresetFromFile(path)
+	if err != nil {
+		t.Fatalf("LoadPresetFromFile: %v", err)
+	}
+
+	analyst := reg.ForSubPhase(RolePlanner, "analyst")
+	if analyst == nil {
+		t.Fatal("expected analyst sub-phase persona on planner role")
+	}
+	if !strings.Contains(analyst.SystemPrompt, "analyst mode") {
+		t.Errorf("expected analyst sub-phase prompt to mention 'analyst mode', got %q", analyst.SystemPrompt)
+	}
+
+	plannerSub := reg.ForSubPhase(RolePlanner, "planner")
+	if plannerSub == nil {
+		t.Fatal("expected planner sub-phase persona on planner role")
+	}
+	if !strings.Contains(plannerSub.SystemPrompt, "planner mode") {
+		t.Errorf("expected planner sub-phase prompt to mention 'planner mode', got %q", plannerSub.SystemPrompt)
+	}
+}
+
 func TestPersonaRegistryNilSafe(t *testing.T) {
 	var reg *PersonaRegistry
 

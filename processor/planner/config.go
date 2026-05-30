@@ -16,6 +16,19 @@ type Config struct {
 	// rejecting the plan. Set to 0 to disable retries.
 	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on loop failure or parse error,category:basic,default:2"`
 
+	// AnalystSubPhase gates the ADR-040 analyst sub-phase. When true (default),
+	// the planner runs an analyst LLM call to produce Plan.Exploration
+	// (capability list + open questions) BEFORE the planner sub-phase
+	// produces Goal/Context/Scope. When false, the planner reverts to the
+	// legacy single-pass flow (created → drafting → drafted) — used for
+	// back-compat with presets that have no analyst sub-phase persona and
+	// for emergency rollback if the analyst path regresses.
+	//
+	// Default behavior is governed by DefaultConfig().AnalystSubPhase = true.
+	// Use a pointer so an explicitly-set false in JSON is distinguishable
+	// from "not set" (which gets the default).
+	AnalystSubPhase *bool `json:"analyst_sub_phase,omitempty" schema:"type:bool,description:Enable ADR-040 analyst sub-phase before planner sub-phase (default true),category:advanced,default:true"`
+
 	// RetryBackoffMs is the floor of the jittered delay before re-dispatching
 	// after a planning failure. See workflow/dispatchretry for semantics.
 	// Default 200ms; non-positive values fall back to the default.
@@ -56,11 +69,23 @@ type Config struct {
 
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
+	t := true
 	return Config{
 		MaxGenerationRetries: 2,
 		RetryBackoffMs:       200,
 		DefaultCapability:    "planning",
+		AnalystSubPhase:      &t,
 	}
+}
+
+// IsAnalystSubPhaseEnabled returns the effective analyst-sub-phase flag.
+// nil (unset) returns true to match ADR-040 default; explicit values
+// override.
+func (c *Config) IsAnalystSubPhaseEnabled() bool {
+	if c.AnalystSubPhase == nil {
+		return true
+	}
+	return *c.AnalystSubPhase
 }
 
 // Validate validates the configuration.

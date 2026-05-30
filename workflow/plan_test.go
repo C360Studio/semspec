@@ -101,6 +101,22 @@ func TestPlan_EffectiveStatus(t *testing.T) {
 			expected: StatusDrafted,
 		},
 		{
+			name: "ADR-040: infers explored from exploration when goal absent",
+			plan: Plan{Exploration: &Exploration{
+				Capabilities: []Capability{{Name: "test-cap", Lifecycle: CapabilityNew, Description: "test"}},
+			}},
+			expected: StatusExplored,
+		},
+		{
+			name: "ADR-040: goal+context still wins over exploration",
+			plan: Plan{
+				Goal:        "do something",
+				Context:     "why it matters",
+				Exploration: &Exploration{Capabilities: []Capability{{Name: "test-cap", Lifecycle: CapabilityNew, Description: "test"}}},
+			},
+			expected: StatusDrafted,
+		},
+		{
 			name:     "defaults to created",
 			plan:     Plan{},
 			expected: StatusCreated,

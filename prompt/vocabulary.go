@@ -47,10 +47,18 @@ func (v *Vocabulary) RoleName(role Role) string {
 // AgentPersona provides optional persona configuration for prompt injection.
 // Configured per-role in semspec.json. When nil, existing domain fragments
 // provide the identity (no behavioral change for current users).
+//
+// SubPhases (ADR-040) lets one role declare multiple sub-personas dispatched
+// serially within a single component. Concrete use: the planner role splits
+// into analyst + planner sub-phases. Loader keys are free-form strings
+// matching what the component asks for via PersonaRegistry.ForSubPhase.
+// Sub-phase personas inherit nothing from the parent — they are independent
+// AgentPersona records under the same role key.
 type AgentPersona struct {
-	DisplayName  string   `json:"display_name"`            // "Mary", "Winston" — UI + logs
-	SystemPrompt string   `json:"system_prompt,omitempty"` // injected at CategoryPersona
-	Backstory    string   `json:"backstory,omitempty"`     // optional character narrative
-	Traits       []string `json:"traits,omitempty"`        // personality attributes
-	Style        string   `json:"style,omitempty"`         // communication style
+	DisplayName  string                   `json:"display_name"`            // "Mary", "Winston" — UI + logs
+	SystemPrompt string                   `json:"system_prompt,omitempty"` // injected at CategoryPersona
+	Backstory    string                   `json:"backstory,omitempty"`     // optional character narrative
+	Traits       []string                 `json:"traits,omitempty"`        // personality attributes
+	Style        string                   `json:"style,omitempty"`         // communication style
+	SubPhases    map[string]*AgentPersona `json:"sub_phases,omitempty"`    // ADR-040: serial sub-phases under one role
 }

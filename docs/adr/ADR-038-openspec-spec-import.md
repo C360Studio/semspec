@@ -1,6 +1,8 @@
 # ADR-038: OpenSpec Spec Import — Brownfield Plan Bootstrap
 
-**Status:** Proposed (2026-05-24)
+**Status:** Superseded by ADR-040 (2026-05-30). Folded in as ADR-040's Move 4. The three-layer defense design, identity-bridge via `external_ref` triples, and Phase 1 implementation surface described below are all preserved verbatim in ADR-040; the only delta is that imported plans now hydrate `Plan.exploration` from the source spec's capability identity so the inbound projection matches the outbound emitter's data shape (round-trip via shared vocabulary). See `docs/adr/ADR-040-openspec-aligned-planning-pipeline.md` for the unified bidirectional design.
+
+**Status (historical):** Proposed (2026-05-24)
 **Deciders:** Coby, Claude
 **Related:** ADR-029 (plan completeness + retry — the review loop this
 ADR reuses for imported plans), ADR-030 (BMAD alignment — the framing

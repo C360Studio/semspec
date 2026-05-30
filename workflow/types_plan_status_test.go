@@ -32,6 +32,9 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		// QA phase statuses
 		{StatusReadyForQA, true},
 		{StatusReviewingQA, true},
+		// ADR-040: analyst sub-phase statuses
+		{StatusExploring, true},
+		{StatusExplored, true},
 		// Invalid
 		{"", false},
 		{"unknown", false},
@@ -226,6 +229,31 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusReviewingQA, StatusRejected, true},
 		// reviewing_qa → implementing (invalid — verdict is terminal decision)
 		{StatusReviewingQA, StatusImplementing, false},
+
+		// ADR-040: analyst sub-phase transitions
+		// created → exploring (planner component claims for analyst sub-phase)
+		{StatusCreated, StatusExploring, true},
+		// exploring → explored (analyst sub-phase done)
+		{StatusExploring, StatusExplored, true},
+		// exploring → rejected (analyst exhausted retries)
+		{StatusExploring, StatusRejected, true},
+		// exploring → drafted (invalid — must pass through explored)
+		{StatusExploring, StatusDrafted, false},
+		// exploring → exploring (second claim — invalid)
+		{StatusExploring, StatusExploring, false},
+		// explored → drafting (planner sub-phase claims)
+		{StatusExplored, StatusDrafting, true},
+		// explored → drafted (legacy/skip path)
+		{StatusExplored, StatusDrafted, true},
+		// explored → rejected (escalation)
+		{StatusExplored, StatusRejected, true},
+		// explored → exploring (invalid — no going back)
+		{StatusExplored, StatusExploring, false},
+		// explored → created (invalid — no implicit reset)
+		{StatusExplored, StatusCreated, false},
+		// Legacy paths still valid after additions
+		{StatusCreated, StatusDrafting, true},
+		{StatusCreated, StatusDrafted, true},
 	}
 
 	for _, tt := range tests {
@@ -248,9 +276,13 @@ func TestPlanStatus_IsInProgress(t *testing.T) {
 		{StatusGeneratingArchitecture, true},
 		{StatusGeneratingScenarios, true},
 		{StatusReviewingScenarios, true},
+		// ADR-040: analyst sub-phase in-progress
+		{StatusExploring, true},
 		// Non-in-progress statuses
 		{StatusCreated, false},
 		{StatusDrafted, false},
+		// ADR-040: explored is terminal of analyst sub-phase, not in-progress
+		{StatusExplored, false},
 		{StatusApproved, false},
 		{StatusRequirementsGenerated, false},
 		{StatusArchitectureGenerated, false},
