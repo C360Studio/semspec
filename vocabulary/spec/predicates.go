@@ -49,6 +49,20 @@ const (
 
 	// ScenarioThen is the expected result (THEN clause).
 	ScenarioThen = "spec.scenario.then"
+
+	// ScenarioTag records a tier or facet tag the scenario carries
+	// (e.g. "@unit", "@integration", "@flaky"). Multi-valued — one triple
+	// per tag. ADR-041 Move 1. Source-graph contract: semsource emits one
+	// of these per tag on the inline-code tag line below the
+	// `#### Scenario:` heading when indexing a spec.md.
+	ScenarioTag = "spec.scenario.tag"
+
+	// ScenarioHarnessProfile records a catalog harness profile id this
+	// scenario binds to. Multi-valued — one triple per bound profile.
+	// ADR-041 Move 1. Source-graph contract: semsource emits one of these
+	// per profile id found in the inline `harness:` prose line below the
+	// scenario tag line.
+	ScenarioHarnessProfile = "spec.scenario.harness_profile"
 )
 
 // Delta predicates for tracking changes between specs.
@@ -168,6 +182,16 @@ func init() {
 		vocabulary.WithDescription("BDD expected result (THEN clause)"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"then"))
+
+	vocabulary.Register(ScenarioTag,
+		vocabulary.WithDescription("Tier or facet tag on the scenario (ADR-041 Move 1)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioTag"))
+
+	vocabulary.Register(ScenarioHarnessProfile,
+		vocabulary.WithDescription("Catalog harness profile id this scenario binds to (ADR-041 Move 1)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioHarnessProfile"))
 
 	// Register delta predicates
 	vocabulary.Register(DeltaOperation,

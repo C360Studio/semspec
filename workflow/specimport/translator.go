@@ -245,14 +245,17 @@ func translateRequirements(ctx context.Context, q graph.Querier, plan *workflow.
 			for si := range scenEntities {
 				se := &scenEntities[si]
 				scen := workflow.Scenario{
-					ID:            scenarioIDFromName(req.ID, entityStringTriple(se, spec.ScenarioName)),
-					RequirementID: req.ID,
-					Given:         entityStringTriple(se, spec.ScenarioGiven),
-					When:          entityStringTriple(se, spec.ScenarioWhen),
-					Then:          entityStringSliceTriple(se, spec.ScenarioThen),
-					Status:        workflow.ScenarioStatusPending,
-					CreatedAt:     time.Now(),
-					UpdatedAt:     time.Now(),
+					ID:                scenarioIDFromName(req.ID, entityStringTriple(se, spec.ScenarioName)),
+					RequirementID:     req.ID,
+					Title:             entityStringTriple(se, spec.ScenarioName),
+					Given:             entityStringTriple(se, spec.ScenarioGiven),
+					When:              entityStringTriple(se, spec.ScenarioWhen),
+					Then:              entityStringSliceTriple(se, spec.ScenarioThen),
+					Tags:              entityStringSliceTriple(se, spec.ScenarioTag),
+					HarnessProfileIDs: entityStringSliceTriple(se, spec.ScenarioHarnessProfile),
+					Status:            workflow.ScenarioStatusPending,
+					CreatedAt:         time.Now(),
+					UpdatedAt:         time.Now(),
 				}
 				plan.Scenarios = append(plan.Scenarios, scen)
 			}

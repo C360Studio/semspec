@@ -130,7 +130,10 @@ func TestRenderSpec_Happy(t *testing.T) {
 		"## Requirements",
 		"### Bootstrap mavsdk_server",
 		"MUST boot mavsdk_server",
-		"#### Scenarios",
+		// ADR-041 PR 6: per-scenario H4 heading replaces the "#### Scenarios"
+		// bucket header. samplePlan()'s scenario has no Title, so the
+		// heading falls back to a synthesized title from the When clause.
+		"#### Scenario: driver.start() is called",
 		"**GIVEN** mavsdk_server binary is on PATH",
 		"**WHEN** driver.start() is called",
 		"**THEN** server reaches LISTEN state within 5s",
@@ -140,6 +143,12 @@ func TestRenderSpec_Happy(t *testing.T) {
 		if !strings.Contains(got, s) {
 			t.Errorf("spec missing %q:\n%s", s, got)
 		}
+	}
+	// The legacy bucket "#### Scenarios" header MUST NOT appear in the new
+	// format — its presence would indicate a regression to the pre-ADR-041
+	// emit shape.
+	if strings.Contains(got, "#### Scenarios\n") {
+		t.Errorf("legacy bucket header '#### Scenarios' should be replaced by per-scenario headings, got:\n%s", got)
 	}
 }
 

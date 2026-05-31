@@ -1395,11 +1395,19 @@ func IsTierTag(s string) bool {
 
 // Scenario represents a Given/When/Then behavioral contract derived from a Requirement.
 type Scenario struct {
-	ID            string   `json:"id"`
-	RequirementID string   `json:"requirement_id"`
-	Given         string   `json:"given"`
-	When          string   `json:"when"`
-	Then          []string `json:"then"`
+	ID            string `json:"id"`
+	RequirementID string `json:"requirement_id"`
+	// Title is the human-readable scenario heading (e.g. "MAVSDK heartbeat
+	// observed after driver start"). Required in scenariosSchema since
+	// ADR-041 PR 1; carried here as omitempty for back-compat with plans
+	// drafted before the field landed. Used as the H4 heading in OpenSpec
+	// spec.md emission per ADR-041 PR 6 — when empty, the emitter falls
+	// back to a synthesized title from the scenario's When clause so legacy
+	// plans still render readable specs.
+	Title string   `json:"title,omitempty"`
+	Given string   `json:"given"`
+	When  string   `json:"when"`
+	Then  []string `json:"then"`
 	// Status is a runtime/execution-time field — see Requirement.Status
 	// note above for the same omitempty rationale (b7r50o9ov 2026-05-08).
 	Status ScenarioStatus `json:"status,omitempty"`

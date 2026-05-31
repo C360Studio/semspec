@@ -759,6 +759,7 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID string)
 		scenarios[i] = workflow.Scenario{
 			ID:                scenarioID,
 			RequirementID:     requirementID,
+			Title:             s.Title,
 			Given:             s.Given,
 			When:              s.When,
 			Then:              s.Then,
