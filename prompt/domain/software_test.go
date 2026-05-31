@@ -1156,6 +1156,8 @@ func TestAnalystSubPhasePromptIsNotContaminatedByPlannerFragments(t *testing.T) 
 		"Produce Goal/Context/Scope structure",
 		"fill in goal, context, and scope",
 		"Review the exploration's Goal/Context/Scope",
+		"produce a plan with clear Goal, Context, and Scope",
+		"You are a planner exploring a problem space",
 	}
 	for _, phrase := range forbidden {
 		if strings.Contains(system, phrase) {
@@ -1171,6 +1173,10 @@ func TestAnalystSubPhasePromptIsNotContaminatedByPlannerFragments(t *testing.T) 
 	// Sanity: the analyst-specific behavioral-gate IS present.
 	if !strings.Contains(system, "Identify capabilities efficiently") {
 		t.Errorf("expected analyst behavioral-gate variant to be injected, got: %s", clipLocal(system, 400))
+	}
+	// Sanity: analyst-specific system-base IS present.
+	if !strings.Contains(system, "You are an analyst classifying a user request into named capabilities") {
+		t.Errorf("expected analyst system-base variant to be injected, got: %s", clipLocal(system, 400))
 	}
 }
 
@@ -1197,6 +1203,7 @@ func TestPlannerSubPhasePromptRetainsPlannerFragments(t *testing.T) {
 	required := []string{
 		"Produce Goal/Context/Scope structure",
 		"fill in goal, context, and scope",
+		"You are a planner exploring a problem space",
 	}
 	for _, phrase := range required {
 		if !strings.Contains(system, phrase) {

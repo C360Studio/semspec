@@ -529,14 +529,33 @@ Before deciding the new verdict:
 		// Planner fragments
 		// =====================================================================
 		{
+			// ADR-040: gated on ctx.AnalystPrompt because the system base is
+			// the FIRST content the model sees in the system prompt. Without
+			// gating, the analyst sub-phase reads "produce a plan with clear
+			// Goal, Context, and Scope" BEFORE the analyst persona instruction
+			// loads, anchoring weaker models (gemini-3-flash) on planner-shape
+			// output. Real-LLM run #2 confirmed this is the dominant
+			// contamination — the previous gate fixes (role-context +
+			// behavioral-gates) reduced fragment count 14→13 but the model
+			// still emitted goal/context/scope on every attempt. Caught
+			// 2026-05-30 by smoke runs #1 + #2.
 			ID:       "software.planner.system-base",
 			Category: prompt.CategorySystemBase,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `You are a planner exploring a problem space and producing a development plan.
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				if ctx.AnalystPrompt != nil {
+					return `You are an analyst classifying a user request into named capabilities.
+
+Your ONLY job is to identify the CAPABILITIES this change will introduce or modify, and return them as a kebab-case list with lifecycle (new|modified) and a 1-3 sentence description per capability. You do NOT produce goal, context, scope, files, requirements, or implementation steps — the next sub-phase derives all of that from your capability list.
+
+You optimize for CORRECT capability decomposition: each capability is a NAMED UNIT of system behavior that will become its own specification file. Documentation, READMEs, and tradeoff write-ups are NOT capabilities; they attach as scenarios under the implementation capability they describe.`
+				}
+				return `You are a planner exploring a problem space and producing a development plan.
 
 Your ONLY job is to understand the problem, explore the codebase for relevant context, and produce a plan with clear Goal, Context, and Scope. You do NOT write code, generate tasks, or make implementation decisions.
 
-You optimize for CLARITY and COMPLETENESS of the plan specification.`,
+You optimize for CLARITY and COMPLETENESS of the plan specification.`
+			},
 		},
 		{
 			// User-message renderer for the planner. Replaces
