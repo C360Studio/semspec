@@ -132,10 +132,16 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 // ---------------------------------------------------------------------------
 
 // llmScenario is the raw JSON shape returned by the agent before we assign IDs.
+// Tags + HarnessProfileIDs are ADR-041 Move 1 fields the scenario-generator
+// persona is required to emit; absence at parse time falls through to
+// ValidateScenarioTags which rejects untagged scenarios with a clear error.
 type llmScenario struct {
-	Given string   `json:"given"`
-	When  string   `json:"when"`
-	Then  []string `json:"then"`
+	Title             string   `json:"title,omitempty"`
+	Given             string   `json:"given"`
+	When              string   `json:"when"`
+	Then              []string `json:"then"`
+	Tags              []string `json:"tags,omitempty"`
+	HarnessProfileIDs []string `json:"harness_profile_ids,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -295,6 +301,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		RequirementDescription: req.RequirementDescription,
 		ArchitectureContext:    req.ArchitectureContext,
 		PreviousError:          previousError,
+		RequiredTiers:          wireTiersToPromptTiers(req.RequiredTiers),
 	}
 	if len(reviewFindings) > 0 {
 		scenCtx.ReviewFindings = reviewFindings[0]
@@ -750,14 +757,19 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID string)
 
 		scenarioID := fmt.Sprintf("scenario.%s.%s.%d", slug, reqSeq, i+1)
 		scenarios[i] = workflow.Scenario{
-			ID:            scenarioID,
-			RequirementID: requirementID,
-			Given:         s.Given,
-			When:          s.When,
-			Then:          s.Then,
-			Status:        workflow.ScenarioStatusPending,
-			CreatedAt:     now,
-			UpdatedAt:     now,
+			ID:                scenarioID,
+			RequirementID:     requirementID,
+			Given:             s.Given,
+			When:              s.When,
+			Then:              s.Then,
+			Tags:              s.Tags,
+			HarnessProfileIDs: s.HarnessProfileIDs,
+			Status:            workflow.ScenarioStatusPending,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		}
+		if err := workflow.ValidateScenarioTags(scenarios[i]); err != nil {
+			return nil, fmt.Errorf("scenario %d: %w", i+1, err)
 		}
 	}
 

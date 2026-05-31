@@ -389,8 +389,11 @@ func writePlanReviewerProjectFileTree(sb *strings.Builder, tree string) {
 }
 
 // renderScenarioGeneratorPrompt produces the scenario-generator agent's user
-// message. Mirrors the legacy workflow/prompts.ScenarioGeneratorPrompt body
-// byte-for-byte; ArchitectureContext is pre-rendered upstream.
+// message. Mirrors the legacy workflow/prompts.ScenarioGeneratorPrompt body;
+// ArchitectureContext is pre-rendered upstream. ADR-041 Move 3 added the
+// "Required tiers" section + tier-tagged JSON output shape.
+//
+//revive:disable-next-line:function-length // sequential prompt builder; byte-equivalence is the contract.
 func renderScenarioGeneratorPrompt(p *prompt.ScenarioGeneratorPromptContext) string {
 	archSection := ""
 	if p.ArchitectureContext != "" {
@@ -402,6 +405,8 @@ func renderScenarioGeneratorPrompt(p *prompt.ScenarioGeneratorPromptContext) str
 		contextSection = fmt.Sprintf("\n**Context:** %s\n", p.PlanContext)
 	}
 
+	tiersSection := renderRequiredTiers(p.RequiredTiers)
+
 	base := fmt.Sprintf(`You are generating BDD scenarios for a specific requirement.
 
 ## Plan: %s
@@ -411,31 +416,46 @@ func renderScenarioGeneratorPrompt(p *prompt.ScenarioGeneratorPromptContext) str
 ## Requirement: %s
 
 %s
-%s
+%s%s
 ## Your Task
 
-Generate 1-5 BDD scenarios that define the observable behavior for this requirement. Each scenario must:
+Generate scenarios that define the observable behavior for this requirement. Emit AT LEAST ONE scenario for each tier listed in "Required tiers" above; you may emit additional scenarios per tier for edge cases. Each scenario must:
 - Describe ONE observable behavior
-- Be independently executable — a QA engineer could run it without additional context
+- Be independently executable — a QA engineer could run it without additional context at the tier's level
 - Use specific, measurable outcomes
 - Cover the happy path first, then key edge cases
+- Carry EXACTLY ONE tier tag (one of @unit / @integration / @smoke / @e2e) matching the tier it describes
 
 **Scenario Design Guidelines:**
 - **Given**: Precondition state — what exists before the action. Be specific: "a registered user with a valid session" not "a user exists"
 - **When**: The triggering action — what the user or system does. One action per scenario, use active voice
 - **Then**: Expected outcomes as an ARRAY of assertions — multiple things to verify. Use specific values where possible: "the response status is 200" not "the request succeeds"
 
-Do NOT include implementation details — describe WHAT happens, not HOW it is implemented.
+**Tier discipline (load-bearing):**
+- @unit scenarios describe in-process behavior with fakes/fixtures. NEVER mention real services, real network endpoints, SITL containers, databases, or peer processes in @unit text.
+- @integration scenarios assume the bound harness is RUNNING and its endpoint is read from environment variables. Reference the profile IDs from "Required tiers" verbatim in harness_profile_ids. The test code does NOT start the harness — qa-runner does that.
+- @e2e scenarios describe a real user driving a real UI through a real browser session.
 
-**Good scenario:**
-- Given: "an unauthenticated user with a registered account"
-- When: "they submit the login form with a valid email and correct password"
-- Then: ["the response status is 200", "a JWT token is returned in the response body", "the token expires in 24 hours"]
+Do NOT include implementation details — describe WHAT happens at the tier's observation point, not HOW it is implemented.
 
-**Bad scenario (too vague):**
-- Given: "a user exists"
-- When: "they log in"
-- Then: ["it works"]
+**Good @unit scenario:**
+- tags: ["@unit"]
+- given: "a Config struct initialized with the default values"
+- when: "the connection-string builder is called with an empty endpoint override"
+- then: ["the builder returns the env-fallback string 'udp://0.0.0.0:14540'"]
+- harness_profile_ids: []
+
+**Good @integration scenario:**
+- tags: ["@integration"]
+- given: "the SITL endpoint at env $SITL_ENDPOINT, the mavsdk_server process started by the test harness"
+- when: "the MAVSDK driver is configured with that endpoint and started"
+- then: ["a MAVLink HEARTBEAT is received within 10 seconds", "the MAVSDK Core connection state transitions to mavsdk_core_connected"]
+- harness_profile_ids: ["mavlink.px4-sitl.mavsdk-smoke"]
+
+**Bad scenario (tier crossover — would be flagged scenario.unit_mentions_services):**
+- tags: ["@unit"]
+- given: "the SITL container is running"  ← SITL is not observable at @unit
+- when: ...
 
 ## Output Format
 
@@ -445,29 +465,32 @@ Return ONLY valid JSON matching this exact structure:
 {
   "scenarios": [
     {
-      "given": "an unauthenticated user with a registered account",
-      "when": "they submit the login form with a valid email and correct password",
+      "title": "config builder returns env fallback when override is empty",
+      "given": "a Config struct initialized with the default values",
+      "when": "the connection-string builder is called with an empty endpoint override",
       "then": [
-        "the response status is 200",
-        "a JWT token is returned in the response body",
-        "the token expires in 24 hours"
-      ]
+        "the builder returns the env-fallback string 'udp://0.0.0.0:14540'"
+      ],
+      "tags": ["@unit"],
+      "harness_profile_ids": []
     },
     {
-      "given": "an unauthenticated user",
-      "when": "they submit the login form with an incorrect password",
+      "title": "HEARTBEAT observed after driver start against SITL",
+      "given": "the SITL endpoint at env $SITL_ENDPOINT, the mavsdk_server process started by the test harness",
+      "when": "the MAVSDK driver is configured with that endpoint and started",
       "then": [
-        "the response status is 401",
-        "the response body contains the message 'Invalid credentials'",
-        "no token is returned"
-      ]
+        "a MAVLink HEARTBEAT is received within 10 seconds",
+        "the MAVSDK Core connection state transitions to mavsdk_core_connected"
+      ],
+      "tags": ["@integration"],
+      "harness_profile_ids": ["mavlink.px4-sitl.mavsdk-smoke"]
     }
   ]
 }
 `+"```"+`
 
 **Important:** Return ONLY the JSON object, no additional text or explanation.
-`, p.PlanTitle, p.PlanGoal, contextSection, p.RequirementTitle, p.RequirementDescription, archSection)
+`, p.PlanTitle, p.PlanGoal, contextSection, p.RequirementTitle, p.RequirementDescription, archSection, tiersSection)
 
 	if p.PreviousError != "" {
 		base += fmt.Sprintf(`
@@ -490,6 +513,34 @@ The previous set of scenarios was reviewed and rejected. Address ALL of the foll
 	}
 
 	return base
+}
+
+// renderRequiredTiers formats the classifier's tier-emission output as a
+// markdown bullet list the scenario-generator persona reads to know which
+// tier tags to emit. Empty input yields an empty string (legacy callers
+// without classifier wiring fall through silently to the legacy single-
+// tier prompt body). ADR-041 Move 3.
+func renderRequiredTiers(tiers []prompt.RequiredTier) string {
+	if len(tiers) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## Required tiers\n\nYou MUST emit at least one scenario tagged with each of the following tier tags. Use the listed harness_profile_ids verbatim for any @integration scenarios; copy them into each scenario's harness_profile_ids array.\n")
+	for _, t := range tiers {
+		if len(t.HarnessProfileIDs) == 0 {
+			fmt.Fprintf(&sb, "- `%s` — no harness binding\n", t.Tag)
+			continue
+		}
+		fmt.Fprintf(&sb, "- `%s` — harness profile ids: ", t.Tag)
+		for i, id := range t.HarnessProfileIDs {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			fmt.Fprintf(&sb, "`%s`", id)
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
 }
 
 // renderArchitectPrompt produces the architecture-generator agent's user
