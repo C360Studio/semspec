@@ -73,6 +73,12 @@ func writeCapabilityTriples(ctx context.Context, tw *graphutil.TripleWriter, cap
 	for _, dep := range cap.DependsOn {
 		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityDependsOn, HashInstanceID(slug, dep))
 	}
+
+	// Multi-valued surfaces (ADR-041 Move 2). One triple per declared surface;
+	// SurfaceUI is the gate for downstream @e2e scenario emission.
+	for _, surface := range cap.Surfaces {
+		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilitySurface, string(surface))
+	}
 	return nil
 }
 
@@ -100,6 +106,9 @@ func ValidateCapabilitySet(caps []Capability) error {
 		if _, dup := names[caps[i].Name]; dup {
 			return fmt.Errorf("capability %q declared more than once", caps[i].Name)
 		}
+		if err := ValidateCapabilitySurfaces(caps[i]); err != nil {
+			return err
+		}
 		names[caps[i].Name] = struct{}{}
 	}
 	// depends_on resolution + simple cycle detection.
@@ -111,6 +120,27 @@ func ValidateCapabilitySet(caps []Capability) error {
 		}
 	}
 	return detectCapabilityCycle(caps)
+}
+
+// ValidateCapabilitySurfaces enforces that every entry in c.Surfaces resolves
+// to a defined CapabilitySurface constant and that no surface appears more
+// than once. Empty Surfaces is allowed — downstream consumers treat it as
+// "unknown" and default to SurfaceAPI. ADR-041 Move 2.
+func ValidateCapabilitySurfaces(c Capability) error {
+	if len(c.Surfaces) == 0 {
+		return nil
+	}
+	seen := make(map[CapabilitySurface]struct{}, len(c.Surfaces))
+	for i, s := range c.Surfaces {
+		if !s.IsValid() {
+			return fmt.Errorf("capability %q surfaces[%d] %q is not one of ui/api/background", c.Name, i, s)
+		}
+		if _, dup := seen[s]; dup {
+			return fmt.Errorf("capability %q declares surface %q more than once", c.Name, s)
+		}
+		seen[s] = struct{}{}
+	}
+	return nil
 }
 
 // detectCapabilityCycle performs a DFS over the depends_on edges to flag
