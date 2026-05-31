@@ -231,6 +231,53 @@ func TestResumeFromRecoveryLocked_ClearsAwaitingAndIncrementsRestarts(t *testing
 	}
 }
 
+// Issue #36: prior to the fix, resumeFromRecoveryLocked preserved
+// exec.RetryCount, which meant every recovery resume exhausted on the
+// first req-review attempt (RetryCount >= MaxRetries fired immediately)
+// and deferred back to recovery — wasting outer budget. Verify the
+// per-recovery retry budget is reset to 0 on resume so each recovery
+// gets a real chance at the requirement before the next exhaustion.
+//
+// Mavlink-hard run 2026-05-31 surfaced this empirically: 4
+// implement-lifecycle attempts + 3 test-lifecycle + 1 unknown + 2
+// requirement-rev worktrees observed in the sandbox, with ~$40-50
+// burned on a single requirement before operator kill.
+func TestResumeFromRecoveryLocked_ResetsRetryCount(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+	exec := newAwaitingExec("plan-rc", "req-rc")
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	// Simulate having burned the per-recovery budget before the resume.
+	exec.RetryCount = 2
+	exec.MaxRetries = 2
+	exec.ReviewRetryCount = 1
+
+	exec.mu.Lock()
+	_ = c.deferToAwaitingRecoveryLocked(context.Background(), exec, "exhausted")
+	exec.mu.Unlock()
+
+	if !exec.awaitingRecovery {
+		t.Fatal("precondition: exec should be awaiting recovery")
+	}
+
+	exec.mu.Lock()
+	c.resumeFromRecoveryLocked(context.Background(), exec)
+	exec.mu.Unlock()
+
+	if exec.RetryCount != 0 {
+		t.Errorf("exec.RetryCount = %d, want 0 (per-recovery budget reset on resume)", exec.RetryCount)
+	}
+	if exec.MaxRetries != 2 {
+		t.Errorf("exec.MaxRetries = %d, want 2 (operator-config budget cap preserved)", exec.MaxRetries)
+	}
+	if exec.ReviewRetryCount != 0 {
+		t.Errorf("exec.ReviewRetryCount = %d, want 0 (reviewer parse-retry budget reset on resume)", exec.ReviewRetryCount)
+	}
+	if exec.recoveryRestarts != 1 {
+		t.Errorf("exec.recoveryRestarts = %d, want 1 (outer recovery budget incremented)", exec.recoveryRestarts)
+	}
+}
+
 // Idempotent timeout: when resume already cleared awaitingRecovery, a
 // late-firing timer must not increment failed-counter or transition
 // state again.
