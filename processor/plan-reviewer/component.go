@@ -337,14 +337,17 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	// ADR-040 Move 2: merge deterministic capability findings before the
-	// verdict is acted on. The LLM reviewer might miss a docs-only capability
-	// or a depends_on cycle; the structural rules don't. NormalizeVerdict in
-	// merge bumps "approved" to "needs_changes" when any error finding lands.
+	// ADR-040 Move 2 + ADR-041 Move 4: merge deterministic findings before
+	// the verdict is acted on. The LLM reviewer might miss a docs-only
+	// capability, a depends_on cycle, an untagged scenario, or a missing
+	// @integration for a services-class harness; the structural rules
+	// don't. NormalizeVerdict in each merge bumps "approved" to
+	// "needs_changes" when any error finding lands.
 	if planForRules, loadErr := c.loadPlanForRules(ctx, slug); loadErr == nil {
 		mergeCapabilityFindings(planForRules, result)
+		mergeScenarioTagFindings(planForRules, result)
 	} else {
-		c.logger.Warn("Skipping capability rules — plan load failed",
+		c.logger.Warn("Skipping capability + scenario-tag rules — plan load failed",
 			"slug", slug, "error", loadErr)
 	}
 
