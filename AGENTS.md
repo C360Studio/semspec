@@ -1,0 +1,298 @@
+# AGENTS.md
+
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+
+## Project Overview
+
+Semspec is a semantic development agent built as a **semstreams extension**. It imports semstreams as a library, registers custom components, and runs them via the component lifecycle.
+
+**Key differentiator**: Persistent knowledge graph eliminates context loss.
+
+## Work Standards
+
+**Report incidental bugs**: If you find a bug, failing test, dead code, or suspicious pattern while working on something else — always include it in your response summary under an "Other issues found" section. Don't silently move on. Include file, line, and observed behavior so someone can act on it.
+
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [docs/how-it-works.md](docs/how-it-works.md) | How semspec works (start here) |
+| [docs/model-configuration.md](docs/model-configuration.md) | LLM model and capability configuration |
+| [docs/model-testing-findings.md](docs/model-testing-findings.md) | Living log of real-LLM regression findings — what works/doesn't per model |
+| [docs/project-setup.md](docs/project-setup.md) | Standards, quality gates |
+| [docs/api.md](docs/api.md) | REST API surface map — all endpoints, SSE streams |
+
+## Component Architecture — Manager Pattern
+
+Entity-owning components follow the same 3-layer pattern:
+
+```
+*-manager {
+    cache        sscache.Cache[T]         // TTL cache (semstreams pkg/cache) — hot reads
+    kvBucket     jetstream.KeyValue       // domain KV (PLAN_STATES etc) — durable write-through
+    tripleWriter *graphutil.TripleWriter  // ENTITY_STATES — cross-component facts for rules
+}
+Start()   → reconcile(ctx)    // populate cache from KV bucket (or graph on first startup)
+OnEvent() → cache + KV + triples   // write-through on every mutation
+HTTP GET  → cache only             // never hits KV or graph at runtime
+```
+
+Rules (JSON in `configs/rules/`) own terminal transitions. Components own phase progression.
+
+| Component | Entities | Domain KV Bucket |
+|-----------|----------|------------------|
+| `plan-manager` | Plans, Requirements, Scenarios, ChangeProposals | `PLAN_STATES` |
+| `execution-manager` | Task + Requirement executions | `EXECUTION_STATES` |
+| `project-manager` | Project config | (filesystem currently) |
+| `scenario-orchestrator` | (dispatcher, no owned state) | — |
+
+**Single-writer pattern**: Generators (`requirement-generator`, `scenario-generator`) publish typed
+events (`RequirementsGeneratedEvent`, `ScenariosForRequirementGeneratedEvent`). `plan-manager` is
+the sole persister — it consumes those events and writes all entity state. Generators do not write
+directly to the graph.
+
+**KV-driven pipeline**: Components watch `PLAN_STATES` and self-trigger on status changes. There
+is no coordinator component — plan state transitions drive the next stage automatically.
+
+**Plan files as artifacts**: `plan-manager` still writes `.semspec/plans/<slug>/plan.json` for
+git-friendliness, but `PLAN_STATES` is the authoritative source of truth. Tasks are created at
+execution time (reactive mode) and are never stored in plan files.
+
+**KV Twofer**: `ENTITY_STATES` KV bucket mirrors key facts from `PLAN_STATES` as triples for
+rule evaluation. Managers write to both on every mutation and reconcile from `PLAN_STATES` on
+startup.
+
+**workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a
+state management layer. Components own their entity lifecycle.
+
+## Registered Components (16)
+
+| Component | Directory | Role |
+|-----------|-----------|------|
+| `workflow-validator` | `processor/workflow-validator/` | Validates workflow configurations |
+| `workflow-documents` | `output/workflow-documents/` | File output to .semspec/plans/ |
+| `question-manager` | `processor/question-manager/` | Q&A KV owner, HTTP API, routing, SLA |
+| `requirement-generator` | `processor/requirement-generator/` | Generates requirements from plans |
+| `architecture-generator` | `processor/architecture-generator/` | Generates technology decisions and component boundaries |
+| `scenario-generator` | `processor/scenario-generator/` | Generates scenarios for requirements |
+| `planner` | `processor/planner/` | Watches PLAN_STATES; generates Goal/Context/Scope via LLM |
+| `plan-manager` | `processor/plan-manager/` | Single writer for plans, requirements, scenarios |
+| `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; standards-aware validation |
+| `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
+| `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
+| `execution-manager` | `processor/execution-manager/` | TDD pipeline: developer → validator → reviewer |
+| `qa-reviewer` | `processor/qa-reviewer/` | Release-readiness verdict (Murat); scoped by project `qa_level` (synthesis/unit/integration/full) |
+| `requirement-executor` | `processor/requirement-executor/` | DAG decomposition and serial node execution |
+| `scenario-orchestrator` | `processor/scenario-orchestrator/` | Dispatches pending requirements for execution |
+| `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, cascade |
+
+## What Semspec is NOT
+
+- **NOT embedded NATS** — Always external via docker-compose
+- **NOT custom entity storage** — Use graph components with vocabulary predicates
+- **NOT rebuilding agentic processors** — Reuses semstreams components
+
+## Quick Start
+
+```bash
+docker compose up -d                   # Run full stack (recommended)
+task local:up                          # Or build from source + full stack
+task local:rebuild                     # Rebuild just semspec (faster iteration)
+```
+
+## Build Commands
+
+```bash
+go build -o semspec ./cmd/semspec   # Build binary
+go build ./...                       # Build all packages
+go test ./...                        # Run all tests
+go mod tidy                          # Update dependencies
+task generate:openapi                # Regenerate schemas + OpenAPI specs
+```
+
+## Semstreams Relationship (CRITICAL)
+
+Semspec **imports semstreams as a library**. See [docs/how-it-works.md](docs/how-it-works.md) for details.
+
+| Package | Purpose |
+|---------|---------|
+| `natsclient` | NATS connection with circuit breaker |
+| `pkg/retry` | Exponential backoff with jitter |
+| `pkg/errs` | Error classification (transient/invalid/fatal) |
+| `component.Registry` | Component lifecycle management |
+| `vocabulary` | Predicate registration and metadata |
+
+**Bash-first tools**: Agents use `bash` for all file, git, and shell operations. Terminal tools
+(`submit_work`, `ask_question`, `decompose_task`) set `StopLoop: true` to signal loop completion.
+Tools are registered globally via `_ "github.com/c360studio/semspec/tools"` init imports.
+
+## Adding Components
+
+1. Create `processor/<name>/` with component.go, config.go, factory.go
+2. Implement `component.Discoverable` interface
+3. Call `yourcomponent.Register(registry)` in main.go
+4. Add instance config to `configs/semspec.json`
+5. Add schema tags to Config struct (follow existing component patterns)
+6. Import component in `cmd/openapi-generator/main.go`
+
+## Environment Variables
+
+Configuration supports env var expansion: `"${LLM_API_URL:-http://localhost:11434}/v1"`
+
+| Variable | Purpose |
+|----------|---------|
+| `LLM_API_URL` | OpenAI-compatible API endpoint (Ollama, vLLM, OpenRouter, etc.) |
+| `NATS_URL` | NATS server URL |
+| `GRAPH_SOURCES` | JSON array of external graph sources for federated knowledge graph |
+| `SEMSOURCE_URL` | Legacy single semsource URL (used when `GRAPH_SOURCES` is not set) |
+| `SANDBOX_URL` | Sandbox container URL; without it agents operate directly on host |
+
+Key config flag: `task-generator.reactive_mode` (default `true`) — skip static task generation and advance plan to `ready_for_execution`; `scenario-orchestrator` then dispatches pending requirements for reactive execution.
+
+## Graph-First Architecture
+
+Graph is source of truth. Use semstreams graph components with vocabulary predicates.
+
+**Rule of thumb**: If it has semantic meaning, it belongs in the graph. If it's structural or ephemeral, use the filesystem.
+
+| Graph | Filesystem |
+|-------|------------|
+| Architecture docs, code patterns, specs/plans, source documents | Project file tree, git diffs, explicitly requested files |
+
+**Anti-patterns**: Hardcoded file path lists in strategies, reading docs from filesystem when they could be graph entities, bypassing graph because "it's faster."
+
+Import vocabulary packages to auto-register predicates via `init()`. Use predicate constants, not inline strings. See existing packages in `vocabulary/` for patterns.
+
+## NATS Messaging Patterns (CRITICAL)
+
+Subject patterns are defined in `workflow/` package and `configs/semspec.json`.
+
+| Use Case | Transport | Why |
+|----------|-----------|-----|
+| Fire-and-forget, heartbeats, tool registration | Core NATS | Ephemeral, no delivery guarantee needed |
+| Task dispatch, plan status changes, KV watches | **JetStream** | Order matters, must not lose messages |
+| Any message with dependencies | **JetStream** | Must confirm delivery before signaling completion |
+
+**CRITICAL**: Core NATS `Publish()` is async/buffered — messages may reorder. Use JetStream publish when order matters or when subsequent logic assumes delivery.
+
+All payloads must be registered with semstreams via `component.RegisterPayload` in `init()` and implement `message.Payload` interface. Wrap in `message.BaseMessage` before publishing. See existing payloads in `workflow/payloads/` for examples.
+
+## Testing Patterns
+
+- Tests create temp directories with `t.TempDir()`
+- Git tests use `setupTestRepo()` helper
+- Use `context.WithTimeout` for async operations
+- Test both success and failure paths
+- **Parsers of upstream wire format need a real fixture, not a guessed one.**
+  Synthetic golden blobs make tests pass against the parser's expectations,
+  not against reality. Capture an actual upstream response (e.g. `/metrics`,
+  `/message-logger/entries`, `ollama ps`) into testdata and load it. Caught
+  2026-04-30 — the bundle's metric parser used `semspec_*` prefix while
+  semstreams emits `semstreams_agentic_*`, every metric was zero on real
+  runs and the synthetic test passed throughout.
+
+## E2E Testing
+
+Use [Task](https://taskfile.dev) commands — they handle infrastructure lifecycle automatically. Do NOT manually run `task e2e:up`.
+
+```bash
+# Tier 1: Component tests (no LLM — seconds)
+task e2e:run -- plan-workflow         # REST API CRUD
+task e2e:run -- scenario-execution    # Requirement/Scenario CRUD + workflow trigger
+
+# Tier 2: Pipeline tests (mock LLM — ~1 min)
+task e2e:mock -- hello-world          # Run hello-world with mock LLM
+task e2e:mock -- plan-phase           # Full plan pipeline
+task e2e:mock -- execution-phase      # Full execution pipeline
+
+# All scenarios
+task e2e:default
+
+# UI E2E (Playwright) — real-LLM scenarios run here
+task e2e:ui                           # Run all UI tests
+task e2e:ui -- --ui                   # Interactive mode
+
+# Real-LLM with diagnostic-bundle sidecar (ADR-034 watch CLI)
+task e2e:watch:llm -- gemini easy     # Streams ALERTs + dumps final bundle
+task e2e:watch:llm -- Codex medium   # Same shape for any provider/tier
+task e2e:watch:llm -- local easy      # Local Ollama variant
+
+# Debugging (keeps infra running)
+task e2e:debug                        # Start infra and tail logs
+task e2e:run -- hello-world           # Run against running infra
+task e2e:down                         # Stop when done
+```
+
+### E2E Active Monitoring Protocol (MANDATORY)
+
+**E2E tests are long-running. MUST monitor actively — never block in foreground.**
+
+**Preferred path (ADR-034):** `task e2e:watch:llm -- <provider> [tier]` runs a
+`semspec watch --live --bail-on critical` sidecar alongside the test. Stream
+output is line-oriented for grep/tail and dedupes ALERTs. Two streams to watch:
+
+1. `tail -f /tmp/semspec-watch-<provider>-<tier>-<ts>/watch.log` — primary
+   signal (heartbeat + ALERT lines + BAIL on critical).
+2. `TaskOutput` of the parent task — Playwright pass/fail (orthogonal to
+   detector signal).
+
+Fall back to `docker logs` only if `watch.log` heartbeats stop emitting (means
+the watch sidecar can't reach the stack — diagnose semspec liveness directly).
+
+**Fallback path (older bash blob, retained for non-watch scenarios):**
+
+1. Launch via `run_in_background: true`
+2. Monitor three sources every 20-30s:
+   - **Test output**: `TaskOutput` (non-blocking)
+   - **Semspec logs**: `docker compose -p semspec-e2e -f docker/compose/e2e.yml logs --since=30s semspec 2>&1 | grep -iE '(workflow|agentic|loop|error|fail|complet|dispatch)' | tail -30`
+   - **Message logger**: `curl -s http://localhost:8180/message-logger/entries?limit=10 | jq '.[].subject'`
+3. Dump evidence to `/tmp/` for post-mortem (logs, messages, workflows, loops)
+4. **Abort early** if stuck in loops or burning tokens on retries
+5. **Report with evidence** — quote log lines, never guess at root cause
+
+**Operator hygiene:** Don't pre-source `.env` when invoking task commands —
+root `Taskfile.yml` has `dotenv: ['.env']` which loads it automatically.
+`task e2e:watch:llm -- gemini easy` is the clean repeatable form.
+
+### Port Allocation
+
+| Stack | NATS | Monitor | HTTP | Mock LLM | Other |
+|-------|------|---------|------|----------|-------|
+| **Backend E2E** | 4322 | 8322 | 8180 | 11535 | sandbox: 8190 |
+| **UI E2E** | 4223 | 8223 | — | 11534 | caddy: 3000, sandbox: 8191 |
+| **Semdragon** | 4222 | 8222 | 8081 | 9090 | caddy: 80 |
+| **Ollama (native)** | — | — | — | 11434 | — |
+| **Production** | 4222 | 8222 | 8080 | — | — |
+
+## Debugging
+
+Use observability tools, not grep.
+
+| Command / Endpoint | Purpose |
+|--------------------|---------|
+| `task e2e:status` | Check service health |
+| `/debug trace <id>` | Query messages by trace ID |
+| `/debug workflow <slug>` | Show workflow state |
+| `/debug loop <id>` | Show agent loop state from KV |
+| `/debug snapshot <id> [--verbose]` | Export trace to .semspec/debug/ |
+| `GET /message-logger/entries?limit=N` | Recent messages (newest first) |
+| `GET /message-logger/trace/{traceID}` | All messages in a trace |
+| `GET /message-logger/kv/{bucket}` | KV bucket contents (WORKFLOWS, AGENT_LOOPS) |
+| `GET :8222/jsz?consumers=true` | JetStream consumer state |
+
+**Message logger returns entries newest first.** Sort by timestamp for chronological order.
+
+## Infrastructure
+
+| Service | Dev Port | E2E Port | Purpose |
+|---------|----------|----------|---------|
+| NATS JetStream | 4222 | 4322 | Messaging |
+| NATS Monitoring | 8222 | 8322 | HTTP monitoring |
+| Semspec HTTP | 8080 | 8180 | Gateway / API (includes graph-gateway at /graph-gateway) |
+| SemSource | internal | internal | Source graph indexing (AST, git, docs, config) — shared NATS |
+| Sandbox | 8090 | 8190 | Code execution |
+| Mock LLM | — | 11535 | Deterministic test fixtures |
+| Ollama (native) | 11434 | — | LLM inference |
+
+SemSource watches the workspace and publishes entities to `graph.ingest.entity` on the shared NATS.
+Graph-ingest processes these into ENTITY_STATES, making them queryable via graph-gateway.
