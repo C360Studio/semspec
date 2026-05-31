@@ -322,23 +322,23 @@ func TestExploration_FindCapability(t *testing.T) {
 		},
 	}
 
-	cap, idx := exp.FindCapability("user-auth")
-	if cap == nil || idx != 0 {
-		t.Errorf("expected user-auth at index 0, got %+v idx=%d", cap, idx)
+	got, idx := exp.FindCapability("user-auth")
+	if got == nil || idx != 0 {
+		t.Errorf("expected user-auth at index 0, got %+v idx=%d", got, idx)
 	}
-	cap, idx = exp.FindCapability("session-store")
-	if cap == nil || idx != 1 {
-		t.Errorf("expected session-store at index 1, got %+v idx=%d", cap, idx)
+	got, idx = exp.FindCapability("session-store")
+	if got == nil || idx != 1 {
+		t.Errorf("expected session-store at index 1, got %+v idx=%d", got, idx)
 	}
-	cap, idx = exp.FindCapability("nonexistent")
-	if cap != nil || idx != -1 {
-		t.Errorf("expected nil/-1 for unknown name, got %+v idx=%d", cap, idx)
+	got, idx = exp.FindCapability("nonexistent")
+	if got != nil || idx != -1 {
+		t.Errorf("expected nil/-1 for unknown name, got %+v idx=%d", got, idx)
 	}
 
 	// Nil exploration is safe.
 	var nilExp *Exploration
-	cap, idx = nilExp.FindCapability("user-auth")
-	if cap != nil || idx != -1 {
-		t.Errorf("expected nil/-1 from nil exploration, got %+v idx=%d", cap, idx)
+	got, idx = nilExp.FindCapability("user-auth")
+	if got != nil || idx != -1 {
+		t.Errorf("expected nil/-1 from nil exploration, got %+v idx=%d", got, idx)
 	}
 }

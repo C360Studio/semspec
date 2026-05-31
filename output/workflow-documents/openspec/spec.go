@@ -35,8 +35,8 @@ func RenderSpec(plan *workflow.Plan, capName string) string {
 	if plan == nil || plan.Exploration == nil {
 		return ""
 	}
-	cap, _ := plan.Exploration.FindCapability(capName)
-	if cap == nil {
+	capability, _ := plan.Exploration.FindCapability(capName)
+	if capability == nil {
 		return ""
 	}
 	var reqs []workflow.Requirement
@@ -53,11 +53,11 @@ func RenderSpec(plan *workflow.Plan, capName string) string {
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "# Spec: %s\n\n", cap.Name)
+	fmt.Fprintf(&sb, "# Spec: %s\n\n", capability.Name)
 
-	if cap.Description != "" {
+	if capability.Description != "" {
 		sb.WriteString("## Overview\n\n")
-		sb.WriteString(cap.Description)
+		sb.WriteString(capability.Description)
 		sb.WriteString("\n\n")
 	}
 

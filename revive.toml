@@ -5,7 +5,10 @@ ignoreGeneratedHeader = false
 severity = "warning"
 confidence = 0.8
 errorCode = 1
-warningCode = 0
+# warningCode=1 makes warnings fail the build. CI gates on this
+# (.github/workflows/ci.yml); local `task lint` also exits non-zero when
+# any warning surfaces — which is the point.
+warningCode = 1
 
 [rule.blank-imports]
 [rule.context-as-argument]

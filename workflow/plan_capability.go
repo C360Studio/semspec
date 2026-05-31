@@ -110,10 +110,7 @@ func ValidateCapabilitySet(caps []Capability) error {
 			}
 		}
 	}
-	if err := detectCapabilityCycle(caps); err != nil {
-		return err
-	}
-	return nil
+	return detectCapabilityCycle(caps)
 }
 
 // detectCapabilityCycle performs a DFS over the depends_on edges to flag

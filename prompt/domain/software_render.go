@@ -15,6 +15,8 @@ import (
 // migration (Plan B). When this renderer's output drifts from the legacy
 // builder's, the migration test in software_render_test.go fails before
 // the LLM ever sees a different prompt.
+//
+//revive:disable-next-line:function-length // structured prompt builder; splitting would obscure the byte-equivalence contract.
 func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) string {
 	var sb strings.Builder
 

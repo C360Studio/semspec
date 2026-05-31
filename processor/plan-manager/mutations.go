@@ -1,3 +1,8 @@
+// Package planmanager mutations file. Holds the request/response DTOs for
+// every plan-mutation HTTP endpoint; the count of public structs is the
+// API surface, not architectural debt.
+//
+//revive:disable:max-public-structs
 package planmanager
 
 import (

@@ -487,6 +487,7 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 //     qa-runner — dev never saw them. ADR-039 wires the rendering.
 //   - testcontainers-class profiles run in dev's TDD via the docker
 //     socket AND again at qa-runner as a reproducibility check.
+//
 // Orchestration type lives on the catalog Profile (ADR-039 Phase 1a).
 //
 // qa-reviewer owns the ready_for_qa → reviewing_qa transition via

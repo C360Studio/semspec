@@ -198,7 +198,7 @@ func TestIsSafeChangeName(t *testing.T) {
 	}
 }
 
-func TestWriteExternalSpecTriple_NoOpsOnEmptyExternalID(t *testing.T) {
+func TestWriteExternalSpecTriple_NoOpsOnEmptyExternalID(_ *testing.T) {
 	// Ensure best-effort behavior: empty external ID → silent no-op,
 	// no panic, no triple write attempt.
 	writeExternalSpecTriple(context.Background(), nil, "capability", "x", "slug", "")

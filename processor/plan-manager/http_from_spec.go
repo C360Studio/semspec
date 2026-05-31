@@ -115,6 +115,8 @@ type FromSpecErrorResponse struct {
 // handleCreatePlanFromSpec handles POST /plan-manager/plans/from-spec.
 // Imports an openspec/changes/<name>/ directory as a semspec Plan
 // (ADR-040 Move 4 / folded ADR-038).
+//
+//revive:disable-next-line:function-length // HTTP handler running the full import pipeline; the linear orchestration is the contract.
 func (c *Component) handleCreatePlanFromSpec(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

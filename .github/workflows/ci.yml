@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install revive
+        run: go install github.com/mgechev/revive@v1.5.1
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt check
+        # Auto-formatting would modify the workspace in CI without committing,
+        # masking real formatting drift. Fail if any file would change.
+        # docs/sponsor-packages/ is excluded — those are fossilized
+        # agent-generated artifacts preserved verbatim (same exclusion logic
+        # revive.toml applies for the exported/package-comments rules).
+        run: |
+          unformatted=$(gofmt -l . | grep -v '^docs/sponsor-packages/' || true)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: revive
+        # revive exit code is controlled by warningCode / errorCode in
+        # revive.toml. warningCode=1 makes warnings fail the build.
+        run: revive -config revive.toml -formatter friendly ./...
+
+      - name: go test
+        run: go test ./...

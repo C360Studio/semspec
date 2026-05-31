@@ -35,6 +35,18 @@ type TranslateOptions struct {
 	GraphReadinessBudget time.Duration
 }
 
+// TranslateResult is the output of Translate. It holds the constructed
+// workflow.Plan and the mapping back to the source-graph external entity
+// IDs that plan-manager writes as external_spec triples post-persist.
+type TranslateResult struct {
+	Plan *workflow.Plan `json:"plan"`
+	// ExternalRefs maps the canonical name (capability or requirement ID)
+	// to the source graph's entity ID. Plan-manager writes these as
+	// external_spec triples post-persist so the round-trip emitter can
+	// surface the original identity. Empty map allowed.
+	ExternalRefs map[string]string `json:"external_refs,omitempty"`
+}
+
 // Translate reads OpenSpec entities from the SKG and produces a
 // workflow.Plan ready for plan-manager to persist. Per ADR-040 Move 4:
 //
@@ -54,20 +66,11 @@ type TranslateOptions struct {
 // `external_spec` triples emitted by SaveCapabilities / SaveRequirements
 // (predicates registered in PR 1a). Storage of those identifiers is the
 // caller's responsibility — see ExternalRefs on the returned Plan.
-type TranslateResult struct {
-	Plan *workflow.Plan `json:"plan"`
-	// ExternalRefs maps the canonical name (capability or requirement ID)
-	// to the source graph's entity ID. Plan-manager writes these as
-	// external_spec triples post-persist so the round-trip emitter can
-	// surface the original identity. Empty map allowed.
-	ExternalRefs map[string]string `json:"external_refs,omitempty"`
-}
-
-// Translate runs the graph→Plan translation. The structural pre-check
-// MUST have run first; pass its result to bound the expected capability
-// set. Returns an error when no requirements were found for any
-// capability — that's a sign that semsource hasn't indexed the change
-// yet (caller can retry).
+//
+// The structural pre-check MUST have run first; pass its result to bound
+// the expected capability set. Returns an error when no requirements
+// were found for any capability — that's a sign that semsource hasn't
+// indexed the change yet (caller can retry).
 func Translate(ctx context.Context, q graph.Querier, sr *StructuralResult, opts TranslateOptions) (*TranslateResult, error) {
 	if q == nil {
 		return nil, fmt.Errorf("graph querier required")
@@ -126,12 +129,12 @@ func Translate(ctx context.Context, q graph.Querier, sr *StructuralResult, opts 
 	// hint if the proposal declared it. Default to "modified" because
 	// inbound imports adopt existing specs.
 	for _, capName := range sr.Proposal.CapabilityNames {
-		cap := workflow.Capability{
+		c := workflow.Capability{
 			Name:        capName,
 			Lifecycle:   workflow.CapabilityModified,
 			Description: capabilityDescription(specsByCap[capName], capName),
 		}
-		plan.Exploration.Capabilities = append(plan.Exploration.Capabilities, cap)
+		plan.Exploration.Capabilities = append(plan.Exploration.Capabilities, c)
 		if e := specsByCap[capName]; e != nil {
 			externalRefs["capability:"+capName] = e.ID
 		}
@@ -189,7 +192,7 @@ func loadSpecEntitiesByCapability(ctx context.Context, q graph.Querier, sr *Stru
 // capabilityNameFromSpecPath extracts the kebab-case capability name from
 // a spec file path. Expected shape: `<changePath>/specs/<capName>/spec.md`.
 // Returns "" when the path doesn't match the expected layout.
-func capabilityNameFromSpecPath(filePath, specsDir string) string {
+func capabilityNameFromSpecPath(filePath, _ string) string {
 	// Allow both absolute and relative file paths in the graph.
 	cleaned := filepath.Clean(filePath)
 	if !strings.HasSuffix(cleaned, string(filepath.Separator)+"spec.md") &&

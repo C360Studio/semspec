@@ -35,6 +35,8 @@ import (
 //
 // Each section only emits when its source slice is non-empty so the
 // document stays readable on partial architectures.
+//
+//revive:disable-next-line:function-length // sequential markdown emitter; section order is the contract, splitting would fragment it.
 func RenderDesign(plan *workflow.Plan) string {
 	if plan == nil || plan.Architecture == nil {
 		return ""

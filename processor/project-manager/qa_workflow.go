@@ -71,6 +71,7 @@ type Logger interface {
 //     Testcontainers library, which uses the docker socket act mounts
 //     into runner containers. No qa.yml-level services: needed.
 //   - pure-fixture: dev's test code holds the fixture directly.
+//
 // This default template ships the language toolchain + test command;
 // services-class blocks are injected later by plan-manager rendering
 // from the architecture's selected harness_profiles[].

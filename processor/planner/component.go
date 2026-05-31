@@ -937,10 +937,10 @@ func (c *Component) dispatchAnalyst(ctx context.Context, slug, title, descriptio
 	}
 
 	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        modelName,
-		Prompt:       assembled.UserMessage,
+		TaskID: taskID,
+		Role:   agentic.RoleGeneral,
+		Model:  modelName,
+		Prompt: assembled.UserMessage,
 		// ADR-040 Move 1: deliverableType="exploration" routes both
 		// submit_work's parameter schema AND the strict response_format
 		// to explorationSchema (capabilities + open_questions). Passing
