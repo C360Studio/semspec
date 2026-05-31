@@ -1273,8 +1273,22 @@ func (c *Component) loadPlanScope(ctx context.Context, slug string) *workflow.Sc
 }
 
 // buildReviewPrompt constructs the prompt for requirement-level review.
-// Includes requirement context, scenarios as acceptance criteria,
-// files modified by completed nodes, and node summaries.
+// Includes requirement context, scenarios grouped by tier with tier-aware
+// verification instructions (ADR-041 Move 6 — the load-bearing fix for
+// issue #37), and files modified by completed nodes.
+//
+// Scenarios are partitioned by tier tag (@unit / @integration / @smoke /
+// @e2e). Each tier group carries instructions that tell the reviewer
+// WHAT to look for at that tier — crucially, @integration scenarios do
+// NOT need to pass at dev-completion (the harness isn't running in the
+// dev sandbox); they need to be authored correctly. qa-runner gates
+// passing later per ADR-039.
+//
+// Legacy scenarios without tier tags (PR 1's tags field absent) fall into
+// an "untagged" group with the legacy "verify all aspects" instruction —
+// existing pre-ADR-041 plans keep working.
+//
+//revive:disable-next-line:function-length // sequential tier-grouped prompt builder; splitting would obscure the load-bearing tier-aware contract.
 func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 	var sb strings.Builder
 
@@ -1289,16 +1303,44 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 	}
 
 	if len(exec.Scenarios) > 0 {
-		sb.WriteString("\nAcceptance Criteria (scenarios to verify):\n")
-		for i, sc := range exec.Scenarios {
-			thenParts := strings.Join(sc.Then, ", ")
-			sb.WriteString(fmt.Sprintf("%d. [%s] Given %s, When %s, Then %s\n",
-				i+1, sc.ID, sc.Given, sc.When, thenParts))
+		groups := groupScenariosByTier(exec.Scenarios)
+
+		sb.WriteString("\n## Scenarios to verify (grouped by test pyramid tier)\n")
+		sb.WriteString("\nApply tier-appropriate verification per ADR-041. The harness is NOT running in the dev sandbox — @integration scenarios are verified for AUTHORING CORRECTNESS, not runtime behavior. qa-runner gates @integration passing downstream.\n")
+
+		if len(groups.unit) > 0 {
+			sb.WriteString("\n### @unit scenarios\n")
+			sb.WriteString("Verify each has a unit test method exercising the behavior with fakes / in-process state. The unit test MUST run and pass at dev-completion (no external dependencies). Reject if missing or if the test references real services / SITL / databases / peer processes (category error — flag for planner to retire the scenario).\n\n")
+			writeScenarioList(&sb, groups.unit)
+		}
+
+		if len(groups.integration) > 0 {
+			sb.WriteString("\n### @integration scenarios\n")
+			sb.WriteString("Verify each has a tagged test file that (a) contains at least one of the scenario's harness_profile_ids as a STRING LITERAL, (b) reads the harness endpoint from environment variables declared by the bound catalog profile (NOT a hardcoded host/port), and (c) asserts on each required_assertion of every bound profile. The test does NOT need to PASS here — the harness isn't up in the dev sandbox. Approve when the AUTHORING is correct; qa-runner gates the runtime behavior downstream per ADR-039.\n\n")
+			writeScenarioList(&sb, groups.integration)
+		}
+
+		if len(groups.smoke) > 0 {
+			sb.WriteString("\n### @smoke scenarios\n")
+			sb.WriteString("Verify each has at least a stub test file OR a documented release-gating plan. Do NOT block dev approval — smoke is gated at scheduled tiers downstream.\n\n")
+			writeScenarioList(&sb, groups.smoke)
+		}
+
+		if len(groups.e2e) > 0 {
+			sb.WriteString("\n### @e2e scenarios\n")
+			sb.WriteString("Verify each has at least a stub test file OR a documented release-gating plan. Do NOT block dev approval — e2e is observed in full-system deployments downstream.\n\n")
+			writeScenarioList(&sb, groups.e2e)
+		}
+
+		if len(groups.untagged) > 0 {
+			sb.WriteString("\n### Untagged scenarios (legacy / pre-ADR-041)\n")
+			sb.WriteString("These scenarios lack tier tags (plan was drafted before ADR-041 lands). Apply the legacy contract: verify each scenario's Given/When/Then is exercised by the implementation. If you find yourself wanting to demand integration-tier behavior from these, surface that as planner feedback rather than rejecting the dev.\n\n")
+			writeScenarioList(&sb, groups.untagged)
 		}
 	}
 
 	if len(exec.NodeResults) > 0 {
-		sb.WriteString("\nCompleted Implementation Nodes:\n")
+		sb.WriteString("\n## Completed Implementation Nodes\n")
 		for _, nr := range exec.NodeResults {
 			sb.WriteString(fmt.Sprintf("- %s", nr.NodeID))
 			if len(nr.FilesModified) > 0 {
@@ -1312,6 +1354,68 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 	}
 
 	return sb.String()
+}
+
+// scenarioTierGroups partitions a requirement's scenarios by tier tag.
+// Scenarios without a tier tag fall into `untagged` so legacy plans
+// without ADR-041's Tags field keep producing a sensible review prompt.
+type scenarioTierGroups struct {
+	unit        []workflow.Scenario
+	integration []workflow.Scenario
+	smoke       []workflow.Scenario
+	e2e         []workflow.Scenario
+	untagged    []workflow.Scenario
+}
+
+// groupScenariosByTier walks scenarios once, dispatching each to the group
+// matching its first recognized tier tag. A scenario with multiple tier
+// tags should have been rejected upstream (PR 1's ValidateScenarioTags
+// rejects, plan-reviewer's scenario.missing_tier_tag rule rejects); if one
+// somehow slips through, the FIRST tier tag wins so the reviewer at least
+// gets a consistent interpretation.
+func groupScenariosByTier(scenarios []workflow.Scenario) scenarioTierGroups {
+	var g scenarioTierGroups
+	for _, s := range scenarios {
+		switch firstTierTag(s.Tags) {
+		case workflow.TierUnit:
+			g.unit = append(g.unit, s)
+		case workflow.TierIntegration:
+			g.integration = append(g.integration, s)
+		case workflow.TierSmoke:
+			g.smoke = append(g.smoke, s)
+		case workflow.TierE2E:
+			g.e2e = append(g.e2e, s)
+		default:
+			g.untagged = append(g.untagged, s)
+		}
+	}
+	return g
+}
+
+// firstTierTag returns the first recognized tier tag in the slice, or "".
+func firstTierTag(tags []string) string {
+	for _, t := range tags {
+		if workflow.IsTierTag(t) {
+			return t
+		}
+	}
+	return ""
+}
+
+// writeScenarioList writes scenarios in the legacy [id] Given/When/Then
+// format, plus an inline harness binding hint for @integration scenarios
+// so the reviewer doesn't have to cross-reference to figure out which
+// profile_ids the test should bind to.
+func writeScenarioList(sb *strings.Builder, scenarios []workflow.Scenario) {
+	for i, sc := range scenarios {
+		thenParts := strings.Join(sc.Then, ", ")
+		sb.WriteString(fmt.Sprintf("%d. [%s] Given %s, When %s, Then %s",
+			i+1, sc.ID, sc.Given, sc.When, thenParts))
+		if len(sc.HarnessProfileIDs) > 0 {
+			sb.WriteString(fmt.Sprintf("  (harness: %s)", strings.Join(sc.HarnessProfileIDs, ", ")))
+		}
+		sb.WriteString("\n")
+	}
 }
 
 // ---------------------------------------------------------------------------
