@@ -502,13 +502,26 @@ tasks:
         sh: |
           case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
             hard) echo 'osh-driver-meshtastic' ;;
+            mavlink-hard) echo 'osh-driver-mavsdk' ;;
             mavlink-decode) echo 'mavlink-heartbeat-go' ;;
             *) echo 'go-project' ;;
           esac
       EPIC_OVERLAY:
-        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: |
+          TIER="$(echo '{{.CLI_ARGS}}' | awk '{print $2}')"
+          if [ "${WITH_EPIC:-0}" = "1" ] && { [ "$TIER" = "hard" ] || [ "$TIER" = "mavlink-hard" ]; }; then
+            echo '-f ui/docker-compose.e2e-epic.yml'
+          else
+            echo ''
+          fi
       EPIC_ON:
-        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '1'; else echo '0'; fi
+        sh: |
+          TIER="$(echo '{{.CLI_ARGS}}' | awk '{print $2}')"
+          if [ "${WITH_EPIC:-0}" = "1" ] && { [ "$TIER" = "hard" ] || [ "$TIER" = "mavlink-hard" ]; }; then
+            echo '1'
+          else
+            echo '0'
+          fi
     # E2E_FIXTURE feeds docker-compose's ${E2E_FIXTURE:-go-project} workspace
     # mount substitution. WITH_EPIC is re-exported with the resolved default
     # so the Playwright spec (ui/e2e/epic-meshtastic-llm.spec.ts) sees the
@@ -585,6 +598,24 @@ tasks:
             # must be set; whichever bites first terminates the test.
             CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=4800000 PLAYWRIGHT_TIMEOUT=4800000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.TIER}}" = "mavlink-hard" ]; then
+            # @mavlink-hard: OpenSensorHub MAVSDK/MAVLink driver epic.
+            # Scope sits between @hard (Meshtastic OSH driver, 120min)
+            # and @mavlink-decode (small Go heartbeat, 80min). The
+            # Connected Systems API coverage matrix + MAVSDK plugin
+            # surface + raw-MAVLink fallback + live mavsdk_server smoke
+            # = roughly 4-6 requirements × ~3-5 task-nodes each.
+            # Wallclock budget tuned 2026-05-29 PM after run #2 forensics:
+            # req-executor.timeout_seconds=7200s (2h/req) + max_recovery_restarts=2
+            # in e2e-hybrid-gpt5.json means a single requirement can spend ~2h
+            # across its TDD cycles + 2 recovery cascades. Two reqs scheduled
+            # in parallel still want ~150-180min wallclock to converge —
+            # earlier 120min cap killed reqs that had actually completed
+            # internally (req 1 succeeded at ~70min but was force-reaped
+            # by the 1h ceiling). 180min cap leaves headroom for one of
+            # the requirements to hit its full recovery budget.
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=10800000 PLAYWRIGHT_TIMEOUT=10800000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
@@ -612,6 +643,7 @@ tasks:
         sh: |
           case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
             hard) echo 'osh-driver-meshtastic' ;;
+            mavlink-hard) echo 'osh-driver-mavsdk' ;;
             mavlink-decode) echo 'mavlink-heartbeat-go' ;;
             *) echo 'go-project' ;;
           esac
@@ -621,9 +653,21 @@ tasks:
       # and http_request. Setting WITH_EPIC=1 mounts /sources/ with pre-cloned
       # upstream repos as a speedup for runs that want cached artifacts.
       EPIC_OVERLAY:
-        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '-f ui/docker-compose.e2e-epic.yml'; else echo ''; fi
+        sh: |
+          TIER="$(echo '{{.CLI_ARGS}}' | awk '{print $2}')"
+          if [ "${WITH_EPIC:-0}" = "1" ] && { [ "$TIER" = "hard" ] || [ "$TIER" = "mavlink-hard" ]; }; then
+            echo '-f ui/docker-compose.e2e-epic.yml'
+          else
+            echo ''
+          fi
       EPIC_ON:
-        sh: if [ "${WITH_EPIC:-0}" = "1" ] && [ "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" = "hard" ]; then echo '1'; else echo '0'; fi
+        sh: |
+          TIER="$(echo '{{.CLI_ARGS}}' | awk '{print $2}')"
+          if [ "${WITH_EPIC:-0}" = "1" ] && { [ "$TIER" = "hard" ] || [ "$TIER" = "mavlink-hard" ]; }; then
+            echo '1'
+          else
+            echo '0'
+          fi
       RUN_TS:
         sh: date +%Y%m%d-%H%M%S
       OUT_DIR: "/tmp/semspec-watch-{{.PROVIDER}}-{{.TIER}}-{{.RUN_TS}}"
@@ -777,6 +821,24 @@ tasks:
             # (ui/e2e/plan-lifecycle-llm-mavlink.spec.ts) — both budgets
             # must be set; whichever bites first terminates the test.
             CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=4800000 PLAYWRIGHT_TIMEOUT=4800000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          elif [ "{{.TIER}}" = "mavlink-hard" ]; then
+            # @mavlink-hard: OpenSensorHub MAVSDK/MAVLink driver epic.
+            # Scope sits between @hard (Meshtastic OSH driver, 120min)
+            # and @mavlink-decode (small Go heartbeat, 80min). The
+            # Connected Systems API coverage matrix + MAVSDK plugin
+            # surface + raw-MAVLink fallback + live mavsdk_server smoke
+            # = roughly 4-6 requirements × ~3-5 task-nodes each.
+            # Wallclock budget tuned 2026-05-29 PM after run #2 forensics:
+            # req-executor.timeout_seconds=7200s (2h/req) + max_recovery_restarts=2
+            # in e2e-hybrid-gpt5.json means a single requirement can spend ~2h
+            # across its TDD cycles + 2 recovery cascades. Two reqs scheduled
+            # in parallel still want ~150-180min wallclock to converge —
+            # earlier 120min cap killed reqs that had actually completed
+            # internally (req 1 succeeded at ~70min but was force-reaped
+            # by the 1h ceiling). 180min cap leaves headroom for one of
+            # the requirements to hit its full recovery budget.
+            GOAL_TIMEOUT=900000 CASCADE_TIMEOUT=1200000 EXECUTION_TIMEOUT=10800000 PLAYWRIGHT_TIMEOUT=10800000 \
               npx playwright test --grep @{{.TIER}} --project t2 --no-deps
           else
             PLAYWRIGHT_TIMEOUT=1200000 \

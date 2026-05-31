@@ -16,21 +16,3 @@ selection path under real LLM. The agent is expected to:
 
 Initial state is a skeleton `main.go` and an empty `go.mod`. Reset by
 `task reset-fixtures` returns to this state between runs.
-
-## QA depth
-
-`.semspec/project.json` pins `qa_level: integration` so the qa-runner
-actually executes the rendered `.github/workflows/qa.yml` via nektos/act
-after implementation converges. Without this the project falls back to
-`synthesis` (LLM verdict only, no test execution) and the integration-
-test path never runs — defeating the point of a fixture that exists to
-verify the catalog-driven harness selection path.
-
-Because the architect picks `mavlink.raw-mavlink-direct` (orchestration
-= pure-fixture), the qa.yml emitted by ADR-039 Phase 1c is the standard
-language-aware Go scaffold without any `services:` block — captured
-HEARTBEAT frames in `testdata/` are authoritative for this scope, and
-no sibling container is spawned. A SITL-demanding scope variant would
-trigger the architect to pick `mavlink.px4-sitl.mavsdk-smoke` (required
-tier, orchestration=services) and Phase 1c would render the px4-sitl
-service block automatically.

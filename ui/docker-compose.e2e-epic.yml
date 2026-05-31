@@ -159,7 +159,77 @@ services:
           cpus: "2"
           memory: 4G
 
+  # External semsource: MAVSDK-Java library (small/medium — chains after OSH).
+  # Used by the @mavlink-hard tier so the agent can read MAVSDK plugin
+  # signatures and proto bindings directly from /sources/ instead of
+  # http-fetching them piecewise. Chained after osh because both compete
+  # for the same Java AST indexing memory; serializing keeps each
+  # seed-burst inside the 4G limit OSH already set.
+  semsource-mavsdk-java:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+      semspec:
+        condition: service_healthy
+      semsource-osh:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../configs/semsource/mavsdk-java.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 2G
+
+  # External semsource: OSH addons (LARGEST — many drivers + the baseline
+  # sensorhub-driver-mavsdk this prompt extends from). Chained last so its
+  # ~200MB clone + Java AST burst doesn't collide with anything else.
+  semsource-osh-addons:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+      semspec:
+        condition: service_healthy
+      semsource-mavsdk-java:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../configs/semsource/osh-addons.json:/etc/semsource/semsource.json:ro
+      - semsource-clones:/shared/sources
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/source-manifest/status 2>/dev/null | grep -q '\"phase\":\"ready\"'"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 180s  # osh-addons is the largest single seed in the chain
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+
   # Allow extra time for OSH (large repo) ingestion to seed the local graph.
+  # Bumped from 180s to 420s for the @mavlink-hard chain: serialized
+  # meshtastic → ogc → osh → mavsdk-java → osh-addons can stretch to
+  # 6-7 minutes of seeding on a slow git path. Each step still has its
+  # own healthcheck start_period budget — this is the umbrella cap
+  # semspec uses before declaring missing-readiness fatal.
   semspec:
     environment:
-      - SEMSOURCE_READINESS_BUDGET=180s
+      - SEMSOURCE_READINESS_BUDGET=420s

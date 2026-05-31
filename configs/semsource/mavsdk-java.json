@@ -1,0 +1,26 @@
+{
+  "namespace": "mavsdk-java",
+  "mode": "headless",
+  "workspace_dir": "/shared/sources",
+  "sources": [
+    {
+      "type": "git",
+      "url": "https://github.com/mavlink/MAVSDK-Java",
+      "branch": "main",
+      "watch": false
+    },
+    {
+      "type": "ast",
+      "path": "/shared/sources/github-com-mavlink-MAVSDK-Java",
+      "language": "java",
+      "watch": true
+    },
+    {
+      "type": "docs",
+      "paths": [
+        "/shared/sources/github-com-mavlink-MAVSDK-Java"
+      ],
+      "watch": true
+    }
+  ]
+}

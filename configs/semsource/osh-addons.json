@@ -1,0 +1,26 @@
+{
+  "namespace": "osh-addons",
+  "mode": "headless",
+  "workspace_dir": "/shared/sources",
+  "sources": [
+    {
+      "type": "git",
+      "url": "https://github.com/opensensorhub/osh-addons",
+      "branch": "master",
+      "watch": false
+    },
+    {
+      "type": "ast",
+      "path": "/shared/sources/github-com-opensensorhub-osh-addons/sensors/robotics/sensorhub-driver-mavsdk",
+      "language": "java",
+      "watch": true
+    },
+    {
+      "type": "docs",
+      "paths": [
+        "/shared/sources/github-com-opensensorhub-osh-addons"
+      ],
+      "watch": true
+    }
+  ]
+}

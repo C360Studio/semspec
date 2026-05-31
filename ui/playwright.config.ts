@@ -43,6 +43,7 @@ const T1_SPECS = [
 const T2_SPECS = [
 	'e2e/plan-lifecycle-llm.spec.ts',
 	'e2e/plan-lifecycle-llm-mavlink.spec.ts',
+	'e2e/plan-lifecycle-llm-mavlink-osh.spec.ts',
 	'e2e/epic-meshtastic-llm.spec.ts',
 	'e2e/mortgage-calc-llm.spec.ts'
 ];

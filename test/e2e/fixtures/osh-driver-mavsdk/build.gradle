@@ -1,0 +1,62 @@
+// OSH MAVSDK driver skeleton — to be filled in by the agent during the
+// @mavlink-hard scenario.
+//
+// Build target: a Java driver that exposes MAVLink/MAVSDK telemetry and
+// control to OpenSensorHub through the OGC Connected Systems API. The
+// upstream reference implementation lives at
+// opensensorhub/osh-addons/sensors/robotics/sensorhub-driver-mavsdk and
+// is mounted read-only at /sources/ when the EPIC overlay is active.
+//
+// First-task discovery — fill in `repositories` and `dependencies` below.
+// Read the upstream poms / build.gradle directly:
+//   /sources/github-com-opensensorhub-osh-addons/sensors/robotics/sensorhub-driver-mavsdk
+//   /sources/github-com-opensensorhub-osh-core
+//   /sources/github-com-mavlink-MAVSDK-Java
+//   /sources/github-com-opengeospatial-ogcapi-connected-systems
+// When /sources/ is not mounted, fall back to web_search + http_request
+// against raw.githubusercontent.com.
+//
+// The legacy Bintray publishing target was sunset by JFrog in 2021; the
+// canonical artifact repository for OSH 2.x is the agent's to discover
+// from the upstream `release.gradle` / publishing configuration.
+
+plugins {
+    id 'java-library'
+}
+
+group = 'org.sensorhub'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    // Match osh-core's Java 17 target. Verify via the mounted upstream
+    // at /sources/github-com-opensensorhub-osh-core/common.gradle
+    // (look for `sourceCompatibility`).
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    // TODO(agent): add the OSH artifact repository here once you've
+    // identified it from the upstream `release.gradle`. The original
+    // Bintray target is dead; discover the current snapshot/release URL
+    // from /sources/github-com-opensensorhub-osh-core/release.gradle.
+}
+
+dependencies {
+    // TODO(agent): declare OSH + MAVSDK Java dependencies. Read the
+    // upstream `sensorhub-driver-mavsdk/build.gradle` first — that is
+    // the baseline this driver extends. Common picks:
+    //   implementation 'org.sensorhub:sensorhub-core:<version>'
+    //   implementation 'org.sensorhub:sensorhub-service-consys:<version>'
+    //   implementation 'io.mavsdk:mavsdk:<version>'
+    //   implementation 'io.mavsdk:mavsdk-server:<version>'
+    // Pin versions against /sources/github-com-mavlink-MAVSDK-Java/build.gradle
+    // (the MAVSDK Java release tags) and the OSH upstream common.gradle.
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+test {
+    useJUnitPlatform()
+}
