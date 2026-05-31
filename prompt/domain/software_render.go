@@ -592,8 +592,8 @@ func renderArchitectHarnessCards(cards []prompt.HarnessProfileCard) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("## Available test harness profiles\n\n")
-	sb.WriteString("Select by profile_id only. These profiles are system-owned; do not invent or copy their images, ports, env vars, startup order, readiness probes, or evidence anchors into the architecture document.\n\n")
+	sb.WriteString("## Available test environments\n\n")
+	sb.WriteString("Select by profile_id only. These test environment profiles are system-owned; do not invent or copy their images, ports, env vars, startup order, readiness probes, or required test assertions into the architecture document.\n\n")
 	for _, card := range cards {
 		fmt.Fprintf(&sb, "### %s\n\n", card.ID)
 		fmt.Fprintf(&sb, "- **Tier:** `%s`\n", card.Tier)

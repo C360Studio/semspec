@@ -143,7 +143,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// from the catalog (qa-runner brings the stack up; tests are consumers).
 	// testcontainers-class and pure-fixture profiles stay in project test code.
 	// This check is orchestration-agnostic: it verifies the dev's tests carry
-	// the required evidence anchors regardless of who starts the services.
+	// the required test assertions regardless of who starts the services.
 	// Loads selections from .semspec/plans/<slug>/plan.json on disk;
 	// greenfield projects (no architecture) trivially pass.
 	if len(filterTestFiles(trigger.FilesModified)) > 0 {

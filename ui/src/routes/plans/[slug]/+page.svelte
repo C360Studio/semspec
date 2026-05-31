@@ -235,7 +235,7 @@
 			case 'reviewing_scenarios':
 				return 'Reviewing scenarios…';
 			case 'reviewing_qa':
-				return 'Running QA review…';
+				return 'Running tests…';
 			case 'reviewing_rollup':
 				return 'Reviewing rollup…';
 			default:

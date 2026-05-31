@@ -327,7 +327,7 @@ qa-reviewer judges coverage against this declared surface.`)
 				return ctx.TaskContext != nil && len(ctx.TaskContext.HarnessProfiles) > 0
 			},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return renderResolvedHarnessProfiles("HARNESS PROFILES — selected catalog-backed test harness details for this task.", ctx.TaskContext.HarnessProfiles)
+				return renderResolvedHarnessProfiles("TEST ENVIRONMENTS — selected test environment details from the catalog for this task.", ctx.TaskContext.HarnessProfiles)
 			},
 		},
 		{
@@ -1356,7 +1356,7 @@ BEFORE submit_work:
    - apis: at least one APISurface entry naming a symbol the developer will integrate against. Each APISurface MUST have a citation (file path or URL where you verified the signature). Without citations the surface is a guess; resubmit after the missing reads.
    - used_by: names of component_boundaries entries that depend on this resolution (bidirectional with component_boundaries[].upstream_refs).
    - role: classify how the dep is consumed at test time. "build_dep" = compile-time only (annotation processor, codegen). "runtime_dep" = library/framework called in-process (most cases — the dev imports the JAR/module and tests its methods directly). "integration_target" = a separate process the dev's code talks to over a wire protocol (daemon, broker, database, gRPC service). When you cannot tell, default to "runtime_dep".
-   - integration_target rule: when any resolution uses role == "integration_target", select at least one entry in architecture.harness_profiles[] whose catalog profile covers that target. Use ONLY profile_id values from the "Available test harness profiles" section. Do NOT author images, ports, env, startup order, or readiness here; the catalog owns those details.
+   - integration_target rule: when any resolution uses role == "integration_target", select at least one entry in architecture.harness_profiles[] whose catalog profile covers that target. Use ONLY profile_id values from the "Available test environments" section. Do NOT author images, ports, env, startup order, or readiness here; the catalog owns those details.
    This is the load-bearing rule for upstream-strengthening: the dev no longer needs a research sub-agent because YOU pre-resolved API surfaces and selected a system-owned test harness profile. Take-23 (2026-05-13) wedged at iter=80 with 35 external file reads + 0 worktree writes specifically because architect named OSH classes without resolving their constructor + lifecycle into the deliverable; the dev had to discover them mid-cycle. Take-29 (2026-05-15) hit 9/9 green on hard but with fabricated stub JARs because no integration_target was declared and the reviewer had no anchor to reject mock-based tests.
 
 7. For EVERY component in component_boundaries that depends on an external library: populate component_boundaries[].upstream_refs with the names of the matching upstream_resolutions entries. Bidirectional with upstream_resolutions[].used_by — both sides must agree.
