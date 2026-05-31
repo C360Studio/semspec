@@ -941,7 +941,13 @@ func (c *Component) dispatchAnalyst(ctx context.Context, slug, title, descriptio
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "plan", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner)...),
+		// ADR-040 Move 1: deliverableType="exploration" routes both
+		// submit_work's parameter schema AND the strict response_format
+		// to explorationSchema (capabilities + open_questions). Passing
+		// "plan" here was the load-bearing bug behind real-LLM runs #1 +
+		// #2 (2026-05-30) — gemini-3-flash anchored on planSchema's
+		// goal/context/scope signature and ignored the analyst persona.
+		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "exploration", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner)...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepExploring,
@@ -956,7 +962,7 @@ func (c *Component) dispatchAnalyst(ctx context.Context, slug, title, descriptio
 			"sub_phase":        "analyst",
 			"model":            modelName,
 		},
-		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "plan", c.config.AttachResponseFormat),
+		ResponseFormat: terminal.ResponseFormatForEndpointGated(endpoint, "exploration", c.config.AttachResponseFormat),
 	}
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-planner")

@@ -80,6 +80,17 @@ func ToolsForEndpoint(reg component.ToolRegistryReader, deliverableType string, 
 // the fields it needs — no kitchen-sink union.
 func schemaForDeliverable(deliverableType string) map[string]any {
 	switch deliverableType {
+	case "exploration":
+		// ADR-040 Move 1: analyst sub-phase deliverable. Returns the
+		// Exploration capability shape. CRITICAL: must be a DIFFERENT
+		// schema from plan — when the analyst dispatch was wired with
+		// deliverableType="plan", gemini-3-flash anchored on the planSchema
+		// and emitted goal/context/scope on every retry (runs #1 + #2,
+		// 2026-05-30). The tool definition has stronger pull than persona
+		// text because it's the literal function signature the model must
+		// call. Smoke runs caught this only after the system-prompt
+		// fragment audits proved cleanup wasn't enough.
+		return explorationSchema()
 	case "plan":
 		return planSchema()
 	case "requirements":
@@ -96,6 +107,54 @@ func schemaForDeliverable(deliverableType string) map[string]any {
 		return lessonSchema()
 	default:
 		return developerSchema()
+	}
+}
+
+// explorationSchema defines the submit_work parameters for the analyst
+// sub-phase (ADR-040 Move 1). Schema mirrors workflow.Exploration —
+// capabilities array with name/lifecycle/description/depends_on per entry,
+// plus optional open_questions string array.
+func explorationSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"capabilities": map[string]any{
+				"type":        "array",
+				"description": "Named capabilities this change introduces or modifies. Each capability becomes its own specification file. REQUIRED, non-empty.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{
+							"type":        "string",
+							"description": "Kebab-case capability identifier (e.g. user-auth, mavsdk-bootstrap). Lowercase letters, digits, and hyphens only; no leading or trailing hyphen.",
+						},
+						"lifecycle": map[string]any{
+							"type":        "string",
+							"enum":        []string{"new", "modified"},
+							"description": "Whether this capability is new (does not exist in openspec/specs/) or modifies an existing spec.",
+						},
+						"description": map[string]any{
+							"type":        "string",
+							"description": "1-3 sentence summary of what the capability covers.",
+						},
+						"depends_on": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Names of other capabilities this one depends on. Multi-valued. Emit [] when no dependencies.",
+						},
+					},
+					"required":             []string{"name", "lifecycle", "description", "depends_on"},
+					"additionalProperties": false,
+				},
+			},
+			"open_questions": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Analyst-flagged ambiguities for the planner sub-phase to resolve. Emit [] when the request is unambiguous.",
+			},
+		},
+		"required":             []string{"capabilities", "open_questions"},
+		"additionalProperties": false,
 	}
 }
 

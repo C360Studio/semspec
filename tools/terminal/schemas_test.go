@@ -9,6 +9,7 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 		deliverableType string
 		wantRequired    []string
 	}{
+		{"exploration", []string{"capabilities", "open_questions"}},
 		{"plan", []string{"goal", "context"}},
 		{"requirements", []string{"requirements"}},
 		{"scenarios", []string{"scenarios"}},
@@ -199,5 +200,70 @@ func TestToolsForDeliverable_SwapsSubmitWork(t *testing.T) {
 	}
 	if _, ok := reviewProps["goal"]; ok {
 		t.Error("review schema should NOT have goal")
+	}
+}
+
+// TestExplorationSchema_HasCapabilitiesNotGoal pins the ADR-040 Move 1
+// fix from real-LLM run #3 (2026-05-30): the analyst sub-phase dispatch
+// must route submit_work's parameter schema to explorationSchema (with
+// capabilities + open_questions) NOT planSchema (with goal/context/scope).
+// Runs #1 and #2 both wedged because dispatchAnalyst passed
+// deliverableType="plan" to ToolsForEndpoint, so the LLM saw the planner
+// schema as the literal function signature and emitted goal/context/scope
+// on every retry — completely overriding the analyst persona instruction.
+//
+// Fix shipped here ensures the deliverableType="exploration" path
+// returns a fundamentally different shape so the model has no way to
+// produce planner-shape output without a schema validation failure.
+func TestExplorationSchema_HasCapabilitiesNotGoal(t *testing.T) {
+	schema := schemaForDeliverable("exploration")
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("exploration schema must have properties map")
+	}
+	// capabilities + open_questions MUST be present.
+	for _, field := range []string{"capabilities", "open_questions"} {
+		if _, exists := props[field]; !exists {
+			t.Errorf("exploration schema missing required property %q", field)
+		}
+	}
+	// goal / context / scope MUST NOT be present — the contamination
+	// surface that wedged runs #1 + #2.
+	for _, field := range []string{"goal", "context", "scope"} {
+		if _, exists := props[field]; exists {
+			t.Errorf("exploration schema contains planner-shape property %q — this is the run-#1/#2 wedge surface", field)
+		}
+	}
+
+	// Capability item shape: name (kebab-case), lifecycle (new|modified),
+	// description, depends_on must all be required.
+	caps, ok := props["capabilities"].(map[string]any)
+	if !ok {
+		t.Fatal("capabilities property must be a map")
+	}
+	items, ok := caps["items"].(map[string]any)
+	if !ok {
+		t.Fatal("capabilities.items must be a map")
+	}
+	itemProps, ok := items["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("capability item must have properties")
+	}
+	for _, field := range []string{"name", "lifecycle", "description", "depends_on"} {
+		if _, exists := itemProps[field]; !exists {
+			t.Errorf("capability item missing required property %q", field)
+		}
+	}
+	// Lifecycle must be enumerated to new|modified.
+	lifecycle, ok := itemProps["lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatal("lifecycle property must be a map")
+	}
+	enum, ok := lifecycle["enum"].([]string)
+	if !ok || len(enum) != 2 {
+		t.Fatalf("lifecycle enum must be [new, modified], got %v", lifecycle["enum"])
+	}
+	if !(enum[0] == "new" && enum[1] == "modified") {
+		t.Errorf("lifecycle enum mismatch: got %v, want [new, modified]", enum)
 	}
 }
