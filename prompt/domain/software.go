@@ -1220,7 +1220,7 @@ Required fields per requirement:
 - description (string)
 - files_owned (array of workspace-relative paths) — MANDATORY. Empty arrays are not acceptable. If a requirement modifies no files, it isn't a code requirement.
 - depends_on (array of titles) — optional, use when one requirement must follow another or when sharing a file with another requirement.
-- capability_name (kebab-case string) — REQUIRED when a "## Capabilities" block appears above in this prompt (ADR-040 Move 2). Must exactly match one of the listed capability names. Omitted when no capabilities are provided (legacy plans).
+- capability_name (kebab-case string) — REQUIRED field; the strict response schema rejects requirements without it. When a "## Capabilities" block appears above in this prompt, set to one of the listed capability names exactly. When no Capabilities block appears, set to empty string "". DO NOT OMIT — the wire schema requires the field even when its value is empty.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 			),

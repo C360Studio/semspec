@@ -232,8 +232,12 @@ func requirementsSchema() map[string]any {
 							"items":       map[string]any{"type": "string"},
 							"description": "Optional list of prerequisite requirement titles. Use when one requirement must finish before another, or when two requirements legitimately need to write to the same file (impl + its test, define + use). The executor sequences depends_on chains so the dependent rebases on the prerequisite's merge commit.",
 						},
+						"capability_name": map[string]any{
+							"type":        "string",
+							"description": "Kebab-case name of the capability this requirement implements. When the prompt includes a '## Capabilities' block, set this to one of the listed capability names exactly. When no Capabilities block is present, set to empty string. Field is required on the wire even when empty.",
+						},
 					},
-					"required":             []string{"title", "description", "files_owned", "depends_on"},
+					"required":             []string{"title", "description", "files_owned", "depends_on", "capability_name"},
 					"additionalProperties": false,
 				},
 			},
