@@ -761,6 +761,46 @@ func TestRenderScenarioGeneratorPrompt_PlanContextRendered(t *testing.T) {
 				"**Context:**",
 			},
 		},
+		{
+			// ADR-041 Move 3: required tiers list reaches the prompt with
+			// tier tags + harness binding hints so the agent emits the
+			// right shape. Without this, the legacy single-tier prompt
+			// would re-surface and the classifier's work would be wasted.
+			name: "required tiers rendered with harness binding",
+			ctx: &prompt.ScenarioGeneratorPromptContext{
+				PlanTitle:        "MAVSDK driver",
+				PlanGoal:         "boot mavsdk_server and observe HEARTBEAT",
+				RequirementTitle: "lifecycle",
+				RequiredTiers: []prompt.RequiredTier{
+					{Tag: "@unit"},
+					{Tag: "@integration", HarnessProfileIDs: []string{"mavlink.px4-sitl.mavsdk-smoke"}},
+				},
+			},
+			mustContain: []string{
+				"## Required tiers",
+				"`@unit` — no harness binding",
+				"`@integration` — harness profile ids: `mavlink.px4-sitl.mavsdk-smoke`",
+				// Output-format JSON example includes tags + harness_profile_ids fields
+				`"tags": ["@unit"]`,
+				`"harness_profile_ids": ["mavlink.px4-sitl.mavsdk-smoke"]`,
+			},
+		},
+		{
+			// Legacy callers without classifier wiring (no RequiredTiers
+			// set) MUST still produce a sensible prompt — the "Required
+			// tiers" section is silently dropped rather than rendering an
+			// empty list that would confuse the agent.
+			name: "required tiers absent — section omitted entirely",
+			ctx: &prompt.ScenarioGeneratorPromptContext{
+				PlanTitle:        "Legacy plan",
+				PlanGoal:         "ship",
+				RequirementTitle: "behave",
+				RequiredTiers:    nil,
+			},
+			mustNotHave: []string{
+				"## Required tiers",
+			},
+		},
 	}
 
 	for _, tt := range tests {

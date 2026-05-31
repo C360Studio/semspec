@@ -26,4 +26,30 @@ type ScenarioGeneratorPromptContext struct {
 	// ReviewFindings is the prior round's review-findings text injected so
 	// the generator can address completeness gaps (ADR-029).
 	ReviewFindings string
+
+	// RequiredTiers tells the scenario-generator which tier tags must appear
+	// across its emitted scenarios for this requirement (ADR-041 Move 3).
+	// Computed by the scenario-generator's classifier from the requirement's
+	// capability surfaces + the architecture's selected harness profiles.
+	// Each entry names a tier tag (e.g. "@unit", "@integration") and the
+	// harness profile IDs scenarios at that tier must bind to (empty for
+	// non-@integration tiers). The user-prompt fragment renders this as a
+	// bullet list so the LLM emits ≥1 scenario per required tier with the
+	// correct tag + binding.
+	RequiredTiers []RequiredTier
+}
+
+// RequiredTier names one tier tag the scenario-generator MUST cover for the
+// current requirement, plus any catalog harness profile IDs scenarios at
+// that tier must bind to. ADR-041 Move 3.
+type RequiredTier struct {
+	// Tag is the tier tag (e.g. workflow.TierUnit "@unit" /
+	// workflow.TierIntegration "@integration" / TierE2E "@e2e"). Always
+	// non-empty.
+	Tag string
+
+	// HarnessProfileIDs lists the catalog profile IDs scenarios at this
+	// tier must bind to. Populated only for "@integration"; empty for the
+	// other tiers.
+	HarnessProfileIDs []string
 }

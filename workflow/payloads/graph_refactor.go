@@ -93,6 +93,27 @@ type ScenarioGeneratorRequest struct {
 	// ArchitectureContext is a pre-formatted summary of actors and integration points
 	// from the architecture document. Injected when dispatching from PLAN_STATES watcher.
 	ArchitectureContext string `json:"architecture_context,omitempty"`
+
+	// RequiredTiers names the test-pyramid tiers the scenario-generator MUST
+	// cover for this requirement plus any catalog harness profile IDs each
+	// tier must bind to (ADR-041 Move 3). Computed by the scenario-generator's
+	// classifier from the requirement's capability surfaces + the
+	// architecture's selected harness profiles. The dispatch layer renders
+	// this into the user prompt as a "Required tiers" bullet list so the
+	// agent emits ≥1 scenario per required tier with the right tag + binding.
+	// Empty in retry payloads originating before ADR-041 lands (legacy
+	// back-compat); the dispatcher falls through to the legacy single-tier
+	// prompt body in that case.
+	RequiredTiers []RequiredTier `json:"required_tiers,omitempty"`
+}
+
+// RequiredTier is the wire shape carried in ScenarioGeneratorRequest for a
+// single tier requirement. Tag names a tier (e.g. "@unit", "@integration");
+// HarnessProfileIDs lists the catalog profile IDs scenarios at that tier
+// MUST bind to (populated only for "@integration"). ADR-041 Move 3.
+type RequiredTier struct {
+	Tag               string   `json:"tag"`
+	HarnessProfileIDs []string `json:"harness_profile_ids,omitempty"`
 }
 
 // Schema implements message.Payload.

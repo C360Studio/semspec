@@ -1,6 +1,6 @@
 # ADR-041: Test Evidence Ladder + Scenario Tags (BDD-Compatible Tier Ownership)
 
-**Status:** Proposed (2026-05-31, revision 1)
+**Status:** Proposed (2026-05-31, revision 2 — rev 1 used "John" for the scenario-generator persona; that was wrong. BMAD canonical: John = product manager / `requirement-generator`, Bob = scrum master / `scenario-generator`. Persona references in Moves 3, 6, the Persona Updates section, and the validation walkthrough now correctly name Bob for tier-emission. The `scenario-generator` persona key in `configs/presets/bmad.json` is and was Bob; only the ADR prose drifted.)
 **Deciders:** Coby, Claude
 **Builds on:** ADR-029 (plan completeness + retry), ADR-030 (BMAD persona alignment — keeps QA persona Murat), ADR-037 (wedge recovery), ADR-039 (test environment catalog → qa.yml rendering), ADR-040 (capability vocabulary alignment + analyst sub-phase)
 **Does not change:** Plan / PlanState / PLAN_STATES, ENTITY_STATES, the semstreams substrate, the test environment catalog, the SKG, the dev → validator → reviewer → QA pipeline, the autonomous recovery cascade, persona names (BMAD-aligned per ADR-030), JSON wire field names (`architecture.harness_profiles[]` etc — hard rename deferred to a future PR), `qa-reviewer` / `qa-runner` component names.
@@ -101,7 +101,7 @@ Mary-analyst (introduced in ADR-040) populates `surfaces` as part of the explora
 
 ### Move 3: Tier-emission classifier in scenario-generator
 
-The scenario-generator's persona (John, in ADR-030) gains a classifier that maps from the architecture's resolved test environment profiles to the tier surface for each requirement, then dispatches one LLM call per tier:
+The scenario-generator's persona (Bob, the BMAD scrum master in ADR-030 — John is the BMAD product manager / our `requirement-generator`; ADR-041 rev 1 had the names crossed) gains a classifier that maps from the architecture's resolved test environment profiles to the tier surface for each requirement, then dispatches one LLM call per tier:
 
 ```
 for each requirement R with capability C:
@@ -201,7 +201,7 @@ These satisfy the rev-5 ADR-040 predicate convention: strictly 3-part `domain.ca
 | `processor/plan-reviewer` | Add five scenario-tag rules + targeted-regen wiring. | ~150 |
 | `processor/structural-validator` | Extend `CheckHarnessProfileDiscipline` with the harness-binding string presence check + env-var consumption pattern check. | ~80 |
 | `processor/requirement-executor` | Update `buildReviewPrompt` to communicate the tier-aware contract to the req-reviewer persona. Update verdict-parsing if needed. | ~60 |
-| `prompt/domain/software.go` | Update the scenario-generator persona prompt (John) with the tier-emission rules + anti-pattern examples. Update the req-reviewer persona prompt with the tier-aware contract. Update rule 7b (`Integration-target test environment discipline`) to reference scenarios' `HarnessProfileIDs` as the binding source, not implicit architectural inference. | ~200 (prompt-only) |
+| `prompt/domain/software.go` | Update the scenario-generator persona prompt (Bob) with the tier-emission rules + anti-pattern examples. Update the req-reviewer persona prompt with the tier-aware contract. Update rule 7b (`Integration-target test environment discipline`) to reference scenarios' `HarnessProfileIDs` as the binding source, not implicit architectural inference. | ~200 (prompt-only) |
 | `output/workflow-documents/openspec/spec.go` | OpenSpec emitter renders scenario tag line + harness binding line in spec.md. Inbound importer (folded from ADR-038 / ADR-040 Move 4) parses both. | ~40 |
 
 **Total: ~910 LOC additive. Zero deletions of existing functionality.**
@@ -230,7 +230,7 @@ Adopter tools (`openspec validate`) continue to parse the file as standard markd
 - Plan / PlanState enum / PLAN_STATES KV bucket
 - EXECUTION_STATES KV bucket + execution-manager TDD pipeline
 - Test environment catalog (ADR-039) + qa.yml services rendering
-- Persona names: Mary, John, Murat, architect, developer, reviewer — BMAD-aligned per ADR-030
+- Persona names: Mary, John, Bob, Winston, Amelia, Murat, architect, developer, reviewer — BMAD-aligned per ADR-030 (Mary = analyst/planner, John = requirement-generator/product manager, Bob = scenario-generator/scrum master, Winston = architect, Amelia = developer, Murat = qa-reviewer/test architect)
 - Component names: `qa-reviewer`, `qa-runner`, `structural-validator`, `harness-profile-discipline` check identifier
 - JSON wire field names: `architecture.harness_profiles[]`, `harness_profile_ids`, etc.
 - Workflow status enum values: `reviewing_qa`, `ready_for_qa`
@@ -245,7 +245,7 @@ Three personas get tier-aware language. Operator-tunable via `configs/presets/bm
 
 > When you list capabilities, also classify each one's surface(s): "ui" (user-visible interface), "api" (programmatic surface for other systems), or "background" (scheduled or event-driven, no human surface). Most capabilities have one surface. UI work has "ui". A background scheduler has "background". A library that other code imports has "api". When in doubt, prefer "api". The architect will use surfaces to select test environments; the scenario-generator will use surfaces to know whether to emit @e2e scenarios.
 
-**John (scenario-generator)** — tier-aware emission:
+**Bob (scenario-generator)** — tier-aware emission:
 
 > For each Requirement: produce scenarios at multiple test tiers. Every requirement MUST have at least one @unit scenario. Requirements bound to services-class or testcontainers-class test environments MUST have at least one @integration scenario tagging that environment. Requirements whose owning capability lists "ui" in surfaces MUST have at least one @e2e scenario.
 >
@@ -281,7 +281,7 @@ Replay the OSH/MAVSDK prompt through the revised pipeline:
 
 2. **Architect** selects test environment profiles via the catalog (ADR-039 — unchanged): `mavlink.px4-sitl.mavsdk-smoke` + `mavlink.raw-mavlink-direct`, both `services`-class.
 
-3. **John (scenario-generator with ADR-041 classifier)** sees that `mavsdk-lifecycle` is bound to `mavlink.px4-sitl.mavsdk-smoke` (services-class) and emits:
+3. **Bob (scenario-generator with ADR-041 classifier)** sees that `mavsdk-lifecycle` is bound to `mavlink.px4-sitl.mavsdk-smoke` (services-class) and emits:
    - 2-3 `@unit` scenarios: state-machine transitions, command-line builder, config validation — pure logic, no SITL mention
    - 2-3 `@integration` scenarios with `HarnessProfileIDs: ["mavlink.px4-sitl.mavsdk-smoke"]`: MAVSDK Core connection, HEARTBEAT observation, lifecycle termination — endpoint-from-env, MAVSDK behavior observable when the harness is up
    - Zero `@e2e` scenarios (no "ui" surface)
@@ -308,7 +308,7 @@ Replay the OSH/MAVSDK prompt through the revised pipeline:
 The infinite-reject pattern from the 2026-05-31 run becomes structurally impossible:
 
 - Mary's surface classification prevents stray @e2e emission for API-only capabilities
-- John's tier-emission rule prevents @unit scenarios from mentioning SITL
+- Bob's tier-emission rule prevents @unit scenarios from mentioning SITL
 - The req-reviewer's tier-aware contract doesn't ask the dev to satisfy assertions only the QA tier can observe
 - The structural-validator gates @integration tests on correct scaffolding, not running behavior
 
@@ -325,10 +325,10 @@ Six PRs, sequenced for review. Each independently shippable, but downstream PRs 
 - Unit tests against the validators
 - One mock e2e fixture asserting Scenario.Tags is populated after scenario generation
 
-### PR 2: Mary's surface classification + John's tier-emission classifier (~3 days)
+### PR 2: Mary's surface classification + Bob's tier-emission classifier (~3 days)
 
 - Update Mary's analyst persona (in `configs/presets/bmad.json`) for surface classification
-- Update John's scenario-generator persona for tier-emission
+- Update Bob's scenario-generator persona for tier-emission
 - Add the tier-emission classifier algorithm in `processor/scenario-generator/` (deterministic + LLM dispatch)
 - Unit tests against the classifier (deterministic boundary: which profiles are relevant per capability)
 - Mock e2e fixtures: assert scenarios for a capability bound to a services-class profile have @unit + @integration; assert scenarios for a UI capability have @e2e; assert anti-pattern enforcement (no @unit scenario mentions SITL)
@@ -381,7 +381,7 @@ All design tensions from the ADR-041 conversation are resolved with the operator
 
 - **Issue #37's infinite-reject loop becomes structurally impossible.** The req-reviewer is no longer asked to confirm assertions it can't observe. Each tier's verdict is well-defined and converges.
 - **Boring industry vocabulary throughout.** BDD tags every adopter recognizes; tag-selector language for free runtime filtering; OpenSpec round-trip without a custom parser. Sponsor narrative reads like CI/CD docs, not internal jargon.
-- **Smaller-model viability improves.** Each tier emits one focused LLM call from John; the persona context per call is smaller and more cohesive than the current single multi-tier-mixing prompt.
+- **Smaller-model viability improves.** Each tier emits one focused LLM call from Bob; the persona context per call is smaller and more cohesive than the current single multi-tier-mixing prompt.
 - **Real-LLM cost predictability.** With the tier-aware req-reviewer contract, dev-completion verdicts converge based on authoring evidence rather than asking the model to predict future runtime behavior. Burn-rate per requirement becomes bounded by tier-coverage scope, not by the autonomous-recovery cascade trying to satisfy un-satisfiable contracts (which is issue #36's adjacent fix).
 - **Decoupled from ADR-042.** Ops persona / harness-manager / HarnessRun lifecycle ship later without rework here.
 - **No persona renames, no substrate changes, no JSON wire breakage.** Plan model survives. Components evolve.
@@ -389,14 +389,14 @@ All design tensions from the ADR-041 conversation are resolved with the operator
 ### Negative
 
 - **One LLM call per tier instead of one per requirement.** Net: ~50-100% wallclock + token cost increase for the scenario phase. Per-call cost is lower (smaller, more cohesive context); per-requirement total is higher. Acceptable — the scenario phase is a small fraction of total per-run cost, and tier-appropriate scenarios produce dramatically better dev outcomes at execution time.
-- **Persona prompt drift management.** Mary, John, and the reviewer persona all get rewrites. Calibration needed against real prompts. Gemini @ easy + @ hard regression after PR 5 lands.
+- **Persona prompt drift management.** Mary, Bob, and the reviewer persona all get rewrites. Calibration needed against real prompts. Gemini @ easy + @ hard regression after PR 5 lands.
 - **New rule surface in plan-reviewer.** Five new rules add validator complexity. Mitigated by ADR-040's existing five-rule precedent and shared finding-shape pattern.
 - **The hard rename of wire fields (`architecture.harness_profiles[]` → `test_environments[]` etc.) is deferred.** Soft-rename vocabulary disconnect (user-facing prose says "test environment profile", JSON field still reads `harness_profiles`) persists until a future PR. Documented in `docs/project-setup.md`.
 
 ### Neutral
 
 - **OpenSpec compatibility preserved.** Tag lines and harness binding lines are standard markdown. Adopter tools (`openspec validate`) parse them as prose.
-- **BMAD persona alignment preserved.** Mary, John, Murat keep their names per ADR-030. The reviewer persona (which gets the tier-aware contract update) doesn't have a BMAD name — it's the requirement-level reviewer role.
+- **BMAD persona alignment preserved.** Mary, John, Bob, Winston, Amelia, Murat keep their names per ADR-030. The reviewer persona (which gets the tier-aware contract update) doesn't have a BMAD name — it's the requirement-level reviewer role.
 - **No e2e fixture demolition.** Existing fixtures continue working; new fixtures added.
 - **Issue #36 (combinatorial retry budget) ships as a separate small PR.** It's contained in `processor/requirement-executor/awaiting_recovery.go` and orthogonal to the scenario-tier work. Issue #38 (decomposer wrong-package paths) is similarly contained.
 
@@ -406,7 +406,7 @@ All design tensions from the ADR-041 conversation are resolved with the operator
 
 Required confirmation before code lands:
 
-1. Operator (Coby) signs off on the four persona prompt rewrites (Mary surface classification, John tier-emission, reviewer tier-aware contract, reviewer-side anti-pattern flagging).
+1. Operator (Coby) signs off on the four persona prompt rewrites (Mary surface classification, Bob tier-emission, reviewer tier-aware contract, reviewer-side anti-pattern flagging).
 2. Operator confirms the 13-day migration is acceptable and which PR sequences first if other priorities collide.
 3. Operator confirms issue #36 ships as a separate small fix PR (not bundled into ADR-041 implementation).
 
@@ -415,7 +415,7 @@ This ADR explicitly preserves:
 - The Plan / PLAN_STATES model and the test environment catalog (ADR-039)
 - The dev pipeline + autonomous QA recovery cascade (with issue #36 fixed separately)
 - BMAD-shaped and OpenSpec-shaped output (ADR-030, ADR-040)
-- Persona names (Mary, John, Murat) per ADR-030
+- Persona names (Mary, John, Bob, Winston, Amelia, Murat) per ADR-030
 - JSON wire field names (`harness_profiles[]`, `harness_profile_ids`, etc.) per the soft-rename scope from PR #41
 
 The operator framing — **"public/operator-facing terms should be boring industry words; semspec-specific names can exist internally"** — is the load-bearing constraint this ADR is designed to honor. ADR-040 applied it to capability vocabulary via OpenSpec; ADR-041 applies it to the test surface via BDD/Cucumber.
