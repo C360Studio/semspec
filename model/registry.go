@@ -205,11 +205,11 @@ func NewDefaultRegistry() *Registry {
 // Resolve returns the preferred model for a capability.
 // Returns the first model in the preferred list.
 // Fallback handling is done by agentic-model on failure (lazy approach).
-func (r *Registry) Resolve(cap Capability) string {
+func (r *Registry) Resolve(c Capability) string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if cfg, ok := r.capabilities[cap]; ok && len(cfg.Preferred) > 0 {
+	if cfg, ok := r.capabilities[c]; ok && len(cfg.Preferred) > 0 {
 		return cfg.Preferred[0]
 	}
 	return r.defaults.Model
@@ -217,11 +217,11 @@ func (r *Registry) Resolve(cap Capability) string {
 
 // GetFallbackChain returns all models for a capability in order of preference.
 // Used by agentic-model when primary fails to try alternatives.
-func (r *Registry) GetFallbackChain(cap Capability) []string {
+func (r *Registry) GetFallbackChain(c Capability) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	if cfg, ok := r.capabilities[cap]; ok {
+	if cfg, ok := r.capabilities[c]; ok {
 		chain := make([]string, 0, len(cfg.Preferred)+len(cfg.Fallback))
 		chain = append(chain, cfg.Preferred...)
 		chain = append(chain, cfg.Fallback...)
@@ -253,14 +253,14 @@ func (r *Registry) GetEndpoint(modelName string) *EndpointConfig {
 }
 
 // SetCapability updates or adds a capability configuration.
-func (r *Registry) SetCapability(cap Capability, cfg *CapabilityConfig) {
+func (r *Registry) SetCapability(c Capability, cfg *CapabilityConfig) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if r.capabilities == nil {
 		r.capabilities = make(map[Capability]*CapabilityConfig)
 	}
-	r.capabilities[cap] = cfg
+	r.capabilities[c] = cfg
 }
 
 // SetEndpoint updates or adds an endpoint configuration.
@@ -374,8 +374,8 @@ func (r *Registry) ListEndpoints() []string {
 // GetToolCapableEndpoints returns the fallback chain for a capability,
 // filtered to only endpoints that support tool calling.
 // Returns empty slice if no tool-capable endpoints are available.
-func (r *Registry) GetToolCapableEndpoints(cap Capability) []string {
-	chain := r.GetFallbackChain(cap)
+func (r *Registry) GetToolCapableEndpoints(c Capability) []string {
+	chain := r.GetFallbackChain(c)
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()

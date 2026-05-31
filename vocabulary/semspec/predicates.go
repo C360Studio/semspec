@@ -699,6 +699,13 @@ const (
 	// was imported from. Reserved for ADR-040 Move 4 (inbound import).
 	// Empty for capabilities authored inside semspec.
 	CapabilityExternalSpec = "semspec.capability.external_spec"
+
+	// CapabilitySurface records a user-observable surface the capability
+	// exposes (ADR-041 Move 2). Multi-valued — one triple per surface.
+	// Values: "ui", "api", "background". Populated by the analyst sub-phase
+	// (Mary). The scenario-generator emits @e2e scenarios only for
+	// capabilities whose surfaces include "ui".
+	CapabilitySurface = "semspec.capability.surface"
 )
 
 // Scenario predicates define attributes for behavioral contracts.
@@ -727,6 +734,25 @@ const (
 
 	// ScenarioUpdatedAt is the RFC3339 last update timestamp.
 	ScenarioUpdatedAt = "semspec.scenario.updated_at"
+
+	// ScenarioTag records a tier or facet tag on the scenario (ADR-041 Move 1).
+	// Multi-valued — one triple per tag. Each scenario carries exactly one
+	// tier tag (@unit/@integration/@smoke/@e2e) per ValidateScenarioTags;
+	// additional operator-defined facet tags (@flaky, @security, @slow) pass
+	// through as informational metadata. Tag bodies are alphanumeric + '-'
+	// only — see ADR-041 §"Why colon-bearing tags fail".
+	ScenarioTag = "semspec.scenario.tag"
+
+	// ScenarioHarnessProfile binds the scenario to a harness profile in the
+	// catalog (ADR-041 Move 1). Multi-valued — one triple per bound profile.
+	// Values are catalog profile IDs (e.g. "mavlink.px4-sitl.mavsdk-smoke"),
+	// NOT hashed entity IDs — these are cross-reference strings into the
+	// harnesscatalog, not graph edges to other entities. Plan-reviewer rule
+	// scenario.harness_id_unresolved (Move 4) validates each ID resolves
+	// into the catalog. Underscore in property segment matches the existing
+	// semspec.requirement.depends_on / semspec.capability.depends_on
+	// convention (rev-5 ADR-040 predicate naming).
+	ScenarioHarnessProfile = "semspec.scenario.harness_profile"
 )
 
 // PlanDecision predicates define attributes for mid-stream change proposals.
@@ -1929,6 +1955,11 @@ func registerCapabilityPredicates() {
 		vocabulary.WithDescription("External entity ID this Capability was imported from (ADR-040 Move 4)"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"capabilityExternalSpec"))
+
+	vocabulary.Register(CapabilitySurface,
+		vocabulary.WithDescription("User-observable surface this capability exposes (ui/api/background; ADR-041 Move 2)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"capabilitySurface"))
 }
 
 func registerRequirementPredicates() {
@@ -2038,6 +2069,16 @@ func registerScenarioPredicates() {
 		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
+
+	vocabulary.Register(ScenarioTag,
+		vocabulary.WithDescription("Tier or facet tag on the scenario (@unit/@integration/@smoke/@e2e or operator-defined facet; ADR-041 Move 1)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioTag"))
+
+	vocabulary.Register(ScenarioHarnessProfile,
+		vocabulary.WithDescription("Harness profile ID this scenario binds to (catalog cross-reference; ADR-041 Move 1)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scenarioHarnessProfile"))
 }
 
 func registerPlanDecisionPredicates() {

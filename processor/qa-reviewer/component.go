@@ -1004,13 +1004,13 @@ func (c *Component) emitParseIncident(ctx context.Context, role, loopID, model, 
 // suitable for embedding in a structured log field. Newlines collapse
 // to spaces so the WARN line stays parseable; max bounds the bytes so
 // 50KB model dumps don't blow the log shipper.
-func truncatePreview(s string, max int) string {
-	if max <= 0 || len(s) == 0 {
+func truncatePreview(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) == 0 {
 		return ""
 	}
 	out := strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
-	if len(out) > max {
-		out = out[:max] + "…"
+	if len(out) > maxBytes {
+		out = out[:maxBytes] + "…"
 	}
 	return out
 }

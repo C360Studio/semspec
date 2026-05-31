@@ -47,6 +47,10 @@ func TestPredicatesRegistered(t *testing.T) {
 		semspec.CapabilityPlan,
 		semspec.CapabilityDependsOn,
 		semspec.CapabilityExternalSpec,
+		// ADR-041: scenario tag + harness binding + capability surface predicates
+		semspec.CapabilitySurface,
+		semspec.ScenarioTag,
+		semspec.ScenarioHarnessProfile,
 	}
 
 	for _, predicate := range predicates {
@@ -188,10 +192,13 @@ func TestCapabilityPredicateValues(t *testing.T) {
 		{"CapabilityPlan", semspec.CapabilityPlan, "semspec.capability.plan"},
 		{"CapabilityDependsOn", semspec.CapabilityDependsOn, "semspec.capability.depends_on"},
 		{"CapabilityExternalSpec", semspec.CapabilityExternalSpec, "semspec.capability.external_spec"},
+		{"CapabilitySurface", semspec.CapabilitySurface, "semspec.capability.surface"},
 		{"PlanExploration", semspec.PlanExploration, "semspec.plan.exploration"},
 		{"PlanOpenQuestions", semspec.PlanOpenQuestions, "semspec.plan.open_questions"},
 		{"RequirementCapability", semspec.RequirementCapability, "semspec.requirement.capability"},
 		{"RequirementExternalSpec", semspec.RequirementExternalSpec, "semspec.requirement.external_spec"},
+		{"ScenarioTag", semspec.ScenarioTag, "semspec.scenario.tag"},
+		{"ScenarioHarnessProfile", semspec.ScenarioHarnessProfile, "semspec.scenario.harness_profile"},
 	}
 
 	for _, tc := range tests {
@@ -218,6 +225,9 @@ func TestCapabilityPredicatesAreThreePart(t *testing.T) {
 		semspec.CapabilityPlan,
 		semspec.CapabilityDependsOn,
 		semspec.CapabilityExternalSpec,
+		semspec.CapabilitySurface,
+		semspec.ScenarioTag,
+		semspec.ScenarioHarnessProfile,
 	}
 	for _, p := range preds {
 		t.Run(p, func(t *testing.T) {

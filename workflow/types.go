@@ -1111,6 +1111,47 @@ func (l CapabilityLifecycle) IsValid() bool {
 	}
 }
 
+// CapabilitySurface classifies the user-observable surface(s) a capability
+// exposes. Set by the analyst sub-phase (Mary) per ADR-041 Move 2 so the
+// scenario-generator can decide whether to emit @e2e scenarios for a
+// capability without relying on a prompt-text heuristic.
+//
+// Most capabilities have exactly one surface. Multi-surface capabilities
+// (e.g., an HTTP endpoint that also has a UI shell) are allowed. Empty
+// Surfaces is treated as "unknown" — downstream emitters default to api.
+type CapabilitySurface string
+
+const (
+	// SurfaceUI marks a capability with a user-visible interface (Svelte
+	// component, CLI prompt, web form). Capabilities with SurfaceUI are the
+	// only ones eligible for @e2e scenario emission.
+	SurfaceUI CapabilitySurface = "ui"
+
+	// SurfaceAPI marks a programmatic surface other code or systems consume
+	// (REST endpoint, library function, NATS subject, gRPC method). Default
+	// when the analyst can't decide.
+	SurfaceAPI CapabilitySurface = "api"
+
+	// SurfaceBackground marks a scheduled or event-driven capability with no
+	// human surface (cron jobs, KV watchers, reactive consumers).
+	SurfaceBackground CapabilitySurface = "background"
+)
+
+// String returns the string representation of the capability surface.
+func (s CapabilitySurface) String() string {
+	return string(s)
+}
+
+// IsValid reports whether the surface is one of the defined values.
+func (s CapabilitySurface) IsValid() bool {
+	switch s {
+	case SurfaceUI, SurfaceAPI, SurfaceBackground:
+		return true
+	default:
+		return false
+	}
+}
+
 // Capability is a named unit of system behavior owned by a plan. The analyst
 // sub-phase produces capabilities from the user prompt; the planner sub-phase
 // derives scope from them; the requirement-generator produces one Requirement
@@ -1136,6 +1177,13 @@ type Capability struct {
 	// DependsOn names other capabilities by Name that this capability requires.
 	// Hard constraint: cycles and orphan references are rejected at plan-review.
 	DependsOn []string `json:"depends_on,omitempty"`
+
+	// Surfaces classifies the user-observable surface(s) the capability exposes
+	// (ADR-041 Move 2). Populated by the analyst sub-phase (Mary). Empty
+	// Surfaces is treated as "unknown" by downstream consumers; the
+	// scenario-generator only emits @e2e scenarios for capabilities whose
+	// Surfaces contains SurfaceUI.
+	Surfaces []CapabilitySurface `json:"surfaces,omitempty"`
 }
 
 // Exploration is the analyst sub-phase output. It is the structured input
@@ -1306,6 +1354,45 @@ func (s ScenarioStatus) CanTransitionTo(target ScenarioStatus) bool {
 	}
 }
 
+// Tier tags classify scenarios by test pyramid level per ADR-041 Move 1.
+// Exactly one of these MUST appear in Scenario.Tags. Operator-defined facet
+// tags (@flaky, @security, @slow, etc.) pass through validation as
+// informational metadata but are not structurally interpreted.
+//
+// Tag names are alphanumeric + hyphens only (BDD convention; pytest-bdd
+// rejects '.' and ':', behave has compat issues with ':'). Harness binding
+// lives in Scenario.HarnessProfileIDs, NOT on the tag.
+const (
+	// TierUnit — observable at function/class boundary with fakes, in-process
+	// state, or pure-fixture test environments. Every requirement MUST have
+	// at least one @unit scenario.
+	TierUnit = "@unit"
+
+	// TierIntegration — observable when a services-class or testcontainers-class
+	// test environment is up. Requires Scenario.HarnessProfileIDs binding.
+	TierIntegration = "@integration"
+
+	// TierSmoke — observable in a release-staging environment; scheduled, not
+	// per-PR. Emitted only when operator/architect explicitly directs.
+	TierSmoke = "@smoke"
+
+	// TierE2E — observable in a full-system deployment with UI + persistence +
+	// network. Emitted only for capabilities whose Surfaces contains SurfaceUI.
+	TierE2E = "@e2e"
+)
+
+// IsTierTag reports whether s is one of the four structurally-validated tier
+// tags. Facet tags (@flaky, @security, etc.) return false — they are valid
+// tags but carry no structural meaning.
+func IsTierTag(s string) bool {
+	switch s {
+	case TierUnit, TierIntegration, TierSmoke, TierE2E:
+		return true
+	default:
+		return false
+	}
+}
+
 // Scenario represents a Given/When/Then behavioral contract derived from a Requirement.
 type Scenario struct {
 	ID            string   `json:"id"`
@@ -1315,9 +1402,28 @@ type Scenario struct {
 	Then          []string `json:"then"`
 	// Status is a runtime/execution-time field — see Requirement.Status
 	// note above for the same omitempty rationale (b7r50o9ov 2026-05-08).
-	Status    ScenarioStatus `json:"status,omitempty"`
-	CreatedAt time.Time      `json:"created_at"`
-	UpdatedAt time.Time      `json:"updated_at"`
+	Status ScenarioStatus `json:"status,omitempty"`
+
+	// Tags classify the scenario by test pyramid tier and optionally carry
+	// operator-defined facet metadata (ADR-041 Move 1). Exactly one tier tag
+	// (@unit/@integration/@smoke/@e2e) is required; additional facet tags
+	// (@flaky, @security, @slow, etc.) pass through as informational metadata.
+	// Validated by ValidateScenarioTags. Cross-entity coverage rules (every
+	// requirement has @unit, services-bound requirement has @integration)
+	// belong to plan-reviewer per ADR-041 Move 4.
+	Tags []string `json:"tags,omitempty"`
+
+	// HarnessProfileIDs binds an @integration (or rarely @smoke) scenario to
+	// one or more harness profile IDs in workflow/harnesscatalog (ADR-041
+	// Move 1). The structural-validator (Move 5) checks the dev's tagged
+	// integration tests reference at least one of these IDs as a string
+	// literal. Plan-reviewer rule scenario.harness_id_unresolved (Move 4)
+	// rejects IDs that don't resolve into the catalog. Multi-binding (one
+	// scenario covering two profiles) is allowed.
+	HarnessProfileIDs []string `json:"harness_profile_ids,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // PlanDecisionStatus represents the lifecycle state of a plan decision.

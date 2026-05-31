@@ -100,6 +100,87 @@ func TestValidateCapabilitySet(t *testing.T) {
 	}
 }
 
+func TestValidateCapabilitySurfaces(t *testing.T) {
+	tests := []struct {
+		name    string
+		cap     Capability
+		wantErr string
+	}{
+		{
+			name: "empty surfaces is allowed",
+			cap:  Capability{Name: "user-auth", Lifecycle: CapabilityNew},
+		},
+		{
+			name: "single ui surface",
+			cap:  Capability{Name: "user-auth", Lifecycle: CapabilityNew, Surfaces: []CapabilitySurface{SurfaceUI}},
+		},
+		{
+			name: "all three surfaces",
+			cap:  Capability{Name: "mixed", Lifecycle: CapabilityNew, Surfaces: []CapabilitySurface{SurfaceUI, SurfaceAPI, SurfaceBackground}},
+		},
+		{
+			name:    "invalid surface rejected",
+			cap:     Capability{Name: "weird", Lifecycle: CapabilityNew, Surfaces: []CapabilitySurface{"cli"}},
+			wantErr: "not one of ui/api/background",
+		},
+		{
+			name:    "duplicate surface rejected",
+			cap:     Capability{Name: "dup", Lifecycle: CapabilityNew, Surfaces: []CapabilitySurface{SurfaceUI, SurfaceUI}},
+			wantErr: "more than once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCapabilitySurfaces(tt.cap)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Errorf("expected success, got error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Errorf("expected error containing %q, got nil", tt.wantErr)
+				return
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("expected error containing %q, got: %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
+// TestValidateCapabilitySet_RejectsBadSurfaces guards the wiring between the
+// set-level validator and the per-capability surface validator added in
+// ADR-041 Move 2. Without this, a future refactor that drops the
+// ValidateCapabilitySurfaces call from ValidateCapabilitySet would silently
+// let invalid surfaces through into the graph.
+func TestValidateCapabilitySet_RejectsBadSurfaces(t *testing.T) {
+	caps := []Capability{
+		{Name: "user-auth", Lifecycle: CapabilityNew, Surfaces: []CapabilitySurface{"bogus"}},
+	}
+	err := ValidateCapabilitySet(caps)
+	if err == nil {
+		t.Fatal("expected error for invalid surface, got nil")
+	}
+	if !strings.Contains(err.Error(), "not one of ui/api/background") {
+		t.Errorf("expected surface validation error to bubble up, got: %v", err)
+	}
+}
+
+func TestCapabilitySurface_IsValid(t *testing.T) {
+	for _, s := range []CapabilitySurface{SurfaceUI, SurfaceAPI, SurfaceBackground} {
+		if !s.IsValid() {
+			t.Errorf("%q should be valid", s)
+		}
+	}
+	for _, s := range []CapabilitySurface{"", "cli", "tty", "UI"} {
+		if s.IsValid() {
+			t.Errorf("%q should not be valid", s)
+		}
+	}
+}
+
 func TestCapabilityEntityID_UniquenessAcrossPlans(t *testing.T) {
 	// Two different plans declaring the same capability name must get
 	// distinct entity IDs.
