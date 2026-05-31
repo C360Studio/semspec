@@ -348,9 +348,9 @@ func buildLoopFailureFeedback(event *agentic.LoopCompletedEvent) string {
 	// tool. Substring match against the semstreams error string
 	// ("max iterations (50) reached" / similar).
 	if strings.Contains(errMsg, "max iterations") {
-		max := maxIter
-		if max == 0 {
-			max = event.Iterations
+		budget := maxIter
+		if budget == 0 {
+			budget = event.Iterations
 		}
 		return fmt.Sprintf(
 			"Your previous attempt exhausted its iteration budget "+
@@ -361,7 +361,7 @@ func buildLoopFailureFeedback(event *agentic.LoopCompletedEvent) string {
 				"and any output. If you are stuck or uncertain, call "+
 				"submit_work with a partial summary that explicitly "+
 				"describes the obstacle — do not keep refining.",
-			event.Iterations, max,
+			event.Iterations, budget,
 		)
 	}
 

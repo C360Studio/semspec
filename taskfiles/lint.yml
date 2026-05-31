@@ -1,5 +1,11 @@
 version: '3'
 
+# Revive version is pinned in CI (.github/workflows/ci.yml installs v1.5.1).
+# Local devs must match — otherwise revive 1.3.9 (or older) misses the
+# Go 1.21+ builtin shadows (max, min, clear) the v1.5.x release catches.
+# Run `go install github.com/mgechev/revive@v1.5.1` if your local version
+# drifts.
+
 tasks:
   default:
     desc: Run Go linters (vet, fmt, revive)
@@ -7,3 +13,8 @@ tasks:
       - go vet ./...
       - go fmt ./...
       - revive -config revive.toml -formatter friendly ./...
+
+  install-revive:
+    desc: Install the pinned revive version (matches CI)
+    cmds:
+      - go install github.com/mgechev/revive@v1.5.1

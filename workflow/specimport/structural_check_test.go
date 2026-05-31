@@ -38,11 +38,11 @@ Sample reasoning.
 `
 }
 
-func sampleSpecMarkdown(cap string) string {
-	return `# Spec: ` + cap + `
+func sampleSpecMarkdown(name string) string {
+	return `# Spec: ` + name + `
 
 ## Overview
-Sample spec for ` + cap + `.
+Sample spec for ` + name + `.
 
 ## Requirements
 

@@ -52,31 +52,31 @@ func SaveCapabilities(ctx context.Context, tw *graphutil.TripleWriter, explorati
 // writeCapabilityTriples writes the predicate set for a single Capability.
 // Hash each depends_on name into the same EntityID suffix scheme so the
 // stored object resolves back to the corresponding Capability entity.
-func writeCapabilityTriples(ctx context.Context, tw *graphutil.TripleWriter, cap *Capability, slug, planEntityID string) error {
+func writeCapabilityTriples(ctx context.Context, tw *graphutil.TripleWriter, c *Capability, slug, planEntityID string) error {
 	if tw == nil {
 		return nil
 	}
-	entityID := CapabilityEntityID(slug, cap.Name)
+	entityID := CapabilityEntityID(slug, c.Name)
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityName, cap.Name)
-	if err := tw.WriteTriple(ctx, entityID, semspec.CapabilityLifecycle, string(cap.Lifecycle)); err != nil {
+	_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityName, c.Name)
+	if err := tw.WriteTriple(ctx, entityID, semspec.CapabilityLifecycle, string(c.Lifecycle)); err != nil {
 		return fmt.Errorf("write capability lifecycle: %w", err)
 	}
-	if cap.Description != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityDescription, cap.Description)
+	if c.Description != "" {
+		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityDescription, c.Description)
 	}
 	_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityPlan, planEntityID)
 
 	// Multi-valued depends_on — one triple per edge, value is the hashed
 	// instance ID of the prerequisite Capability (matches the entity-ID
 	// suffix scheme used by RequirementDependsOn).
-	for _, dep := range cap.DependsOn {
+	for _, dep := range c.DependsOn {
 		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityDependsOn, HashInstanceID(slug, dep))
 	}
 
 	// Multi-valued surfaces (ADR-041 Move 2). One triple per declared surface;
 	// SurfaceUI is the gate for downstream @e2e scenario emission.
-	for _, surface := range cap.Surfaces {
+	for _, surface := range c.Surfaces {
 		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilitySurface, string(surface))
 	}
 	return nil

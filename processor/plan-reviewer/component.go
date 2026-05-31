@@ -716,13 +716,13 @@ func (c *Component) emitParseIncident(ctx context.Context, role, loopID, model, 
 // truncatePreview collapses newlines and bounds length so a model
 // response can be embedded in a single structured-log field without
 // blowing the log shipper. Empty input returns empty.
-func truncatePreview(s string, max int) string {
-	if max <= 0 || len(s) == 0 {
+func truncatePreview(s string, maxBytes int) string {
+	if maxBytes <= 0 || len(s) == 0 {
 		return ""
 	}
 	out := strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "\r", " ")
-	if len(out) > max {
-		out = out[:max] + "…"
+	if len(out) > maxBytes {
+		out = out[:maxBytes] + "…"
 	}
 	return out
 }
