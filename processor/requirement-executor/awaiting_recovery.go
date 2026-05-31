@@ -171,8 +171,39 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 	exec.terminated = false
 	exec.recoveryRestarts++
 
-	// Reset DAG state — like restructure, but without incrementing the
-	// normal RetryCount. Recovery restart is out-of-band budget.
+	// Reset DAG state AND per-recovery retry budget. Each recovery
+	// resumption is a fresh shot at the requirement — re-decompose, retry
+	// up to MaxRequirementRetries again. recoveryRestarts is the outer cap
+	// (incremented above); RetryCount is the inner per-recovery budget.
+	//
+	// Before issue #36 fix (2026-05-31): RetryCount was preserved across
+	// resumptions, which meant every recovery resume immediately exhausted
+	// on the first req-review attempt (RetryCount=2 >= MaxRetries=2 fired
+	// at L1650 of component.go before any meaningful work) and deferred
+	// back to recovery — wasting an outer budget slot per cycle. Each
+	// recovery then yielded only 1 round of (impl+test+req-review) before
+	// the next defer, defeating the point of giving the requirement
+	// another chance.
+	//
+	// Reset semantics matches restructure (startRestructureRetryLocked at
+	// component.go:1835), which already starts fresh; recovery resumption
+	// is conceptually identical (wipe everything, start over with feedback)
+	// except that recovery is human/auto-decision-driven rather than
+	// reviewer-verdict-driven.
+	//
+	// Worst-case cycle math after this fix:
+	//   - Per recovery: (1 initial + MaxRequirementRetries fixable retries)
+	//     × max_tdd_cycles per node = 3 × 5 = 15 dev dispatches with
+	//     default config
+	//   - Across recoveries: × (1 + MaxRecoveryRestarts) = × 3 = 45
+	//     dev dispatches lifetime max
+	// Operators concerned about worst-case spend should lower
+	// max_recovery_restarts (default 1; hybrid-gpt5 uses 2). A future
+	// PR may add a stuck-pattern detector (consecutive identical
+	// reviewer verdicts → human gate) as defense-in-depth, but the
+	// underlying non-convergence is fixed structurally by ADR-041 — the
+	// req-reviewer's tier-aware contract makes the run-#3-shape
+	// failure mode impossible.
 	exec.DAG = nil
 	exec.SortedNodeIDs = nil
 	exec.NodeIndex = nil
@@ -184,6 +215,7 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 	exec.ReviewVerdict = ""
 	exec.ReviewFeedback = ""
 	exec.ReviewRetryCount = 0
+	exec.RetryCount = 0
 	exec.ScenarioVerdicts = nil
 
 	if c.sandbox != nil && exec.RequirementBranch != "" {
