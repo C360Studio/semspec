@@ -158,7 +158,8 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 				Stdout:   fmt.Sprintf("load harness catalog: %v", err),
 			})
 		} else {
-			results = append(results, CheckHarnessProfileDiscipline(workDir, trigger.FilesModified, selections, catalog))
+			scenarios := loadScenarios(e.repoPath, trigger.Slug)
+			results = append(results, CheckHarnessProfileDiscipline(workDir, trigger.FilesModified, selections, scenarios, catalog))
 		}
 	}
 
