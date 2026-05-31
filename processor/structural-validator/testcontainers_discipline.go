@@ -26,14 +26,14 @@ import (
 // Unknown profile IDs and missing required-profile evidence are hard failures.
 func CheckHarnessProfileDiscipline(workDir string, filesModified []string, selections []workflow.HarnessProfileSelection, catalog *harnesscatalog.Catalog) payloads.CheckResult {
 	if len(selections) == 0 {
-		return passHarnessResult("no harness profiles selected — nothing to enforce")
+		return passHarnessResult("no test environment profiles selected — nothing to enforce")
 	}
 	required, err := catalog.RequiredProfiles(selections)
 	if err != nil {
 		return failHarnessResult(err.Error())
 	}
 	if len(required) == 0 {
-		return passHarnessResult("no required harness profiles selected — compatibility/heavy profiles are advisory")
+		return passHarnessResult("no required test environment profiles selected — compatibility/heavy profiles are advisory")
 	}
 
 	testFiles := filterTestFiles(filesModified)
@@ -57,7 +57,7 @@ func CheckHarnessProfileDiscipline(workDir string, filesModified []string, selec
 			Passed:   true,
 			Required: true,
 			Command:  "harness-profile-discipline (internal)",
-			Stdout:   fmt.Sprintf("required harness profiles covered in modified tests: %d", len(required)),
+			Stdout:   fmt.Sprintf("required test environment profiles covered in modified tests: %d", len(required)),
 		}
 	}
 
@@ -179,7 +179,7 @@ func missingEvidenceAnchors(contents []string, anchors []string) []string {
 }
 
 func formatHarnessViolation(r harnesscatalog.ResolvedSelection, missing []string) string {
-	return fmt.Sprintf("required harness profile %q is selected but no modified test file contains required evidence anchors: %s",
+	return fmt.Sprintf("required test environment profile %q is selected but no modified test file contains required test assertions: %s",
 		r.Profile.ID, strings.Join(quoteStrings(missing), ", "))
 }
 

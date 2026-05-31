@@ -420,7 +420,7 @@ func TestRenderArchitectPrompt_UsesHarnessProfileCatalogCards(t *testing.T) {
 	})
 
 	required := []string{
-		"Available test harness profiles",
+		"Available test environments",
 		"mavlink.px4-sitl.mavsdk-smoke",
 		"Select by profile_id only",
 		"harness_profiles",

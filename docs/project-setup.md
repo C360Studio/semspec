@@ -166,8 +166,8 @@ using the host Docker daemon via a mounted socket — tests run in real GitHub
 Actions runner images (catthehacker/ubuntu:act-latest). The qa.yml template is
 scaffolded by `POST /project-manager/init` when missing.
 
-Catalog-backed harness profiles split into three orchestration types
-(`harnesscatalog.Profile.Orchestration`, per ADR-039):
+Catalog-backed **test environment profiles** split into three orchestration
+types (`harnesscatalog.Profile.Orchestration` in code, per ADR-039):
 
 - **`services`** — heavy or persistent integration peers (e.g. PX4 SITL via
   `mavlink.px4-sitl.mavsdk-smoke`). Plan-manager renders `services:` blocks
@@ -180,10 +180,18 @@ Catalog-backed harness profiles split into three orchestration types
   runner containers). No qa.yml-level `services:` blocks needed.
 - **`pure-fixture`** — in-process fixtures the test code holds directly.
 
-The structural-validator's `harness-profile-discipline` check verifies the
-dev's tests carry the catalog's required evidence anchors regardless of
-orchestration type. The architect selects profiles by `profile_id`; concrete
-images/ports/env/readiness live in the catalog and render downstream.
+The structural-validator's pre-merge test-environment-discipline check
+verifies the dev's tests carry the catalog's required test assertions
+regardless of orchestration type. The architect selects a profile by
+`profile_id`; concrete images/ports/env/readiness live in the catalog
+and render downstream.
+
+> **Vocabulary note**: code keeps the precise type names
+> (`harnesscatalog.Profile`, `harness_profiles[]`, `EvidenceAnchors`) because
+> they're load-bearing for the catalog wire format. User-facing prose calls
+> them "test environment profiles" and "required test assertions" to match
+> standard CI/CD vocabulary. ADR-041 will land the structural surface that
+> makes this distinction the canonical user-facing framing.
 
 Artifacts from every QA run land at `.semspec/qa-artifacts/{plan-slug}/{run-id}/`:
 - `act.log` — combined act stdout+stderr

@@ -465,13 +465,13 @@ func architectureSchema() map[string]any {
 			},
 			"harness_profiles": map[string]any{
 				"type":        "array",
-				"description": "Catalog-backed test harness profile selections. Populate with profile IDs from the harness catalog only. The catalog owns images, ports, readiness, evidence anchors, and runner compatibility. Emit [] when no integration_target upstreams need a harness.",
+				"description": "Catalog-backed test environment profile selections. Populate with profile IDs from the catalog only. The catalog owns images, ports, readiness, required test assertions, and runner compatibility. Emit [] when no integration_target upstreams need a test environment.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
 						"profile_id": map[string]any{
 							"type":        "string",
-							"description": "Stable harness catalog profile ID, for example 'mavlink.px4-sitl.mavsdk-smoke'. Do not invent IDs.",
+							"description": "Stable test environment profile ID from the catalog, for example 'mavlink.px4-sitl.mavsdk-smoke'. Do not invent IDs.",
 						},
 						"used_by": map[string]any{
 							"type":        "array",
