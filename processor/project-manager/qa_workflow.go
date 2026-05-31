@@ -36,7 +36,7 @@ func EnsureQAWorkflow(workspacePath string, projectConfig *workflow.ProjectConfi
 		return fmt.Errorf("write qa.yml: %w", err)
 	}
 	if logger != nil {
-		logger.Info("Scaffolded default QA workflow — keep catalog harness orchestration in project tests",
+		logger.Info("Scaffolded default QA workflow — services-class harness profiles render as qa.yml services from the catalog (ADR-039); testcontainers and pure-fixture profiles stay in project test code",
 			"path", workflowPath, "language", primaryLanguage(projectConfig))
 	}
 	return nil
@@ -62,11 +62,18 @@ type Logger interface {
 // absence of --job filter). qa-runner uses --job integration at
 // qa_level=integration to skip the e2e job for faster feedback.
 //
-// Note: Testcontainers usage doesn't need any qa.yml-level service
-// declaration — the dev's test code spins up containers via the
-// Testcontainers library, which uses the docker socket that act
-// mounts into runner containers. The qa.yml just needs the language
-// toolchain + the test command.
+// Note: harness profiles split into three orchestration types (see
+// prompt/domain/software_render.go:harnessProfilesIntro and ADR-039):
+//   - services: qa-runner renders services: blocks into qa.yml from
+//     the catalog (images/ports/env/readiness). Tests are consumers
+//     that read the endpoint from the env qa-runner injects.
+//   - testcontainers: dev's test code spins up containers via the
+//     Testcontainers library, which uses the docker socket act mounts
+//     into runner containers. No qa.yml-level services: needed.
+//   - pure-fixture: dev's test code holds the fixture directly.
+// This default template ships the language toolchain + test command;
+// services-class blocks are injected later by plan-manager rendering
+// from the architecture's selected harness_profiles[].
 func BuildQAWorkflow(pc *workflow.ProjectConfig) string {
 	switch primaryLanguage(pc) {
 	case "Java", "Kotlin":
@@ -115,10 +122,14 @@ func javaQAWorkflow(pc *workflow.ProjectConfig) string {
 # integration: runs at qa_level=integration AND qa_level=full.
 # e2e:         runs at qa_level=full only (Playwright browser flows).
 #
-# Testcontainers usage in test code does not require services: blocks
-# here — the dev's tests spawn containers via the Testcontainers
-# library, which uses the docker socket that act mounts into runner
-# containers.
+# Harness profiles split into three orchestration types (ADR-039):
+#   - services: qa-runner renders services: blocks into this file from
+#     the catalog. Tests read the endpoint from the env qa-runner injects.
+#   - testcontainers: tests spawn containers via the Testcontainers
+#     library (uses the docker socket act mounts into runner containers).
+#   - pure-fixture: tests hold the fixture directly.
+# This default scaffold ships the toolchain + test command; services-class
+# blocks are injected by plan-manager from architecture.harness_profiles[].
 on: [push, pull_request]
 jobs:
   integration:
@@ -279,9 +290,18 @@ func goQAWorkflow(pc *workflow.ProjectConfig) string {
 # qa_level=integration so the e2e job is skipped for faster feedback. At
 # qa_level=full act runs the full workflow, exercising both jobs.
 #
-# Catalog harness profiles are test-code responsibilities, not GitHub Actions
-# services: entries. Keep Testcontainers/SITL orchestration in the project test
-# suite so qa-runner, act, and GitHub-hosted runners execute the same path.
+# Harness profiles split into three orchestration types (ADR-039):
+#   - services: qa-runner renders services: blocks into this file from
+#     the catalog (e.g. PX4 SITL via mavlink.px4-sitl.mavsdk-smoke).
+#     Tests are consumers; they read the endpoint from the env qa-runner
+#     injects, never start the service themselves.
+#   - testcontainers: tests spawn containers via the Testcontainers
+#     library (uses the docker socket act mounts into runner containers).
+#   - pure-fixture: tests hold the fixture directly.
+# qa-runner, act, and GitHub-hosted runners all execute the same rendered
+# file — services-class blocks come from plan-manager rendering the
+# architecture's harness_profiles[]; testcontainers and pure-fixture stay
+# in the project test suite.
 on: [push, pull_request]
 jobs:
   integration:

@@ -466,11 +466,14 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 // level=unit        → StatusReadyForQA (sandbox runs project tests first)
 // level=integration → StatusReadyForQA (qa-runner via act in a clean-room
 //
-//	runner; dev's TDD already exercised the same tests
-//	against Testcontainers-spawned services in the
-//	sandbox — this is the reproducibility gate that
-//	catches "passes with dev's working state, fails
-//	fresh checkout" cases)
+//	runner against the rendered .github/workflows/qa.yml.
+//	Per ADR-039, services-class harness profiles render
+//	as qa.yml services: blocks from the catalog and
+//	qa-runner brings them up. For testcontainers-class
+//	profiles dev's TDD already exercised them via the
+//	docker socket mounted on the sandbox, so qa-runner
+//	doubles as a reproducibility gate catching "passes
+//	with dev's working state, fails fresh checkout" cases.)
 //
 // level=full        → StatusReadyForQA (qa-runner runs the integration
 //
@@ -478,11 +481,13 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 //	adding Playwright/browser flows on top of
 //	integration tests)
 //
-// The Testcontainers-led integration tier (2026-05-15) means dev's
-// TDD loop is already exercising real upstream services via the docker
-// socket mounted on the sandbox; qa-runner is the second, clean-room
-// run that catches sandbox-state leakage. Both layers exercise the
-// same test code — the difference is the execution environment.
+// Two integration models coexist on the same qa.yml:
+//   - services-class profiles (e.g. PX4 SITL via
+//     mavlink.px4-sitl.mavsdk-smoke) introduce real services FIRST at
+//     qa-runner — dev never saw them. ADR-039 wires the rendering.
+//   - testcontainers-class profiles run in dev's TDD via the docker
+//     socket AND again at qa-runner as a reproducibility check.
+// Orchestration type lives on the catalog Profile (ADR-039 Phase 1a).
 //
 // qa-reviewer owns the ready_for_qa → reviewing_qa transition via
 // plan.mutation.qa.start, mirroring plan-reviewer's mutation-driven shape.

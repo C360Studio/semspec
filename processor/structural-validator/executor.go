@@ -138,8 +138,12 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// Catalog-backed harness profile discipline check — fires whenever modified
 	// files include test files in ANY supported language (not just Go).
 	// Verifies that selected required catalog profiles are evidenced by the
-	// dev's tests. The catalog owns images, ports, readiness, and assertions;
-	// qa.yml remains generic and project tests own Testcontainers/SITL startup.
+	// dev's tests. The catalog owns images, ports, readiness, and assertions.
+	// Per ADR-039, services-class profiles render as qa.yml services: blocks
+	// from the catalog (qa-runner brings the stack up; tests are consumers).
+	// testcontainers-class and pure-fixture profiles stay in project test code.
+	// This check is orchestration-agnostic: it verifies the dev's tests carry
+	// the required evidence anchors regardless of who starts the services.
 	// Loads selections from .semspec/plans/<slug>/plan.json on disk;
 	// greenfield projects (no architecture) trivially pass.
 	if len(filterTestFiles(trigger.FilesModified)) > 0 {
