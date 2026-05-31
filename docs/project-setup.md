@@ -137,7 +137,7 @@ plan at creation so policy changes don't retroactively affect in-flight work.
 | `none` | — | No QA gate; plan goes straight to `complete` | Doc-only hotfixes |
 | `synthesis` | qa-reviewer only | LLM verdict on plan artifacts, no test execution | Default; fast, content-based check |
 | `unit` | sandbox | `go test ./...` (or language default) against the merged worktree | Most projects |
-| `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — typically tagged integration tests with real service dependencies started by test code | Projects with integration suites |
+| `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — tagged integration tests against real service dependencies. Per ADR-039 the catalog `services`-class profiles render as qa.yml `services:` blocks brought up by qa-runner; `testcontainers` and `pure-fixture` profiles are started by the test code itself. | Projects with integration suites |
 | `full` | qa-runner + `act` | Both `integration` + `e2e` jobs — adds Playwright browser flows | Projects with UI + browser tests |
 
 Configure via `.semspec/project.json`:
@@ -164,10 +164,26 @@ container semspec uses for per-task structural validation. **qa-runner**
 (level=integration/full) invokes nektos/act against `.github/workflows/qa.yml`
 using the host Docker daemon via a mounted socket — tests run in real GitHub
 Actions runner images (catthehacker/ubuntu:act-latest). The qa.yml template is
-scaffolded by `POST /project-manager/init` when missing. Catalog-backed harness
-profiles are test-code responsibilities: start SITL, databases, brokers, or other
-fixtures from the project tests (for example via Testcontainers) rather than
-adding GitHub Actions `services:` entries for semspec-owned profiles.
+scaffolded by `POST /project-manager/init` when missing.
+
+Catalog-backed harness profiles split into three orchestration types
+(`harnesscatalog.Profile.Orchestration`, per ADR-039):
+
+- **`services`** — heavy or persistent integration peers (e.g. PX4 SITL via
+  `mavlink.px4-sitl.mavsdk-smoke`). Plan-manager renders `services:` blocks
+  into qa.yml from the catalog entry's `images`, `ports`, `env`, and
+  `readiness` fields. qa-runner brings the stack up; **tests are consumers**
+  that read the endpoint from the env qa-runner injects and never start the
+  service themselves.
+- **`testcontainers`** — lightweight per-test fixtures the test code spins
+  up via the Testcontainers library (uses the docker socket act mounts into
+  runner containers). No qa.yml-level `services:` blocks needed.
+- **`pure-fixture`** — in-process fixtures the test code holds directly.
+
+The structural-validator's `harness-profile-discipline` check verifies the
+dev's tests carry the catalog's required evidence anchors regardless of
+orchestration type. The architect selects profiles by `profile_id`; concrete
+images/ports/env/readiness live in the catalog and render downstream.
 
 Artifacts from every QA run land at `.semspec/qa-artifacts/{plan-slug}/{run-id}/`:
 - `act.log` — combined act stdout+stderr
