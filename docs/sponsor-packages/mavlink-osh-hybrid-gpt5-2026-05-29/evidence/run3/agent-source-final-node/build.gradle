@@ -1,0 +1,118 @@
+// OSH MAVSDK driver skeleton — to be filled in by the agent during the
+// @mavlink-hard scenario.
+//
+// Build target: a Java driver that exposes MAVLink/MAVSDK telemetry and
+// control to OpenSensorHub through the OGC Connected Systems API. The
+// upstream reference implementation lives at
+// opensensorhub/osh-addons/sensors/robotics/sensorhub-driver-mavsdk and
+// is mounted read-only at /sources/ when the EPIC overlay is active.
+
+plugins {
+    id 'java-library'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
+}
+
+group = 'org.sensorhub'
+version = '0.1.0-SNAPSHOT'
+
+ext {
+    oshCoreVersion = '2.0.1'
+    mavsdkVersion = '3.14.0'
+    oshRepositoryUrl = 'https://maven.pkg.github.com/opensensorhub/osh-core'
+    oshRepositoryName = 'osh-core'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+def oshUsername = providers.gradleProperty('gpr.user')
+        .orElse(providers.environmentVariable('GITHUB_ACTOR'))
+def oshToken = providers.gradleProperty('gpr.key')
+        .orElse(providers.environmentVariable('GITHUB_TOKEN'))
+
+repositories {
+    mavenCentral()
+    maven {
+        name = oshRepositoryName
+        url = uri(oshRepositoryUrl)
+        credentials {
+            username = oshUsername.orNull ?: ''
+            password = oshToken.orNull ?: ''
+        }
+    }
+}
+
+def hasOshRepository = {
+    repositories.any { repository ->
+        repository.hasProperty('url') && repository.url.toString() == oshRepositoryUrl
+    }
+}
+
+
+def isDependencyReportOnly = {
+    !gradle.startParameter.taskNames.empty && gradle.startParameter.taskNames.every { taskName ->
+        taskName == 'dependencies' || taskName.endsWith(':dependencies')
+    }
+}
+
+def assertOshRepositoryAccess = {
+    if (!hasOshRepository()) {
+        throw new GradleException("Required OpenSensorHub Maven repository is not configured: ${oshRepositoryUrl}")
+    }
+    if (!oshUsername.present || !oshToken.present) {
+        throw new GradleException("OpenSensorHub Maven repository requires credentials before resolving OSH artifacts. Set GITHUB_ACTOR and GITHUB_TOKEN, or Gradle properties gpr.user and gpr.key, for ${oshRepositoryUrl}.")
+    }
+}
+
+tasks.register('verifyOshRepositoryAccess') {
+    group = 'verification'
+    description = 'Fails cleanly when the required OpenSensorHub Maven repository or credentials are not configured.'
+
+    doLast {
+        assertOshRepositoryAccess()
+    }
+}
+
+configurations.configureEach { configuration ->
+    if (configuration.name == 'testImplementation') {
+        configuration.setExtendsFrom([])
+    }
+    if (configuration.canBeResolved) {
+        configuration.incoming.beforeResolve {
+            if (!isDependencyReportOnly() && configuration.allDependencies.any { dependency -> dependency.group == 'org.sensorhub' }) {
+                assertOshRepositoryAccess()
+            }
+        }
+    }
+}
+
+sourceSets {
+    test {
+        compileClasspath = configurations.testCompileClasspath
+        runtimeClasspath = output + configurations.testRuntimeClasspath
+    }
+}
+
+dependencies {
+    implementation "org.sensorhub:sensorhub-core:${oshCoreVersion}"
+    implementation "org.sensorhub:sensorhub-service-consys:${oshCoreVersion}"
+    implementation "io.mavsdk:mavsdk:${mavsdkVersion}"
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+shadowJar {
+    archiveClassifier.set('all')
+    configurations = [project.configurations.runtimeClasspath]
+    mergeServiceFiles()
+}
+
+tasks.named('build') {
+    dependsOn tasks.named('shadowJar')
+}

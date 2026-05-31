@@ -1,0 +1,171 @@
+// OSH MAVSDK driver skeleton — to be filled in by the agent during the
+// @mavlink-hard scenario.
+//
+// Build target: a Java driver that exposes MAVLink/MAVSDK telemetry and
+// control to OpenSensorHub through the OGC Connected Systems API. The
+// upstream reference implementation lives at
+// opensensorhub/osh-addons/sensors/robotics/sensorhub-driver-mavsdk and
+// is mounted read-only at /sources/ when the EPIC overlay is active.
+//
+// First-task discovery — fill in `repositories` and `dependencies` below.
+// Read the upstream poms / build.gradle directly:
+//   /sources/github-com-opensensorhub-osh-addons/sensors/robotics/sensorhub-driver-mavsdk
+//   /sources/github-com-opensensorhub-osh-core
+//   /sources/github-com-mavlink-MAVSDK-Java
+//   /sources/github-com-opengeospatial-ogcapi-connected-systems
+// When /sources/ is not mounted, fall back to web_search + http_request
+// against raw.githubusercontent.com.
+//
+// The legacy Bintray publishing target was sunset by JFrog in 2021; the
+// canonical artifact repository for OSH 2.x is the agent's to discover
+// from the upstream `release.gradle` / publishing configuration.
+
+plugins {
+    id 'java-library'
+}
+
+group = 'org.sensorhub'
+version = '0.1.0-SNAPSHOT'
+
+java {
+    // Match osh-core's Java 17 target. Verify via the mounted upstream
+    // at /sources/github-com-opensensorhub-osh-core/common.gradle
+    // (look for `sourceCompatibility`).
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+repositories {
+    mavenCentral()
+    // TODO(agent): add the OSH artifact repository here once you've
+    // identified it from the upstream `release.gradle`. The original
+    // Bintray target is dead; discover the current snapshot/release URL
+    // from /sources/github-com-opensensorhub-osh-core/release.gradle.
+}
+
+dependencies {
+    // TODO(agent): declare OSH + MAVSDK Java dependencies. Read the
+    // upstream `sensorhub-driver-mavsdk/build.gradle` first — that is
+    // the baseline this driver extends. Common picks:
+    //   implementation 'org.sensorhub:sensorhub-core:<version>'
+    //   implementation 'org.sensorhub:sensorhub-service-consys:<version>'
+    //   implementation 'io.mavsdk:mavsdk:<version>'
+    //   implementation 'io.mavsdk:mavsdk-server:<version>'
+    // Pin versions against /sources/github-com-mavlink-MAVSDK-Java/build.gradle
+    // (the MAVSDK Java release tags) and the OSH upstream common.gradle.
+
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+    testImplementation gradleTestKit()
+}
+
+test {
+    useJUnitPlatform()
+}
+
+tasks.register('checkCoverageMatrix') {
+    group = 'verification'
+    description = 'Verifies the README MAVSDK to Connected Systems API coverage matrix.'
+
+    inputs.file(layout.projectDirectory.file('README.md'))
+
+    doLast {
+        def readmeFile = inputs.files.singleFile
+        if (!readmeFile.isFile()) {
+            throw new GradleException('README.md is required for coverage matrix validation')
+        }
+
+        def splitMarkdownRow = { String line ->
+            def trimmedLine = line.trim()
+            if (!trimmedLine.startsWith('|') || !trimmedLine.endsWith('|')) {
+                throw new GradleException('README coverage matrix rows must start and end with a pipe')
+            }
+            trimmedLine.substring(1, trimmedLine.length() - 1)
+                    .split('\\|', -1)
+                    .collect { it.trim() }
+        }
+
+        def allLines = readmeFile.readLines()
+        def headerIndex = allLines.findIndexOf { it.trim() == '| MAVSDK plugin | MAVLink evidence handled | CS API type | Runtime mapping | Rationale |' }
+        if (headerIndex < 0) {
+            throw new GradleException('README coverage matrix must include the expected machine-checkable header')
+        }
+
+        def tableLines = allLines.drop(headerIndex).takeWhile { it.trim().startsWith('|') }
+        if (tableLines.size() < 3) {
+            throw new GradleException('README coverage matrix must include a header, separator, and data rows')
+        }
+
+        def headers = splitMarkdownRow(tableLines[0])
+        def requiredHeaders = ['MAVSDK plugin', 'MAVLink evidence handled', 'CS API type', 'Runtime mapping', 'Rationale']
+        if (headers != requiredHeaders) {
+            throw new GradleException("README coverage matrix columns must be exactly: ${requiredHeaders.join(', ')}")
+        }
+
+        def separatorCells = splitMarkdownRow(tableLines[1])
+        def hasValidSeparator = separatorCells.size() == headers.size() && separatorCells.every { it ==~ /:?-{3,}:?/ }
+        if (!hasValidSeparator) {
+            throw new GradleException('README coverage matrix must include a valid Markdown separator row')
+        }
+
+        def rows = []
+        def dataLines = tableLines.drop(2)
+        for (int index = 0; index < dataLines.size(); index++) {
+            def cells = splitMarkdownRow(dataLines[index])
+            if (cells.size() != headers.size()) {
+                throw new GradleException("README coverage matrix row ${index + 1} does not match the header column count")
+            }
+            rows << [headers, cells].transpose().collectEntries { pair -> [(pair[0]): pair[1]] }
+        }
+
+        if (rows.isEmpty()) {
+            throw new GradleException('README coverage matrix must include at least one data row')
+        }
+
+        def normalized = { String value -> value.replace('`', '').trim() }
+        def containsToken = { String value, String token -> normalized(value).toUpperCase(Locale.ROOT).contains(token) }
+        def cellEquals = { Map row, String column, String expected -> normalized(row[column]) == expected }
+
+        def hasTelemetryHeartbeatDataStream = rows.any { row ->
+            cellEquals(row, 'MAVSDK plugin', 'Telemetry') &&
+                    containsToken(row['MAVLink evidence handled'], 'HEARTBEAT') &&
+                    cellEquals(row, 'CS API type', 'DataStream status') &&
+                    cellEquals(row, 'Runtime mapping', 'Runtime')
+        }
+        if (!hasTelemetryHeartbeatDataStream) {
+            throw new GradleException('Coverage matrix must include Runtime Telemetry coverage for HEARTBEAT as DataStream status')
+        }
+
+        def hasTelemetryGpsObservation = rows.any { row ->
+            cellEquals(row, 'MAVSDK plugin', 'Telemetry') &&
+                    cellEquals(row, 'CS API type', 'Observation') &&
+                    cellEquals(row, 'Runtime mapping', 'Runtime') &&
+                    (containsToken(row['MAVLink evidence handled'], 'GPS') || containsToken(row['MAVLink evidence handled'], 'GLOBAL_POSITION_INT'))
+        }
+        if (!hasTelemetryGpsObservation) {
+            throw new GradleException('Coverage matrix must include a Runtime Telemetry Observation stream for HEARTBEAT/GPS coverage')
+        }
+
+        def hasActionArmControlStream = rows.any { row ->
+            cellEquals(row, 'MAVSDK plugin', 'Action') &&
+                    cellEquals(row, 'CS API type', 'ControlStream') &&
+                    cellEquals(row, 'Runtime mapping', 'Runtime') &&
+                    (containsToken(row['MAVLink evidence handled'], 'ARM') ||
+                            containsToken(row['MAVLink evidence handled'], 'MAV_CMD_COMPONENT_ARM_DISARM') ||
+                            containsToken(row['Rationale'], 'ARM'))
+        }
+        if (!hasActionArmControlStream) {
+            throw new GradleException("Coverage matrix must include a Runtime Action ControlStream mapping for the 'arm' command")
+        }
+
+        def deferredRowsWithoutRationale = rows.findAll { row ->
+            row.values().any { normalized(it) == 'Deferred' } && normalized(row['Rationale']).isEmpty()
+        }
+        if (!deferredRowsWithoutRationale.isEmpty()) {
+            throw new GradleException('Coverage matrix Deferred entries must include a rationale')
+        }
+    }
+}
+
+check {
+    dependsOn tasks.named('checkCoverageMatrix')
+}

@@ -1,0 +1,460 @@
+{
+  "id": "semspec.workspace.wf.plan.plan.cbe8cdd0effac868",
+  "slug": "182fec27c834",
+  "title": "Starting from the existing OpenSensorHub MAVSDK addon at https://github.com/opensensorhub/osh-addons/tree/master/sensors/robotics/sensorhub-driver-mavsdk, design and implement MAVLink/MAVSDK support for OpenSensorHub through the OGC Connected Systems API.\n\nTreat the upstream addon as the baseline, not a clean-room rewrite. Preserve its OSH sensor module patterns, MAVSDK Java integration, mavsdk_server lifecycle, existing telemetry outputs, and existing control inputs unless the architecture explicitly replaces them.\n\nThe implementation must provide full Connected Systems API coverage for MAVSDK plugins. For every plugin exposed by the pinned MAVSDK Java/proto version, produce a coverage matrix mapping the plugin's methods and streams to one of:\n- CS API DataStream + Observation\n- CS API ControlStream + Command + CommandStatus/CommandResult\n- SystemEvent\n- explicit unsupported/deferred entry with rationale\n\nPrefer typed MAVSDK plugin integrations for semantic APIs. Also evaluate MAVLink-native access and implement a generic MAVLink fallback using MavlinkDirect or a native MAVLink library where needed for raw messages, custom dialects, or plugin gaps. Do not hand-roll MAVLink framing, do not stub MAVSDK/OSH classes, and do not claim full coverage without a machine-checkable coverage inventory.\n\nAcceptance:\n1. The driver starts a real mavsdk_server and connects to a real or simulated MAVLink system.\n2. CS API exposes typed datastreams for telemetry/status/info/events and typed controlstreams for actions, missions, offboard/manual control, params, camera/gimbal, geofence, FTP/logs, calibration, RTK, shell/tune, transponder/winch/gripper, server-side plugins where applicable.\n3. A generic raw MAVLink datastream/controlstream supports subscribe-all, subscribe-by-message-name, send-message, and load-custom-XML dialect.\n4. Long-running commands expose status/result resources, not just fire-and-forget acknowledgements.\n5. Tests include schema/coverage tests plus at least one live MAVSDK/SITL smoke test.\n6. README documents MAVSDK vs native-MAVLink tradeoffs and the coverage matrix.\n\nTest run: 1780110015106",
+  "project_id": "semspec.workspace.wf.project.project.37a8eec1ce19687d",
+  "status": "ready_for_execution",
+  "approved": true,
+  "created_at": "2026-05-30T03:00:15.118190208Z",
+  "approved_at": "2026-05-30T03:01:07.318223136Z",
+  "review_verdict": "needs_changes",
+  "review_summary": "The plan has severe goal coverage gaps (missing requirements for the core implementation) and orphaned scope files. It also has invalid component dependency references.",
+  "reviewed_at": "2026-05-30T03:01:06.746986927Z",
+  "review_findings": [
+    {
+      "sop_id": "N/A",
+      "sop_title": "Goal Coverage \u0026 File Ownership",
+      "severity": "error",
+      "status": "violation",
+      "category": "completeness",
+      "phase": "requirements",
+      "issue": "The plan misses requirements for the core implementation. The goal specifies 'Implement MAVLink/MAVSDK support...' but the requirements only cover build.gradle and README.md. The files in scope.create are completely orphaned.",
+      "suggestion": "Add a requirement to implement the MAVSDK driver, generic MAVLink fallback, and tests, owning all the Java files in scope.create.",
+      "evidence": "Plan goal states 'Implement MAVLink/MAVSDK support...'. plan.requirements contains only req 1 (build.gradle) and req 2 (README.md). Files in scope.create are unowned."
+    },
+    {
+      "sop_id": "N/A",
+      "sop_title": "Upstream Resolution Discipline",
+      "severity": "error",
+      "status": "violation",
+      "category": "completeness",
+      "phase": "architecture",
+      "target_id": "mavsdk-driver",
+      "issue": "mavsdk-driver lists 'sensorhub-core', 'sensorhub-service-consys', and 'mavsdk' in dependencies, but these are external libraries that do not match the names in upstream_resolutions. Dependencies should only point to internal components, while upstream_refs covers external integrations.",
+      "suggestion": "Replace dependencies for mavsdk-driver with an empty array, as it has no internal dependencies.",
+      "evidence": "architecture.component_boundaries[0].dependencies = ['sensorhub-core', 'sensorhub-service-consys', 'mavsdk']; upstream_resolutions names are 'OpenSensorHub Core', etc."
+    }
+  ],
+  "review_formatted_findings": "### Violations\n\n- **[ERROR]** Goal Coverage \u0026 File Ownership phase=requirements\n  - Issue: The plan misses requirements for the core implementation. The goal specifies 'Implement MAVLink/MAVSDK support...' but the requirements only cover build.gradle and README.md. The files in scope.create are completely orphaned.\n  - Evidence: Plan goal states 'Implement MAVLink/MAVSDK support...'. plan.requirements contains only req 1 (build.gradle) and req 2 (README.md). Files in scope.create are unowned.\n  - Suggestion: Add a requirement to implement the MAVSDK driver, generic MAVLink fallback, and tests, owning all the Java files in scope.create.\n\n- **[ERROR]** Upstream Resolution Discipline phase=architecture target=mavsdk-driver\n  - Issue: mavsdk-driver lists 'sensorhub-core', 'sensorhub-service-consys', and 'mavsdk' in dependencies, but these are external libraries that do not match the names in upstream_resolutions. Dependencies should only point to internal components, while upstream_refs covers external integrations.\n  - Evidence: architecture.component_boundaries[0].dependencies = ['sensorhub-core', 'sensorhub-service-consys', 'mavsdk']; upstream_resolutions names are 'OpenSensorHub Core', etc.\n  - Suggestion: Replace dependencies for mavsdk-driver with an empty array, as it has no internal dependencies.\n\n",
+  "review_iteration": 1,
+  "goal": "Implement MAVLink/MAVSDK support for OpenSensorHub through the OGC Connected Systems API, including typed MAVSDK plugin coverage and a generic MAVLink fallback.",
+  "context": "The implementation needs to bridge the MAVLink/MAVSDK Java stack into OpenSensorHub using the OGC Connected Systems (CS) API. It extends the upstream sensorhub-driver-mavsdk addon by replacing legacy OSH interfaces with CS API DataStream, ControlStream, and SystemEvent patterns. The integration must map all pinned MAVSDK plugins to semantic API endpoints, offer a generic raw MAVLink fallback, ensure long-running commands yield proper status/result resources, and produce a documented coverage matrix. OSH artifacts are located at https://maven.pkg.github.com/opensensorhub/osh-core.",
+  "scope": {
+    "include": [
+      "build.gradle",
+      "README.md"
+    ],
+    "create": [
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java",
+      "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkCoverageTest.java",
+      "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSmokeTest.java"
+    ]
+  },
+  "architecture": {
+    "technology_choices": [
+      {
+        "category": "build_tool",
+        "choice": "Gradle",
+        "rationale": "Existing project uses Gradle per /workspace/build.gradle and /workspace/.semspec/project.json"
+      },
+      {
+        "category": "language",
+        "choice": "Java 17",
+        "rationale": "Existing project targets Java 17 per /workspace/build.gradle sourceCompatibility"
+      }
+    ],
+    "component_boundaries": [
+      {
+        "name": "mavsdk-driver",
+        "responsibility": "Exposes MAVLink/MAVSDK telemetry and control to OpenSensorHub through OGC CS API",
+        "dependencies": [],
+        "upstream_refs": [
+          "OpenSensorHub Core",
+          "OpenSensorHub Connected Systems API",
+          "MAVSDK Java",
+          "PX4 SITL",
+          "raw MAVLink endpoint"
+        ]
+      }
+    ],
+    "data_flow": "MAVLink Vehicle \u003c-\u003e MAVSDK Server (or raw UDP) \u003c-\u003e mavsdk-driver \u003c-\u003e OSH CS API (DataStream/ControlStream) \u003c-\u003e OSH Client",
+    "decisions": [
+      {
+        "id": "ARCH-001",
+        "title": "Generic MAVLink fallback",
+        "decision": "Implement native MAVLink parser fallback",
+        "rationale": "Requirement 3 mandates a generic MAVLink fallback for raw messages without relying on MAVSDK abstractions. Cited: /workspace/README.md"
+      },
+      {
+        "id": "ARCH-002",
+        "title": "Use CS API DataStream for Telemetry",
+        "decision": "Expose MAVSDK via OGC CS API DataStream and ControlStream",
+        "rationale": "Requirement to replace legacy OSH interfaces with CS API patterns. Cited: /sources/github-com-opensensorhub-osh-core/sensorhub-service-consys/src/main/java/org/sensorhub/impl/service/consys/obs/DataStreamHandler.java"
+      }
+    ],
+    "actors": [
+      {
+        "name": "System Operator",
+        "type": "human",
+        "triggers": [
+          "Send command via CS API ControlStream"
+        ]
+      },
+      {
+        "name": "MAVLink Vehicle",
+        "type": "system",
+        "triggers": [
+          "Send MAVLink telemetry",
+          "Send MAVLink HEARTBEAT"
+        ]
+      }
+    ],
+    "integrations": [
+      {
+        "name": "MAVSDK peer",
+        "direction": "bidirectional",
+        "protocol": "gRPC",
+        "contract": "MAVSDK gRPC proto",
+        "error_mode": "Retry on gRPC unavailability; report MAVLink timeouts via SystemEvent"
+      },
+      {
+        "name": "raw MAVLink peer",
+        "direction": "bidirectional",
+        "protocol": "UDP/Serial",
+        "contract": "MAVLink common dialect",
+        "error_mode": "Timeout on heartbeat loss"
+      }
+    ],
+    "test_surface": {
+      "integration_flows": [
+        {
+          "name": "mavsdk-telemetry-flow",
+          "components_involved": [
+            "mavsdk-driver"
+          ],
+          "description": "Ensure MAVSDK telemetry events map correctly to OGC CS DataStream values"
+        },
+        {
+          "name": "raw-mavlink-fallback-flow",
+          "components_involved": [
+            "mavsdk-driver"
+          ],
+          "description": "Verify the driver successfully parses raw MAVLink HEARTBEAT when acting as a direct endpoint"
+        }
+      ],
+      "e2e_flows": [
+        {
+          "actor": "System Operator",
+          "steps": [
+            "Send action command via CS API ControlStream",
+            "Verify MAVSDK driver delegates to MAVSDK Action plugin",
+            "Verify vehicle accepts command via MAVLink ACK",
+            "Verify command completion reported via CS API SystemEvent"
+          ],
+          "success_criteria": [
+            "Action completes successfully",
+            "SystemEvent is emitted with OK status"
+          ]
+        }
+      ]
+    },
+    "upstream_resolutions": [
+      {
+        "name": "OpenSensorHub Core",
+        "coordinate": "org.sensorhub:sensorhub-core:2.0.1",
+        "source_ref": "/sources/github-com-opensensorhub-osh-core/common.gradle",
+        "apis": [
+          {
+            "symbol": "AbstractSensorModule",
+            "kind": "class",
+            "signature": "public abstract class AbstractSensorModule\u003cT extends SensorConfig\u003e",
+            "lifecycle": "init() -\u003e start() -\u003e stop()",
+            "notes": "Driver subclasses this to integrate with OSH core lifecycle",
+            "citation": "/sources/github-com-opensensorhub-osh-core/sensorhub-core/src/main/java/org/sensorhub/impl/sensor/AbstractSensorModule.java"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "runtime_dep"
+      },
+      {
+        "name": "OpenSensorHub Connected Systems API",
+        "coordinate": "org.sensorhub:sensorhub-service-consys:2.0.1",
+        "source_ref": "/sources/github-com-opensensorhub-osh-core/common.gradle",
+        "apis": [
+          {
+            "symbol": "DataStreamHandler",
+            "kind": "class",
+            "signature": "public class DataStreamHandler",
+            "notes": "Provides handling for OGC CS API DataStream resources",
+            "citation": "/sources/github-com-opensensorhub-osh-core/sensorhub-service-consys/src/main/java/org/sensorhub/impl/service/consys/obs/DataStreamHandler.java"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "runtime_dep"
+      },
+      {
+        "name": "MAVSDK Java",
+        "coordinate": "io.mavsdk:mavsdk:3.14.0",
+        "source_ref": "/sources/github-com-opensensorhub-osh-addons/sensors/robotics/sensorhub-driver-mavsdk/build.gradle",
+        "apis": [
+          {
+            "symbol": "System",
+            "kind": "class",
+            "signature": "public class System",
+            "lifecycle": "system.getTelemetry() / system.getAction()",
+            "notes": "Main entry point for MAVSDK Java plugins",
+            "citation": "/sources/github-com-mavlink-mavsdk-java/sdk/src/main/java/io/mavsdk/System.java"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "runtime_dep"
+      },
+      {
+        "name": "PX4 SITL",
+        "coordinate": "mavlink:px4-sitl",
+        "source_ref": "https://docs.px4.io/main/en/simulation/",
+        "apis": [
+          {
+            "symbol": "HEARTBEAT",
+            "kind": "interface",
+            "signature": "MAVLink HEARTBEAT",
+            "lifecycle": "Periodic emission",
+            "notes": "Used as readiness and telemetry proof for the driver",
+            "citation": "https://mavlink.io/en/messages/common.html#HEARTBEAT"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "integration_target"
+      },
+      {
+        "name": "raw MAVLink endpoint",
+        "coordinate": "mavlink:raw-mavlink",
+        "source_ref": "https://mavlink.io/en/",
+        "apis": [
+          {
+            "symbol": "HEARTBEAT",
+            "kind": "interface",
+            "signature": "MAVLink HEARTBEAT",
+            "lifecycle": "Periodic emission",
+            "notes": "Target for direct raw MAVLink parser validation",
+            "citation": "https://mavlink.io/en/messages/common.html#HEARTBEAT"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "integration_target"
+      }
+    ],
+    "harness_profiles": [
+      {
+        "profile_id": "mavlink.px4-sitl.mavsdk-smoke",
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "purpose": "Prove MAVSDK control and telemetry paths against a real PX4 SITL MAVLink endpoint",
+        "covers": [
+          "PX4 SITL",
+          "MAVSDK server",
+          "MAVSDK action plugin",
+          "MAVSDK telemetry plugin"
+        ]
+      },
+      {
+        "profile_id": "mavlink.raw-mavlink-direct",
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "purpose": "Prove the generic MAVLink fallback logic can decode and round-trip raw MAVLink frames natively",
+        "covers": [
+          "raw MAVLink endpoint"
+        ]
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "id": "requirement.182fec27c834.1",
+      "plan_id": "semspec.workspace.wf.plan.plan.cbe8cdd0effac868",
+      "title": "Configure project dependencies for MAVSDK and OSH",
+      "description": "The build system must be configured with the OSH and MAVSDK Java dependencies required to bridge the MAVLink/MAVSDK stack into OpenSensorHub. It must specify the correct artifact repositories and dependency versions.",
+      "status": "active",
+      "files_owned": [
+        "build.gradle"
+      ],
+      "created_at": "2026-05-30T03:04:40.570271179Z",
+      "updated_at": "2026-05-30T03:04:40.570271179Z"
+    },
+    {
+      "id": "requirement.182fec27c834.2",
+      "plan_id": "semspec.workspace.wf.plan.plan.cbe8cdd0effac868",
+      "title": "Document MAVSDK coverage matrix and tradeoffs",
+      "description": "The project documentation must include a coverage matrix mapping MAVSDK plugins to CS API DataStream, ControlStream, SystemEvent, or explicit deferred status. It must also document the tradeoffs between MAVSDK and native-MAVLink fallbacks.",
+      "status": "active",
+      "files_owned": [
+        "README.md"
+      ],
+      "created_at": "2026-05-30T03:04:40.570271179Z",
+      "updated_at": "2026-05-30T03:04:40.570271179Z"
+    },
+    {
+      "id": "requirement.182fec27c834.3",
+      "plan_id": "semspec.workspace.wf.plan.plan.cbe8cdd0effac868",
+      "title": "Implement MAVSDK driver, generic MAVLink fallback, and tests",
+      "description": "The system must expose typed MAVSDK datastreams and controlstreams via the OGC Connected Systems API, support a generic MAVLink fallback for raw messages, and provide a test suite with coverage matrix and SITL smoke tests.",
+      "status": "active",
+      "depends_on": [
+        "requirement.182fec27c834.1"
+      ],
+      "files_owned": [
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java",
+        "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkCoverageTest.java",
+        "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSmokeTest.java"
+      ],
+      "created_at": "2026-05-30T03:04:40.570271179Z",
+      "updated_at": "2026-05-30T03:04:40.570271179Z"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "scenario.182fec27c834.2.1",
+      "requirement_id": "requirement.182fec27c834.2",
+      "given": "a user accessing the project documentation for MAVLink support",
+      "when": "the user views the coverage matrix section",
+      "then": [
+        "the documentation contains a mapping for each MAVSDK plugin to its OGC CS API representation (DataStream, ControlStream, or SystemEvent)",
+        "the documentation explicitly lists which MAVSDK plugins are currently in 'deferred' status"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:10.688406887Z",
+      "updated_at": "2026-05-30T03:06:10.688406887Z"
+    },
+    {
+      "id": "scenario.182fec27c834.2.2",
+      "requirement_id": "requirement.182fec27c834.2",
+      "given": "a developer evaluating the driver for a custom MAVLink vehicle",
+      "when": "the developer reads the architecture and tradeoff documentation",
+      "then": [
+        "the documentation lists the benefits and limitations of using the typed MAVSDK plugin versus the generic MAVLink fallback",
+        "the documentation provides guidance on when to use raw MAVLink peer (UDP/Serial) instead of the gRPC-based MAVSDK peer"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:10.688406887Z",
+      "updated_at": "2026-05-30T03:06:10.688406887Z"
+    },
+    {
+      "id": "scenario.182fec27c834.3.1",
+      "requirement_id": "requirement.182fec27c834.3",
+      "given": "an OpenSensorHub instance with the MAVSDK driver configured and a connected SITL vehicle sending telemetry",
+      "when": "a GET request is sent to the OGC CS API Datastreams endpoint for the vehicle position",
+      "then": [
+        "the response status is 200 OK",
+        "the response body contains a Datastream with typed position data (latitude, longitude, altitude) mapped from MAVSDK telemetry"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:13.78269393Z",
+      "updated_at": "2026-05-30T03:06:13.78269393Z"
+    },
+    {
+      "id": "scenario.182fec27c834.3.2",
+      "requirement_id": "requirement.182fec27c834.3",
+      "given": "an OpenSensorHub instance with the MAVSDK driver and a MAVLink vehicle providing a non-standard message not in the MAVSDK plugin set",
+      "when": "a GET request is sent to the OGC CS API Datastreams endpoint for the raw MAVLink fallback stream",
+      "then": [
+        "the response status is 200 OK",
+        "the response body contains the raw MAVLink message payload and message ID in a generic Datastream format"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:13.78269393Z",
+      "updated_at": "2026-05-30T03:06:13.78269393Z"
+    },
+    {
+      "id": "scenario.182fec27c834.3.3",
+      "requirement_id": "requirement.182fec27c834.3",
+      "given": "a System Operator authenticated with the OGC Connected Systems API and an active MAVSDK vehicle session",
+      "when": "the System Operator posts a \"Takeoff\" command to the OGC CS API ControlStream endpoint",
+      "then": [
+        "the response status is 202 Accepted",
+        "the MAVSDK peer receives a gRPC command to perform the requested takeoff action",
+        "the vehicle begins the takeoff procedure in the SITL environment"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:13.78269393Z",
+      "updated_at": "2026-05-30T03:06:13.78269393Z"
+    },
+    {
+      "id": "scenario.182fec27c834.3.4",
+      "requirement_id": "requirement.182fec27c834.3",
+      "given": "an OpenSensorHub instance with the MAVSDK driver and a SITL simulator running",
+      "when": "the automated integration test suite is executed against the SITL environment",
+      "then": [
+        "the test execution completes successfully with 100% pass rate",
+        "the MAVSDK plugin coverage matrix includes verified telemetry and control paths"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:13.78269393Z",
+      "updated_at": "2026-05-30T03:06:13.78269393Z"
+    },
+    {
+      "id": "scenario.182fec27c834.1.1",
+      "requirement_id": "requirement.182fec27c834.1",
+      "given": "a build system with an empty local artifact cache and the build.gradle configured for the MAVSDK driver",
+      "when": "the project dependencies are refreshed and downloaded during a build task",
+      "then": [
+        "the project resolves 'org.sensorhub:sensorhub-core' from the OSH repository",
+        "the project resolves 'io.mavsdk:mavsdk' from the MAVSDK repository or Maven Central",
+        "the project resolves 'org.sensorhub:sensorhub-service-consys' for OGC Connected Systems support"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:16.329085084Z",
+      "updated_at": "2026-05-30T03:06:16.329085084Z"
+    },
+    {
+      "id": "scenario.182fec27c834.1.2",
+      "requirement_id": "requirement.182fec27c834.1",
+      "given": "a development environment with the build.gradle configured for Java 17 compatibility",
+      "when": "the 'gradle build' command is executed",
+      "then": [
+        "the project compiles all source files without version mismatch errors",
+        "the output JAR includes MAVSDK and OSH library references in its manifest or shadow-jar config"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:16.329085084Z",
+      "updated_at": "2026-05-30T03:06:16.329085084Z"
+    },
+    {
+      "id": "scenario.182fec27c834.1.3",
+      "requirement_id": "requirement.182fec27c834.1",
+      "given": "a project configuration missing the specific OSH repository URL in build.gradle",
+      "when": "a clean build is attempted",
+      "then": [
+        "the build fails with an 'unresolved dependency' error for 'org.sensorhub:sensorhub-core'",
+        "the error message indicates that the artifact was not found in Maven Central"
+      ],
+      "status": "pending",
+      "created_at": "2026-05-30T03:06:16.329085084Z",
+      "updated_at": "2026-05-30T03:06:16.329085084Z"
+    }
+  ],
+  "qa_level": "integration"
+}
