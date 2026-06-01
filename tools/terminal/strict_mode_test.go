@@ -13,6 +13,7 @@ func allDeliverableSchemas() map[string]map[string]any {
 		"plan":         planSchema(),
 		"requirements": requirementsSchema(),
 		"scenarios":    scenariosSchema(),
+		"stories":      storiesSchema(),
 		"architecture": architectureSchema(),
 		"review":       reviewSchema(),
 		"developer":    developerSchema(),

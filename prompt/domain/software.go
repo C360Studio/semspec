@@ -1462,6 +1462,71 @@ The upstream_resolutions[] and harness_profiles[] fields are the load-bearing pi
 		},
 
 		// =====================================================================
+		// Story Preparer fragments (RoleStoryPreparer) — ADR-043 Move 3
+		//
+		// Sarah is the BMAD product owner. She takes Mary's capability list,
+		// Winston's component_boundaries (with implementation_files and
+		// capability mappings) and John's requirement set, and shards each
+		// requirement into ready-for-dev Stories with Task checklists.
+		//
+		// The persona's system_prompt + readiness gate prose lives in
+		// configs/presets/bmad.json. The user-prompt fragment below renders
+		// her dispatch context; the output-format fragment cites the
+		// storiesSchema shape.
+		// =====================================================================
+		{
+			// User-message renderer for story-preparer.
+			ID:       "software.story-preparer.user-prompt",
+			Category: prompt.CategoryUserPrompt,
+			Roles:    []prompt.Role{prompt.RoleStoryPreparer},
+			UserPrompt: func(ctx *prompt.AssemblyContext) (string, error) {
+				p := ctx.StoryPreparerPrompt
+				if p == nil {
+					return "", fmt.Errorf("story-preparer user-prompt: AssemblyContext.StoryPreparerPrompt is nil")
+				}
+				return renderStoryPreparerPrompt(p), nil
+			},
+		},
+		{
+			ID:       "software.story-preparer.output-format",
+			Category: prompt.CategoryOutputFormat,
+			Roles:    []prompt.Role{prompt.RoleStoryPreparer},
+			Content: `When your story preparation is ready, call the submit_work tool with these JSON fields:
+
+{
+  "stories": [
+    {
+      "id": "story.<plan-slug>.<reqseq>.<storyseq>",
+      "requirement_id": "<existing requirement.id>",
+      "title": "Human-readable story heading",
+      "intent": "1-2 sentences on what implementing this story proves.",
+      "components": ["component-name-1"],
+      "files_owned": ["src/path/one.go", "src/path/two.go"],
+      "depends_on": [],
+      "tasks": [
+        {
+          "id": "task.<plan-slug>.<reqseq>.<storyseq>.<taskseq>",
+          "story_id": "story.<plan-slug>.<reqseq>.<storyseq>",
+          "description": "Write failing test for boot lifecycle",
+          "depends_on": []
+        }
+      ]
+    }
+  ]
+}
+
+Required per story: id, requirement_id, title, intent, components, files_owned, depends_on, tasks. Required per task: id, story_id, description, depends_on.
+
+Readiness gate before signing off a Story (rejection means regen):
+  - files_owned non-empty AND at least one source-code file (.go/.java/.ts/.py/.rs/...).
+  - tasks non-empty (3-5 entries is typical).
+  - components entries match declared component_boundaries[].name from the architecture.
+  - depends_on entries (both story-level and task-level) resolve to other IDs you emit in this same call.
+
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
+		},
+
+		// =====================================================================
 		// Task Decomposer fragments (RoleTaskGenerator)
 		//
 		// The decomposer is dispatched by requirement-executor to partition a

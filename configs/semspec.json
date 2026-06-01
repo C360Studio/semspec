@@ -322,6 +322,17 @@
         "default_capability": "scenario_generation"
       }
     },
+    "story-preparer": {
+      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). PR 3 ships with config.enabled=false so architecture_generated → scenarios_generated flow is unchanged. PR 4 flips on alongside execution-manager + scenario-generator rewiring.",
+      "name": "story-preparer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": false,
+        "default_capability": "planning",
+        "max_generation_retries": 2
+      }
+    },
     "planner": {
       "name": "planner",
       "type": "processor",

@@ -98,6 +98,10 @@ type AssemblyContext struct {
 	// the architecture-generator component before assembly.
 	ArchitectPrompt *ArchitectPromptContext
 
+	// StoryPreparerPrompt carries data for the story-preparer user prompt.
+	// Set by the story-preparer component before assembly (ADR-043 Move 3).
+	StoryPreparerPrompt *StoryPreparerPromptContext
+
 	// PlanReviewerPrompt carries data for the plan-reviewer user prompt.
 	// Set by the plan-reviewer component before assembly.
 	PlanReviewerPrompt *PlanReviewerPromptContext

@@ -97,6 +97,8 @@ func schemaForDeliverable(deliverableType string) map[string]any {
 		return requirementsSchema()
 	case "scenarios":
 		return scenariosSchema()
+	case "stories":
+		return storiesSchema()
 	case "architecture":
 		return architectureSchema()
 	case "review":
@@ -296,6 +298,99 @@ func scenariosSchema() map[string]any {
 			},
 		},
 		"required":             []string{"scenarios"},
+		"additionalProperties": false,
+	}
+}
+
+// storiesSchema defines the submit_work parameters for the story-preparer
+// dispatch (ADR-043 Move 3). Sarah shards Requirements into ready-for-dev
+// Stories with intra-story Task checklists. The shape mirrors workflow.Story
+// + workflow.Task minus the runtime fields (Status, PreparedBy, PreparedAt,
+// CreatedAt, UpdatedAt) — those are populated by plan-manager on persistence,
+// not by the LLM.
+//
+// Strict-mode subset: no minItems / patternProperties. The per-Story
+// invariants (≥1 source file, ≥1 task, valid component refs, DAG without
+// cycles) are enforced by workflow.ValidateStories at parse time + by
+// plan-reviewer R3 rules at the post-mutation review pass. The schema's
+// job is structural shape; the validators' job is cardinality and
+// cross-entity coherence.
+func storiesSchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"stories": map[string]any{
+				"type":        "array",
+				"description": "Stories sharded from Requirements (ADR-043 Move 2). Sarah is the product owner: decide whether a Requirement maps to one Story or N Stories with DependsOn edges (single-component → one story; multi-component or prereq-ordered work → multiple stories). Every Story you sign off MUST have ≥1 source-code file in files_owned, ≥1 task in tasks, components that resolve to declared component_boundaries entries, and depends_on entries that resolve to other Story.ID values you emit in this same call.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"id": map[string]any{
+							"type":        "string",
+							"description": "Stable story identifier. Format: story.<plan-slug>.<reqseq>.<storyseq> — for example story.840b.1.1 for the first story of the first requirement of plan 840b. Use the requirement_id's numeric suffix as <reqseq> and a 1-indexed counter as <storyseq>.",
+						},
+						"requirement_id": map[string]any{
+							"type":        "string",
+							"description": "Parent requirement.id. Must match an existing requirement in the plan; plan-reviewer R3 rule story.requirement_orphan rejects unresolved references.",
+						},
+						"title": map[string]any{
+							"type":        "string",
+							"description": "Human-readable story heading (e.g. 'MAVSDK Lifecycle Bootstrap'). Sarah-authored, sentence-cased.",
+						},
+						"intent": map[string]any{
+							"type":        "string",
+							"description": "1-2 sentence description of what implementing this Story proves. Plain prose; the dev reads this as their unit-of-work summary.",
+						},
+						"components": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "ComponentDef.Name entries from the architecture's component_boundaries[] that this story implements. Emit at least one entry; plan-reviewer R3 rule story.unresolved_components rejects entries that don't match any declared component.",
+						},
+						"files_owned": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Workspace-relative paths this story owns. Compute as the UNION of the selected components' implementation_files — assemble it explicitly so the dev sees the exact file set. Emit at least one entry, and at least one entry MUST be a source-code file (.go/.java/.ts/.py/.rs/…); docs-only file sets are rejected by your readiness gate and by plan-reviewer R3 rule story.docs_only_files_owned.",
+						},
+						"depends_on": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Story.ID entries that must reach complete before this story can dispatch. Emit [] for stories with no prereqs. Plan-reviewer R3 rules story.depends_on_orphan and story.depends_on_cycle reject unresolved IDs and DAG cycles. Use this only for explicit prereq ordering — not implicit chronology.",
+						},
+						"tasks": map[string]any{
+							"type":        "array",
+							"description": "Sarah-authored ordered TDD checklist. Typical shape is 3-5 tasks per story: write failing tests, implement to pass, integration smoke, verify scenarios. The execution-manager runs tasks in topo order from intra-story depends_on. Emit at least one task; an empty list is rejected by your readiness gate and by plan-reviewer R3 rule task.missing_within_story.",
+							"items": map[string]any{
+								"type": "object",
+								"properties": map[string]any{
+									"id": map[string]any{
+										"type":        "string",
+										"description": "Stable task identifier. Format: task.<plan-slug>.<reqseq>.<storyseq>.<taskseq> — for example task.840b.1.1.1 for the first task of story story.840b.1.1.",
+									},
+									"story_id": map[string]any{
+										"type":        "string",
+										"description": "Parent story.id — must match the story this task is nested under.",
+									},
+									"description": map[string]any{
+										"type":        "string",
+										"description": "1-line statement of what this task accomplishes (e.g. 'Write failing test for boot lifecycle'). The dev decomposes further inside the TDD pipeline; you author intent, not implementation.",
+									},
+									"depends_on": map[string]any{
+										"type":        "array",
+										"items":       map[string]any{"type": "string"},
+										"description": "Other task.id entries within this same story that must reach complete before this task can dispatch. Emit [] when the task has no intra-story prereqs. Cross-story task ordering lives on story.depends_on, NOT here. Plan-reviewer R3 rule task.depends_on_cycle rejects intra-story DAG cycles.",
+									},
+								},
+								"required":             []string{"id", "story_id", "description", "depends_on"},
+								"additionalProperties": false,
+							},
+						},
+					},
+					"required":             []string{"id", "requirement_id", "title", "intent", "components", "files_owned", "depends_on", "tasks"},
+					"additionalProperties": false,
+				},
+			},
+		},
+		"required":             []string{"stories"},
 		"additionalProperties": false,
 	}
 }

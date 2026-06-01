@@ -149,6 +149,7 @@ func TestLoadPresetFromFile(t *testing.T) {
 		RoleRequirementGenerator: "John",
 		RoleArchitect:            "Winston",
 		RoleScenarioGenerator:    "Bob",
+		RoleStoryPreparer:        "Sarah",
 		RoleDeveloper:            "Amelia",
 		Role("qa"):               "Murat",
 	}

@@ -29,6 +29,7 @@ const (
 	mutationApproved              = "plan.mutation.approved"
 	mutationRequirementsGenerated = "plan.mutation.requirements.generated"
 	mutationArchitectureGenerated = "plan.mutation.architecture.generated"
+	mutationStoriesGenerated      = "plan.mutation.stories.generated"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationScenariosReviewed     = "plan.mutation.scenarios.reviewed"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
@@ -89,6 +90,19 @@ type architectureMutationRequest struct {
 	Slug         string                         `json:"slug"`
 	Architecture *workflow.ArchitectureDocument `json:"architecture,omitempty"`
 	TraceID      string                         `json:"trace_id,omitempty"`
+}
+
+// storiesMutationRequest is sent by story-preparer after Sarah finishes
+// sharding requirements into Stories (ADR-043 Move 3). plan-manager
+// persists Plan.Stories and transitions preparing_stories →
+// ready_for_execution. Mirror shape of workflow.StoriesGeneratedEvent so the
+// over-the-wire bytes are interchangeable between the typed event and the
+// mutation request body.
+type storiesMutationRequest struct {
+	Slug       string           `json:"slug"`
+	Stories    []workflow.Story `json:"stories"`
+	StoryCount int              `json:"story_count,omitempty"`
+	TraceID    string           `json:"trace_id,omitempty"`
 }
 
 // ReviewedMutationRequest is sent by the plan-reviewer after reviewing.
@@ -163,6 +177,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationApproved, c.handleApprovedMutation},
 		{mutationRequirementsGenerated, c.handleRequirementsMutation},
 		{mutationArchitectureGenerated, c.handleArchitectureMutation},
+		{mutationStoriesGenerated, c.handleStoriesMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationScenariosReviewed, c.handleScenariosReviewedMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
@@ -304,6 +319,57 @@ func (c *Component) handleArchitectureMutation(ctx context.Context, data []byte)
 	c.logger.Info("Architecture phase complete via mutation",
 		"slug", req.Slug,
 		"skipped", skipped)
+
+	return MutationResponse{Success: true}
+}
+
+// handleStoriesMutation persists Sarah's emitted Stories inline on the plan
+// and advances preparing_stories → ready_for_execution (ADR-043 Move 3).
+// Plan-reviewer R3 (mergeStoryFindings) fires on the new
+// ready_for_execution state via the normal review pipeline.
+//
+// Validates the wire payload (workflow.ValidateStories — the same gate
+// story-preparer runs pre-publish) before persistence. Validation
+// failures return Success=false so story-preparer treats it as a transient
+// error and retries; structural failures that escape Sarah's gate are
+// rare and indicate a wire-drift or operator-edited PLAN_STATES.
+func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) MutationResponse {
+	var req storiesMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+	if err := workflow.ValidateStories(req.Stories); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("validate stories: %v", err)}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusReadyForExecution) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → ready_for_execution", current)}
+	}
+
+	plan.Stories = req.Stories
+	plan.Status = workflow.StatusReadyForExecution
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save stories via mutation", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
+	}
+
+	c.logger.Info("Stories saved via mutation",
+		"slug", req.Slug,
+		"count", len(req.Stories))
 
 	return MutationResponse{Success: true}
 }

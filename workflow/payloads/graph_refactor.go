@@ -329,6 +329,52 @@ func (p *ScenariosForRequirementGeneratedPayload) UnmarshalJSON(data []byte) err
 	return json.Unmarshal(data, (*Alias)(&p.ScenariosForRequirementGeneratedEvent))
 }
 
+// StoriesGeneratedType is the message type for story-preparer's output
+// (ADR-043 Move 3). Sarah publishes one event per plan; plan-manager (the
+// single writer) consumes it, persists Plan.Stories + per-Task triples,
+// and transitions the plan from preparing_stories to ready_for_execution.
+var StoriesGeneratedType = message.Type{
+	Domain:   "workflow",
+	Category: "stories-generated",
+	Version:  "v1",
+}
+
+// StoriesGeneratedPayload wraps workflow.StoriesGeneratedEvent to satisfy
+// message.Payload for publishing via message.NewBaseMessage.
+type StoriesGeneratedPayload struct {
+	workflow.StoriesGeneratedEvent
+}
+
+// Schema implements message.Payload.
+func (p *StoriesGeneratedPayload) Schema() message.Type {
+	return StoriesGeneratedType
+}
+
+// Validate implements message.Payload. Slug is required (every event names
+// the owning plan). Empty Stories is allowed at the message layer — Sarah
+// may legitimately emit a zero-story payload as a "no stories to prepare"
+// signal that plan-manager treats as a pass-through. Per-Story structural
+// invariants live in workflow.ValidateStories, called by the story-preparer
+// before publish and by plan-manager R3 before transition.
+func (p *StoriesGeneratedPayload) Validate() error {
+	if p.Slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (p *StoriesGeneratedPayload) MarshalJSON() ([]byte, error) {
+	type Alias workflow.StoriesGeneratedEvent
+	return json.Marshal((*Alias)(&p.StoriesGeneratedEvent))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *StoriesGeneratedPayload) UnmarshalJSON(data []byte) error {
+	type Alias workflow.StoriesGeneratedEvent
+	return json.Unmarshal(data, (*Alias)(&p.StoriesGeneratedEvent))
+}
+
 // GenerationFailedType is the message type for generation failure events.
 var GenerationFailedType = message.Type{
 	Domain:   "workflow",

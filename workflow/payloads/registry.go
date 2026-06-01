@@ -65,6 +65,7 @@ func registerRequestPayloads(reg *payloadregistry.Registry) error {
 		{RequirementExecutionRequestType, "Requirement execution request from scenario-orchestrator", func() any { return &RequirementExecutionRequest{} }},
 		// Generation event payloads (single-writer fix)
 		{ScenariosForRequirementGeneratedType, "Per-requirement scenario generation result", func() any { return &ScenariosForRequirementGeneratedPayload{} }},
+		{StoriesGeneratedType, "Per-plan story preparation result from story-preparer (ADR-043 Move 3)", func() any { return &StoriesGeneratedPayload{} }},
 		{GenerationFailedType, "Generation failure event from requirement/scenario generators", func() any { return &GenerationFailedPayload{} }},
 		// GitHub integration payloads (ADR-031)
 		{GitHubPlanCreationRequestType, "GitHub issue-to-plan creation request", func() any { return &GitHubPlanCreationRequest{} }},
