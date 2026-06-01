@@ -121,8 +121,10 @@ sponsor pack documents the full forensic dig.
 |------|------|--------|----------|
 | 2026-05-16 | hard | 78 min, 9/9 verified-real, 2,283 LOC Java | [`docs/sponsor-packages/take-30/`](sponsor-packages/take-30/) |
 | 2026-05-22 | easy | 8.7 min, 8/8, ~24 loops | `task e2e:watch:llm -- gemini easy` bundle (extracted to `/tmp/semspec-watch-gemini-easy-*/bundle.tar.gz`) |
+| 2026-05-30 | easy | 6.7 min, 8/8 (post-ADR-040) | Mary analyst sub-phase + capability rules + dual OpenSpec emission |
+| 2026-05-31 | easy | 7.5 min, 8/8, 39 loops (post-ADR-041) | First validation after all six ADR-041 PRs land. Mary surfaces + Bob tier-tags + reviewer tier-aware contract all fire in trajectories. `/tmp/semspec-watch-gemini-easy-20260531-131619/` |
 
-Two data points. Both are N=1.
+Four data points. All N=1 each.
 
 ## 5. What we don't yet know
 
