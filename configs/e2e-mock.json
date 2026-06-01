@@ -27,6 +27,15 @@
           "mock-fast"
         ]
       },
+      "story_preparation": {
+        "description": "Sarah's Story sharding (ADR-043 Move 3; mock: returns canned Stories)",
+        "preferred": [
+          "mock-story-preparer"
+        ],
+        "fallback": [
+          "mock-planner"
+        ]
+      },
       "writing": {
         "description": "Documentation, plans, specifications (mock)",
         "preferred": [
@@ -188,6 +197,14 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-architecture-generator",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
+      },
+      "mock-story-preparer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-story-preparer",
         "max_tokens": 32768,
         "supports_tools": true,
         "tool_format": "openai"
@@ -768,13 +785,13 @@
       }
     },
     "story-preparer": {
-      "_comment": "ADR-043 Move 3 — Sarah is enabled in production (configs/semspec.json) as of PR 4c, but mock e2e stays on the legacy architecture_generated → generating_scenarios path until a future PR authors mock-story-preparer.json fixtures and a story_preparation capability mapping. Override here keeps mock e2e scenarios running unchanged.",
+      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). Production is enabled in configs/semspec.json as of PR 4c. PR 4d wires the mock infrastructure (story_preparation capability + mock-story-preparer endpoint above) but keeps Sarah disabled in mock e2e because per-scenario fixtures must reference real requirement IDs (slug-dependent), and authoring 21 of those is its own PR. PR 4e will land the fixtures + re-enable here. The default_capability is set to story_preparation so the day fixtures land, the routing already works.",
       "name": "story-preparer",
       "type": "processor",
       "enabled": true,
       "config": {
         "enabled": false,
-        "default_capability": "planning",
+        "default_capability": "story_preparation",
         "max_generation_retries": 2
       }
     },

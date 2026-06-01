@@ -27,6 +27,15 @@
           "mock-fast"
         ]
       },
+      "story_preparation": {
+        "description": "Sarah's Story sharding (ADR-043 Move 3; mock: returns canned Stories)",
+        "preferred": [
+          "mock-story-preparer"
+        ],
+        "fallback": [
+          "mock-planner"
+        ]
+      },
       "writing": {
         "description": "Documentation, plans, specifications (mock)",
         "preferred": [
@@ -196,6 +205,14 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-architecture-generator",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
+      },
+      "mock-story-preparer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-story-preparer",
         "max_tokens": 32768,
         "supports_tools": true,
         "tool_format": "openai"
@@ -525,13 +542,13 @@
       }
     },
     "story-preparer": {
-      "_comment": "ADR-043 Move 3 — Sarah is enabled in production (configs/semspec.json) as of PR 4c, but UI mock e2e stays on the legacy path until mock-story-preparer.json fixtures + a story_preparation capability mapping land.",
+      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). UI e2e infrastructure wired in PR 4d (story_preparation capability + mock-story-preparer endpoint above); Sarah enabled flip happens in PR 4e alongside per-scenario fixtures with real requirement IDs.",
       "name": "story-preparer",
       "type": "processor",
       "enabled": true,
       "config": {
         "enabled": false,
-        "default_capability": "planning",
+        "default_capability": "story_preparation",
         "max_generation_retries": 2
       }
     },
