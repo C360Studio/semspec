@@ -71,6 +71,25 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 	})
 
+	// ADR-043 PR 4i — story_reprepare is the new action class for wedges
+	// whose root cause is Sarah's Story-shaping (wrong task DAG, missing
+	// files_owned, mis-selected components). Reaches back to story-preparer
+	// for a re-prep cycle. Callers materialize once execution dispatches
+	// per-Story (PR 4h).
+	t.Run("happy path story_reprepare", func(t *testing.T) {
+		raw := `{"action":"story_reprepare","diagnosis":"Sarah's task DAG missed integration smoke; dev loop has no scaffold to verify against PX4 SITL.","recovery_succeeded":true}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected ok, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionStoryReprepare {
+			t.Errorf("Action: got %q, want story_reprepare", got.Action)
+		}
+		if !strings.Contains(got.Diagnosis, "Sarah") {
+			t.Errorf("diagnosis content lost: %q", got.Diagnosis)
+		}
+	})
+
 	cases := []struct {
 		name string
 		raw  string

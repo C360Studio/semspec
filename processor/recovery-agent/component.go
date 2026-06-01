@@ -701,11 +701,21 @@ func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason st
 // through requirement_change so the cascade dirty-marks the req for
 // re-run; terminal actions go through execution_exhausted so plan-manager
 // auto-archives when the subject req reaches a non-failed terminal state.
+//
+// story_reprepare (ADR-043 PR 4i) maps to requirement_change because the
+// cascade target is the same: dirty-mark the parent requirement so the
+// downstream chain (Sarah's preparing_stories → ready_for_execution)
+// re-runs. The distinction between story_reprepare and the other
+// requirement_change actions surfaces in the PlanDecision rationale text,
+// which plan-manager threads into Sarah's RecoveryHint on the next
+// dispatch — Sarah sees "the wedge happened because <X>; re-shard with
+// <Y> in mind."
 func recoveryActionToPlanDecisionKind(action payloads.RecoveryActionKind) workflow.PlanDecisionKind {
 	switch action {
 	case payloads.RecoveryActionRefinePrompt,
 		payloads.RecoveryActionNarrowScope,
-		payloads.RecoveryActionSplitReq:
+		payloads.RecoveryActionSplitReq,
+		payloads.RecoveryActionStoryReprepare:
 		return workflow.PlanDecisionKindRequirementChange
 	case payloads.RecoveryActionEscalateHuman, payloads.RecoveryActionMarkUnrecoverable:
 		return workflow.PlanDecisionKindExecutionExhausted

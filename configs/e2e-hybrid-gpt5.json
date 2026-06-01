@@ -777,6 +777,17 @@
         "default_capability": "architecture"
       }
     },
+    "story-preparer": {
+      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). Real-LLM configs run Sarah on the same planning capability endpoint as Mary; the persona prompt + storiesSchema (positional/labeled per PR 4e) carry the differentiation. Added in PR 4k after the gemini @easy smoke caught Sarah dormant on every real-LLM run.",
+      "name": "story-preparer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": true,
+        "default_capability": "planning",
+        "max_generation_retries": 2
+      }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",
