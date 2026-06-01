@@ -488,8 +488,13 @@ func renderScenarioGeneratorPrompt(p *prompt.ScenarioGeneratorPromptContext) str
 	}
 
 	tiersSection := renderRequiredTiers(p.RequiredTiers)
+	storySection := renderScenarioStorySection(p)
+	taskScope := "requirement"
+	if p.StoryID != "" {
+		taskScope = "story (one slice of the requirement)"
+	}
 
-	base := fmt.Sprintf(`You are generating BDD scenarios for a specific requirement.
+	base := fmt.Sprintf(`You are generating BDD scenarios for a specific %s.
 
 ## Plan: %s
 
@@ -498,10 +503,10 @@ func renderScenarioGeneratorPrompt(p *prompt.ScenarioGeneratorPromptContext) str
 ## Requirement: %s
 
 %s
-%s%s
+%s%s%s
 ## Your Task
 
-Generate scenarios that define the observable behavior for this requirement. Emit AT LEAST ONE scenario for each tier listed in "Required tiers" above; you may emit additional scenarios per tier for edge cases. Each scenario must:
+Generate scenarios that define the observable behavior for this %s. Emit AT LEAST ONE scenario for each tier listed in "Required tiers" above; you may emit additional scenarios per tier for edge cases. Each scenario must:
 - Describe ONE observable behavior
 - Be independently executable — a QA engineer could run it without additional context at the tier's level
 - Use specific, measurable outcomes
@@ -572,7 +577,7 @@ Return ONLY valid JSON matching this exact structure:
 `+"```"+`
 
 **Important:** Return ONLY the JSON object, no additional text or explanation.
-`, p.PlanTitle, p.PlanGoal, contextSection, p.RequirementTitle, p.RequirementDescription, archSection, tiersSection)
+`, taskScope, p.PlanTitle, p.PlanGoal, contextSection, p.RequirementTitle, p.RequirementDescription, archSection, tiersSection, storySection, taskScope)
 
 	if p.PreviousError != "" {
 		base += fmt.Sprintf(`
@@ -595,6 +600,35 @@ The previous set of scenarios was reviewed and rejected. Address ALL of the foll
 	}
 
 	return base
+}
+
+// renderScenarioStorySection produces the per-Story scope block injected
+// into Bob's user prompt when the dispatcher is operating in per-Story
+// mode (ADR-043 PR 4j). When StoryID is empty (legacy plans / mock
+// fixtures without Sarah Stories) the section is omitted and Bob authors
+// scenarios for the whole Requirement. Otherwise the section names the
+// Story's title, intent, files_owned, and components so Bob can scope
+// scenarios to this specific slice of work.
+func renderScenarioStorySection(p *prompt.ScenarioGeneratorPromptContext) string {
+	if p.StoryID == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("\n## Story (your authoring scope — a slice of the requirement above)\n\n")
+	if p.StoryTitle != "" {
+		fmt.Fprintf(&sb, "**Title:** %s\n", p.StoryTitle)
+	}
+	if p.StoryIntent != "" {
+		fmt.Fprintf(&sb, "**Intent:** %s\n", p.StoryIntent)
+	}
+	if len(p.StoryComponents) > 0 {
+		fmt.Fprintf(&sb, "**Components:** %s\n", strings.Join(p.StoryComponents, ", "))
+	}
+	if len(p.StoryFilesOwned) > 0 {
+		fmt.Fprintf(&sb, "**Files owned by this story:** %s\n", strings.Join(p.StoryFilesOwned, ", "))
+	}
+	sb.WriteString("\nAuthor scenarios for THIS Story only — do not duplicate scenarios that belong to sibling Stories on the same Requirement. The reviewer will validate Story-scoped scenarios independently.\n")
+	return sb.String()
 }
 
 // renderRequiredTiers formats the classifier's tier-emission output as a

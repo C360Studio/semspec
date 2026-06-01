@@ -105,6 +105,20 @@ type ScenarioGeneratorRequest struct {
 	// back-compat); the dispatcher falls through to the legacy single-tier
 	// prompt body in that case.
 	RequiredTiers []RequiredTier `json:"required_tiers,omitempty"`
+
+	// Story fields — populated when dispatching per-Story (ADR-043 PR 4j).
+	// Bob authors one batch of scenarios per Story instead of per Requirement;
+	// scenarios in the batch are auto-attached to this Story server-side.
+	//
+	// When StoryID is empty, the dispatcher operates in legacy per-Requirement
+	// mode (pre-Sarah plans / mock fixtures without Stories) — Bob still emits
+	// scenarios for the whole Requirement and the server falls back to the
+	// "first story owns the scenarios" lookup.
+	StoryID         string   `json:"story_id,omitempty"`
+	StoryTitle      string   `json:"story_title,omitempty"`
+	StoryIntent     string   `json:"story_intent,omitempty"`
+	StoryFilesOwned []string `json:"story_files_owned,omitempty"`
+	StoryComponents []string `json:"story_components,omitempty"`
 }
 
 // RequiredTier is the wire shape carried in ScenarioGeneratorRequest for a

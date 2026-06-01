@@ -37,6 +37,18 @@ type ScenarioGeneratorPromptContext struct {
 	// bullet list so the LLM emits ≥1 scenario per required tier with the
 	// correct tag + binding.
 	RequiredTiers []RequiredTier
+
+	// Story fields — populated when the dispatcher is operating in per-Story
+	// mode (ADR-043 PR 4j). When StoryID is non-empty, the user-prompt
+	// renderer scopes the authoring task to this Sarah-prepared Story
+	// (a slice of the parent Requirement) rather than the whole Requirement.
+	// StoryID empty means legacy per-Requirement mode — pre-Sarah plans or
+	// mock fixtures without Stories.
+	StoryID         string
+	StoryTitle      string
+	StoryIntent     string
+	StoryFilesOwned []string
+	StoryComponents []string
 }
 
 // RequiredTier names one tier tag the scenario-generator MUST cover for the

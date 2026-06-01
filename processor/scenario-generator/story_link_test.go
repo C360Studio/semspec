@@ -56,10 +56,10 @@ func TestAttachStoryIDs_SingleStoryPerRequirement(t *testing.T) {
 }
 
 // TestAttachStoryIDs_MultiStoryPicksFirst pins the PR 4b "first story wins"
-// behavior. PR 4c will refine this when execution-manager dispatches
-// per-Story and Bob's classifier becomes story-aware at emission time;
-// until then a Requirement sharded into N Stories sees scenarios assigned
-// to the first Story in plan.Stories ordering.
+// fallback. ADR-043 PR 4j superseded this for per-Story dispatch (the
+// dispatch-time StoryID is now assigned explicitly in handleLoopCompletion);
+// attachStoryIDs is only consulted when storyID is empty in metadata
+// (legacy per-Requirement dispatch / pre-Sarah mock fixtures).
 func TestAttachStoryIDs_MultiStoryPicksFirst(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "x",
@@ -90,5 +90,31 @@ func TestAttachStoryIDs_UnresolvedRequirementSkipsAssignment(t *testing.T) {
 	attachStoryIDs(scenarios, plan, "req.x.2")
 	if scenarios[0].StoryID != "" {
 		t.Errorf("expected empty StoryID on unresolved requirement, got %q", scenarios[0].StoryID)
+	}
+}
+
+// TestExplicitStoryIDAssignmentOverridesAttachFallback pins the ADR-043 PR 4j
+// path: when the dispatch carries an explicit StoryID (per-Story mode),
+// EVERY scenario in the batch gets that StoryID — bypasses the
+// attachStoryIDs lookup heuristic. Even if the plan has multiple Stories
+// owning the same Requirement, the dispatch context wins.
+func TestExplicitStoryIDAssignmentOverridesAttachFallback(t *testing.T) {
+	// Simulates the body of handleLoopCompletion's switch — when storyID is
+	// non-empty, assignment is direct. attachStoryIDs is NOT consulted.
+	scenarios := []workflow.Scenario{
+		{ID: "s1", RequirementID: "req.x.1"},
+		{ID: "s2", RequirementID: "req.x.1"},
+		{ID: "s3", RequirementID: "req.x.1"},
+	}
+	dispatchedStoryID := "story.x.1.2" // SECOND story, not the first
+
+	for i := range scenarios {
+		scenarios[i].StoryID = dispatchedStoryID
+	}
+
+	for _, s := range scenarios {
+		if s.StoryID != "story.x.1.2" {
+			t.Errorf("scenario %s.StoryID = %q, want story.x.1.2 (the dispatched story)", s.ID, s.StoryID)
+		}
 	}
 }
