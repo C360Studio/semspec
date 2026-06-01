@@ -388,6 +388,85 @@ func writePlanReviewerProjectFileTree(sb *strings.Builder, tree string) {
 	sb.WriteString("```\n\n")
 }
 
+// renderStoryPreparerPrompt produces the story-preparer (Sarah) agent's user
+// message (ADR-043 Move 3). Sarah's system_prompt + readiness gate prose
+// live in configs/presets/bmad.json; this fragment renders her dispatch
+// inputs — the plan goal/context, the analyst capabilities, the architect
+// component map, and the requirement summaries she's sharding.
+func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
+	var sb strings.Builder
+	sb.WriteString("You are sharding requirements into ready-for-dev Stories with Task checklists.\n\n")
+	fmt.Fprintf(&sb, "## Plan: %s\n\n", p.PlanTitle)
+	if p.PlanGoal != "" {
+		fmt.Fprintf(&sb, "**Goal:** %s\n\n", p.PlanGoal)
+	}
+	if p.PlanContext != "" {
+		fmt.Fprintf(&sb, "**Context:** %s\n\n", p.PlanContext)
+	}
+
+	if len(p.Capabilities) > 0 {
+		sb.WriteString("## Capabilities (from analyst)\n\n")
+		for _, c := range p.Capabilities {
+			fmt.Fprintf(&sb, "- **%s** — %s\n", c.Name, c.Description)
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(p.ArchitectureComponents) > 0 {
+		sb.WriteString("## Architecture Components (Winston's tech-spec)\n\n")
+		sb.WriteString("Each component declares the files it owns and the capabilities it implements. Use these as the source of truth when populating story.components and story.files_owned.\n\n")
+		for _, comp := range p.ArchitectureComponents {
+			fmt.Fprintf(&sb, "### %s\n", comp.Name)
+			if comp.Responsibility != "" {
+				fmt.Fprintf(&sb, "**Responsibility:** %s\n\n", comp.Responsibility)
+			}
+			if len(comp.ImplementationFiles) > 0 {
+				sb.WriteString("**Implementation files:**\n")
+				for _, f := range comp.ImplementationFiles {
+					fmt.Fprintf(&sb, "- `%s`\n", f)
+				}
+				sb.WriteString("\n")
+			}
+			if len(comp.Capabilities) > 0 {
+				fmt.Fprintf(&sb, "**Implements capabilities:** %s\n\n", strings.Join(comp.Capabilities, ", "))
+			}
+		}
+	}
+
+	if len(p.Requirements) > 0 {
+		sb.WriteString("## Requirements to Shard\n\n")
+		for _, r := range p.Requirements {
+			fmt.Fprintf(&sb, "### %s — %s\n", r.ID, r.Title)
+			if r.Description != "" {
+				fmt.Fprintf(&sb, "%s\n\n", r.Description)
+			}
+			if len(r.DependsOn) > 0 {
+				fmt.Fprintf(&sb, "*Depends on requirements:* %s\n\n", strings.Join(r.DependsOn, ", "))
+			}
+		}
+	}
+
+	sb.WriteString("\n## Your Task\n\n")
+	sb.WriteString("For each requirement above, decide whether it shards into ONE Story or N Stories with depends_on edges. Single-component requirements are usually one Story; multi-component or prereq-ordered work splits into multiple Stories.\n\n")
+	sb.WriteString("For each Story:\n")
+	sb.WriteString("- Pick the components it modifies (from the Architecture Components above).\n")
+	sb.WriteString("- Compute files_owned as the UNION of those components' implementation_files. Assemble the list explicitly — the dev needs to see the exact file set.\n")
+	sb.WriteString("- Author an ordered TDD checklist of 3-5 Tasks (write failing test, implement to pass, integration smoke, verify scenarios).\n")
+	sb.WriteString("- Express any cross-story prereqs in story.depends_on. Express intra-story TDD ordering in task.depends_on. Cross-story task ordering does NOT belong on task.depends_on.\n\n")
+	sb.WriteString("Apply your readiness gate before signing off each Story. Any Story that doesn't pass — empty files_owned, docs-only files_owned, empty tasks, unresolved component reference — must be flagged back rather than emitted.\n\n")
+
+	if p.PreviousError != "" {
+		fmt.Fprintf(&sb, "## Previous Attempt Failed\n\nYour previous output could not be processed: %s\n\nPlease fix the issue and ensure your response is valid JSON matching the required format.\n\n", p.PreviousError)
+	}
+
+	if p.ReviewFindings != "" {
+		fmt.Fprintf(&sb, "## Previous Review Findings (Address These)\n\nThe previous set of stories was reviewed and rejected. Address ALL of the following findings:\n\n%s\n%s",
+			p.ReviewFindings, reviewFindingsActionDirective())
+	}
+
+	return sb.String()
+}
+
 // renderScenarioGeneratorPrompt produces the scenario-generator agent's user
 // message. Mirrors the legacy workflow/prompts.ScenarioGeneratorPrompt body;
 // ArchitectureContext is pre-rendered upstream. ADR-041 Move 3 added the

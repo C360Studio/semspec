@@ -46,6 +46,7 @@ import (
 	researchermanager "github.com/c360studio/semspec/processor/researcher-manager"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
+	storypreparer "github.com/c360studio/semspec/processor/story-preparer"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semspec/prompt"
@@ -275,6 +276,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return researchermanager.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return architecturegenerator.Register(componentRegistry) },
+		func() error { return storypreparer.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return planmanager.Register(componentRegistry) },

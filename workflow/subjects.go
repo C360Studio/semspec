@@ -41,6 +41,19 @@ type ScenariosGeneratedEvent struct {
 	TraceID       string `json:"trace_id,omitempty"`
 }
 
+// StoriesGeneratedEvent is published by the story-preparer when Sarah has
+// finished sharding requirements into Stories with Task checklists
+// (ADR-043 Move 3). Carries the full Stories list inline so plan-manager
+// (the single writer) can persist through its store and transition the
+// plan to ready_for_execution. TraceID threads loop telemetry through
+// to the manager for trajectory correlation.
+type StoriesGeneratedEvent struct {
+	Slug       string  `json:"slug"`
+	Stories    []Story `json:"stories"`
+	StoryCount int     `json:"story_count"` // len(Stories), for logging
+	TraceID    string  `json:"trace_id,omitempty"`
+}
+
 // GenerationFailedEvent is published when a generator fails after all retries.
 // Plan-manager marks the plan as errored on receipt.
 type GenerationFailedEvent struct {
@@ -201,6 +214,8 @@ var (
 		"workflow.events.scenarios.requirement_generated")
 	ScenariosGenerated = natsclient.NewSubject[ScenariosGeneratedEvent](
 		"workflow.events.scenarios.generated")
+	StoriesGenerated = natsclient.NewSubject[StoriesGeneratedEvent](
+		"workflow.events.stories.generated")
 	GenerationFailed = natsclient.NewSubject[GenerationFailedEvent](
 		"workflow.events.generation.failed")
 
