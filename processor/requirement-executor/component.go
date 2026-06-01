@@ -504,6 +504,8 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		RequirementBranch: reqExec.RequirementBranch,
 		CurrentNodeIdx:    reqExec.CurrentNodeIdx,
 		SortedNodeIDs:     reqExec.SortedNodeIDs,
+		SortedStoryIDs:    reqExec.SortedStoryIDs,
+		CurrentStoryIdx:   reqExec.CurrentStoryIdx,
 		RetryCount:        reqExec.RetryCount,
 		MaxRetries:        reqExec.MaxRetries,
 		storeKey:          key,
@@ -922,21 +924,72 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 		return
 	}
 
-	dag, synthErr := synthesizeTaskDAGFromStories(plan, exec.RequirementID)
-	if synthErr != nil {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("synthesize DAG from plan.Stories failed: %v", synthErr))
-		return
+	// Populate SortedStoryIDs the first time the requirement enters this
+	// path. Subsequent calls (recovery resume, etc.) re-enter with the
+	// list already populated; CurrentStoryIdx is the cursor.
+	if len(exec.SortedStoryIDs) == 0 {
+		stories := plan.StoriesForRequirement(exec.RequirementID)
+		if len(stories) == 0 {
+			c.markFailedLocked(ctx, exec, fmt.Sprintf("no Stories on plan for requirement %s — story-preparer must run before execution", exec.RequirementID))
+			return
+		}
+		sortedIDs, err := topoSortStoryIDs(stories)
+		if err != nil {
+			c.markFailedLocked(ctx, exec, fmt.Sprintf("topo-sort stories failed: %v", err))
+			return
+		}
+		exec.SortedStoryIDs = sortedIDs
+		exec.CurrentStoryIdx = 0
 	}
-	if dag == nil {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("no Stories on plan for requirement %s — story-preparer must run before execution", exec.RequirementID))
+
+	c.dispatchCurrentStoryLocked(ctx, exec, plan)
+}
+
+// dispatchCurrentStoryLocked synthesizes the DAG for the Story at
+// SortedStoryIDs[CurrentStoryIdx] and hands off to applyParsedDAGLocked.
+// Caller must hold exec.mu.
+func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
+	if exec.CurrentStoryIdx < 0 || exec.CurrentStoryIdx >= len(exec.SortedStoryIDs) {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("CurrentStoryIdx %d out of range [0, %d)", exec.CurrentStoryIdx, len(exec.SortedStoryIDs)))
 		return
 	}
 
-	c.logger.Info("Synthesized DAG from plan.Stories",
+	currentStoryID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
+	story, ok := findStoryByID(plan, currentStoryID)
+	if !ok {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("story %q not found on plan (planning regression — Sarah output drifted from SortedStoryIDs)", currentStoryID))
+		return
+	}
+
+	dag, synthErr := synthesizeTaskDAGForStory(plan, story)
+	if synthErr != nil {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("synthesize DAG for story %s failed: %v", currentStoryID, synthErr))
+		return
+	}
+
+	c.logger.Info("Dispatching story DAG",
 		"entity_id", exec.EntityID,
 		"requirement_id", exec.RequirementID,
+		"story_id", currentStoryID,
+		"story_idx", exec.CurrentStoryIdx+1,
+		"story_total", len(exec.SortedStoryIDs),
 		"node_count", len(dag.Nodes))
+
 	c.applyParsedDAGLocked(ctx, exec, dag, "stories-synthesis")
+}
+
+// findStoryByID returns the Story with the given ID from plan.Stories.
+// Returns the zero Story and false when not found.
+func findStoryByID(plan *workflow.Plan, storyID string) (workflow.Story, bool) {
+	if plan == nil {
+		return workflow.Story{}, false
+	}
+	for _, s := range plan.Stories {
+		if s.ID == storyID {
+			return s, true
+		}
+	}
+	return workflow.Story{}, false
 }
 
 // loadPlanScope reads the plan from PLAN_STATES KV and returns its scope.
@@ -1465,10 +1518,7 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 	exec.ScenarioVerdicts = result.ScenarioVerdicts
 
 	if result.Verdict == "approved" {
-		if c.handleApprovedClaimMismatchLocked(ctx, exec) {
-			return
-		}
-		c.markCompletedLocked(ctx, exec)
+		c.handleApprovedVerdictLocked(ctx, exec)
 		return
 	}
 
@@ -1706,10 +1756,14 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution, re
 		NodeResults:   c.buildNodeSummaries(exec),
 	}
 
-	// Populate per-scenario specs for multi-scenario verdict tracking.
-	if len(exec.Scenarios) > 0 {
-		specs := make([]prompt.ScenarioSpec, len(exec.Scenarios))
-		for i, s := range exec.Scenarios {
+	// ADR-043 PR 4h: per-Story reviewer scope. Filter the requirement's
+	// scenarios down to the current Story's scenarios — that is the verdict
+	// surface for THIS reviewer dispatch. Other Stories' scenarios are out
+	// of scope (they'll get their own reviewer pass).
+	scoped := scopeScenariosToCurrentStory(exec)
+	if len(scoped) > 0 {
+		specs := make([]prompt.ScenarioSpec, len(scoped))
+		for i, s := range scoped {
 			specs[i] = prompt.ScenarioSpec{
 				ID:    s.ID,
 				Given: s.Given,
@@ -1736,6 +1790,98 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution, re
 		Vocabulary:            prompt.GlobalPersonas().Vocabulary(),
 		HasResponseFormat:     terminal.EndpointSupportsResponseFormat(endpoint),
 	}
+}
+
+// handleApprovedVerdictLocked routes an approved reviewer verdict. ADR-043
+// PR 4h split this off handleRequirementReviewerCompleteLocked to keep the
+// outer function under the function-length lint cap and to localize the
+// per-Story advancement decision.
+//
+// Caller must hold exec.mu.
+func (c *Component) handleApprovedVerdictLocked(ctx context.Context, exec *requirementExecution) {
+	if c.handleApprovedClaimMismatchLocked(ctx, exec) {
+		return
+	}
+	// Per-Story reviewer: if more Stories remain, advance the cursor and
+	// dispatch the next Story's DAG; otherwise mark the whole requirement
+	// complete.
+	if exec.CurrentStoryIdx+1 < len(exec.SortedStoryIDs) {
+		c.advanceToNextStoryLocked(ctx, exec)
+		return
+	}
+	c.markCompletedLocked(ctx, exec)
+}
+
+// advanceToNextStoryLocked increments CurrentStoryIdx, clears per-Story
+// state (DAG / node bookkeeping / reviewer verdict / retry counters), and
+// dispatches the next Story's DAG. NodeResults accumulate across Stories
+// so the requirement-final aggregateFiles call still sees every node's
+// output for the merge-commit cross-check.
+//
+// Caller must hold exec.mu.
+func (c *Component) advanceToNextStoryLocked(ctx context.Context, exec *requirementExecution) {
+	exec.CurrentStoryIdx++
+
+	// Per-Story state reset. NodeResults intentionally NOT reset — they
+	// feed the requirement-level claim/observation cross-check at
+	// markCompletedLocked.
+	exec.DAG = nil
+	exec.SortedNodeIDs = nil
+	exec.NodeIndex = nil
+	exec.CurrentNodeIdx = -1
+	exec.CurrentNodeTaskID = ""
+	exec.VisitedNodes = make(map[string]bool)
+	exec.ReviewVerdict = ""
+	exec.ReviewFeedback = ""
+	exec.ReviewRetryCount = 0
+	exec.RetryCount = 0
+	exec.DirtyNodeIDs = nil
+	exec.ScenarioVerdicts = nil
+
+	nextStoryID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
+	c.logger.Info("Advancing to next Story",
+		"entity_id", exec.EntityID,
+		"requirement_id", exec.RequirementID,
+		"next_story_id", nextStoryID,
+		"story_idx", exec.CurrentStoryIdx+1,
+		"story_total", len(exec.SortedStoryIDs))
+
+	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
+	if err != nil {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("load plan from KV failed mid-requirement: %v", err))
+		return
+	}
+	if plan == nil {
+		c.markFailedLocked(ctx, exec, "plan disappeared from PLAN_STATES mid-requirement")
+		return
+	}
+
+	c.dispatchCurrentStoryLocked(ctx, exec, plan)
+}
+
+// scopeScenariosToCurrentStory returns the subset of exec.Scenarios whose
+// StoryID matches the Story currently being executed (per CurrentStoryIdx).
+// When no Stories are tracked or the current Story ID can't be resolved,
+// falls back to all exec.Scenarios — preserves pre-ADR-043 behavior for
+// legacy plans that reach the reviewer without SortedStoryIDs populated.
+func scopeScenariosToCurrentStory(exec *requirementExecution) []workflow.Scenario {
+	if exec == nil {
+		return nil
+	}
+	if exec.CurrentStoryIdx < 0 || exec.CurrentStoryIdx >= len(exec.SortedStoryIDs) {
+		return exec.Scenarios
+	}
+	currentStoryID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
+	if currentStoryID == "" {
+		return exec.Scenarios
+	}
+	out := make([]workflow.Scenario, 0, len(exec.Scenarios))
+	for _, s := range exec.Scenarios {
+		if s.StoryID == currentStoryID {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // resolveProvider maps a model string to a prompt.Provider.

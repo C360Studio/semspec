@@ -6,98 +6,50 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// synthesizeTaskDAGFromStories converts Sarah's Stories (ADR-043 Move 3 +
-// PR 4e positional shape, persisted by plan-manager from
-// StoriesGeneratedEvent) into a TaskDAG that the
-// requirement-executor's existing downstream consumes unchanged. This is
-// the PR 4f decomposer-bypass: when the plan carries Sarah-authored
-// Stories for the requirement, the LLM decomposer call is skipped — the
-// DAG comes directly from the structured Story.Tasks.
+// synthesizeTaskDAGForStory converts a single Sarah-prepared Story into a
+// TaskDAG. ADR-043 PR 4h: per-Story dispatch synthesizes one DAG per Story
+// (instead of combining every Story on a requirement into one flat DAG).
+// Sequencing of Stories within a requirement is handled by the caller via
+// Story.DependsOn topo-sort; the synthesized DAG carries only the Story's
+// own intra-Task ordering.
 //
 // Mapping:
-//   - Each Task in each Story for the requirement becomes one TaskNode.
+//   - Each Task in the Story becomes one TaskNode.
 //   - TaskNode.ID = Task.ID (canonical task.<slug>.<reqseq>.<storyseq>.<taskseq>).
-//   - TaskNode.Prompt = Task.Description (Sarah's 1-line intent).
-//   - TaskNode.Role = "developer" (matches the decomposer's default role
-//     for code-producing tasks; future ADR-043 work may differentiate
-//     review / qa nodes here).
-//   - TaskNode.DependsOn = intra-story Task.DependsOn (canonical IDs),
-//     extended on entry tasks (Tasks with empty DependsOn) with the exit
-//     tasks of cross-story prereqs from Story.DependsOn.
+//   - TaskNode.Prompt = Task.Description.
+//   - TaskNode.Role = "developer".
+//   - TaskNode.DependsOn = intra-story Task.DependsOn (canonical IDs).
 //   - TaskNode.FileScope = parent Story.FilesOwned.
-//   - TaskNode.ScenarioIDs = IDs of scenarios whose StoryID == this story
-//     (populated by Bob's attachStoryIDs in PR 4b; empty for legacy plans).
+//   - TaskNode.ScenarioIDs = IDs of scenarios whose StoryID == this story.
 //
-// Returns (nil, nil) when no Stories own the requirement — signals the
-// caller to fall back to the legacy decomposer-LLM dispatch path.
-// Returns (nil, err) when the synthesis produces a structurally invalid
-// DAG (caller surfaces as a parse-style failure).
-func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*TaskDAG, error) {
-	if plan == nil || requirementID == "" {
-		return nil, nil
+// Returns (nil, err) on Sarah-readiness gate violations (no tasks / no
+// files_owned). Caller surfaces as a planning-phase failure.
+func synthesizeTaskDAGForStory(plan *workflow.Plan, story workflow.Story) (*TaskDAG, error) {
+	if len(story.Tasks) == 0 {
+		return nil, fmt.Errorf("story %q has no tasks; cannot synthesize DAG", story.ID)
 	}
-	stories := plan.StoriesForRequirement(requirementID)
-	if len(stories) == 0 {
-		return nil, nil
+	if len(story.FilesOwned) == 0 {
+		return nil, fmt.Errorf("story %q has empty files_owned; cannot synthesize DAG", story.ID)
 	}
 
-	// Pre-compute per-story exit tasks (tasks no other task in the same
-	// story depends on) so cross-story DependsOn can expand to concrete
-	// node-level prereqs.
-	exitTasksByStoryID := storyExitTasks(stories)
-
-	nodes := make([]TaskNode, 0)
-	for _, s := range stories {
-		if len(s.Tasks) == 0 {
-			// Empty Tasks on a story is a Sarah readiness-gate violation —
-			// caught upstream by workflow.ValidateStories. Surface as a
-			// synthesis error here so the caller knows the bypass can't
-			// proceed.
-			return nil, fmt.Errorf("story %q has no tasks; cannot synthesize DAG", s.ID)
-		}
-		if len(s.FilesOwned) == 0 {
-			return nil, fmt.Errorf("story %q has empty files_owned; cannot synthesize DAG (Sarah's gate should have caught this)", s.ID)
-		}
-
-		// Collect cross-story prereqs: exit tasks of every story this story
-		// depends on. Entry tasks (Task.DependsOn empty) inherit them.
-		var crossPrereqs []string
-		for _, depStoryID := range s.DependsOn {
-			crossPrereqs = append(crossPrereqs, exitTasksByStoryID[depStoryID]...)
-		}
-
-		// ScenarioIDs come from the plan's scenarios whose StoryID matches.
-		var scenarioIDs []string
-		for _, sc := range plan.ScenariosForStory(s.ID) {
+	var scenarioIDs []string
+	if plan != nil {
+		for _, sc := range plan.ScenariosForStory(story.ID) {
 			scenarioIDs = append(scenarioIDs, sc.ID)
 		}
-
-		// FileScope: clone Story.FilesOwned (each TaskNode gets the
-		// full story scope; per-task file partitioning is a refinement
-		// PR 4g+ may introduce).
-		files := append([]string(nil), s.FilesOwned...)
-
-		for _, t := range s.Tasks {
-			deps := append([]string(nil), t.DependsOn...)
-			if len(t.DependsOn) == 0 && len(crossPrereqs) > 0 {
-				// Entry task — inherit cross-story prereqs.
-				deps = append(deps, crossPrereqs...)
-			}
-			nodes = append(nodes, TaskNode{
-				ID:          t.ID,
-				Prompt:      t.Description,
-				Role:        "developer",
-				DependsOn:   deps,
-				FileScope:   files,
-				ScenarioIDs: append([]string(nil), scenarioIDs...),
-			})
-		}
 	}
 
-	if len(nodes) == 0 {
-		// Should be unreachable given the per-story empty-Tasks guard above,
-		// but defensive — the caller fallback path is well-tested.
-		return nil, nil
+	files := append([]string(nil), story.FilesOwned...)
+	nodes := make([]TaskNode, 0, len(story.Tasks))
+	for _, t := range story.Tasks {
+		nodes = append(nodes, TaskNode{
+			ID:          t.ID,
+			Prompt:      t.Description,
+			Role:        "developer",
+			DependsOn:   append([]string(nil), t.DependsOn...),
+			FileScope:   files,
+			ScenarioIDs: append([]string(nil), scenarioIDs...),
+		})
 	}
 
 	dag := &TaskDAG{Nodes: nodes}
@@ -107,32 +59,65 @@ func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*T
 	return dag, nil
 }
 
-// storyExitTasks returns a map from Story.ID to the list of Task.IDs that
-// no other task in the same story depends on (the "exit" tasks). A
-// cross-story DependsOn edge expands to "the exit tasks of the prereq
-// story" so the consuming story waits on the actual terminal work, not
-// intermediate steps.
-func storyExitTasks(stories []workflow.Story) map[string][]string {
-	out := make(map[string][]string, len(stories))
-	for _, s := range stories {
-		if len(s.Tasks) == 0 {
-			continue
-		}
-		// Build a set of task IDs that ARE depended on by some other task
-		// in the same story.
-		dependedOn := make(map[string]struct{}, len(s.Tasks))
-		for _, t := range s.Tasks {
-			for _, dep := range t.DependsOn {
-				dependedOn[dep] = struct{}{}
-			}
-		}
-		var exits []string
-		for _, t := range s.Tasks {
-			if _, ok := dependedOn[t.ID]; !ok {
-				exits = append(exits, t.ID)
-			}
-		}
-		out[s.ID] = exits
+// topoSortStoryIDs returns the Story.IDs ordered so that every Story's
+// DependsOn entries appear before it. ADR-043 PR 4h: the requirement-
+// executor consumes this order to dispatch Stories sequentially.
+//
+// Cycles are an upstream planning bug (plan-reviewer R3
+// `story.depends_on_cycle` catches them); returning an error here is the
+// fail-loudly path that surfaces a planning regression as a synthesis
+// error rather than silently flattening into a non-deterministic order.
+func topoSortStoryIDs(stories []workflow.Story) ([]string, error) {
+	if len(stories) == 0 {
+		return nil, nil
 	}
-	return out
+
+	idIndex := make(map[string]struct{}, len(stories))
+	deps := make(map[string][]string, len(stories))
+	for _, s := range stories {
+		if _, dup := idIndex[s.ID]; dup {
+			return nil, fmt.Errorf("duplicate story ID %q in requirement", s.ID)
+		}
+		idIndex[s.ID] = struct{}{}
+		deps[s.ID] = append([]string(nil), s.DependsOn...)
+	}
+
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := make(map[string]int, len(stories))
+	var sorted []string
+
+	var visit func(id string) error
+	visit = func(id string) error {
+		switch color[id] {
+		case gray:
+			return fmt.Errorf("story dependency cycle involves %q", id)
+		case black:
+			return nil
+		}
+		color[id] = gray
+		for _, dep := range deps[id] {
+			if _, ok := idIndex[dep]; !ok {
+				return fmt.Errorf("story %q depends on unknown story %q", id, dep)
+			}
+			if err := visit(dep); err != nil {
+				return err
+			}
+		}
+		color[id] = black
+		sorted = append(sorted, id)
+		return nil
+	}
+
+	for _, s := range stories {
+		if color[s.ID] == white {
+			if err := visit(s.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return sorted, nil
 }

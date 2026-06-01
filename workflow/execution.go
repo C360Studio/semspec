@@ -139,7 +139,13 @@ type RequirementExecution struct {
 	Role       string          `json:"role,omitempty"`
 	PlanBranch string          `json:"plan_branch,omitempty"`
 
-	// DAG decomposition
+	// Story sequencing (ADR-043 PR 4h — per-Story dispatch)
+	SortedStoryIDs  []string `json:"sorted_story_ids,omitempty"`
+	CurrentStoryIdx int      `json:"current_story_idx,omitempty"`
+
+	// DAG decomposition — represents the CURRENT Story's DAG (per-Story
+	// dispatch; the value is replaced each time the executor advances to
+	// the next Story).
 	NodeCount      int             `json:"node_count,omitempty"`
 	CurrentNodeIdx int             `json:"current_node_idx"` // -1 before execution starts
 	DAGRaw         json.RawMessage `json:"dag,omitempty"`    // serialized TaskDAG
