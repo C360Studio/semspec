@@ -299,34 +299,41 @@ func scenariosSchema() map[string]any {
 
 // storiesSchema defines the submit_work parameters for the story-preparer
 // dispatch (ADR-043 Move 3). Sarah shards Requirements into ready-for-dev
-// Stories with intra-story Task checklists. The shape mirrors workflow.Story
-// + workflow.Task minus the runtime fields (Status, PreparedBy, PreparedAt,
-// CreatedAt, UpdatedAt) — those are populated by plan-manager on persistence,
-// not by the LLM.
+// Stories with intra-story Task checklists.
 //
-// Strict-mode subset: no minItems / patternProperties. The per-Story
-// invariants (≥1 source file, ≥1 task, valid component refs, DAG without
-// cycles) are enforced by workflow.ValidateStories at parse time + by
-// plan-reviewer R3 rules at the post-mutation review pass. The schema's
-// job is structural shape; the validators' job is cardinality and
-// cross-entity coherence.
+// ADR-043 PR 4e — positional/labeled wire shape: Sarah never authors entity
+// IDs (story.id, task.id, requirement_id). Instead she emits a local
+// `label` string for each story/task and references requirements by
+// `requirement_index` (0-indexed into the plan's Requirements array as
+// shown in her prompt). Cross-story DependsOn references use story labels;
+// intra-story task DependsOn references use task labels. The story-preparer
+// component resolves labels + indices to canonical IDs server-side before
+// publishing the StoriesGeneratedEvent. This mirrors Bob's pattern from
+// PR 4b (Scenario.StoryID populated server-side) and eliminates two
+// historical pain points: (1) the LLM doesn't have to fabricate the
+// entity-ID format, and (2) mock fixtures don't depend on plan slug.
+//
+// Strict-mode subset: no minItems / patternProperties. Per-Story invariants
+// (≥1 source file, ≥1 task, valid component refs, DAG without cycles) are
+// enforced server-side after label-to-ID resolution.
 func storiesSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"stories": map[string]any{
 				"type":        "array",
-				"description": "Stories sharded from Requirements (ADR-043 Move 2). Sarah is the product owner: decide whether a Requirement maps to one Story or N Stories with DependsOn edges (single-component → one story; multi-component or prereq-ordered work → multiple stories). Every Story you sign off MUST have ≥1 source-code file in files_owned, ≥1 task in tasks, components that resolve to declared component_boundaries entries, and depends_on entries that resolve to other Story.ID values you emit in this same call.",
+				"description": "Stories sharded from Requirements (ADR-043 Move 2 + PR 4e positional shape). Sarah is the product owner: decide whether a Requirement maps to one Story or N Stories with DependsOn edges (single-component → one story; multi-component or prereq-ordered work → multiple stories). Every Story you sign off MUST have ≥1 source-code file in files_owned, ≥1 task in tasks, components that resolve to declared component_boundaries entries, and depends_on entries that match story labels in this same call.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"id": map[string]any{
+						"label": map[string]any{
 							"type":        "string",
-							"description": "Stable story identifier. Format: story.<plan-slug>.<reqseq>.<storyseq> — for example story.840b.1.1 for the first story of the first requirement of plan 840b. Use the requirement_id's numeric suffix as <reqseq> and a 1-indexed counter as <storyseq>.",
+							"description": "Local label for this story, used only within this submit_work call to express cross-story DependsOn edges. Author any short kebab-case string (e.g. 'lifecycle', 'telemetry'). The story-preparer component resolves your labels into canonical Story.ID values server-side, so you don't fabricate the slug-dependent ID format.",
 						},
-						"requirement_id": map[string]any{
-							"type":        "string",
-							"description": "Parent requirement.id. Must match an existing requirement in the plan; plan-reviewer R3 rule story.requirement_orphan rejects unresolved references.",
+						"requirement_index": map[string]any{
+							"type":        "integer",
+							"description": "Zero-based index into the prompt's Requirements list. Setting requirement_index=0 binds this story to the first Requirement shown in your prompt context, requirement_index=1 to the second, etc. The component resolves indices to canonical Requirement.ID values server-side.",
+							"minimum":     0,
 						},
 						"title": map[string]any{
 							"type":        "string",
@@ -346,41 +353,37 @@ func storiesSchema() map[string]any {
 							"items":       map[string]any{"type": "string"},
 							"description": "Workspace-relative paths this story owns. Compute as the UNION of the selected components' implementation_files — assemble it explicitly so the dev sees the exact file set. Emit at least one entry, and at least one entry MUST be a source-code file (.go/.java/.ts/.py/.rs/…); docs-only file sets are rejected by your readiness gate and by plan-reviewer R3 rule story.docs_only_files_owned.",
 						},
-						"depends_on": map[string]any{
+						"depends_on_labels": map[string]any{
 							"type":        "array",
 							"items":       map[string]any{"type": "string"},
-							"description": "Story.ID entries that must reach complete before this story can dispatch. Emit [] for stories with no prereqs. Plan-reviewer R3 rules story.depends_on_orphan and story.depends_on_cycle reject unresolved IDs and DAG cycles. Use this only for explicit prereq ordering — not implicit chronology.",
+							"description": "Story labels (from other stories in this submit_work call) that must reach complete before this story can dispatch. Emit [] for stories with no prereqs. Resolved to canonical Story.ID values server-side. Plan-reviewer R3 rules story.depends_on_orphan and story.depends_on_cycle reject unresolved labels and DAG cycles.",
 						},
 						"tasks": map[string]any{
 							"type":        "array",
-							"description": "Sarah-authored ordered TDD checklist. Typical shape is 3-5 tasks per story: write failing tests, implement to pass, integration smoke, verify scenarios. The execution-manager runs tasks in topo order from intra-story depends_on. Emit at least one task; an empty list is rejected by your readiness gate and by plan-reviewer R3 rule task.missing_within_story.",
+							"description": "Sarah-authored ordered TDD checklist. Typical shape is 3-5 tasks per story: write failing tests, implement to pass, integration smoke, verify scenarios. The execution-manager runs tasks in topo order from intra-story depends_on_labels. Emit at least one task; an empty list is rejected by your readiness gate and by plan-reviewer R3 rule task.missing_within_story.",
 							"items": map[string]any{
 								"type": "object",
 								"properties": map[string]any{
-									"id": map[string]any{
+									"label": map[string]any{
 										"type":        "string",
-										"description": "Stable task identifier. Format: task.<plan-slug>.<reqseq>.<storyseq>.<taskseq> — for example task.840b.1.1.1 for the first task of story story.840b.1.1.",
-									},
-									"story_id": map[string]any{
-										"type":        "string",
-										"description": "Parent story.id — must match the story this task is nested under.",
+										"description": "Local label for this task, used only within this story to express intra-story DependsOn edges. Author any short kebab-case string (e.g. 'test-first', 'impl'). The story-preparer component resolves your labels into canonical Task.ID values server-side.",
 									},
 									"description": map[string]any{
 										"type":        "string",
 										"description": "1-line statement of what this task accomplishes (e.g. 'Write failing test for boot lifecycle'). The dev decomposes further inside the TDD pipeline; you author intent, not implementation.",
 									},
-									"depends_on": map[string]any{
+									"depends_on_labels": map[string]any{
 										"type":        "array",
 										"items":       map[string]any{"type": "string"},
-										"description": "Other task.id entries within this same story that must reach complete before this task can dispatch. Emit [] when the task has no intra-story prereqs. Cross-story task ordering lives on story.depends_on, NOT here. Plan-reviewer R3 rule task.depends_on_cycle rejects intra-story DAG cycles.",
+										"description": "Other task labels within this story that must reach complete before this task can dispatch. Emit [] when the task has no intra-story prereqs. Cross-story task ordering lives on story.depends_on_labels, NOT here. Plan-reviewer R3 rule task.depends_on_cycle rejects intra-story DAG cycles.",
 									},
 								},
-								"required":             []string{"id", "story_id", "description", "depends_on"},
+								"required":             []string{"label", "description", "depends_on_labels"},
 								"additionalProperties": false,
 							},
 						},
 					},
-					"required":             []string{"id", "requirement_id", "title", "intent", "components", "files_owned", "depends_on", "tasks"},
+					"required":             []string{"label", "requirement_index", "title", "intent", "components", "files_owned", "depends_on_labels", "tasks"},
 					"additionalProperties": false,
 				},
 			},
