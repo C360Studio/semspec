@@ -291,8 +291,15 @@ func (c *Component) Stop(_ time.Duration) error {
 func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads.ScenarioGeneratorRequest, previousError string, reviewFindings ...string) {
 	c.updateLastActivity()
 
-	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, req.RequirementID, uuid.New().String())
-	c.retry.SetActiveLoop(req.Slug+"/"+req.RequirementID, taskID)
+	// ADR-043 PR 4j — per-Story dispatch keys the retry/task state on
+	// StoryID; legacy per-Requirement dispatch falls back to RequirementID
+	// when no Story is in scope (pre-Sarah plans / mock fixtures).
+	retryKeyTail := req.RequirementID
+	if req.StoryID != "" {
+		retryKeyTail = req.StoryID
+	}
+	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, retryKeyTail, uuid.New().String())
+	c.retry.SetActiveLoop(req.Slug+"/"+retryKeyTail, taskID)
 
 	scenCtx := &prompt.ScenarioGeneratorPromptContext{
 		PlanGoal:               req.PlanGoal,
@@ -302,6 +309,11 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		ArchitectureContext:    req.ArchitectureContext,
 		PreviousError:          previousError,
 		RequiredTiers:          wireTiersToPromptTiers(req.RequiredTiers),
+		StoryID:                req.StoryID,
+		StoryTitle:             req.StoryTitle,
+		StoryIntent:            req.StoryIntent,
+		StoryFilesOwned:        append([]string(nil), req.StoryFilesOwned...),
+		StoryComponents:        append([]string(nil), req.StoryComponents...),
 	}
 	if len(reviewFindings) > 0 {
 		scenCtx.ReviewFindings = reviewFindings[0]
@@ -382,6 +394,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		Metadata: map[string]any{
 			"plan_slug":        req.Slug,
 			"requirement_id":   req.RequirementID,
+			"story_id":         req.StoryID, // empty in legacy per-Requirement dispatch
 			"deliverable_type": "scenarios",
 			"task_id":          "main", // scenario-gen reads repo root, no isolated worktree
 			// role + model for SKG tool.recovery.incident partitioning.
@@ -478,6 +491,7 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 		slug, _ := loop.Metadata["plan_slug"].(string)
 		requirementID, _ := loop.Metadata["requirement_id"].(string)
+		storyID, _ := loop.Metadata["story_id"].(string)
 		if slug == "" || requirementID == "" {
 			continue
 		}
@@ -499,14 +513,19 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 		}
 		processedLoops[loop.ID] = true
 
-		c.handleLoopCompletion(ctx, &loop, slug, requirementID)
+		c.handleLoopCompletion(ctx, &loop, slug, requirementID, storyID)
 	}
 }
 
 // handleLoopCompletion processes a completed scenario-generator agent loop.
 // It parses scenarios from the loop result and sends a per-requirement mutation
 // to plan-manager via plan.mutation.scenarios.generated.
-func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug, requirementID string) {
+//
+// storyID is the dispatch-time Story scope (ADR-043 PR 4j). When non-empty,
+// every scenario in the parsed batch is auto-assigned that StoryID. When
+// empty (legacy per-Requirement dispatch), the function falls back to the
+// PR 4b "first story owns the scenarios" lookup.
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug, requirementID, storyID string) {
 	c.updateLastActivity()
 	key := slug + "/" + requirementID
 
@@ -564,12 +583,21 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		}
 	}
 
-	// ADR-043 Move 4 — populate Scenario.StoryID from plan.Stories. Bob's LLM
-	// emits scenarios linked by RequirementID; the StoryID is filled in
-	// server-side by looking up which Story owns the parent Requirement.
-	// When Sarah is dormant (PR 3 default) plan.Stories is empty and StoryID
-	// stays empty — Scenario.RequirementID remains the only link.
-	if kvPlan != nil && len(kvPlan.Stories) > 0 {
+	// ADR-043 PR 4j — when the dispatch carried a StoryID (per-Story mode)
+	// every scenario in this batch belongs to THAT Story by construction.
+	// Assign explicitly from the dispatch context — drops the lookup
+	// ambiguity of "which Story owns the requirement?" that PR 4b's
+	// attachStoryIDs heuristic resolved by picking the first match.
+	//
+	// In legacy per-Requirement mode (storyID empty), fall back to the PR 4b
+	// "first story owns the scenarios" lookup so mock fixtures + pre-Sarah
+	// plans continue to work.
+	switch {
+	case storyID != "":
+		for i := range scenarios {
+			scenarios[i].StoryID = storyID
+		}
+	case kvPlan != nil && len(kvPlan.Stories) > 0:
 		attachStoryIDs(scenarios, kvPlan, requirementID)
 	}
 
