@@ -614,7 +614,9 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	// Check if the plan has moved past generating_architecture while we were working.
 	// If so, our result is stale — discard it without rejecting the plan.
-	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
+	// Reuse the load result for ADR-043 PR 2 capability-coverage validation.
+	kvPlan, loadErr := c.loadPlanFromKV(ctx, slug)
+	if loadErr == nil {
 		status := kvPlan.EffectiveStatus()
 		if status != workflow.StatusGeneratingArchitecture {
 			c.logger.Warn("Plan advanced past generating_architecture, discarding stale result",
@@ -622,6 +624,30 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"current_status", status,
 				"loop_id", loop.ID)
 			c.retry.Clear(slug)
+			return
+		}
+	}
+
+	// ADR-043 PR 2: Winston's tech-spec scope must be complete before
+	// persistence. Each component owns ≥1 source-code file; every capability
+	// declared by the analyst is implemented by ≥1 component. Validator
+	// failures funnel through retryOrFail so the LLM gets another cycle with
+	// the rejection message as feedback — mirrors the parse-failure path.
+	if err := workflow.ValidateComponentImplementationFiles(architecture.ComponentBoundaries); err != nil {
+		c.generationsFailed.Add(1)
+		msg := fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())
+		c.logger.Warn("Architecture rejected by ADR-043 validator",
+			"slug", slug, "loop_id", loop.ID, "rule", "component_implementation_files", "error", err)
+		c.retryOrFail(ctx, slug, msg)
+		return
+	}
+	if kvPlan != nil {
+		if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
+			c.generationsFailed.Add(1)
+			msg := fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())
+			c.logger.Warn("Architecture rejected by ADR-043 validator",
+				"slug", slug, "loop_id", loop.ID, "rule", "capability_coverage", "error", err)
+			c.retryOrFail(ctx, slug, msg)
 			return
 		}
 	}

@@ -320,7 +320,7 @@ func architectureSchema() map[string]any {
 			},
 			"component_boundaries": map[string]any{
 				"type":        "array",
-				"description": "Component definitions with name, responsibility, dependencies, and upstream_refs",
+				"description": "Component definitions with name, responsibility, dependencies, upstream_refs, implementation_files, and capabilities. ADR-043 Move 1 — Winston declares the BMAD tech-spec scope here: every component owns its file space AND maps to capabilities. Sarah uses this in the next phase to shard requirements into ready-for-dev stories.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -335,8 +335,18 @@ func architectureSchema() map[string]any {
 							"items":       map[string]any{"type": "string"},
 							"description": "Names of upstream_resolutions[] entries this component integrates with. Bidirectional with upstream_resolutions[].used_by — both sides must agree. Emit [] when the component has no external integrations.",
 						},
+						"implementation_files": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Workspace-relative paths this component owns (ADR-043 Move 1). Source these from plan.scope.create for new components or the existing project tree for modified components. Emit at least one entry, and at least one entry MUST be a source-code file (.java/.go/.ts/.py/.rs/…); companion documentation files (.md/.txt) MAY appear alongside source but never alone. The min-1 + at-least-one-source invariants are enforced by workflow.ValidateComponentImplementationFiles at architecture-generator parse time and by plan-reviewer R2 rules architecture.component_missing_implementation_files and architecture.component_implementation_files_doc_only — strict-mode JSON schema does not support minItems so the cardinality lives in the validator.",
+						},
+						"capabilities": map[string]any{
+							"type":        "array",
+							"items":       map[string]any{"type": "string"},
+							"description": "Kebab-case capability names from plan.exploration.capabilities[] that this component implements (ADR-043 Move 1). Bidirectional bridge between Mary's capability list and the file space this component just declared. Emit at least one entry. Every capability MUST appear in at least one component's list, otherwise plan-reviewer R2 rule capability.unresolved_in_architecture rejects the architecture. The min-1 invariant is enforced by workflow.ValidateCapabilityCoverage at architecture-generator parse time.",
+						},
 					},
-					"required":             []string{"name", "responsibility", "dependencies", "upstream_refs"},
+					"required":             []string{"name", "responsibility", "dependencies", "upstream_refs", "implementation_files", "capabilities"},
 					"additionalProperties": false,
 				},
 			},

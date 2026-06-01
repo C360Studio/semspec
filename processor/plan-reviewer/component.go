@@ -345,9 +345,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	// "needs_changes" when any error finding lands.
 	if planForRules, loadErr := c.loadPlanForRules(ctx, slug); loadErr == nil {
 		mergeCapabilityFindings(planForRules, result)
+		mergeArchitectureFindings(planForRules, result)
 		mergeScenarioTagFindings(planForRules, result)
 	} else {
-		c.logger.Warn("Skipping capability + scenario-tag rules — plan load failed",
+		c.logger.Warn("Skipping capability + architecture + scenario-tag rules — plan load failed",
 			"slug", slug, "error", loadErr)
 	}
 

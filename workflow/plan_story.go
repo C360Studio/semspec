@@ -120,12 +120,12 @@ func ValidateStory(s Story) error {
 }
 
 // hasSourceFile reports whether the given paths contain at least one
-// source-code file (anything not matched by isDocumentationPath). Empty
+// source-code file (anything not matched by IsDocumentationPath). Empty
 // slice returns false. Used by Sarah's readiness gate logic + plan-reviewer
 // story.docs_only_files_owned rule.
 func hasSourceFile(paths []string) bool {
 	for _, p := range paths {
-		if !isDocumentationPath(p) {
+		if !IsDocumentationPath(p) {
 			return true
 		}
 	}
@@ -242,20 +242,56 @@ func ValidateTaskDAG(parentStoryID string, tasks []Task) error {
 	return nil
 }
 
+// ValidateCapabilityCoverage checks that every Capability declared in the
+// exploration is implemented by at least one ComponentDef whose Capabilities
+// list contains the capability's Name (ADR-043 Move 1, plan-reviewer R2
+// rule capability.unresolved_in_architecture). Empty exploration or empty
+// components slice is treated as "nothing to validate yet" — pre-PR 2
+// plans and back-compat reads pass through clean. The check fires once the
+// exploration is populated AND the architecture has components.
+//
+// Returns ErrInvalidStoryStructure wrapped with the first unresolved
+// capability name. The architecture-generator surfaces this back to Winston
+// via retry-feedback so the LLM can extend the offending component or add
+// a new one in the next cycle.
+func ValidateCapabilityCoverage(exp *Exploration, components []ComponentDef) error {
+	if exp == nil || len(exp.Capabilities) == 0 || len(components) == 0 {
+		return nil
+	}
+	covered := make(map[string]struct{}, len(exp.Capabilities))
+	for _, c := range components {
+		for _, capName := range c.Capabilities {
+			covered[capName] = struct{}{}
+		}
+	}
+	for _, cap := range exp.Capabilities {
+		if _, ok := covered[cap.Name]; !ok {
+			return fmt.Errorf("%w: capability %q has no component whose capabilities list contains it — every capability declared by the analyst must be implemented by at least one component",
+				ErrInvalidStoryStructure, cap.Name)
+		}
+	}
+	return nil
+}
+
 // ValidateComponentImplementationFiles checks that every ComponentDef in
 // the architecture document declares at least one ImplementationFiles entry,
-// and that at least one of those entries is a source-code file (docs-only
-// rejected). Skips ComponentDefs with empty Name (downstream architecture
-// validators flag those separately). Mirror of the docs-only rule for
-// requirements (plan_capability.FindDocsOnlyCapabilities) at the
-// architect-side layer (ADR-043 Move 6 — plan-reviewer R2 rules
+// that at least one of those entries is a source-code file (docs-only
+// rejected), AND that every component declares at least one capability
+// (the per-component cardinality check; cross-capability coverage is
+// ValidateCapabilityCoverage's job). Skips ComponentDefs with empty Name
+// (downstream architecture validators flag those separately).
+//
+// Mirrors the docs-only rule for requirements
+// (plan_capability.FindDocsOnlyCapabilities) at the architect-side layer
+// (ADR-043 Move 6 — plan-reviewer R2 rules
 // architecture.component_missing_implementation_files and
 // architecture.component_implementation_files_doc_only).
 //
 // Returns nil when components are nil/empty so plans that pre-date ADR-043
 // PR 2's Winston-extension schema enforcement still validate clean — PR 2
 // adds the schema-required guard so post-PR-2 plans always have populated
-// fields.
+// fields. The schema cannot enforce minItems (OpenAI strict-mode subset
+// excludes it), so the min-1 check lives here.
 func ValidateComponentImplementationFiles(components []ComponentDef) error {
 	for _, c := range components {
 		if c.Name == "" {
@@ -268,6 +304,10 @@ func ValidateComponentImplementationFiles(components []ComponentDef) error {
 		if !hasSourceFile(c.ImplementationFiles) {
 			return fmt.Errorf("%w: component %q implementation_files %v contains only documentation files — every component must own at least one source-code file",
 				ErrInvalidStoryStructure, c.Name, c.ImplementationFiles)
+		}
+		if len(c.Capabilities) == 0 {
+			return fmt.Errorf("%w: component %q has empty capabilities — every component must implement at least one capability from plan.exploration.capabilities[]",
+				ErrInvalidStoryStructure, c.Name)
 		}
 	}
 	return nil

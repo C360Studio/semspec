@@ -335,7 +335,7 @@ func FindDocsOnlyCapabilities(exp *Exploration, requirements []Requirement) []st
 		for _, r := range reqs {
 			for _, f := range r.FilesOwned {
 				hasAnyFiles = true
-				if !isDocumentationPath(f) {
+				if !IsDocumentationPath(f) {
 					allDocs = false
 					break
 				}
@@ -351,11 +351,11 @@ func FindDocsOnlyCapabilities(exp *Exploration, requirements []Requirement) []st
 	return docsOnly
 }
 
-// isDocumentationPath reports whether a workspace-relative path looks like
+// IsDocumentationPath reports whether a workspace-relative path looks like
 // pure documentation. Loose heuristic — false negatives are fine (a
 // docs-only capability that escapes this filter is still caught by
 // downstream phases that need actual implementation code).
-func isDocumentationPath(p string) bool {
+func IsDocumentationPath(p string) bool {
 	lower := strings.ToLower(p)
 	suffixes := []string{".md", ".txt", ".rst", ".adoc"}
 	for _, s := range suffixes {

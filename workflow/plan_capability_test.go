@@ -388,8 +388,8 @@ func TestIsDocumentationPath(t *testing.T) {
 	}
 	for path, want := range tests {
 		t.Run(path, func(t *testing.T) {
-			if got := isDocumentationPath(path); got != want {
-				t.Errorf("isDocumentationPath(%q) = %v, want %v", path, got, want)
+			if got := IsDocumentationPath(path); got != want {
+				t.Errorf("IsDocumentationPath(%q) = %v, want %v", path, got, want)
 			}
 		})
 	}
