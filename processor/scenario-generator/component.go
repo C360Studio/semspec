@@ -549,7 +549,9 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	// Check if the plan has moved past generating_scenarios while we were working.
 	// If so, our result is stale — discard it without rejecting the plan.
-	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
+	// The plan is also our source for ADR-043 StoryID linkage below.
+	kvPlan, loadErr := c.loadPlanFromKV(ctx, slug)
+	if loadErr == nil {
 		status := kvPlan.EffectiveStatus()
 		if status != workflow.StatusGeneratingScenarios {
 			c.logger.Warn("Plan advanced past generating_scenarios, discarding stale result",
@@ -560,6 +562,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			c.retry.Clear(key)
 			return
 		}
+	}
+
+	// ADR-043 Move 4 — populate Scenario.StoryID from plan.Stories. Bob's LLM
+	// emits scenarios linked by RequirementID; the StoryID is filled in
+	// server-side by looking up which Story owns the parent Requirement.
+	// When Sarah is dormant (PR 3 default) plan.Stories is empty and StoryID
+	// stays empty — Scenario.RequirementID remains the only link.
+	if kvPlan != nil && len(kvPlan.Stories) > 0 {
+		attachStoryIDs(scenarios, kvPlan, requirementID)
 	}
 
 	// Build a synthetic trigger for publishResults — it only needs Slug,
@@ -775,6 +786,36 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID string)
 	}
 
 	return scenarios, nil
+}
+
+// attachStoryIDs walks the scenarios and sets Scenario.StoryID from the
+// plan's Stories list (ADR-043 Move 4). For each scenario, the parent
+// Requirement is resolved through scenario.RequirementID, then the Story
+// owning that Requirement is looked up via plan.StoriesForRequirement.
+//
+// When a Requirement has multiple Stories (Sarah-sharded), the FIRST story
+// in the plan's Stories ordering is assigned. PR 4c refines this when
+// execution-manager rewires for per-Story dispatch — at that point Bob's
+// classifier becomes aware of Stories at scenario-emission time and can
+// emit one scenario set per Story. For PR 4b (this incremental step),
+// the simple "first story owns the scenarios" mapping preserves the
+// existing single-bucket-per-requirement semantics.
+//
+// requirementID is the parent requirement of THIS scenario batch — passed
+// in because every scenario in the batch belongs to the same Requirement
+// (scenario-generator dispatches per-Requirement).
+func attachStoryIDs(scenarios []workflow.Scenario, plan *workflow.Plan, requirementID string) {
+	if plan == nil {
+		return
+	}
+	stories := plan.StoriesForRequirement(requirementID)
+	if len(stories) == 0 {
+		return
+	}
+	firstStoryID := stories[0].ID
+	for i := range scenarios {
+		scenarios[i].StoryID = firstStoryID
+	}
 }
 
 // requirementSequence extracts the trailing sequence suffix from a requirement ID.
