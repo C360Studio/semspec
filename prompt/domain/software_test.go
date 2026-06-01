@@ -37,7 +37,6 @@ func TestSoftwareFragments(t *testing.T) {
 		"software.reviewer.system-base",
 		"software.requirement-generator.system-base",
 		"software.scenario-generator.system-base",
-		"software.task-decomposer.system-base",
 		"software.provider.ollama-tool-enforcement",
 	}
 	for _, id := range required {

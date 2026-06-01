@@ -147,7 +147,6 @@ type RequirementExecution struct {
 	NodeResults    []NodeResult    `json:"node_results,omitempty"`
 
 	// Routing
-	DecomposerTaskID  string `json:"decomposer_task_id,omitempty"`
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`
 	ReviewerTaskID    string `json:"reviewer_task_id,omitempty"`
 

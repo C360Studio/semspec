@@ -3,13 +3,12 @@ package requirementexecutor
 import (
 	"fmt"
 
-	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/workflow"
 )
 
 // synthesizeTaskDAGFromStories converts Sarah's Stories (ADR-043 Move 3 +
 // PR 4e positional shape, persisted by plan-manager from
-// StoriesGeneratedEvent) into a decompose.TaskDAG that the
+// StoriesGeneratedEvent) into a TaskDAG that the
 // requirement-executor's existing downstream consumes unchanged. This is
 // the PR 4f decomposer-bypass: when the plan carries Sarah-authored
 // Stories for the requirement, the LLM decomposer call is skipped — the
@@ -33,7 +32,7 @@ import (
 // caller to fall back to the legacy decomposer-LLM dispatch path.
 // Returns (nil, err) when the synthesis produces a structurally invalid
 // DAG (caller surfaces as a parse-style failure).
-func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*decompose.TaskDAG, error) {
+func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*TaskDAG, error) {
 	if plan == nil || requirementID == "" {
 		return nil, nil
 	}
@@ -47,7 +46,7 @@ func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*d
 	// node-level prereqs.
 	exitTasksByStoryID := storyExitTasks(stories)
 
-	nodes := make([]decompose.TaskNode, 0)
+	nodes := make([]TaskNode, 0)
 	for _, s := range stories {
 		if len(s.Tasks) == 0 {
 			// Empty Tasks on a story is a Sarah readiness-gate violation —
@@ -84,7 +83,7 @@ func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*d
 				// Entry task — inherit cross-story prereqs.
 				deps = append(deps, crossPrereqs...)
 			}
-			nodes = append(nodes, decompose.TaskNode{
+			nodes = append(nodes, TaskNode{
 				ID:          t.ID,
 				Prompt:      t.Description,
 				Role:        "developer",
@@ -101,7 +100,7 @@ func synthesizeTaskDAGFromStories(plan *workflow.Plan, requirementID string) (*d
 		return nil, nil
 	}
 
-	dag := &decompose.TaskDAG{Nodes: nodes}
+	dag := &TaskDAG{Nodes: nodes}
 	if err := dag.Validate(); err != nil {
 		return nil, fmt.Errorf("synthesized DAG fails validation: %w", err)
 	}

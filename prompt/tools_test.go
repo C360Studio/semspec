@@ -78,7 +78,7 @@ func TestFilterTools_Scratchpad_RoleScope(t *testing.T) {
 	hasScratchpad := []Role{
 		RoleDeveloper, RoleArchitect, RoleLessonDecomposer,
 		RolePlanner, RoleRequirementGenerator, RoleScenarioGenerator,
-		RoleTaskGenerator, RolePlanReviewer, RoleTaskReviewer,
+		RolePlanReviewer, RoleTaskReviewer,
 		RoleScenarioReviewer, RolePlanQAReviewer, RoleReviewer,
 	}
 	for _, role := range hasScratchpad {
@@ -160,7 +160,7 @@ func TestFilterTools_NoRoleGetsGraphTools(t *testing.T) {
 
 	rolesWithAllowlist := []Role{
 		RolePlanner, RoleDeveloper, RoleArchitect, RoleValidator,
-		RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleTaskGenerator,
+		RoleReviewer, RolePlanReviewer, RoleTaskReviewer,
 		RoleRequirementGenerator, RoleScenarioGenerator, RoleScenarioReviewer,
 		RolePlanQAReviewer, RoleLessonDecomposer, RoleRecoveryAgent,
 	}
@@ -191,7 +191,7 @@ func TestFilterTools_NoRoleGetsSpawnAgent(t *testing.T) {
 
 	rolesWithAllowlist := []Role{
 		RolePlanner, RoleDeveloper, RoleValidator, RoleReviewer,
-		RolePlanReviewer, RoleTaskReviewer, RoleTaskGenerator,
+		RolePlanReviewer, RoleTaskReviewer,
 		RoleRequirementGenerator, RoleScenarioGenerator, RoleScenarioReviewer,
 		RolePlanQAReviewer,
 	}

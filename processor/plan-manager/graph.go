@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/vocabulary/semspec"
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
@@ -98,33 +96,6 @@ func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Quest
 	}
 
 	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.QuestionEntityType, entityID, triples))
-}
-
-// publishDAGNodeEntity publishes a DAG execution node as a graph entity.
-func (c *Component) publishDAGNodeEntity(ctx context.Context, executionID string, node *decompose.TaskNode) error {
-	entityID := workflow.DAGNodeEntityID(executionID, node.ID)
-	execEntityID := fmt.Sprintf("%s.exec.scenario.run.%s", workflow.EntityPrefix(), executionID)
-
-	triples := []message.Triple{
-		{Subject: entityID, Predicate: wf.DAGNodeID, Object: node.ID},
-		{Subject: entityID, Predicate: wf.DAGNodePrompt, Object: node.Prompt},
-		{Subject: entityID, Predicate: wf.DAGNodeRole, Object: node.Role},
-		{Subject: entityID, Predicate: wf.DAGNodeStatus, Object: "pending"},
-		{Subject: entityID, Predicate: wf.RelScenario, Object: execEntityID},
-	}
-
-	// File scope — one triple per path.
-	for _, f := range node.FileScope {
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.DAGNodeFileScope, Object: f})
-	}
-
-	// Dependency edges to sibling DAG nodes
-	for _, depID := range node.DependsOn {
-		depEntityID := workflow.DAGNodeEntityID(executionID, depID)
-		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.DAGNodeDependsOn, Object: depEntityID})
-	}
-
-	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.DAGNodeEntityType, entityID, triples))
 }
 
 // truncateForTitle truncates a string for use as a DCTitle predicate value.

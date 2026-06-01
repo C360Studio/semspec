@@ -2,14 +2,12 @@ package requirementexecutor
 
 import (
 	"fmt"
-
-	"github.com/c360studio/semspec/tools/decompose"
 )
 
 // topoSort returns node IDs in topological order using Kahn's algorithm (BFS).
 // For nodes with equal in-degree, slice order is preserved (stable sort).
 // The input DAG must have already passed Validate() (no cycles, valid deps).
-func topoSort(dag *decompose.TaskDAG) ([]string, error) {
+func topoSort(dag *TaskDAG) ([]string, error) {
 	if dag == nil || len(dag.Nodes) == 0 {
 		return nil, fmt.Errorf("empty DAG")
 	}

@@ -139,7 +139,7 @@ func TestResearcherAvailableToolNames(t *testing.T) {
 	}
 
 	// Critical guardrails — these must NEVER be in the researcher palette.
-	forbidden := []string{"research", "submit_work", "write_todos", "scratchpad", "decompose_task"}
+	forbidden := []string{"research", "submit_work", "write_todos", "scratchpad"}
 	for _, name := range got {
 		for _, bad := range forbidden {
 			if name == bad {

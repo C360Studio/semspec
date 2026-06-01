@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c360studio/semspec/tools/decompose"
-	_ "github.com/c360studio/semspec/tools/decompose" // ensure decompose package is imported
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/jsonutil"
@@ -503,7 +501,6 @@ func TestDataFlow_LastActivityUpdates(t *testing.T) {
 func newTestComponent(t *testing.T) *Component {
 	t.Helper()
 	cfg := DefaultConfig()
-	cfg.DecomposerModel = "default"
 	cfg.ReviewerModel = "default"
 	raw, _ := json.Marshal(cfg)
 	comp, err := NewComponent(raw, component.Dependencies{})
@@ -683,7 +680,6 @@ func TestCleanupExecutionLocked_RemovesFromActiveExecutions(t *testing.T) {
 
 	exec := &requirementExecution{
 		EntityID:          workflow.EntityPrefix() + ".exec.req.run.plan-c-req-c",
-		DecomposerTaskID:  "decomp-c",
 		CurrentNodeTaskID: "node-c",
 		VisitedNodes:      make(map[string]bool),
 	}
@@ -909,9 +905,10 @@ func TestInitReqExecution_StaleBranchFromPriorAttempt_DeletesAndRecreates(t *tes
 
 	c.initReqExecution(context.Background(), exec, "semspec/plan-main")
 
-	if exec.terminated {
-		t.Error("exec.terminated = true; recovery via delete-and-recreate should have succeeded")
-	}
+	// ADR-043 PR 4g — initReqExecution synthesizes the DAG synchronously
+	// and marks the exec failed when no plan exists in PLAN_STATES (the
+	// unit-test mode case). That is now expected; this test pins the
+	// branch reset side-effect, not the synthesis outcome.
 	if c.errors.Load() != 0 {
 		t.Errorf("errors counter = %d, want 0 (recovery not a real error)", c.errors.Load())
 	}
@@ -987,8 +984,8 @@ func TestRequirementExecution_VisitedNodesTracking(t *testing.T) {
 func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "node-1", Prompt: "First task", Role: "developer", FileScope: []string{"a.go"}},
 			{ID: "node-2", Prompt: "Second task", Role: "developer", FileScope: []string{"b.go"}},
 		},
@@ -1000,7 +997,7 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 		RequirementID:  "r",
 		DAG:            dag,
 		SortedNodeIDs:  []string{"node-1", "node-2"},
-		NodeIndex:      map[string]*decompose.TaskNode{"node-1": &dag.Nodes[0], "node-2": &dag.Nodes[1]},
+		NodeIndex:      map[string]*TaskNode{"node-1": &dag.Nodes[0], "node-2": &dag.Nodes[1]},
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
@@ -1019,8 +1016,8 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesReviewer(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "only-node", Prompt: "The only task", Role: "developer", FileScope: []string{"x.go"}},
 		},
 	}
@@ -1033,7 +1030,7 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesReviewer(t *testing.
 		Prompt:         "implement requirement",
 		DAG:            dag,
 		SortedNodeIDs:  []string{"only-node"},
-		NodeIndex:      map[string]*decompose.TaskNode{"only-node": &dag.Nodes[0]},
+		NodeIndex:      map[string]*TaskNode{"only-node": &dag.Nodes[0]},
 		CurrentNodeIdx: 0,
 		VisitedNodes:   make(map[string]bool),
 	}
@@ -1061,7 +1058,7 @@ func TestDispatchNextNodeLocked_MissingNodeInIndex_MarksError(t *testing.T) {
 		Slug:           "p",
 		RequirementID:  "r3",
 		SortedNodeIDs:  []string{"ghost-node"},
-		NodeIndex:      map[string]*decompose.TaskNode{},
+		NodeIndex:      map[string]*TaskNode{},
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
@@ -1079,286 +1076,6 @@ func TestDispatchNextNodeLocked_MissingNodeInIndex_MarksError(t *testing.T) {
 		t.Errorf("errors = %d, want 1", c.errors.Load())
 	}
 }
-
-// ---------------------------------------------------------------------------
-// handleDecomposerCompleteLocked — DAG parse tests
-// ---------------------------------------------------------------------------
-
-func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rd",
-		Slug:             "p",
-		RequirementID:    "rd",
-		DecomposerTaskID: "decomp-d",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-		// Exhausted retry budget — next failure terminates.
-		DecomposerAttempt: c.config.MaxDecomposerRetries + 1,
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-d",
-		TaskID:       "decomp-d",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeFailed,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	terminated := exec.terminated
-	exec.mu.Unlock()
-
-	if !terminated {
-		t.Error("failed decomposer outcome should terminate the execution")
-	}
-	if c.requirementsFailed.Load() != 1 {
-		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
-	}
-}
-
-func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rm",
-		Slug:             "p",
-		RequirementID:    "rm",
-		DecomposerTaskID: "decomp-m",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-		// Exhausted retry budget — next failure terminates.
-		DecomposerAttempt: c.config.MaxDecomposerRetries + 1,
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-m",
-		TaskID:       "decomp-m",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       `not valid json`,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	terminated := exec.terminated
-	exec.mu.Unlock()
-
-	if !terminated {
-		t.Error("malformed decomposer result should terminate the execution")
-	}
-	if c.requirementsFailed.Load() != 1 {
-		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
-	}
-}
-
-func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-ri",
-		Slug:             "p",
-		RequirementID:    "ri",
-		DecomposerTaskID: "decomp-i",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-		// Exhausted retry budget — next failure terminates.
-		DecomposerAttempt: c.config.MaxDecomposerRetries + 1,
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	// DAG with a cycle — Validate() will reject it.
-	cycleResult := `{
-		"goal": "build something",
-		"dag": {
-			"nodes": [
-				{"id": "a", "prompt": "p", "role": "dev", "depends_on": ["b"], "file_scope": ["a.go"]},
-				{"id": "b", "prompt": "p", "role": "dev", "depends_on": ["a"], "file_scope": ["b.go"]}
-			]
-		}
-	}`
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-i",
-		TaskID:       "decomp-i",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       cycleResult,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	terminated := exec.terminated
-	exec.mu.Unlock()
-
-	if !terminated {
-		t.Error("cyclic DAG should cause the execution to terminate as failed")
-	}
-	if c.requirementsFailed.Load() != 1 {
-		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
-	}
-}
-
-// TestHandleDecomposerCompleteLocked_EmptyDAG_RetriesWithFeedback verifies that
-// an invalid DAG (e.g., empty nodes array from an under-powered model) does NOT
-// terminate the execution while the retry budget is not exhausted. Instead the
-// previous error is stored for the next dispatch prompt.
-func TestHandleDecomposerCompleteLocked_EmptyDAG_RetriesWithFeedback(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-retry",
-		Slug:             "p",
-		RequirementID:    "retry",
-		Title:            "retry me",
-		Model:            "test-model", // required for the re-dispatch marshal path
-		DecomposerTaskID: "decomp-retry",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-		// First attempt — well under the retry budget.
-		DecomposerAttempt: 1,
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	// Empty nodes array — Validate() rejects with "dag must contain at least one node".
-	emptyResult := `{"goal": "x", "dag": {"nodes": []}}`
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-retry",
-		TaskID:       "decomp-retry",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       emptyResult,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	terminated := exec.terminated
-	lastError := exec.DecomposerLastError
-	exec.mu.Unlock()
-
-	if terminated {
-		t.Error("retry path should NOT terminate the execution while budget remains")
-	}
-	if c.requirementsFailed.Load() != 0 {
-		t.Errorf("requirementsFailed = %d during retry, want 0", c.requirementsFailed.Load())
-	}
-	if lastError == "" {
-		t.Error("DecomposerLastError should be populated for the retry prompt")
-	}
-	if !strings.Contains(lastError, "at least one node") {
-		t.Errorf("DecomposerLastError = %q, want it to mention the validation failure", lastError)
-	}
-}
-
-func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rv",
-		Slug:             "p",
-		RequirementID:    "rv",
-		DecomposerTaskID: "decomp-v",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	validResult := `{
-		"goal": "implement auth",
-		"dag": {
-			"nodes": [
-				{"id": "setup", "prompt": "setup env", "role": "developer", "file_scope": ["setup.go"]},
-				{"id": "impl",  "prompt": "write code", "role": "developer", "depends_on": ["setup"], "file_scope": ["impl.go"]}
-			]
-		}
-	}`
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-v",
-		TaskID:       "decomp-v",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       validResult,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	dagSet := exec.DAG != nil
-	nodeCount := len(exec.SortedNodeIDs)
-	indexLen := len(exec.NodeIndex)
-	exec.mu.Unlock()
-
-	if !dagSet {
-		t.Error("exec.DAG should be set after successful decomposition")
-	}
-	if nodeCount != 2 {
-		t.Errorf("SortedNodeIDs len = %d, want 2", nodeCount)
-	}
-	if indexLen != 2 {
-		t.Errorf("NodeIndex len = %d, want 2", indexLen)
-	}
-}
-
-func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rv2",
-		Slug:             "p",
-		RequirementID:    "rv2",
-		DecomposerTaskID: "decomp-v2",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	// Linear chain: setup → impl → test
-	chainResult := `{
-		"goal": "build and test",
-		"dag": {
-			"nodes": [
-				{"id": "setup", "prompt": "prepare", "role": "developer", "file_scope": ["setup.go"]},
-				{"id": "impl",  "prompt": "implement", "role": "developer", "depends_on": ["setup"], "file_scope": ["impl.go"]},
-				{"id": "test",  "prompt": "test it",   "role": "developer", "depends_on": ["impl"],  "file_scope": ["impl_test.go"]}
-			]
-		}
-	}`
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-v2",
-		TaskID:       "decomp-v2",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       chainResult,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	sorted := make([]string, len(exec.SortedNodeIDs))
-	copy(sorted, exec.SortedNodeIDs)
-	exec.mu.Unlock()
-
-	if len(sorted) != 3 {
-		t.Fatalf("SortedNodeIDs len = %d, want 3", len(sorted))
-	}
-	if sorted[0] != "setup" || sorted[1] != "impl" || sorted[2] != "test" {
-		t.Errorf("SortedNodeIDs = %v, want [setup impl test]", sorted)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// handleNodeCompleteLocked — serial execution advancement tests
-// ---------------------------------------------------------------------------
 
 func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	c := newTestComponent(t)
@@ -1398,8 +1115,8 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 func TestHandleNodeCompleteLocked_FailedOutcome_RetriesWhenBudgetRemains(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
 		},
 	}
@@ -1412,7 +1129,7 @@ func TestHandleNodeCompleteLocked_FailedOutcome_RetriesWhenBudgetRemains(t *test
 		CurrentNodeTaskID: "node-task-retry",
 		DAG:               dag,
 		SortedNodeIDs:     []string{"task-a"},
-		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		NodeIndex:         map[string]*TaskNode{"task-a": &dag.Nodes[0]},
 		VisitedNodes:      make(map[string]bool),
 		CurrentNodeIdx:    0,
 		MaxRetries:        2,
@@ -1505,8 +1222,8 @@ func TestHandleNodeCompleteLocked_FailedOutcome_SkipsRetryOnTDDExhaustion(t *tes
 func TestHandleNodeCompleteLocked_FailedOutcome_RetriesOnTransientError(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
 		},
 	}
@@ -1519,7 +1236,7 @@ func TestHandleNodeCompleteLocked_FailedOutcome_RetriesOnTransientError(t *testi
 		CurrentNodeTaskID: "node-task-terr",
 		DAG:               dag,
 		SortedNodeIDs:     []string{"task-a"},
-		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		NodeIndex:         map[string]*TaskNode{"task-a": &dag.Nodes[0]},
 		VisitedNodes:      make(map[string]bool),
 		CurrentNodeIdx:    0,
 		MaxRetries:        2,
@@ -1593,8 +1310,8 @@ func TestHandleNodeCompleteLocked_FailedOutcome_ExhaustsRetryBudget(t *testing.T
 func TestHandleNodeCompleteLocked_MalformedResult_RetriesAtRequirementLevel(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
 		},
 	}
@@ -1607,7 +1324,7 @@ func TestHandleNodeCompleteLocked_MalformedResult_RetriesAtRequirementLevel(t *t
 		CurrentNodeTaskID: "node-task-mal",
 		DAG:               dag,
 		SortedNodeIDs:     []string{"task-a"},
-		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		NodeIndex:         map[string]*TaskNode{"task-a": &dag.Nodes[0]},
 		VisitedNodes:      map[string]bool{"task-a": true},
 		CurrentNodeIdx:    0,
 		MaxRetries:        2,
@@ -1663,8 +1380,8 @@ func TestHandleNodeCompleteLocked_MalformedResult_RetriesAtRequirementLevel(t *t
 func TestHandleNodeCompleteLocked_EmptyContentResult_RetriesAtRequirementLevel(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
 		},
 	}
@@ -1677,7 +1394,7 @@ func TestHandleNodeCompleteLocked_EmptyContentResult_RetriesAtRequirementLevel(t
 		CurrentNodeTaskID: "node-task-empty",
 		DAG:               dag,
 		SortedNodeIDs:     []string{"task-a"},
-		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		NodeIndex:         map[string]*TaskNode{"task-a": &dag.Nodes[0]},
 		VisitedNodes:      map[string]bool{"task-a": true},
 		CurrentNodeIdx:    0,
 		MaxRetries:        2,
@@ -1855,8 +1572,8 @@ func TestParseNodeResultPayload_SurfacesQuirksFired(t *testing.T) {
 func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *testing.T) {
 	c := newTestComponent(t)
 
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "node-x", Prompt: "do x", Role: "developer", FileScope: []string{"x.go"}},
 			{ID: "node-y", Prompt: "do y", Role: "developer", FileScope: []string{"y.go"}},
 		},
@@ -1870,7 +1587,7 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 		CurrentNodeTaskID: "node-task-x",
 		DAG:               dag,
 		SortedNodeIDs:     []string{"node-x", "node-y"},
-		NodeIndex:         map[string]*decompose.TaskNode{"node-x": &dag.Nodes[0], "node-y": &dag.Nodes[1]},
+		NodeIndex:         map[string]*TaskNode{"node-x": &dag.Nodes[0], "node-y": &dag.Nodes[1]},
 		CurrentNodeIdx:    0,
 		VisitedNodes:      make(map[string]bool),
 	}
@@ -1916,7 +1633,7 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesReviewer(t *testing.
 		Prompt:            "implement requirement",
 		CurrentNodeTaskID: "node-task-last",
 		SortedNodeIDs:     []string{"only"},
-		NodeIndex:         map[string]*decompose.TaskNode{},
+		NodeIndex:         map[string]*TaskNode{},
 		CurrentNodeIdx:    0,
 		VisitedNodes:      make(map[string]bool),
 	}
@@ -1958,7 +1675,7 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 		Prompt:            "implement requirement",
 		CurrentNodeTaskID: "node-task-rm",
 		SortedNodeIDs:     []string{"rm-node"},
-		NodeIndex:         map[string]*decompose.TaskNode{},
+		NodeIndex:         map[string]*TaskNode{},
 		CurrentNodeIdx:    0,
 		VisitedNodes:      make(map[string]bool),
 	}
@@ -2204,359 +1921,12 @@ func TestParseReactivePayload_EmptyPayload_ReturnsError(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// buildDecomposerPromptContext tests
-//
-// The hand-rolled buildDecomposerPrompt was deleted 2026-05-11 when the
-// decomposer dispatch was wired through the assembler. These tests cover the
-// projection from requirementExecution to prompt.DecomposerPromptContext.
-// The rendering of that context into the user message lives in
-// prompt/domain/software_render.go and is covered by tests in that package.
-// ---------------------------------------------------------------------------
-
-func TestBuildDecomposerPromptContext_TitleAndDescription(t *testing.T) {
-	exec := &requirementExecution{
-		RequirementID: "req-1",
-		Title:         "Add user authentication",
-		Description:   "Implement JWT-based auth",
-	}
-
-	got := buildDecomposerPromptContext(exec, "")
-	if got.RequirementTitle != "Add user authentication" {
-		t.Errorf("RequirementTitle = %q, want title", got.RequirementTitle)
-	}
-	if got.RequirementDescription != "Implement JWT-based auth" {
-		t.Errorf("RequirementDescription = %q, want description", got.RequirementDescription)
-	}
-}
-
-func TestBuildDecomposerPromptContext_IncludesPrerequisites(t *testing.T) {
-	exec := &requirementExecution{
-		RequirementID: "req-2",
-		Title:         "Add OAuth",
-		DependsOn: []payloads.PrereqContext{
-			{
-				RequirementID: "req-1",
-				Title:         "Add JWT auth",
-				Description:   "Basic JWT auth",
-				FilesModified: []string{"auth/jwt.go"},
-				Summary:       "Implemented JWT tokens",
-			},
-		},
-	}
-
-	got := buildDecomposerPromptContext(exec, "")
-	if len(got.DependsOn) != 1 {
-		t.Fatalf("DependsOn length = %d, want 1", len(got.DependsOn))
-	}
-	pre := got.DependsOn[0]
-	if pre.Title != "Add JWT auth" {
-		t.Errorf("prereq Title = %q, want %q", pre.Title, "Add JWT auth")
-	}
-	if len(pre.FilesModified) != 1 || pre.FilesModified[0] != "auth/jwt.go" {
-		t.Errorf("prereq FilesModified = %v, want [auth/jwt.go]", pre.FilesModified)
-	}
-	if pre.Summary != "Implemented JWT tokens" {
-		t.Errorf("prereq Summary = %q, want summary", pre.Summary)
-	}
-}
-
-func TestBuildDecomposerPromptContext_RetryFeedbackThreaded(t *testing.T) {
-	exec := &requirementExecution{
-		RequirementID: "req-3",
-		Title:         "Try again",
-	}
-	got := buildDecomposerPromptContext(exec, "previous attempt produced empty nodes array")
-	if got.RetryFeedback != "previous attempt produced empty nodes array" {
-		t.Errorf("RetryFeedback = %q, want previous attempt error", got.RetryFeedback)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Decomposer coverage gate — scenarios on the requirement must appear in at
-// least one node's scenario_ids. Without the gate a DAG that left scenarios
-// uncovered would only surface later when the executor's fixable-retry path
-// tried to route a failed scenario to a node. Catching it here shortens the
-// feedback loop and gives the decomposer a specific list to fix.
-// ---------------------------------------------------------------------------
-
-func TestUncoveredInputScenarios(t *testing.T) {
-	cases := []struct {
-		name      string
-		scenarios []workflow.Scenario
-		nodes     []decompose.TaskNode
-		want      []string
-	}{
-		{
-			name:      "no scenarios returns nil",
-			scenarios: nil,
-			nodes:     []decompose.TaskNode{{ID: "n1"}},
-			want:      nil,
-		},
-		{
-			name: "every scenario covered returns nil",
-			scenarios: []workflow.Scenario{
-				{ID: "s1"}, {ID: "s2"},
-			},
-			nodes: []decompose.TaskNode{
-				{ID: "n1", ScenarioIDs: []string{"s1"}},
-				{ID: "n2", ScenarioIDs: []string{"s2"}},
-			},
-			want: nil,
-		},
-		{
-			name: "no nodes carrying any ID returns every scenario",
-			scenarios: []workflow.Scenario{
-				{ID: "s-b"}, {ID: "s-a"},
-			},
-			nodes: []decompose.TaskNode{
-				{ID: "n1"}, {ID: "n2"},
-			},
-			want: []string{"s-a", "s-b"},
-		},
-		{
-			name: "partial coverage returns the uncovered ids sorted",
-			scenarios: []workflow.Scenario{
-				{ID: "s1"}, {ID: "s2"}, {ID: "s3"},
-			},
-			nodes: []decompose.TaskNode{
-				{ID: "n1", ScenarioIDs: []string{"s2"}},
-			},
-			want: []string{"s1", "s3"},
-		},
-		{
-			name: "scenarios with empty ID are skipped (malformed input)",
-			scenarios: []workflow.Scenario{
-				{ID: ""}, {ID: "s1"},
-			},
-			nodes: []decompose.TaskNode{
-				{ID: "n1", ScenarioIDs: []string{"s1"}},
-			},
-			want: nil,
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := uncoveredInputScenarios(tc.scenarios, tc.nodes)
-			if len(got) != len(tc.want) {
-				t.Fatalf("len=%d want %d; got=%v", len(got), len(tc.want), got)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("[%d]=%q want %q", i, got[i], tc.want[i])
-				}
-			}
-		})
-	}
-}
-
-// Coverage gap on a DAG that parses fine but doesn't cite every scenario must
-// NOT terminate the requirement — it should route through retryOrFail so the
-// decomposer re-runs with actionable feedback.
-func TestHandleDecomposerCompleteLocked_CoverageGap_RetriesWithFeedback(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-cov",
-		Slug:              "p",
-		RequirementID:     "cov",
-		Title:             "cover all scenarios",
-		Model:             "test-model",
-		DecomposerTaskID:  "decomp-cov",
-		VisitedNodes:      make(map[string]bool),
-		CurrentNodeIdx:    -1,
-		DecomposerAttempt: 1,
-		Scenarios: []workflow.Scenario{
-			{ID: "s-happy", Given: "x", When: "y", Then: []string{"z"}},
-			{ID: "s-edge", Given: "a", When: "b", Then: []string{"c"}},
-		},
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	// DAG covers s-happy but leaves s-edge uncovered.
-	result := `{
-		"goal": "cover",
-		"dag": {
-			"nodes": [
-				{"id": "n1", "prompt": "do x", "role": "developer", "file_scope": ["a.go"], "scenario_ids": ["s-happy"]}
-			]
-		}
-	}`
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-cov",
-		TaskID:       "decomp-cov",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       result,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	terminated := exec.terminated
-	dagSet := exec.DAG != nil
-	lastError := exec.DecomposerLastError
-	exec.mu.Unlock()
-
-	if terminated {
-		t.Error("coverage gap should route through retry, not terminate")
-	}
-	if dagSet {
-		t.Error("exec.DAG should NOT be populated when coverage gate fails")
-	}
-	if !strings.Contains(lastError, "s-edge") {
-		t.Errorf("DecomposerLastError should call out the uncovered scenario id; got %q", lastError)
-	}
-	if !strings.Contains(lastError, "scenario_ids") {
-		t.Errorf("DecomposerLastError should explain the required field; got %q", lastError)
-	}
-}
-
-// When EnforceScenarioCoverage is explicitly false (mock-LLM runs), a coverage
-// gap must NOT block — it logs a WARN and proceeds. This is the escape hatch
-// for fixtures that can't cite runtime-generated scenario IDs yet.
-func TestHandleDecomposerCompleteLocked_CoverageGap_GateDisabled_Proceeds(t *testing.T) {
-	c := newTestComponent(t)
-	disabled := false
-	c.config.EnforceScenarioCoverage = &disabled
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-covoff",
-		Slug:             "p",
-		RequirementID:    "covoff",
-		DecomposerTaskID: "decomp-covoff",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-		Scenarios:        []workflow.Scenario{{ID: "s1"}, {ID: "s2"}},
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	// Covers s1 only, leaves s2 uncovered.
-	result := `{
-		"goal": "cover",
-		"dag": {
-			"nodes": [
-				{"id": "n1", "prompt": "x", "role": "developer", "file_scope": ["a.go"], "scenario_ids": ["s1"]}
-			]
-		}
-	}`
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-covoff",
-		TaskID:       "decomp-covoff",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       result,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	dagSet := exec.DAG != nil
-	lastError := exec.DecomposerLastError
-	exec.mu.Unlock()
-
-	if !dagSet {
-		t.Error("with gate disabled, DAG should be populated even on coverage gap")
-	}
-	if lastError != "" {
-		t.Errorf("DecomposerLastError should remain empty when gate is disabled; got %q", lastError)
-	}
-}
-
-// A DAG that cites every input scenario id should proceed normally through
-// decomposer-complete. Regression guard — the coverage gate must be a no-op
-// on well-formed output.
-func TestHandleDecomposerCompleteLocked_FullCoverage_PopulatesDAG(t *testing.T) {
-	c := newTestComponent(t)
-
-	exec := &requirementExecution{
-		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-covok",
-		Slug:             "p",
-		RequirementID:    "covok",
-		DecomposerTaskID: "decomp-covok",
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-		Scenarios: []workflow.Scenario{
-			{ID: "s1"}, {ID: "s2"},
-		},
-	}
-	c.activeExecs.Set(exec.EntityID, exec)
-
-	result := `{
-		"goal": "cover",
-		"dag": {
-			"nodes": [
-				{"id": "n1", "prompt": "do x", "role": "developer", "file_scope": ["a.go"], "scenario_ids": ["s1", "s2"]}
-			]
-		}
-	}`
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       "loop-decomp-covok",
-		TaskID:       "decomp-covok",
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Outcome:      agentic.OutcomeSuccess,
-		Result:       result,
-	}
-
-	exec.mu.Lock()
-	c.handleDecomposerCompleteLocked(context.Background(), event, exec)
-	dagSet := exec.DAG != nil
-	nodeCount := len(exec.SortedNodeIDs)
-	lastError := exec.DecomposerLastError
-	exec.mu.Unlock()
-
-	if !dagSet {
-		t.Error("exec.DAG should be set for a fully-covered DAG")
-	}
-	if nodeCount != 1 {
-		t.Errorf("SortedNodeIDs len = %d, want 1", nodeCount)
-	}
-	if lastError != "" {
-		t.Errorf("DecomposerLastError should be cleared on success; got %q", lastError)
-	}
-}
-
-// Prompt must surface scenario IDs explicitly — without them the LLM has no
-// way to populate node.scenario_ids correctly. This test locks in the
-// context projection — the renderer's "id=" marker emission is covered
-// in prompt/domain.
-func TestBuildDecomposerPromptContext_EmitsScenarios(t *testing.T) {
-	exec := &requirementExecution{
-		RequirementID: "req-scenarios",
-		Title:         "Add auth",
-		Scenarios: []workflow.Scenario{
-			{ID: "sc-login", Given: "a user", When: "they log in", Then: []string{"ok"}},
-			{ID: "sc-logout", Given: "a user", When: "they log out", Then: []string{"ok"}},
-		},
-	}
-	got := buildDecomposerPromptContext(exec, "")
-
-	if len(got.Scenarios) != 2 {
-		t.Fatalf("Scenarios length = %d, want 2", len(got.Scenarios))
-	}
-	ids := []string{got.Scenarios[0].ID, got.Scenarios[1].ID}
-	for _, want := range []string{"sc-login", "sc-logout"} {
-		found := false
-		for _, id := range ids {
-			if id == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("scenario id %q missing from projected context; got %v", want, ids)
-		}
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Coverage gap tripwire — uncoveredFailedScenarios + restructure escalation.
 // ---------------------------------------------------------------------------
 
-func execWithNodes(nodes []*decompose.TaskNode) *requirementExecution {
+func execWithNodes(nodes []*TaskNode) *requirementExecution {
 	exec := &requirementExecution{
-		NodeIndex: make(map[string]*decompose.TaskNode, len(nodes)),
+		NodeIndex: make(map[string]*TaskNode, len(nodes)),
 	}
 	for _, n := range nodes {
 		exec.SortedNodeIDs = append(exec.SortedNodeIDs, n.ID)
@@ -2570,19 +1940,19 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 
 	cases := []struct {
 		name     string
-		nodes    []*decompose.TaskNode
+		nodes    []*TaskNode
 		verdicts []ScenarioVerdict
 		want     []string
 	}{
 		{
 			name:     "no failures returns nil",
-			nodes:    []*decompose.TaskNode{{ID: "n1", ScenarioIDs: []string{"s1"}}},
+			nodes:    []*TaskNode{{ID: "n1", ScenarioIDs: []string{"s1"}}},
 			verdicts: []ScenarioVerdict{{ScenarioID: "s1", Passed: true}},
 			want:     nil,
 		},
 		{
 			name: "all failed scenarios covered returns nil",
-			nodes: []*decompose.TaskNode{
+			nodes: []*TaskNode{
 				{ID: "n1", ScenarioIDs: []string{"s1"}},
 				{ID: "n2", ScenarioIDs: []string{"s2"}},
 			},
@@ -2594,7 +1964,7 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 		},
 		{
 			name: "zero nodes with scenario_ids returns every failed id",
-			nodes: []*decompose.TaskNode{
+			nodes: []*TaskNode{
 				{ID: "n1"},
 				{ID: "n2"},
 			},
@@ -2606,7 +1976,7 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 		},
 		{
 			name: "partial coverage returns only uncovered ids sorted",
-			nodes: []*decompose.TaskNode{
+			nodes: []*TaskNode{
 				{ID: "n1", ScenarioIDs: []string{"s2"}},
 			},
 			verdicts: []ScenarioVerdict{
@@ -2618,7 +1988,7 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 		},
 		{
 			name: "passed scenarios never show up even if uncovered",
-			nodes: []*decompose.TaskNode{
+			nodes: []*TaskNode{
 				{ID: "n1", ScenarioIDs: []string{"s1"}},
 			},
 			verdicts: []ScenarioVerdict{

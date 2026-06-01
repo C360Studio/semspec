@@ -1,22 +1,16 @@
-package decompose_test
+package requirementexecutor
 
 import (
 	"strings"
 	"testing"
-
-	"github.com/c360studio/semspec/tools/decompose"
 )
 
-// -- helpers --
-
-// dag builds a TaskDAG from a slice of TaskNodes for concise test setup.
-func dag(nodes ...decompose.TaskNode) decompose.TaskDAG {
-	return decompose.TaskDAG{Nodes: nodes}
+func dag(nodes ...TaskNode) TaskDAG {
+	return TaskDAG{Nodes: nodes}
 }
 
-// taskNode is a convenience builder for a TaskNode with file scope and optional dependencies.
-func taskNode(id, prompt, role string, deps ...string) decompose.TaskNode {
-	return decompose.TaskNode{
+func taskNode(id, prompt, role string, deps ...string) TaskNode {
+	return TaskNode{
 		ID:        id,
 		Prompt:    prompt,
 		Role:      role,
@@ -25,11 +19,8 @@ func taskNode(id, prompt, role string, deps ...string) decompose.TaskNode {
 	}
 }
 
-// -- tests --
-
 func TestValidate_SingleNode_Valid(t *testing.T) {
 	t.Parallel()
-
 	d := dag(taskNode("a", "Do something", "worker"))
 	if err := d.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil for single valid node", err)
@@ -38,7 +29,6 @@ func TestValidate_SingleNode_Valid(t *testing.T) {
 
 func TestValidate_LinearChain_Valid(t *testing.T) {
 	t.Parallel()
-
 	d := dag(
 		taskNode("a", "Step A", "worker"),
 		taskNode("b", "Step B", "worker", "a"),
@@ -51,7 +41,6 @@ func TestValidate_LinearChain_Valid(t *testing.T) {
 
 func TestValidate_ParallelNodesWithSharedDep_Valid(t *testing.T) {
 	t.Parallel()
-
 	d := dag(
 		taskNode("root", "Root task", "planner"),
 		taskNode("a", "Branch A", "worker", "root"),
@@ -65,8 +54,7 @@ func TestValidate_ParallelNodesWithSharedDep_Valid(t *testing.T) {
 
 func TestValidate_EmptyNodes_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	d := decompose.TaskDAG{} // zero value, no nodes
+	d := TaskDAG{}
 	if err := d.Validate(); err == nil {
 		t.Error("Validate() = nil, want error for empty nodes")
 	}
@@ -74,12 +62,10 @@ func TestValidate_EmptyNodes_ReturnsError(t *testing.T) {
 
 func TestValidate_DuplicateNodeIDs_ReturnsError(t *testing.T) {
 	t.Parallel()
-
 	d := dag(
 		taskNode("dup", "First", "worker"),
 		taskNode("dup", "Second with same ID", "worker"),
 	)
-
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for duplicate node IDs")
@@ -91,12 +77,10 @@ func TestValidate_DuplicateNodeIDs_ReturnsError(t *testing.T) {
 
 func TestValidate_InvalidDependencyRef_ReturnsError(t *testing.T) {
 	t.Parallel()
-
 	d := dag(
 		taskNode("a", "Valid", "worker"),
 		taskNode("b", "Depends on ghost", "worker", "nonexistent"),
 	)
-
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for unknown dependency")
@@ -108,9 +92,7 @@ func TestValidate_InvalidDependencyRef_ReturnsError(t *testing.T) {
 
 func TestValidate_SelfReference_ReturnsError(t *testing.T) {
 	t.Parallel()
-
 	d := dag(taskNode("loop", "Self-referencing", "worker", "loop"))
-
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for self-reference")
@@ -122,13 +104,10 @@ func TestValidate_SelfReference_ReturnsError(t *testing.T) {
 
 func TestValidate_SimpleCycleTwoNodes_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	// A depends on B, B depends on A.
 	d := dag(
 		taskNode("a", "Task A", "worker", "b"),
 		taskNode("b", "Task B", "worker", "a"),
 	)
-
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want cycle detection error")
@@ -140,14 +119,11 @@ func TestValidate_SimpleCycleTwoNodes_ReturnsError(t *testing.T) {
 
 func TestValidate_ThreeNodeCycle_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	// A → B → C → A
 	d := dag(
 		taskNode("a", "Task A", "worker", "c"),
 		taskNode("b", "Task B", "worker", "a"),
 		taskNode("c", "Task C", "worker", "b"),
 	)
-
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want cycle detection error for 3-node cycle")
@@ -159,33 +135,20 @@ func TestValidate_ThreeNodeCycle_ReturnsError(t *testing.T) {
 
 func TestValidate_MultipleDisconnectedComponents_Valid(t *testing.T) {
 	t.Parallel()
-
-	// Two independent chains with no relationship between them.
 	d := dag(
 		taskNode("chain1-a", "Chain 1 Step A", "worker"),
 		taskNode("chain1-b", "Chain 1 Step B", "worker", "chain1-a"),
 		taskNode("chain2-a", "Chain 2 Step A", "analyst"),
 		taskNode("chain2-b", "Chain 2 Step B", "analyst", "chain2-a"),
 	)
-
 	if err := d.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil for disconnected valid DAG", err)
 	}
 }
 
-// -- FileScope validation tests --
-
 func TestValidate_FileScope_MissingEntries_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	d := dag(decompose.TaskNode{
-		ID:        "a",
-		Prompt:    "Do something",
-		Role:      "worker",
-		DependsOn: nil,
-		FileScope: nil, // no file scope
-	})
-
+	d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker"})
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for missing file_scope")
@@ -200,15 +163,7 @@ func TestValidate_FileScope_MissingEntries_ReturnsError(t *testing.T) {
 
 func TestValidate_FileScope_EmptySlice_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	d := dag(decompose.TaskNode{
-		ID:        "a",
-		Prompt:    "Do something",
-		Role:      "worker",
-		DependsOn: nil,
-		FileScope: []string{}, // explicitly empty
-	})
-
+	d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker", FileScope: []string{}})
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for empty file_scope slice")
@@ -220,15 +175,7 @@ func TestValidate_FileScope_EmptySlice_ReturnsError(t *testing.T) {
 
 func TestValidate_FileScope_EmptyStringEntry_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	d := dag(decompose.TaskNode{
-		ID:        "a",
-		Prompt:    "Do something",
-		Role:      "worker",
-		DependsOn: nil,
-		FileScope: []string{"src/main.go", ""}, // second entry is empty
-	})
-
+	d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker", FileScope: []string{"src/main.go", ""}})
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for empty file_scope entry")
@@ -240,7 +187,6 @@ func TestValidate_FileScope_EmptyStringEntry_ReturnsError(t *testing.T) {
 
 func TestValidate_FileScope_PathTraversal_ReturnsError(t *testing.T) {
 	t.Parallel()
-
 	cases := []struct {
 		name  string
 		entry string
@@ -249,19 +195,11 @@ func TestValidate_FileScope_PathTraversal_ReturnsError(t *testing.T) {
 		{"double dot in path", "src/../../../etc/passwd"},
 		{"double dot component", "foo/../../bar"},
 	}
-
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			d := dag(decompose.TaskNode{
-				ID:        "a",
-				Prompt:    "Do something",
-				Role:      "worker",
-				DependsOn: nil,
-				FileScope: []string{tc.entry},
-			})
-
+			d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker", FileScope: []string{tc.entry}})
 			err := d.Validate()
 			if err == nil {
 				t.Fatalf("Validate() = nil, want error for path traversal entry %q", tc.entry)
@@ -275,12 +213,8 @@ func TestValidate_FileScope_PathTraversal_ReturnsError(t *testing.T) {
 
 func TestValidate_FileScope_ValidGlobPatterns_NoError(t *testing.T) {
 	t.Parallel()
-
-	d := dag(decompose.TaskNode{
-		ID:        "a",
-		Prompt:    "Do something",
-		Role:      "worker",
-		DependsOn: nil,
+	d := dag(TaskNode{
+		ID: "a", Prompt: "Do something", Role: "worker",
 		FileScope: []string{
 			"src/auth/*.go",
 			"pkg/utils/hash.go",
@@ -288,7 +222,6 @@ func TestValidate_FileScope_ValidGlobPatterns_NoError(t *testing.T) {
 			"cmd/semspec/main.go",
 		},
 	})
-
 	if err := d.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil for valid glob patterns", err)
 	}
@@ -296,21 +229,11 @@ func TestValidate_FileScope_ValidGlobPatterns_NoError(t *testing.T) {
 
 func TestValidate_FileScope_MaxEntriesExceeded_ReturnsError(t *testing.T) {
 	t.Parallel()
-
-	// Build 51 unique file scope entries — just above the maximum.
 	scope := make([]string, 51)
 	for i := range scope {
 		scope[i] = "src/file" + strings.Repeat("x", i) + ".go"
 	}
-
-	d := dag(decompose.TaskNode{
-		ID:        "a",
-		Prompt:    "Do something",
-		Role:      "worker",
-		DependsOn: nil,
-		FileScope: scope,
-	})
-
+	d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker", FileScope: scope})
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error for exceeding max file_scope entries")
@@ -322,21 +245,11 @@ func TestValidate_FileScope_MaxEntriesExceeded_ReturnsError(t *testing.T) {
 
 func TestValidate_FileScope_ExactlyMaxEntries_Valid(t *testing.T) {
 	t.Parallel()
-
-	// Build exactly 50 entries — at the boundary, should be valid.
 	scope := make([]string, 50)
 	for i := range scope {
 		scope[i] = "src/file" + strings.Repeat("x", i) + ".go"
 	}
-
-	d := dag(decompose.TaskNode{
-		ID:        "a",
-		Prompt:    "Do something",
-		Role:      "worker",
-		DependsOn: nil,
-		FileScope: scope,
-	})
-
+	d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker", FileScope: scope})
 	if err := d.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil for exactly %d file_scope entries", err, 50)
 	}
@@ -344,20 +257,10 @@ func TestValidate_FileScope_ExactlyMaxEntries_Valid(t *testing.T) {
 
 func TestValidate_FileScope_MultipleNodes_AllMustHaveScope(t *testing.T) {
 	t.Parallel()
-
-	// First node valid, second node missing file scope.
 	d := dag(
-		decompose.TaskNode{
-			ID: "a", Prompt: "Task A", Role: "worker",
-			FileScope: []string{"src/a.go"},
-		},
-		decompose.TaskNode{
-			ID: "b", Prompt: "Task B", Role: "worker",
-			DependsOn: []string{"a"},
-			FileScope: nil, // missing
-		},
+		TaskNode{ID: "a", Prompt: "Task A", Role: "worker", FileScope: []string{"src/a.go"}},
+		TaskNode{ID: "b", Prompt: "Task B", Role: "worker", DependsOn: []string{"a"}},
 	)
-
 	err := d.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want error when second node has no file_scope")

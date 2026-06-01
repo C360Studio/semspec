@@ -108,10 +108,7 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 		event.CompletedAt = time.Now()
 	}
 
-	switch {
-	case loop.TaskID == exec.DecomposerTaskID:
-		c.handleDecomposerCompleteLocked(ctx, event, exec)
-	case loop.TaskID == exec.ReviewerTaskID:
+	if loop.TaskID == exec.ReviewerTaskID {
 		c.handleRequirementReviewerCompleteLocked(ctx, event, exec)
 	}
 }
@@ -249,9 +246,7 @@ func (c *Component) findExecByTaskID(taskID string) *requirementExecution {
 		if !ok {
 			continue
 		}
-		if exec.DecomposerTaskID == taskID ||
-			exec.CurrentNodeTaskID == taskID ||
-			exec.ReviewerTaskID == taskID {
+		if exec.CurrentNodeTaskID == taskID || exec.ReviewerTaskID == taskID {
 			found = exec
 			break
 		}
@@ -285,20 +280,14 @@ func (c *Component) resumeInterruptedExecutions(ctx context.Context) {
 		}
 
 		switch {
-		case exec.DAG == nil && exec.DecomposerTaskID == "":
-			// No DAG and no decomposer dispatched — re-dispatch decomposer.
-			c.logger.Info("Resuming: re-dispatching decomposer",
+		case exec.DAG == nil:
+			// No DAG yet — re-run synthesis. ADR-043 PR 4g: synthesis is
+			// sync, so there is no in-flight decomposer state to resume.
+			c.logger.Info("Resuming: re-running DAG synthesis",
 				"entity_id", exec.EntityID, "slug", exec.Slug)
 			c.startExecutionTimeoutLocked(exec)
 			c.dispatchDecomposerLocked(ctx, exec)
 			resumed++
-
-		case exec.DAG == nil && exec.DecomposerTaskID != "":
-			// Decomposer was dispatched but hasn't completed. The replay
-			// may have already delivered the completion. If not, the timeout
-			// mechanism will handle it.
-			c.logger.Debug("Decomposer in-flight, waiting for completion or timeout",
-				"entity_id", exec.EntityID, "decomposer_task_id", exec.DecomposerTaskID)
 
 		case exec.DAG != nil && exec.CurrentNodeIdx < len(exec.SortedNodeIDs):
 			// DAG exists, mid-execution. Check if the current node already

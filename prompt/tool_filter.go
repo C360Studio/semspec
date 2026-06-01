@@ -53,16 +53,6 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		RoleScenarioGenerator: {
 			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
-		// Task decomposer (req-executor's decompose dispatch) — bounded
-		// palette because the decomposer's job is to commit a DAG, not to
-		// research. decompose_task is the terminal tool; scratchpad +
-		// write_todos give it private reasoning space (broken-out from
-		// the strict tool-args). Deliberately NO bash / graph_search /
-		// graph_query / submit_work: the user message carries all the
-		// requirement + scope + scenario data the decomposer needs.
-		RoleTaskGenerator: {
-			AllowExact: []string{"decompose_task", "scratchpad", "write_todos"},
-		},
 		// Recovery agent (manager-role wedge diagnosis) — closed action
 		// set is enforced at parse time; the palette here is "the tools
 		// you'll actually call." submit_work is the terminal commit;

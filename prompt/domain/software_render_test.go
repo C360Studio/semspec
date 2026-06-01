@@ -818,50 +818,10 @@ func TestRenderScenarioGeneratorPrompt_PlanContextRendered(t *testing.T) {
 	}
 }
 
-// TestRenderTaskDecomposerPrompt_IncludesCompletenessSignal pins the
-// take-11 fix: the renderer surfaces requirement title, description,
-// scope, prereqs, and the scenario-coverage rule. The completeness rule
-// itself is in the persona fragment (system-base), not the user prompt;
-// this test focuses on the per-dispatch context bake-in.
-func TestRenderTaskDecomposerPrompt_IncludesCoreContext(t *testing.T) {
-	out := renderTaskDecomposerPrompt(&prompt.DecomposerPromptContext{
-		RequirementTitle:       "Implement Meshtastic driver",
-		RequirementDescription: "OSH driver that bridges Meshtastic frames to the CS-API",
-		ScopeInclude:           []string{"src/main/java/io/opensensorhub/drivers/meshtastic", "build.gradle"},
-		ScopeDoNotTouch:        []string{"main.go"},
-		Scenarios: []prompt.DecomposerScenario{
-			{ID: "sc-frame-parse", Given: "a Meshtastic frame fixture", When: "ingested", Then: []string{"one CS-API message emitted"}},
-		},
-	})
-	mustContain := []string{
-		"Implement Meshtastic driver",
-		"OSH driver",
-		"src/main/java/io/opensensorhub/drivers/meshtastic",
-		"sc-frame-parse",
-		"scenario_ids array",
-		"Do not touch",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(out, want) {
-			t.Errorf("renderTaskDecomposerPrompt missing %q\nfull:\n%s", want, out)
-		}
-	}
-}
-
-func TestRenderTaskDecomposerPrompt_RetryFeedbackOnFirstLine(t *testing.T) {
-	out := renderTaskDecomposerPrompt(&prompt.DecomposerPromptContext{
-		RequirementTitle: "Try again",
-		RetryFeedback:    "previous attempt emitted empty nodes array",
-	})
-	// Retry feedback should appear before the requirement section so the
-	// LLM sees the prior failure first.
-	if !strings.HasPrefix(out, "RETRY") {
-		t.Errorf("retry feedback should prefix prompt; got first 80 chars: %s", clip(out, 80))
-	}
-	if !strings.Contains(out, "previous attempt emitted empty nodes array") {
-		t.Errorf("renderTaskDecomposerPrompt missing retry-feedback content\nfull:\n%s", out)
-	}
-}
+// renderTaskDecomposerPrompt tests retired with ADR-043 PR 4g — the
+// decomposer LLM path was replaced by synthesis from Sarah-prepared
+// Stories. See processor/requirement-executor/synthesize_dag_test.go
+// for the replacement coverage.
 
 // TestRenderRecoveryAgentPrompt_IncludesEvidence covers the user prompt
 // for RoleRecoveryAgent. Ported from the legacy
