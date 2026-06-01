@@ -255,30 +255,28 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// generating_architecture → rejected (fatal error)
 		return target == StatusArchitectureGenerated || target == StatusRejected
 	case StatusArchitectureGenerated:
-		// architecture_generated → generating_scenarios (scenario-generator claims; legacy pre-ADR-043 path)
-		// architecture_generated → scenarios_generated (auto-cascade; legacy)
-		// architecture_generated → preparing_stories (ADR-043 PR 3: story-preparer claims)
+		// ADR-043 PR 4l — strict sequential: only story-preparer claims from
+		// here. The legacy direct path to scenarios_* was a back-compat hedge
+		// while Sarah was optional; PR 4l deleted Sarah's Enabled flag and
+		// removed Bob's architecture_generated watch, so that path is gone.
+		// architecture_generated → preparing_stories (story-preparer claims)
 		// architecture_generated → changed (change proposal deprecated requirements)
 		// architecture_generated → rejected (validation failure)
-		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated ||
-			target == StatusPreparingStories ||
+		return target == StatusPreparingStories ||
 			target == StatusChanged || target == StatusRejected
 	case StatusPreparingStories:
-		// preparing_stories → stories_generated (Sarah done; ADR-043 PR 4c — Bob still needs to run after this)
-		// preparing_stories → ready_for_execution (legacy PR 3 wire shape; kept for back-compat until story-preparer.enabled becomes the only path)
+		// preparing_stories → stories_generated (Sarah's mutation handler — happy path)
 		// preparing_stories → architecture_generated (R3 phase-targeted retry — architect must reshape components)
 		// preparing_stories → rejected (escalation: readiness gate exhausted retries)
 		return target == StatusStoriesGenerated ||
-			target == StatusReadyForExecution ||
 			target == StatusArchitectureGenerated ||
 			target == StatusRejected
 	case StatusStoriesGenerated:
-		// stories_generated → generating_scenarios (Bob claims; ADR-043 PR 4c — Bob now watches BOTH architecture_generated and stories_generated)
-		// stories_generated → scenarios_generated (auto-cascade fallback when scenario-generator can claim and dispatch in one step)
+		// stories_generated → generating_scenarios (Bob claims; PR 4l: Bob watches ONLY this state)
 		// stories_generated → preparing_stories (R3 retry — Sarah re-prep on accepted story_reprepare PlanDecision)
 		// stories_generated → changed (change proposal deprecated requirements; cascade restarts the plan-prep chain)
 		// stories_generated → rejected (escalation)
-		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated ||
+		return target == StatusGeneratingScenarios ||
 			target == StatusPreparingStories ||
 			target == StatusChanged || target == StatusRejected
 	case StatusGeneratingScenarios:

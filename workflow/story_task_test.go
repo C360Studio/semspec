@@ -335,17 +335,18 @@ func TestStatusPreparingStoriesTransitions(t *testing.T) {
 		from, to Status
 		want     bool
 	}{
+		// ADR-043 PR 4l — strict sequential flow. architecture_generated
+		// flows only into preparing_stories (the legacy direct paths to
+		// scenarios_* were removed alongside Sarah's Enabled hedge).
 		{StatusArchitectureGenerated, StatusPreparingStories, true},
-		// ADR-043 PR 4c — preparing_stories now targets stories_generated as
-		// the primary terminal. ready_for_execution is kept for back-compat
-		// with PR 3's initial wire shape.
 		{StatusPreparingStories, StatusStoriesGenerated, true},
-		{StatusPreparingStories, StatusReadyForExecution, true},
-		{StatusPreparingStories, StatusArchitectureGenerated, true},
+		{StatusPreparingStories, StatusArchitectureGenerated, true}, // R3 retry
 		{StatusPreparingStories, StatusRejected, true},
-		// Legacy architecture→scenarios path still works
-		{StatusArchitectureGenerated, StatusScenariosGenerated, true},
-		// Reject jumps
+		// Removed by PR 4l (these are the legacy hedges).
+		{StatusArchitectureGenerated, StatusScenariosGenerated, false},
+		{StatusArchitectureGenerated, StatusGeneratingScenarios, false},
+		{StatusPreparingStories, StatusReadyForExecution, false},
+		// Disallowed jumps.
 		{StatusPreparingStories, StatusImplementing, false},
 		{StatusPreparingStories, StatusCreated, false},
 	}
@@ -375,14 +376,15 @@ func TestStatusStoriesGeneratedTransitions(t *testing.T) {
 	}{
 		// Happy path: Bob picks up stories_generated to generate scenarios per requirement.
 		{StatusStoriesGenerated, StatusGeneratingScenarios, true},
-		// Auto-cascade fallback when scenario-generator claims and dispatches in one step.
-		{StatusStoriesGenerated, StatusScenariosGenerated, true},
 		// R3 retry: story_reprepare PlanDecision sends Sarah back for another cycle.
 		{StatusStoriesGenerated, StatusPreparingStories, true},
 		// Change proposal cascade.
 		{StatusStoriesGenerated, StatusChanged, true},
 		// Escalation.
 		{StatusStoriesGenerated, StatusRejected, true},
+		// Removed by PR 4l — the auto-cascade direct-to-scenarios_generated
+		// hedge is gone; Bob always claims generating_scenarios first.
+		{StatusStoriesGenerated, StatusScenariosGenerated, false},
 		// Disallowed jumps.
 		{StatusStoriesGenerated, StatusImplementing, false},
 		{StatusStoriesGenerated, StatusReadyForExecution, false},

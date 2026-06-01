@@ -253,13 +253,16 @@ func TestBuildPromptContext_NilExploration(t *testing.T) {
 
 func TestDefaultConfig(t *testing.T) {
 	c := DefaultConfig()
-	if c.Enabled {
-		t.Errorf("ADR-043 PR 3 ships dormant — DefaultConfig().Enabled must be false, got true")
-	}
 	if c.MaxGenerationRetries != 2 {
 		t.Errorf("expected default MaxGenerationRetries=2, got %d", c.MaxGenerationRetries)
 	}
 	if c.PlanStateBucket != "PLAN_STATES" {
 		t.Errorf("expected PLAN_STATES bucket, got %q", c.PlanStateBucket)
+	}
+	if c.DefaultCapability != "planning" {
+		t.Errorf("expected default capability=planning, got %q", c.DefaultCapability)
+	}
+	if c.RetryBackoffMs != 200 {
+		t.Errorf("expected default RetryBackoffMs=200, got %d", c.RetryBackoffMs)
 	}
 }

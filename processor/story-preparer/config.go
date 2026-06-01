@@ -10,16 +10,15 @@ import (
 var storyPreparerSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
 // Config holds the story-preparer component configuration.
+//
+// ADR-043 PR 4l removed the Enabled flag — it was a PR 3-era safety hatch
+// that became a footgun. Sarah is always-on when the component is
+// registered; disabling Sarah means removing the component from the
+// registry, not flipping a config bit. The scenario-generator now
+// watches only stories_generated (PR 4l) so the flow is strictly
+// sequential: arch_generated → preparing_stories → stories_generated →
+// generating_scenarios.
 type Config struct {
-	// Enabled gates whether the component actively claims plans reaching
-	// architecture_generated. Defaults to false so ADR-043 PR 3 ships in a
-	// dormant state — the component registers, builds, and tests cleanly,
-	// but the workflow flow (architecture_generated → scenarios_generated)
-	// is unchanged. PR 4 of ADR-043 flips this on when execution-manager
-	// + scenario-generator are reworked to consume Stories. Operators can
-	// flip it earlier per-instance for canarying.
-	Enabled bool `json:"enabled" schema:"type:bool,description:Enable story-preparer claim path (ADR-043 PR 3 ships off; PR 4 flips on),category:basic,default:false"`
-
 	// DefaultCapability is the model capability to use for story preparation.
 	// Sarah is a planning/structural persona — the same capability slot that
 	// other planning generators (analyst, architecture) use is the natural
@@ -50,7 +49,6 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		Enabled:              false,
 		DefaultCapability:    "planning",
 		PlanStateBucket:      "PLAN_STATES",
 		MaxGenerationRetries: 2,
