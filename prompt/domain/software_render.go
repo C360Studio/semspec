@@ -73,7 +73,7 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 		sb.WriteString("\nRules:\n")
 		sb.WriteString("- ONE Requirement per capability — no merging two capabilities into one Requirement, no splitting one capability across multiple Requirements.\n")
 		sb.WriteString("- `capability_name` is REQUIRED on every Requirement; it MUST exactly match one of the capability names above.\n")
-		sb.WriteString("- Each Requirement owns a focused `files_owned` set (≤5 paths). If a capability's scope would require more than 5 files, flag `capability_too_broad` in your output and stop — the analyst will re-split.\n")
+		sb.WriteString("- Each Requirement carries INTENT + acceptance criteria — what the system MUST do. Implementation file paths are NOT your concern (the architect declares files per component, and the product owner assigns files to stories downstream). Do NOT emit files_owned; the field has been removed from your schema.\n")
 		sb.WriteString("- Use SHALL or MUST in the Requirement title and description (RFC 2119 normative language).\n")
 		sb.WriteString("- Documentation content (READMEs, coverage matrices, tradeoff write-ups) is NOT a standalone Requirement. It attaches as scenarios under the implementation Requirement that produces the documented behavior.\n")
 		sb.WriteString("- Capability `depends_on` relationships translate to Requirement `depends_on` automatically — set the Requirement's `depends_on` to the requirement IDs of the capabilities it depends on (preserve the DAG).\n\n")
@@ -89,14 +89,11 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 				continue
 			}
 			fmt.Fprintf(&sb, "- %s — title: %q\n", r.ID, r.Title)
-			if len(r.FilesOwned) > 0 {
-				fmt.Fprintf(&sb, "  files_owned: %s\n", strings.Join(r.FilesOwned, ", "))
-			}
 			if len(r.DependsOn) > 0 {
 				fmt.Fprintf(&sb, "  depends_on: %s\n", strings.Join(r.DependsOn, ", "))
 			}
 		}
-		sb.WriteString("\nWhen proposing replacements, do NOT claim a path already in any kept requirement's files_owned unless your replacement lists that requirement's title in depends_on. Otherwise the plan-level merge will deadlock and the entire generation will be rejected.\n\n")
+		sb.WriteString("\nWhen proposing replacements, preserve the depends_on edges and intent that kept requirements rely on; downstream phases (Winston's architecture, Sarah's stories) bind files to components per ADR-043 Move 4 — Requirements no longer carry files_owned.\n\n")
 		sb.WriteString("## Rejected Requirements (regenerate replacements for these only)\n\n")
 		for _, id := range rg.ReplaceRequirementIDs {
 			reason := rg.RejectionReasons[id]
@@ -315,19 +312,19 @@ func writeProjectFileTree(sb *strings.Builder, tree string) {
 }
 
 // writeRequirementGeneratorProjectFileTree renders the `git ls-files`
-// snapshot for the requirement-generator with framing focused on the
-// files_owned partitioning rule. The persona warns against "inventing fake
-// file splits" — without a real tree, weak models still hallucinate
-// idiomatic-looking paths (api/handlers/*.go on projects with no api/
-// directory) into files_owned. Empty input silently omits the section so
-// greenfield projects aren't penalized.
+// snapshot for the requirement-generator as scope-awareness context. Post
+// ADR-043 Move 4 John no longer authors file paths — but the tree still
+// helps him reason about what capabilities make sense given the existing
+// project shape (e.g. recognizing that a Spring-flavored Java project has
+// AbstractSensorModule conventions vs a flat Python script). Empty input
+// silently omits the section.
 func writeRequirementGeneratorProjectFileTree(sb *strings.Builder, tree string) {
 	tree = strings.TrimSpace(tree)
 	if tree == "" {
 		return
 	}
 	sb.WriteString("## Project Files (ground truth — captured at dispatch via git ls-files)\n\n")
-	sb.WriteString("Use this list when filling files_owned. Real, existing files belong here. The plan's scope.include is your allow-list — every files_owned entry should appear in scope.include AND in this tree, OR be a file the plan declares in scope.create. Do NOT invent paths that look idiomatic but aren't in this list.\n\n```\n")
+	sb.WriteString("Use this tree to ground your understanding of the project's existing shape — what languages, frameworks, and conventions are in play. You do NOT need to author file paths on Requirements; that work moved to the architect (Winston) and the product owner (Sarah) per ADR-043 Move 4. Use the tree to confirm that the capabilities you describe map onto something real in the codebase.\n\n```\n")
 	sb.WriteString(tree)
 	if !strings.HasSuffix(tree, "\n") {
 		sb.WriteString("\n")
@@ -1147,7 +1144,7 @@ const planReviewerCompletenessR2 = "## Completeness Criteria (Round 2 — Requir
 	"1. **Goal coverage** — Requirements must collectively address the stated goal. If the goal says \"add a /goodbye endpoint\" but no requirement covers that endpoint, flag it. (phase: \"requirements\")\n" +
 	"2. **Requirement→Scenario coverage** — Every requirement must have at least one scenario. Requirements without scenarios cannot be verified. (phase: \"requirements\", target_id: the requirement ID)\n" +
 	"3. **Dependency validity** — All depends_on references must point to existing requirement IDs. The dependency graph must be a valid DAG (no cycles, no orphan references). (phase: \"requirements\")\n" +
-	"3a. **File-ownership partition** — Two requirements must not both list the same path in `files_owned` unless one transitively depends on the other via `depends_on`. Independent parallel requirements that touch the same file deadlock on the plan-level merge. Emit ONE finding per conflicting pair (not one finding listing all conflicts). For each pair, set verdict=rejected with category \"completeness\", phase: \"requirements\", target_id: the requirement that should be modified to resolve the conflict (typically the later or narrower-scoped one). The `evidence` field should name the conflicting paths and the other requirement's ID; the `suggestion` field should propose either consolidating the two requirements into one or adding a specific `depends_on` edge. Watch for semantic overlap too — two requirements describing the same feature surface (e.g. both about /health) should be flagged here even if their `files_owned` happen not to literally collide today, because the developer agents will reach for the same files at execution time. (phase: \"requirements\")\n" +
+	"3a. **Semantic overlap between requirements** — Two requirements describing the same feature surface (e.g. both about /health, both about the same component) signal a sharding error: they should be consolidated or one should depend on the other. Flag as completeness with category=\"completeness\", phase=\"requirements\", target_id pointing to the later requirement. ADR-043 Move 4 moved file-level partition checking to story preparation (Sarah computes files_owned from selected components), so file-path overlaps no longer surface here — but semantic duplication still matters because Sarah will produce conflicting Stories from semantically-duplicate Requirements. (phase: \"requirements\")\n" +
 	"4. **No orphaned scenarios** — Every scenario must reference an existing requirement ID. (phase: \"scenarios\", target_id: the orphaned scenario ID)\n" +
 	"5. **Scope alignment** — Scope files should be relevant to the requirements. Scope entries unrelated to any requirement may indicate stale or incorrect scope. (phase: \"plan\")\n" +
 	"6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent, component boundaries must not overlap, actors must have distinct trigger sets, and integration points must not contradict component boundaries. (phase: \"architecture\")\n" +

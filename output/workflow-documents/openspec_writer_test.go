@@ -32,7 +32,7 @@ func samplePlanForWriter() *workflow.Plan {
 			},
 		},
 		Requirements: []workflow.Requirement{
-			{ID: "r1", Title: "Core req", CapabilityName: "core", FilesOwned: []string{"core.go"}},
+			{ID: "r1", Title: "Core req", CapabilityName: "core"},
 		},
 		Architecture: &workflow.ArchitectureDocument{
 			TechnologyChoices: []workflow.TechChoice{{Category: "lang", Choice: "Go", Rationale: "default"}},

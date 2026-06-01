@@ -99,148 +99,21 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 	return nil
 }
 
-// ValidateFileOwnershipPartition rejects requirement sets that would deadlock
-// at plan-level merge. Two failure modes are caught here:
+// ValidateFileOwnershipPartition was a Requirement-level validator that
+// rejected requirement sets with empty files_owned or overlapping files
+// without a depends_on edge. ADR-043 Move 4 removed Requirement.FilesOwned;
+// file ownership now lives on Story (Sarah computes the union of selected
+// Components' implementation_files). The equivalent invariants for the
+// Story DAG live on workflow.ValidateStories + plan-reviewer R3 rules
+// (story.missing_files_owned, story.docs_only_files_owned).
 //
-//  1. Missing files_owned. When >1 requirement exists, every requirement must
-//     declare files_owned. Without it the executor can't reason about
-//     parallelism vs serialization, and the prompt-side promise of "the
-//     validator will reject" is meaningless. Empty arrays are not acceptable.
-//
-//  2. Overlap without dependency. Two requirements may share a file in
-//     files_owned, but only when one transitively depends on the other —
-//     the executor then sequences them so the later requirement rebases on
-//     the earlier one's merge commit. Without that depends_on edge, parallel
-//     branches both rewrite the same file and the plan-level merge stalls.
-//
-// Mode 1 (empty files_owned) ALWAYS fires regardless of requirement count —
-// a code requirement with no FilesOwned isn't a code requirement. Single-req
-// plans previously skipped this and produced a gap where ADR-040 Move 2's
-// docs-only / orphan rules also couldn't fire (no files to inspect). Lifting
-// the exemption closes the gap; the docs-only and orphan rules in
-// plan_capability.go assume every code req has a FilesOwned entry to reason about.
-//
-// Mode 2 (overlap-without-depends_on) still skips single-req plans because
-// overlap is structurally impossible with one requirement.
-//
-// Background: 2026-04-29 Gemini @easy run found the previous lenient version
-// (skip-if-empty) silently accepted requirements with files_owned=null and
-// stalled at reviewing_qa with a merge conflict. See
-// project_gemini_easy_2026_04_29 memory.
+// This function survives as a no-op so SaveRequirements still compiles
+// and existing callers don't fan out into the rest of the codebase. The
+// real partition validation moves to ValidateStories in PR 4b once
+// per-Story execution lands.
 func ValidateFileOwnershipPartition(requirements []Requirement) error {
-	if len(requirements) == 0 {
-		return nil
-	}
-	// Mode 1: every requirement must declare files_owned. Catches generators
-	// that ignore the prompt, AND single-req plans where the docs-only rule
-	// couldn't reason about file types without FilesOwned to inspect.
-	for i := range requirements {
-		if len(requirements[i].FilesOwned) == 0 {
-			return fmt.Errorf(
-				"%w: requirement %q has empty files_owned — every requirement must declare the workspace-relative paths it modifies. Regenerate with files_owned set",
-				ErrInvalidFileOwnership, requirements[i].ID,
-			)
-		}
-	}
-	if len(requirements) < 2 {
-		return nil
-	}
-	ancestors := transitiveAncestors(requirements)
-	for i := range requirements {
-		ri := &requirements[i]
-		for j := i + 1; j < len(requirements); j++ {
-			rj := &requirements[j]
-			conflict := intersectFiles(ri.FilesOwned, rj.FilesOwned)
-			if len(conflict) == 0 {
-				continue
-			}
-			// Mode 2: overlap is allowed when there's a dependency edge.
-			// Required for the layered case (impl + test for same surface,
-			// define + use, etc.) where two reqs legitimately touch the
-			// same file. The executor sequences them via depends_on.
-			if ancestors[ri.ID][rj.ID] || ancestors[rj.ID][ri.ID] {
-				continue
-			}
-			// Hint includes the two valid resolutions concretely — the
-			// abstract "consolidate or add depends_on edge" line was
-			// observed to recur on qwen3-moe even AFTER the fan-in
-			// prompt fix shipped 2026-05-02. The worked examples
-			// below give the model a directive template to copy
-			// rather than reasoning about the right shape from
-			// scratch on every retry. Same SAP-loud-on-help
-			// discipline as graph_query D.8 ("Try entity(id: \"X\")
-			// if that's the one you meant").
-			return fmt.Errorf(
-				"%w: requirements %q and %q both claim files_owned %v with no dependency edge between them — parallel writes to the same file deadlock the plan-level merge.\n\nFIX: choose ONE of these two resolutions.\n\n(a) Consolidate into a single requirement that owns all the conflicting files:\n  {\"title\": \"<merged title>\", \"description\": \"...\", \"files_owned\": %v}\n\n(b) Keep two requirements, add a depends_on edge so the second rebases on the first's merge:\n  {\"title\": %q, \"files_owned\": %v}\n  {\"title\": %q, \"depends_on\": [%q], \"files_owned\": %v}\n\nIf the two requirements are about the SAME surface (impl + its test, define + use), prefer (a). If they're genuinely separate features that happen to touch a shared file (router/main wire-up), use (b)",
-				ErrInvalidFileOwnership, ri.ID, rj.ID, conflict,
-				conflict,             // (a) merged files_owned
-				ri.ID, ri.FilesOwned, // (b) first req keeps its files
-				rj.ID, ri.ID, rj.FilesOwned, // (b) second req gains depends_on
-			)
-		}
-	}
+	_ = requirements
 	return nil
-}
-
-// transitiveAncestors returns, for each requirement ID, the set of IDs reachable
-// via DependsOn (i.e. the prerequisites). Used by ValidateFileOwnershipPartition
-// to allow file overlap between requirements that have an explicit ordering.
-//
-// Caller is expected to have already passed ValidateRequirementDAG so cycles
-// don't lead to non-termination.
-func transitiveAncestors(requirements []Requirement) map[string]map[string]bool {
-	deps := make(map[string][]string, len(requirements))
-	for _, r := range requirements {
-		deps[r.ID] = r.DependsOn
-	}
-	out := make(map[string]map[string]bool, len(requirements))
-	for _, r := range requirements {
-		seen := make(map[string]bool)
-		stack := append([]string(nil), r.DependsOn...)
-		for len(stack) > 0 {
-			top := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			if seen[top] {
-				continue
-			}
-			seen[top] = true
-			stack = append(stack, deps[top]...)
-		}
-		out[r.ID] = seen
-	}
-	return out
-}
-
-// intersectFiles returns the set intersection of two path slices, comparing
-// canonical (NormalizeFilePath) forms so "./main.go" and "main.go" don't slip
-// past as distinct paths. Returns the canonical form of overlapping paths.
-// Empty input → nil; no overlap → nil.
-func intersectFiles(a, b []string) []string {
-	if len(a) == 0 || len(b) == 0 {
-		return nil
-	}
-	bSet := make(map[string]struct{}, len(b))
-	for _, p := range b {
-		if np := NormalizeFilePath(p); np != "" {
-			bSet[np] = struct{}{}
-		}
-	}
-	var out []string
-	seen := make(map[string]struct{}, len(a))
-	for _, p := range a {
-		np := NormalizeFilePath(p)
-		if np == "" {
-			continue
-		}
-		if _, ok := seen[np]; ok {
-			continue
-		}
-		if _, ok := bSet[np]; ok {
-			seen[np] = struct{}{}
-			out = append(out, np)
-		}
-	}
-	return out
 }
 
 // NormalizeFilePath canonicalises a workspace-relative path so equivalent
@@ -338,12 +211,9 @@ func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, re
 		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, HashInstanceID(dep))
 	}
 
-	// Write each owned file path as an individual triple — multi-valued by
-	// design so queries can ask "which requirements own this path?" without
-	// parsing a JSON blob.
-	for _, path := range req.FilesOwned {
-		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementFilesOwned, path)
-	}
+	// ADR-043 Move 4 removed Requirement.FilesOwned. File-ownership triples
+	// (semspec.story.files_owned) now emit from the story-persistence path
+	// in plan-manager when Sarah's Stories land.
 
 	return nil
 }

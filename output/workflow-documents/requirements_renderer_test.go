@@ -22,10 +22,9 @@ func TestRenderRequirements_FullList(t *testing.T) {
 		Slug:  "req-test",
 		Title: "Auth feature",
 		Requirements: []workflow.Requirement{
-			{ID: "req-1", Title: "Login endpoint", Description: "POST /login", Status: "active",
-				FilesOwned: []string{"src/auth/login.go", "src/auth/login_test.go"}},
+			{ID: "req-1", Title: "Login endpoint", Description: "POST /login", Status: "active"},
 			{ID: "req-2", Title: "Token validation", Description: "JWT validation middleware",
-				FilesOwned: []string{"src/auth/middleware.go"}, DependsOn: []string{"req-1"}},
+				DependsOn: []string{"req-1"}},
 		},
 		Scenarios: []workflow.Scenario{
 			{ID: "s1", RequirementID: "req-1"},
@@ -39,7 +38,6 @@ func TestRenderRequirements_FullList(t *testing.T) {
 		"**2 requirements**":            true,
 		"## Login endpoint":             true,
 		"## Token validation":           true,
-		"src/auth/login.go":             true,
 		"**Depends on:** req-1":         true,
 		"**Verified by 2 scenario(s)**": true, // req-1 has 2 scenarios
 		"**Verified by 1 scenario(s)**": true, // req-2 has 1

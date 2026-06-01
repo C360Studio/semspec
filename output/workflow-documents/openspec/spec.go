@@ -41,8 +41,9 @@ import (
 // has no HarnessProfileIDs. Title falls back to a synthesized "When X"
 // when the scenario was emitted before workflow.Scenario.Title existed.
 //
-// applies_to is derived from the union of FilesOwned across all
-// Requirements owning this capability.
+// applies_to is derived from the union of Story.FilesOwned across all
+// Stories owning Requirements of this capability (ADR-043 Move 4).
+// Pre-ADR-043 plans without Stories produce empty applies_to.
 func RenderSpec(plan *workflow.Plan, capName string) string {
 	if plan == nil || plan.Exploration == nil {
 		return ""
@@ -73,12 +74,22 @@ func RenderSpec(plan *workflow.Plan, capName string) string {
 		sb.WriteString("\n\n")
 	}
 
-	// applies_to: union of FilesOwned, deduplicated, sorted by first
-	// appearance for stable diffs.
+	// applies_to: union of Story.FilesOwned across the Stories that link to
+	// this capability's Requirements (ADR-043 Move 4). Deduplicated, sorted
+	// by first appearance for stable diffs. Plans persisted before
+	// story-preparer was enabled emit no Stories — applies_to falls back to
+	// empty, and the renderer omits the section.
 	seen := make(map[string]bool)
 	var appliesTo []string
+	reqIDs := make(map[string]struct{}, len(reqs))
 	for _, r := range reqs {
-		for _, f := range r.FilesOwned {
+		reqIDs[r.ID] = struct{}{}
+	}
+	for _, s := range plan.Stories {
+		if _, ok := reqIDs[s.RequirementID]; !ok {
+			continue
+		}
+		for _, f := range s.FilesOwned {
 			if !seen[f] {
 				seen[f] = true
 				appliesTo = append(appliesTo, f)

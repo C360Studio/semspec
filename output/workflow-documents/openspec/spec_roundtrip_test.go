@@ -215,7 +215,6 @@ func tagAwarePlan() *workflow.Plan {
 				Title:          "Driver boots and connects to SITL",
 				Description:    "The driver SHALL start mavsdk_server and observe a HEARTBEAT.",
 				CapabilityName: "mavsdk-lifecycle",
-				FilesOwned:     []string{"src/main/java/Driver.java"},
 				CreatedAt:      now,
 				UpdatedAt:      now,
 			},

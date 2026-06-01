@@ -118,11 +118,14 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 
 // requirementItem is the agent-generated JSON shape for a single requirement.
 // The agent is instructed to output an array of these objects.
+// ADR-043 Move 4 removed files_owned — John no longer authors file paths;
+// Winston declares implementation_files per component and Sarah selects
+// components per Story. Legacy LLM outputs that still emit files_owned
+// have the field silently ignored at unmarshal.
 type requirementItem struct {
 	Title          string   `json:"title"`
 	Description    string   `json:"description"`
 	DependsOn      []string `json:"depends_on,omitempty"`      // titles of prerequisite requirements (resolved to IDs at build time)
-	FilesOwned     []string `json:"files_owned,omitempty"`     // workspace-relative paths this requirement may modify
 	CapabilityName string   `json:"capability_name,omitempty"` // ADR-040 Move 2: links to Plan.Exploration.Capabilities[].Name
 }
 
@@ -472,11 +475,10 @@ func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGenerat
 		rg.ExistingRequirements = make([]prompt.ExistingRequirementSummary, 0, len(trigger.ExistingRequirements))
 		for _, r := range trigger.ExistingRequirements {
 			rg.ExistingRequirements = append(rg.ExistingRequirements, prompt.ExistingRequirementSummary{
-				ID:         r.ID,
-				Title:      r.Title,
-				Status:     string(r.Status),
-				FilesOwned: r.FilesOwned,
-				DependsOn:  r.DependsOn,
+				ID:        r.ID,
+				Title:     r.Title,
+				Status:    string(r.Status),
+				DependsOn: r.DependsOn,
 			})
 		}
 	}
@@ -757,7 +759,6 @@ func buildRequirementsFromItems(slug string, trigger *payloads.RequirementGenera
 			PlanID:         planID,
 			Title:          item.Title,
 			Description:    item.Description,
-			FilesOwned:     workflow.NormalizeFilePaths(item.FilesOwned),
 			Status:         workflow.RequirementStatusActive,
 			CapabilityName: item.CapabilityName, // ADR-040 Move 2
 			CreatedAt:      now,

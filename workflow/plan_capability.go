@@ -301,54 +301,23 @@ func FindOrphanRequirementCapabilities(exp *Exploration, requirements []Requirem
 	return orphans
 }
 
-// FindDocsOnlyCapabilities returns capabilities whose owning Requirements
-// only touch documentation files (e.g. *.md, *.txt, README*). This is the
-// run-#3 failure mode: the planner generates a "capability" but the
-// requirement-generator produces only docs requirements for it, no
-// implementation code. Used by plan-reviewer's capability_orphan rule.
+// FindDocsOnlyCapabilities was the Requirement-level run-#3-fingerprint
+// detector — it flagged capabilities whose owning Requirements only touched
+// documentation files. ADR-043 Move 4 removed Requirement.FilesOwned;
+// file ownership moved to Story. The architectural-layer
+// equivalent (architecture.component_implementation_files_doc_only, PR 2)
+// + the story-layer equivalent (story.docs_only_files_owned, PR 3) catch
+// the same shape upstream of where this rule used to fire.
 //
-// "Documentation-only" means: at least one FilesOwned entry, AND every
-// FilesOwned entry matches a documentation pattern. A capability with NO
-// FilesOwned at all is flagged by FindUncoveredCapabilities (orphan), not
-// here.
+// This function returns nil unconditionally now — kept for ABI continuity
+// with plan-reviewer's capability_rules.go which still calls it. The rule
+// path becomes a no-op for ADR-043 plans; legacy plans (no Stories) also
+// get nil because file paths were never recorded on those Requirements in
+// post-PR-1 wire shapes.
 func FindDocsOnlyCapabilities(exp *Exploration, requirements []Requirement) []string {
-	if exp == nil || len(exp.Capabilities) == 0 {
-		return nil
-	}
-	// Group requirements by capability
-	reqsByCap := make(map[string][]Requirement, len(exp.Capabilities))
-	for _, r := range requirements {
-		if r.CapabilityName == "" {
-			continue
-		}
-		reqsByCap[r.CapabilityName] = append(reqsByCap[r.CapabilityName], r)
-	}
-
-	var docsOnly []string
-	for _, c := range exp.Capabilities {
-		reqs := reqsByCap[c.Name]
-		if len(reqs) == 0 {
-			continue // orphan, not docs-only
-		}
-		allDocs := true
-		hasAnyFiles := false
-		for _, r := range reqs {
-			for _, f := range r.FilesOwned {
-				hasAnyFiles = true
-				if !IsDocumentationPath(f) {
-					allDocs = false
-					break
-				}
-			}
-			if !allDocs {
-				break
-			}
-		}
-		if hasAnyFiles && allDocs {
-			docsOnly = append(docsOnly, c.Name)
-		}
-	}
-	return docsOnly
+	_ = exp
+	_ = requirements
+	return nil
 }
 
 // IsDocumentationPath reports whether a workspace-relative path looks like

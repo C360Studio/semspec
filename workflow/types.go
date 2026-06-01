@@ -1384,9 +1384,15 @@ type Requirement struct {
 	// field values" because some scenarios had "" and any populated value
 	// would have looked inconsistent against them. Same applies to
 	// Scenario.Status below.
-	Status     RequirementStatus `json:"status,omitempty"`
-	DependsOn  []string          `json:"depends_on,omitempty"`  // IDs of prerequisite requirements
-	FilesOwned []string          `json:"files_owned,omitempty"` // workspace-relative paths this requirement owns; two requirements that both list the same path must have a DependsOn edge between them or the plan-level merge will conflict
+	Status    RequirementStatus `json:"status,omitempty"`
+	DependsOn []string          `json:"depends_on,omitempty"` // IDs of prerequisite requirements. ADR-043 Move 4 — execution-time file-collision sequencing moves to Story.DependsOn after Sarah shards; this stays as capability-level intent ordering.
+
+	// FilesOwned was a Requirement field that named workspace-relative paths
+	// the requirement was allowed to modify. ADR-043 Move 4 removed it: file
+	// ownership now lives on Story (Sarah computes the union of selected
+	// Components' implementation_files). Legacy plans persisted before this
+	// removal may still carry the field on disk; the Go type ignores it on
+	// deserialize.
 
 	// CapabilityName links the Requirement to the Capability that owns it
 	// (ADR-040 Move 2). One Requirement per Capability after the analyst

@@ -2557,10 +2557,6 @@ components:
                                 type: array
                             description:
                                 type: string
-                            files_owned:
-                                items:
-                                    type: string
-                                type: array
                             id:
                                 type: string
                             plan_id:
@@ -3286,10 +3282,6 @@ components:
                                 type: array
                             description:
                                 type: string
-                            files_owned:
-                                items:
-                                    type: string
-                                type: array
                             id:
                                 type: string
                             plan_id:

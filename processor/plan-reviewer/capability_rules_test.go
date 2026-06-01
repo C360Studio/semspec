@@ -105,7 +105,7 @@ func TestCapabilityOrphan_NoImplementingReq(t *testing.T) {
 		},
 		Requirements: []workflow.Requirement{
 			// Only user-auth has an implementing requirement.
-			{ID: "r1", Title: "Auth req", CapabilityName: "user-auth", FilesOwned: []string{"auth.go"}},
+			{ID: "r1", Title: "Auth req", CapabilityName: "user-auth"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
@@ -129,10 +129,14 @@ func TestCapabilityOrphan_NoImplementingReq(t *testing.T) {
 	}
 }
 
-// TestCapabilityOrphan_DocsOnlyFingerprint is the deterministic encoding
-// of run #3: the Capability has a Requirement, but the Requirement only
-// owns *.md files. The implementation code is missing.
-func TestCapabilityOrphan_DocsOnlyFingerprint(t *testing.T) {
+// TestCapabilityOrphanDocsOnly_NoLongerFires pins that after ADR-043 Move 4
+// removed Requirement.FilesOwned, the docs-only rule (which depended on
+// inspecting Requirement file paths) no longer fires on the capability
+// surface. The equivalent shape is now caught at the architecture layer
+// (architecture.component_implementation_files_doc_only, PR 2) and the
+// story layer (story.docs_only_files_owned, PR 3) upstream of where this
+// rule used to fire.
+func TestCapabilityOrphanDocsOnly_NoLongerFires(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "test",
 		Exploration: &workflow.Exploration{
@@ -141,62 +145,16 @@ func TestCapabilityOrphan_DocsOnlyFingerprint(t *testing.T) {
 			},
 		},
 		Requirements: []workflow.Requirement{
-			{
-				ID:             "r1",
-				Title:          "Document coverage",
-				CapabilityName: "coverage-matrix-tooling",
-				FilesOwned:     []string{"README.md", "docs/coverage.md"},
-			},
+			{ID: "r1", Title: "Document coverage", CapabilityName: "coverage-matrix-tooling"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
-
-	mergeCapabilityFindings(plan, result)
-
-	if result.Verdict != "needs_changes" {
-		t.Errorf("expected verdict upgraded to needs_changes, got %q", result.Verdict)
-	}
-	found := false
-	for _, f := range result.Findings {
-		if f.SOPID == "capability.orphan.docs_only" && f.TargetID == "coverage-matrix-tooling" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected capability.orphan.docs_only finding, got: %+v", result.Findings)
-	}
-}
-
-// TestCapabilityOrphan_MixedFilesPasses confirms a Requirement that owns
-// both implementation AND documentation files is NOT flagged docs-only.
-func TestCapabilityOrphan_MixedFilesPasses(t *testing.T) {
-	plan := &workflow.Plan{
-		Slug: "test",
-		Exploration: &workflow.Exploration{
-			Capabilities: []workflow.Capability{
-				{Name: "auth", Lifecycle: workflow.CapabilityNew, Description: "Auth."},
-			},
-		},
-		Requirements: []workflow.Requirement{
-			{
-				ID:             "r1",
-				Title:          "Auth",
-				CapabilityName: "auth",
-				FilesOwned:     []string{"auth.go", "auth.md"},
-			},
-		},
-	}
-	result := &workflow.PlanReviewResult{Verdict: "approved"}
-
 	mergeCapabilityFindings(plan, result)
 
 	for _, f := range result.Findings {
 		if f.SOPID == "capability.orphan.docs_only" {
-			t.Errorf("did not expect docs_only finding for mixed-files requirement, got: %+v", f)
+			t.Errorf("post-ADR-043, capability.orphan.docs_only should not fire — architecture + story rules handle this shape now: %+v", f)
 		}
-	}
-	if result.Verdict != "approved" {
-		t.Errorf("expected verdict preserved as approved, got %q", result.Verdict)
 	}
 }
 
@@ -211,8 +169,8 @@ func TestRequirementCapability_Orphan(t *testing.T) {
 			},
 		},
 		Requirements: []workflow.Requirement{
-			{ID: "r1", CapabilityName: "user-auth", FilesOwned: []string{"auth.go"}},
-			{ID: "r2", CapabilityName: "ghost-capability", FilesOwned: []string{"ghost.go"}},
+			{ID: "r1", CapabilityName: "user-auth"},
+			{ID: "r2", CapabilityName: "ghost-capability"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
@@ -244,8 +202,8 @@ func TestCapabilityDependencyCycle(t *testing.T) {
 		},
 		// Make capabilities covered so orphan rules don't fire and pollute.
 		Requirements: []workflow.Requirement{
-			{ID: "r1", CapabilityName: "a", FilesOwned: []string{"a.go"}},
-			{ID: "r2", CapabilityName: "b", FilesOwned: []string{"b.go"}},
+			{ID: "r1", CapabilityName: "a"},
+			{ID: "r2", CapabilityName: "b"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
@@ -277,7 +235,7 @@ func TestCapabilityDependencyOrphan_PerEdge(t *testing.T) {
 			},
 		},
 		Requirements: []workflow.Requirement{
-			{ID: "r1", CapabilityName: "a", FilesOwned: []string{"a.go"}},
+			{ID: "r1", CapabilityName: "a"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
@@ -313,8 +271,8 @@ func TestMergeCapabilityFindings_HealthyPlanPasses(t *testing.T) {
 			},
 		},
 		Requirements: []workflow.Requirement{
-			{ID: "r1", CapabilityName: "user-auth", FilesOwned: []string{"auth.go", "auth_test.go"}},
-			{ID: "r2", CapabilityName: "session-store", FilesOwned: []string{"session.go"}, DependsOn: []string{"r1"}},
+			{ID: "r1", CapabilityName: "user-auth"},
+			{ID: "r2", CapabilityName: "session-store", DependsOn: []string{"r1"}},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved", Summary: "ok"}

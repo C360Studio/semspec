@@ -186,11 +186,10 @@ func TestRenderRequirementGeneratorPrompt_PartialRegen(t *testing.T) {
 		Goal:  "Implement a /goodbye HTTP endpoint that returns JSON.",
 		ExistingRequirements: []prompt.ExistingRequirementSummary{
 			{
-				ID:         "requirement.foo.1",
-				Title:      "Goodbye endpoint returns JSON",
-				Status:     "active",
-				FilesOwned: []string{"api/handlers/goodbye.go"},
-				DependsOn:  []string{"requirement.foo.2"},
+				ID:        "requirement.foo.1",
+				Title:     "Goodbye endpoint returns JSON",
+				Status:    "active",
+				DependsOn: []string{"requirement.foo.2"},
 			},
 			{
 				// Inactive requirements must NOT be surfaced to the LLM —
@@ -212,13 +211,13 @@ func TestRenderRequirementGeneratorPrompt_PartialRegen(t *testing.T) {
 		"## Existing Approved Requirements",
 		"requirement.foo.1",
 		"Goodbye endpoint returns JSON",
-		"files_owned: api/handlers/goodbye.go",
 		"depends_on: requirement.foo.2",
 		"## Rejected Requirements",
 		"requirement.foo.3: rejected because: scope was too broad",
 		"requirement.foo.4: rejected because: no reason provided",
 		"Generate ONLY replacement requirements for the rejected IDs above",
-		"do NOT claim a path already in any kept requirement",
+		// ADR-043 Move 4: files_owned guidance moved downstream to Sarah.
+		"Requirements no longer carry files_owned",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(got, want) {
@@ -655,7 +654,7 @@ func TestRenderRequirementGeneratorPrompt_ProjectFileTreeInjection(t *testing.T)
 		mustNotHave []string
 	}{
 		{
-			name: "tree present — surfaced with files_owned framing",
+			name: "tree present — surfaced as scope-awareness framing (ADR-043 Move 4)",
 			ctx: &prompt.RequirementGeneratorContext{
 				Title:           "Add /health",
 				Goal:            "expose service health",
@@ -664,8 +663,8 @@ func TestRenderRequirementGeneratorPrompt_ProjectFileTreeInjection(t *testing.T)
 			mustContain: []string{
 				"## Project Files",
 				"main.go\ninternal/auth/auth.go",
-				"Use this list when filling files_owned",
-				"Do NOT invent paths that look idiomatic",
+				"You do NOT need to author file paths on Requirements",
+				"that work moved to the architect (Winston) and the product owner (Sarah)",
 			},
 		},
 		{
@@ -677,7 +676,6 @@ func TestRenderRequirementGeneratorPrompt_ProjectFileTreeInjection(t *testing.T)
 			},
 			mustNotHave: []string{
 				"## Project Files",
-				"Use this list when filling files_owned",
 			},
 		},
 	}
