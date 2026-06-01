@@ -609,24 +609,37 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 	// Successful parse — clear retry state.
 	exec.DecomposerLastError = ""
 
-	// Topological sort for serial execution order.
-	sorted, err := topoSort(&dagResponse.DAG)
+	c.applyParsedDAGLocked(ctx, exec, &dagResponse.DAG, "decomposer-llm")
+}
+
+// applyParsedDAGLocked is the post-parse downstream shared by both the
+// legacy decomposer-LLM path (handleDecomposerCompleteLocked) and the
+// ADR-043 PR 4f decomposer-bypass path (dispatchDecomposerLocked, when
+// plan.Stories supplies the DAG without an LLM round-trip). It topo-sorts
+// the DAG, populates exec state for the per-node dispatch loop, persists
+// to EXECUTION_STATES, publishes graph entities, and kicks off the first
+// node dispatch.
+//
+// source identifies the DAG origin for telemetry ("decomposer-llm" vs
+// "stories-synthesis"). All callers must hold exec.mu.
+func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementExecution, dag *decompose.TaskDAG, source string) {
+	sorted, err := topoSort(dag)
 	if err != nil {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("topological sort failed: %v", err))
 		return
 	}
 
-	exec.DAG = &dagResponse.DAG
+	exec.DAG = dag
 	exec.SortedNodeIDs = sorted
-	exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dagResponse.DAG.Nodes))
-	for i := range dagResponse.DAG.Nodes {
-		exec.NodeIndex[dagResponse.DAG.Nodes[i].ID] = &dagResponse.DAG.Nodes[i]
+	exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dag.Nodes))
+	for i := range dag.Nodes {
+		exec.NodeIndex[dag.Nodes[i].ID] = &dag.Nodes[i]
 	}
 
 	// Persist DAG state to EXECUTION_STATES for crash recovery.
 	// The DAGRaw + SortedNodeIDs fields let reconcileFromKV rebuild the full
 	// execution state without re-running the decomposer.
-	dagRaw, _ := json.Marshal(dagResponse.DAG)
+	dagRaw, _ := json.Marshal(*dag)
 
 	nodeCount := len(sorted)
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
@@ -640,10 +653,11 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 	c.logger.Info("Decomposition complete, starting serial execution",
 		"entity_id", exec.EntityID,
 		"node_count", len(sorted),
+		"source", source,
 	)
 
 	// Publish each DAG node as a graph entity so the knowledge graph captures
-	// the full execution hierarchy.  Best-effort: failure does not abort execution.
+	// the full execution hierarchy. Best-effort: failure does not abort execution.
 	c.publishDAGNodes(ctx, exec)
 
 	// Dispatch the first node.
@@ -962,6 +976,27 @@ func (c *Component) recordNodeSuccessLocked(ctx context.Context, exec *requireme
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirementExecution) {
+	// ADR-043 PR 4f — when plan.Stories carries Sarah-authored Stories for
+	// this requirement, synthesize the TaskDAG locally instead of dispatching
+	// the decomposer LLM. The downstream after parse is shared; both paths
+	// funnel through applyParsedDAGLocked. Fall through to the legacy LLM
+	// path when no Stories are present (pre-ADR-043 plans, or plans that
+	// reached requirement-execution before story-preparer was enabled).
+	if plan, err := c.loadPlanFromKV(ctx, exec.Slug); err == nil && plan != nil {
+		dag, synthErr := synthesizeTaskDAGFromStories(plan, exec.RequirementID)
+		if synthErr != nil {
+			c.logger.Warn("Story DAG synthesis failed, falling back to decomposer LLM",
+				"entity_id", exec.EntityID, "requirement_id", exec.RequirementID, "error", synthErr)
+		} else if dag != nil {
+			c.logger.Info("Bypassing decomposer LLM with synthesized DAG from plan.Stories",
+				"entity_id", exec.EntityID, "requirement_id", exec.RequirementID,
+				"node_count", len(dag.Nodes))
+			exec.DecomposerLastError = ""
+			c.applyParsedDAGLocked(ctx, exec, dag, "stories-synthesis")
+			return
+		}
+	}
+
 	taskID := fmt.Sprintf("decompose-%s-%s", exec.EntityID, uuid.New().String())
 	exec.DecomposerTaskID = taskID
 
@@ -1270,6 +1305,34 @@ func (c *Component) loadPlanScope(ctx context.Context, slug string) *workflow.Sc
 		return nil
 	}
 	return plan.Scope
+}
+
+// loadPlanFromKV reads the full plan from PLAN_STATES KV. Returns nil
+// (with error nil) when the bucket / entry is missing — the decomposer
+// bypass path treats that as "no Stories available, fall through to
+// legacy LLM decomposition". A non-nil error signals a parse failure;
+// the caller logs and falls through too. Used by ADR-043 PR 4f.
+func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.Plan, error) {
+	if c.natsClient == nil {
+		return nil, nil
+	}
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, nil
+	}
+	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	if err != nil {
+		return nil, nil
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil, nil
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan %q: %w", slug, err)
+	}
+	return &plan, nil
 }
 
 // buildReviewPrompt constructs the prompt for requirement-level review.
