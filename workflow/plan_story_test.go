@@ -330,6 +330,76 @@ func TestValidateStoriesAggregate(t *testing.T) {
 	}
 }
 
+func TestValidateCapabilityCoverage(t *testing.T) {
+	cases := []struct {
+		name       string
+		exp        *Exploration
+		components []ComponentDef
+		wantErr    error
+		errPhrase  string
+	}{
+		{
+			name: "nil exploration is valid",
+		},
+		{
+			name: "empty exploration is valid",
+			exp:  &Exploration{},
+		},
+		{
+			name:       "no components is valid (pre-architecture phase)",
+			exp:        &Exploration{Capabilities: []Capability{{Name: "auth"}}},
+			components: nil,
+		},
+		{
+			name: "every capability covered is valid",
+			exp: &Exploration{Capabilities: []Capability{
+				{Name: "auth"}, {Name: "session"},
+			}},
+			components: []ComponentDef{
+				{Name: "auth-service", Capabilities: []string{"auth"}},
+				{Name: "session-store", Capabilities: []string{"session"}},
+			},
+		},
+		{
+			name: "single component covers multiple capabilities is valid",
+			exp: &Exploration{Capabilities: []Capability{
+				{Name: "auth"}, {Name: "session"},
+			}},
+			components: []ComponentDef{
+				{Name: "auth-and-session", Capabilities: []string{"auth", "session"}},
+			},
+		},
+		{
+			name: "unresolved capability rejected",
+			exp: &Exploration{Capabilities: []Capability{
+				{Name: "auth"}, {Name: "session"},
+			}},
+			components: []ComponentDef{
+				{Name: "auth-service", Capabilities: []string{"auth"}},
+			},
+			wantErr:   ErrInvalidStoryStructure,
+			errPhrase: `capability "session" has no component`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCapabilityCoverage(tc.exp, tc.components)
+			if tc.wantErr == nil {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, tc.wantErr) {
+				t.Errorf("got %v, want sentinel %v", err, tc.wantErr)
+			}
+			if tc.errPhrase != "" && err != nil && !strings.Contains(err.Error(), tc.errPhrase) {
+				t.Errorf("error message %q missing phrase %q", err.Error(), tc.errPhrase)
+			}
+		})
+	}
+}
+
 func TestValidateComponentImplementationFiles(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -342,17 +412,17 @@ func TestValidateComponentImplementationFiles(t *testing.T) {
 			components: nil,
 		},
 		{
-			name: "all components have source files",
+			name: "all components have source files + capabilities",
 			components: []ComponentDef{
-				{Name: "a", ImplementationFiles: []string{"src/a.go"}},
-				{Name: "b", ImplementationFiles: []string{"src/b.go", "README.md"}},
+				{Name: "a", ImplementationFiles: []string{"src/a.go"}, Capabilities: []string{"feature-a"}},
+				{Name: "b", ImplementationFiles: []string{"src/b.go", "README.md"}, Capabilities: []string{"feature-b"}},
 			},
 		},
 		{
 			name: "unnamed component skipped (separate validator)",
 			components: []ComponentDef{
 				{Name: "", ImplementationFiles: nil},
-				{Name: "a", ImplementationFiles: []string{"src/a.go"}},
+				{Name: "a", ImplementationFiles: []string{"src/a.go"}, Capabilities: []string{"feature-a"}},
 			},
 		},
 		{
@@ -370,6 +440,14 @@ func TestValidateComponentImplementationFiles(t *testing.T) {
 			},
 			wantErr:   ErrInvalidStoryStructure,
 			errPhrase: "only documentation files",
+		},
+		{
+			name: "empty capabilities rejected",
+			components: []ComponentDef{
+				{Name: "a", ImplementationFiles: []string{"src/a.go"}, Capabilities: nil},
+			},
+			wantErr:   ErrInvalidStoryStructure,
+			errPhrase: "empty capabilities",
 		},
 	}
 	for _, tc := range cases {
