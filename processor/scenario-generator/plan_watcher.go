@@ -28,7 +28,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Watching PLAN_STATES for architecture_generated")
+	c.logger.Info("Watching PLAN_STATES for architecture_generated / stories_generated")
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
@@ -42,7 +42,12 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		if plan.Status != workflow.StatusArchitectureGenerated {
+		// ADR-043 PR 4c — Bob's watch source widened. Legacy path:
+		// arch_generated (when Sarah is dormant). Post-Sarah path:
+		// stories_generated (Sarah's terminal state). Either claims
+		// generating_scenarios next.
+		if plan.Status != workflow.StatusArchitectureGenerated &&
+			plan.Status != workflow.StatusStoriesGenerated {
 			continue
 		}
 		if len(plan.Requirements) == 0 {

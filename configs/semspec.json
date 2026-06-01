@@ -323,12 +323,12 @@
       }
     },
     "story-preparer": {
-      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). PR 3 ships with config.enabled=false so architecture_generated → scenarios_generated flow is unchanged. PR 4 flips on alongside execution-manager + scenario-generator rewiring.",
+      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). PR 3 shipped dormant; PR 4c flipped on alongside the state-machine fix (architecture_generated → preparing_stories → stories_generated → generating_scenarios). The execution-manager per-Story rewrite + decomposer deletion remain for PR 4d; until then execution continues per-Requirement with Stories populated as structural validation evidence (Sarah's docs-only fingerprint closure is the value Sarah ships at this stage).",
       "name": "story-preparer",
       "type": "processor",
       "enabled": true,
       "config": {
-        "enabled": false,
+        "enabled": true,
         "default_capability": "planning",
         "max_generation_retries": 2
       }
