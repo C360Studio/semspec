@@ -336,6 +336,10 @@ func TestStatusPreparingStoriesTransitions(t *testing.T) {
 		want     bool
 	}{
 		{StatusArchitectureGenerated, StatusPreparingStories, true},
+		// ADR-043 PR 4c — preparing_stories now targets stories_generated as
+		// the primary terminal. ready_for_execution is kept for back-compat
+		// with PR 3's initial wire shape.
+		{StatusPreparingStories, StatusStoriesGenerated, true},
 		{StatusPreparingStories, StatusReadyForExecution, true},
 		{StatusPreparingStories, StatusArchitectureGenerated, true},
 		{StatusPreparingStories, StatusRejected, true},
@@ -344,6 +348,45 @@ func TestStatusPreparingStoriesTransitions(t *testing.T) {
 		// Reject jumps
 		{StatusPreparingStories, StatusImplementing, false},
 		{StatusPreparingStories, StatusCreated, false},
+	}
+	for _, tc := range cases {
+		name := string(tc.from) + "→" + string(tc.to)
+		t.Run(name, func(t *testing.T) {
+			if got := tc.from.CanTransitionTo(tc.to); got != tc.want {
+				t.Errorf("%s = %v, want %v", name, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStatusStoriesGeneratedIsValidAndNotInProgress(t *testing.T) {
+	if !StatusStoriesGenerated.IsValid() {
+		t.Errorf("StatusStoriesGenerated not in IsValid set")
+	}
+	if StatusStoriesGenerated.IsInProgress() {
+		t.Errorf("StatusStoriesGenerated should NOT be IsInProgress (terminal phase state)")
+	}
+}
+
+func TestStatusStoriesGeneratedTransitions(t *testing.T) {
+	cases := []struct {
+		from, to Status
+		want     bool
+	}{
+		// Happy path: Bob picks up stories_generated to generate scenarios per requirement.
+		{StatusStoriesGenerated, StatusGeneratingScenarios, true},
+		// Auto-cascade fallback when scenario-generator claims and dispatches in one step.
+		{StatusStoriesGenerated, StatusScenariosGenerated, true},
+		// R3 retry: story_reprepare PlanDecision sends Sarah back for another cycle.
+		{StatusStoriesGenerated, StatusPreparingStories, true},
+		// Change proposal cascade.
+		{StatusStoriesGenerated, StatusChanged, true},
+		// Escalation.
+		{StatusStoriesGenerated, StatusRejected, true},
+		// Disallowed jumps.
+		{StatusStoriesGenerated, StatusImplementing, false},
+		{StatusStoriesGenerated, StatusReadyForExecution, false},
+		{StatusStoriesGenerated, StatusCreated, false},
 	}
 	for _, tc := range cases {
 		name := string(tc.from) + "→" + string(tc.to)

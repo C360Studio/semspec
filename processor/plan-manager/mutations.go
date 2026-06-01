@@ -324,9 +324,13 @@ func (c *Component) handleArchitectureMutation(ctx context.Context, data []byte)
 }
 
 // handleStoriesMutation persists Sarah's emitted Stories inline on the plan
-// and advances preparing_stories → ready_for_execution (ADR-043 Move 3).
-// Plan-reviewer R3 (mergeStoryFindings) fires on the new
-// ready_for_execution state via the normal review pipeline.
+// and advances preparing_stories → stories_generated (ADR-043 PR 4c).
+// Bob (scenario-generator) watches stories_generated as one of its source
+// states and dispatches scenario generation per Requirement — until PR 4d
+// rewires for per-Story scenario emission.
+//
+// Plan-reviewer R3 (mergeStoryFindings) fires on stories_generated via the
+// normal review pipeline.
 //
 // Validates the wire payload (workflow.ValidateStories — the same gate
 // story-preparer runs pre-publish) before persistence. Validation
@@ -355,12 +359,12 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 	}
 
 	current := plan.EffectiveStatus()
-	if !current.CanTransitionTo(workflow.StatusReadyForExecution) {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → ready_for_execution", current)}
+	if !current.CanTransitionTo(workflow.StatusStoriesGenerated) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → stories_generated", current)}
 	}
 
 	plan.Stories = req.Stories
-	plan.Status = workflow.StatusReadyForExecution
+	plan.Status = workflow.StatusStoriesGenerated
 
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save stories via mutation", "slug", req.Slug, "error", err)

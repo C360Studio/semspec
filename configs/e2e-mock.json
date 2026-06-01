@@ -767,6 +767,17 @@
         "default_capability": "architecture"
       }
     },
+    "story-preparer": {
+      "_comment": "ADR-043 Move 3 — Sarah is enabled in production (configs/semspec.json) as of PR 4c, but mock e2e stays on the legacy architecture_generated → generating_scenarios path until a future PR authors mock-story-preparer.json fixtures and a story_preparation capability mapping. Override here keeps mock e2e scenarios running unchanged.",
+      "name": "story-preparer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": false,
+        "default_capability": "planning",
+        "max_generation_retries": 2
+      }
+    },
     "project-manager": {
       "name": "project-manager",
       "type": "processor",

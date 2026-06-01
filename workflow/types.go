@@ -99,6 +99,15 @@ const (
 	// (ADR-040 Move 1) is ready to claim and produce Goal/Context/Scope.
 	// Terminal for the analyst sub-phase (not in-progress).
 	StatusExplored Status = "explored"
+
+	// StatusStoriesGenerated indicates Sarah (story-preparer) has finished
+	// sharding requirements into Stories. Terminal for the story-prep phase;
+	// downstream the scenario-generator claims to generate scenarios per
+	// requirement (PR 4c) — PR 4d rewires per-Story dispatch. Pre-ADR-043
+	// plans skip this state entirely (Sarah dormant: architecture_generated
+	// → generating_scenarios). Post-ADR-043 plans: architecture_generated →
+	// preparing_stories → stories_generated → generating_scenarios → ...
+	StatusStoriesGenerated Status = "stories_generated"
 )
 
 // String returns the string representation of the status.
@@ -169,7 +178,7 @@ func (s Status) IsValid() bool {
 		StatusExploring, StatusExplored,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
-		StatusPreparingStories:
+		StatusPreparingStories, StatusStoriesGenerated:
 		return true
 	default:
 		return false
@@ -255,12 +264,23 @@ func (s Status) CanTransitionTo(target Status) bool {
 			target == StatusPreparingStories ||
 			target == StatusChanged || target == StatusRejected
 	case StatusPreparingStories:
-		// preparing_stories → ready_for_execution (Sarah done; plan-reviewer R3 will fire on this state per ADR-043 PR 3)
+		// preparing_stories → stories_generated (Sarah done; ADR-043 PR 4c — Bob still needs to run after this)
+		// preparing_stories → ready_for_execution (legacy PR 3 wire shape; kept for back-compat until story-preparer.enabled becomes the only path)
 		// preparing_stories → architecture_generated (R3 phase-targeted retry — architect must reshape components)
 		// preparing_stories → rejected (escalation: readiness gate exhausted retries)
-		return target == StatusReadyForExecution ||
+		return target == StatusStoriesGenerated ||
+			target == StatusReadyForExecution ||
 			target == StatusArchitectureGenerated ||
 			target == StatusRejected
+	case StatusStoriesGenerated:
+		// stories_generated → generating_scenarios (Bob claims; ADR-043 PR 4c — Bob now watches BOTH architecture_generated and stories_generated)
+		// stories_generated → scenarios_generated (auto-cascade fallback when scenario-generator can claim and dispatch in one step)
+		// stories_generated → preparing_stories (R3 retry — Sarah re-prep on accepted story_reprepare PlanDecision)
+		// stories_generated → changed (change proposal deprecated requirements; cascade restarts the plan-prep chain)
+		// stories_generated → rejected (escalation)
+		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated ||
+			target == StatusPreparingStories ||
+			target == StatusChanged || target == StatusRejected
 	case StatusGeneratingScenarios:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:

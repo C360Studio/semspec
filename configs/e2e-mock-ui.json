@@ -524,6 +524,17 @@
         "default_capability": "architecture"
       }
     },
+    "story-preparer": {
+      "_comment": "ADR-043 Move 3 — Sarah is enabled in production (configs/semspec.json) as of PR 4c, but UI mock e2e stays on the legacy path until mock-story-preparer.json fixtures + a story_preparation capability mapping land.",
+      "name": "story-preparer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "enabled": false,
+        "default_capability": "planning",
+        "max_generation_retries": 2
+      }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",
