@@ -566,7 +566,28 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	stories, err := parseStoriesFromResult(loop.Result)
+	// ADR-043 PR 4e — pre-load the plan because Sarah's positional output
+	// (requirement_index, story labels) needs the plan's Requirements list +
+	// slug to resolve into canonical IDs. The load also doubles as the
+	// staleness check that historically lived after parse.
+	kvPlan, loadErr := c.loadPlanFromKV(ctx, slug)
+	if loadErr != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to load plan for story label resolution",
+			"slug", slug, "loop_id", loop.ID, "error", loadErr)
+		c.retryOrFail(ctx, slug, fmt.Sprintf("plan load failed pre-parse: %v", loadErr))
+		return
+	}
+	if status := kvPlan.EffectiveStatus(); status != workflow.StatusPreparingStories {
+		c.logger.Warn("Plan advanced past preparing_stories, discarding stale result",
+			"slug", slug,
+			"current_status", status,
+			"loop_id", loop.ID)
+		c.retry.Clear(slug)
+		return
+	}
+
+	stories, err := parseStoriesFromResult(loop.Result, kvPlan, slug)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		parseErrorMsg := fmt.Sprintf("failed to parse stories: %s", err.Error())
@@ -576,20 +597,6 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"error", err)
 		c.retryOrFail(ctx, slug, parseErrorMsg)
 		return
-	}
-
-	// Staleness guard + plan re-load for validators.
-	kvPlan, loadErr := c.loadPlanFromKV(ctx, slug)
-	if loadErr == nil {
-		status := kvPlan.EffectiveStatus()
-		if status != workflow.StatusPreparingStories {
-			c.logger.Warn("Plan advanced past preparing_stories, discarding stale result",
-				"slug", slug,
-				"current_status", status,
-				"loop_id", loop.ID)
-			c.retry.Clear(slug)
-			return
-		}
 	}
 
 	// Sarah's readiness gate runs as workflow.ValidateStories. Cross-entity
@@ -713,20 +720,52 @@ func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.
 }
 
 // ---------------------------------------------------------------------------
-// Result parsing
+// Result parsing — ADR-043 PR 4e positional/labeled wire shape
 // ---------------------------------------------------------------------------
 
-// parseStoriesFromResult extracts the Stories list from an agent loop result.
-// The deliverable shape is validated by submit_work, so the unmarshal is
-// the primary parse — the deeper structural invariants live on
-// workflow.ValidateStories.
-func parseStoriesFromResult(result string) ([]workflow.Story, error) {
+// positionalStoryInput is the LLM-facing shape per ADR-043 PR 4e: Sarah
+// authors labels (her own short kebab-case strings) and requirement_index
+// (0-based into plan.Requirements); the system resolves to canonical IDs.
+type positionalStoryInput struct {
+	Label            string                `json:"label"`
+	RequirementIndex int                   `json:"requirement_index"`
+	Title            string                `json:"title"`
+	Intent           string                `json:"intent,omitempty"`
+	Components       []string              `json:"components,omitempty"`
+	FilesOwned       []string              `json:"files_owned,omitempty"`
+	DependsOnLabels  []string              `json:"depends_on_labels,omitempty"`
+	Tasks            []positionalTaskInput `json:"tasks,omitempty"`
+}
+
+// positionalTaskInput is the per-task LLM shape — task-local label plus
+// labels of other tasks WITHIN the same story (cross-story task ordering
+// lives on the story's depends_on_labels).
+type positionalTaskInput struct {
+	Label           string   `json:"label"`
+	Description     string   `json:"description"`
+	DependsOnLabels []string `json:"depends_on_labels,omitempty"`
+}
+
+// parseStoriesFromResult extracts Sarah's positional output from the loop
+// result and resolves it into canonical workflow.Story shape. The
+// transformation: (a) resolve requirement_index to Requirement.ID;
+// (b) assign canonical Story.ID = story.<slug>.<reqseq>.<storyseq>;
+// (c) build a label → Story.ID map and rewrite depends_on_labels →
+// canonical Story.ID strings; (d) for each task: assign canonical Task.ID
+// = task.<slug>.<reqseq>.<storyseq>.<taskseq>, set StoryID, resolve
+// intra-story DependsOn labels.
+//
+// Label-resolution errors (unknown story label, unknown task label,
+// requirement_index out of range) surface as parse errors → retryOrFail
+// → Sarah gets another cycle. Sarah's readiness gate runs after this in
+// ValidateStories at the workflow layer.
+func parseStoriesFromResult(result string, plan *workflow.Plan, slug string) ([]workflow.Story, error) {
 	if result == "" {
 		return nil, fmt.Errorf("empty result")
 	}
 
 	var wrapper struct {
-		Stories []workflow.Story `json:"stories"`
+		Stories []positionalStoryInput `json:"stories"`
 	}
 	if err := json.Unmarshal([]byte(result), &wrapper); err != nil {
 		return nil, fmt.Errorf("parse stories JSON: %w", err)
@@ -736,7 +775,146 @@ func parseStoriesFromResult(result string) ([]workflow.Story, error) {
 		return nil, fmt.Errorf("stories list is empty — Sarah must emit at least one story per dispatch")
 	}
 
-	return wrapper.Stories, nil
+	return resolveStoryLabels(wrapper.Stories, plan, slug)
+}
+
+// resolveStoryLabels transforms Sarah's positional output into canonical
+// workflow.Story shape. Extracted as a separate function for testability —
+// see component_test.go for the input → output conversion contract.
+func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug string) ([]workflow.Story, error) {
+	if plan == nil {
+		return nil, fmt.Errorf("plan required for label resolution")
+	}
+	if slug == "" {
+		return nil, fmt.Errorf("slug required for canonical ID assignment")
+	}
+
+	// Pass 1: assign canonical story IDs and build label → ID map.
+	// storyseq counts per requirement so two stories sharing a requirement
+	// produce story.<slug>.<reqseq>.1 and story.<slug>.<reqseq>.2.
+	storiesByReqseq := make(map[string]int)
+	labelToStoryID := make(map[string]string, len(input))
+	canonicalIDs := make([]string, len(input))
+	canonicalReqIDs := make([]string, len(input))
+
+	for i, s := range input {
+		if s.RequirementIndex < 0 || s.RequirementIndex >= len(plan.Requirements) {
+			return nil, fmt.Errorf("story %q: requirement_index %d out of range [0, %d)",
+				s.Label, s.RequirementIndex, len(plan.Requirements))
+		}
+		req := plan.Requirements[s.RequirementIndex]
+		reqseq := requirementSeq(req.ID)
+		storiesByReqseq[reqseq]++
+		storyseq := storiesByReqseq[reqseq]
+		canonicalID := fmt.Sprintf("story.%s.%s.%d", slug, reqseq, storyseq)
+		canonicalIDs[i] = canonicalID
+		canonicalReqIDs[i] = req.ID
+		if s.Label == "" {
+			return nil, fmt.Errorf("story at index %d: missing label", i)
+		}
+		if _, exists := labelToStoryID[s.Label]; exists {
+			return nil, fmt.Errorf("story label %q appears more than once", s.Label)
+		}
+		labelToStoryID[s.Label] = canonicalID
+	}
+
+	// Pass 2: construct workflow.Story values, resolving depends_on_labels
+	// to canonical Story.ID values and recursively resolving task labels
+	// to canonical Task.ID values.
+	out := make([]workflow.Story, len(input))
+	for i, s := range input {
+		dependsOn, err := resolveLabels(s.DependsOnLabels, labelToStoryID, "story depends_on", s.Label)
+		if err != nil {
+			return nil, err
+		}
+
+		tasks, err := resolveTasks(s.Tasks, canonicalIDs[i], canonicalIDs[i], s.Label)
+		if err != nil {
+			return nil, err
+		}
+
+		out[i] = workflow.Story{
+			ID:            canonicalIDs[i],
+			RequirementID: canonicalReqIDs[i],
+			Title:         s.Title,
+			Intent:        s.Intent,
+			Components:    append([]string(nil), s.Components...),
+			FilesOwned:    append([]string(nil), s.FilesOwned...),
+			DependsOn:     dependsOn,
+			Tasks:         tasks,
+		}
+	}
+	return out, nil
+}
+
+// resolveTasks assigns canonical Task.IDs and resolves intra-story task
+// DependsOn labels. The canonical Task.ID is derived from the story's
+// canonical ID by replacing the story.* prefix with task.* and appending
+// a 1-indexed task sequence number.
+func resolveTasks(inputs []positionalTaskInput, storyID, storyCanonicalID, storyLabel string) ([]workflow.Task, error) {
+	// task IDs derive from the story's canonical ID by replacing the
+	// story.<slug>.<reqseq>.<storyseq> prefix with task.<slug>.<reqseq>.<storyseq>.<taskseq>.
+	taskIDPrefix := "task." + strings.TrimPrefix(storyCanonicalID, "story.")
+
+	labelToTaskID := make(map[string]string, len(inputs))
+	canonicalTaskIDs := make([]string, len(inputs))
+	for i, t := range inputs {
+		if t.Label == "" {
+			return nil, fmt.Errorf("story %q: task at index %d missing label", storyLabel, i)
+		}
+		if _, exists := labelToTaskID[t.Label]; exists {
+			return nil, fmt.Errorf("story %q: task label %q appears more than once", storyLabel, t.Label)
+		}
+		canonicalTaskIDs[i] = fmt.Sprintf("%s.%d", taskIDPrefix, i+1)
+		labelToTaskID[t.Label] = canonicalTaskIDs[i]
+	}
+
+	out := make([]workflow.Task, len(inputs))
+	for i, t := range inputs {
+		depends, err := resolveLabels(t.DependsOnLabels, labelToTaskID,
+			fmt.Sprintf("task depends_on (story %q)", storyLabel), t.Label)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = workflow.Task{
+			ID:          canonicalTaskIDs[i],
+			StoryID:     storyID,
+			Description: t.Description,
+			DependsOn:   depends,
+		}
+	}
+	return out, nil
+}
+
+// resolveLabels maps a slice of labels to canonical IDs via the provided
+// label-to-ID map. Returns an error naming the unresolved label so the
+// regen prompt can pinpoint Sarah's mistake.
+func resolveLabels(labels []string, m map[string]string, fieldName, sourceLabel string) ([]string, error) {
+	if len(labels) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(labels))
+	for _, lbl := range labels {
+		id, ok := m[lbl]
+		if !ok {
+			return nil, fmt.Errorf("%s on %q references unknown label %q", fieldName, sourceLabel, lbl)
+		}
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// requirementSeq extracts the trailing sequence suffix from a requirement
+// ID. Given "requirement.my-plan.3", returns "3". Falls back to the full
+// ID if no dotted suffix can be extracted cleanly. Mirrors the
+// scenario-generator helper but kept local to story-preparer to avoid
+// cross-package dependency on a 3-line utility.
+func requirementSeq(requirementID string) string {
+	idx := strings.LastIndex(requirementID, ".")
+	if idx < 0 || idx == len(requirementID)-1 {
+		return requirementID
+	}
+	return requirementID[idx+1:]
 }
 
 // ---------------------------------------------------------------------------

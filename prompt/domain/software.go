@@ -1457,32 +1457,43 @@ The upstream_resolutions[] and harness_profiles[] fields are the load-bearing pi
 {
   "stories": [
     {
-      "id": "story.<plan-slug>.<reqseq>.<storyseq>",
-      "requirement_id": "<existing requirement.id>",
+      "label": "lifecycle",
+      "requirement_index": 0,
       "title": "Human-readable story heading",
       "intent": "1-2 sentences on what implementing this story proves.",
       "components": ["component-name-1"],
       "files_owned": ["src/path/one.go", "src/path/two.go"],
-      "depends_on": [],
+      "depends_on_labels": [],
       "tasks": [
         {
-          "id": "task.<plan-slug>.<reqseq>.<storyseq>.<taskseq>",
-          "story_id": "story.<plan-slug>.<reqseq>.<storyseq>",
+          "label": "test-first",
           "description": "Write failing test for boot lifecycle",
-          "depends_on": []
+          "depends_on_labels": []
+        },
+        {
+          "label": "impl",
+          "description": "Implement to pass",
+          "depends_on_labels": ["test-first"]
         }
       ]
     }
   ]
 }
 
-Required per story: id, requirement_id, title, intent, components, files_owned, depends_on, tasks. Required per task: id, story_id, description, depends_on.
+Required per story: label, requirement_index, title, intent, components, files_owned, depends_on_labels, tasks. Required per task: label, description, depends_on_labels.
+
+Label semantics (ADR-043 PR 4e positional shape):
+  - label is your local string identifier for a story/task. Use any short kebab-case form ("lifecycle", "telemetry", "test-first"). The system resolves your labels into canonical Story.ID / Task.ID values server-side, so you don't fabricate the slug-dependent entity-ID format.
+  - requirement_index is 0-based — requirement_index=0 binds this story to the first Requirement in your prompt's Requirements list, requirement_index=1 to the second, etc.
+  - depends_on_labels (on a story) must match labels of OTHER stories you emit in this same call.
+  - depends_on_labels (on a task) must match labels of OTHER tasks within the SAME story (cross-story task ordering lives on story.depends_on_labels, not task.depends_on_labels).
 
 Readiness gate before signing off a Story (rejection means regen):
   - files_owned non-empty AND at least one source-code file (.go/.java/.ts/.py/.rs/...).
   - tasks non-empty (3-5 entries is typical).
   - components entries match declared component_boundaries[].name from the architecture.
-  - depends_on entries (both story-level and task-level) resolve to other IDs you emit in this same call.
+  - depends_on_labels entries resolve to other story/task labels you emit in this same call.
+  - requirement_index points at a real entry in the Requirements list shown in your prompt.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},

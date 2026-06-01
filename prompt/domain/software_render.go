@@ -390,6 +390,8 @@ func writePlanReviewerProjectFileTree(sb *strings.Builder, tree string) {
 // live in configs/presets/bmad.json; this fragment renders her dispatch
 // inputs — the plan goal/context, the analyst capabilities, the architect
 // component map, and the requirement summaries she's sharding.
+//
+//revive:disable-next-line:function-length // sequential prompt builder; mirrors renderArchitectPrompt + renderScenarioGeneratorPrompt size.
 func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 	var sb strings.Builder
 	sb.WriteString("You are sharding requirements into ready-for-dev Stories with Task checklists.\n\n")
@@ -432,8 +434,10 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 
 	if len(p.Requirements) > 0 {
 		sb.WriteString("## Requirements to Shard\n\n")
-		for _, r := range p.Requirements {
-			fmt.Fprintf(&sb, "### %s — %s\n", r.ID, r.Title)
+		sb.WriteString("Reference these by zero-based `requirement_index` in your output (index 0 = first entry below, index 1 = second, etc.).\n\n")
+		for i, r := range p.Requirements {
+			fmt.Fprintf(&sb, "### Requirement #%d — %s\n", i, r.Title)
+			fmt.Fprintf(&sb, "*(canonical id: %s)*\n\n", r.ID)
 			if r.Description != "" {
 				fmt.Fprintf(&sb, "%s\n\n", r.Description)
 			}
@@ -444,13 +448,15 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 	}
 
 	sb.WriteString("\n## Your Task\n\n")
-	sb.WriteString("For each requirement above, decide whether it shards into ONE Story or N Stories with depends_on edges. Single-component requirements are usually one Story; multi-component or prereq-ordered work splits into multiple Stories.\n\n")
+	sb.WriteString("For each Requirement above, decide whether it shards into ONE Story or N Stories with depends_on_labels edges. Single-component requirements are usually one Story; multi-component or prereq-ordered work splits into multiple Stories.\n\n")
 	sb.WriteString("For each Story:\n")
+	sb.WriteString("- Assign a `label` (any short kebab-case local string you choose — used only to express cross-story DependsOn).\n")
+	sb.WriteString("- Set `requirement_index` to the 0-based index of the parent Requirement in the list above.\n")
 	sb.WriteString("- Pick the components it modifies (from the Architecture Components above).\n")
 	sb.WriteString("- Compute files_owned as the UNION of those components' implementation_files. Assemble the list explicitly — the dev needs to see the exact file set.\n")
-	sb.WriteString("- Author an ordered TDD checklist of 3-5 Tasks (write failing test, implement to pass, integration smoke, verify scenarios).\n")
-	sb.WriteString("- Express any cross-story prereqs in story.depends_on. Express intra-story TDD ordering in task.depends_on. Cross-story task ordering does NOT belong on task.depends_on.\n\n")
-	sb.WriteString("Apply your readiness gate before signing off each Story. Any Story that doesn't pass — empty files_owned, docs-only files_owned, empty tasks, unresolved component reference — must be flagged back rather than emitted.\n\n")
+	sb.WriteString("- Author an ordered TDD checklist of 3-5 Tasks (write failing test, implement to pass, integration smoke, verify scenarios). Each task gets its own `label` for intra-story DependsOn.\n")
+	sb.WriteString("- Cross-story prereqs go in story.depends_on_labels (list other story labels). Intra-story task ordering goes in task.depends_on_labels. Cross-story task ordering does NOT belong on task.depends_on_labels.\n\n")
+	sb.WriteString("Apply your readiness gate before signing off each Story. Any Story that doesn't pass — empty files_owned, docs-only files_owned, empty tasks, unresolved component reference, requirement_index out of range — must be flagged back rather than emitted.\n\n")
 
 	if p.PreviousError != "" {
 		fmt.Fprintf(&sb, "## Previous Attempt Failed\n\nYour previous output could not be processed: %s\n\nPlease fix the issue and ensure your response is valid JSON matching the required format.\n\n", p.PreviousError)

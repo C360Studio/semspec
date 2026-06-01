@@ -8,6 +8,14 @@ import (
 )
 
 func TestParseStoriesFromResult(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "x",
+		Requirements: []workflow.Requirement{
+			{ID: "requirement.x.1", Title: "First"},
+			{ID: "requirement.x.2", Title: "Second"},
+		},
+	}
+
 	cases := []struct {
 		name      string
 		input     string
@@ -35,14 +43,39 @@ func TestParseStoriesFromResult(t *testing.T) {
 			wantErr: "stories list is empty",
 		},
 		{
-			name:      "single story parses cleanly",
-			input:     `{"stories":[{"id":"story.x.1.1","requirement_id":"req.x.1","title":"T","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on":[],"tasks":[{"id":"task.x.1.1.1","story_id":"story.x.1.1","description":"d","depends_on":[]}]}]}`,
+			name:      "single story with positional shape parses cleanly",
+			input:     `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on_labels":[],"tasks":[{"label":"t1","description":"d","depends_on_labels":[]}]}]}`,
 			wantCount: 1,
+		},
+		{
+			name:    "requirement_index out of range rejected",
+			input:   `{"stories":[{"label":"l1","requirement_index":5,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]}]}`,
+			wantErr: "requirement_index 5 out of range",
+		},
+		{
+			name:    "missing story label rejected",
+			input:   `{"stories":[{"label":"","requirement_index":0,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]}]}`,
+			wantErr: "missing label",
+		},
+		{
+			name:    "duplicate story label rejected",
+			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T1","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]},{"label":"l1","requirement_index":1,"title":"T2","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]}]}`,
+			wantErr: `label "l1" appears more than once`,
+		},
+		{
+			name:    "unknown depends_on_labels rejected",
+			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":["ghost"],"tasks":[]}]}`,
+			wantErr: `references unknown label "ghost"`,
+		},
+		{
+			name:    "duplicate task label rejected",
+			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[{"label":"a","description":"d","depends_on_labels":[]},{"label":"a","description":"d","depends_on_labels":[]}]}]}`,
+			wantErr: `task label "a" appears more than once`,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := parseStoriesFromResult(tc.input)
+			got, err := parseStoriesFromResult(tc.input, plan, plan.Slug)
 			if tc.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tc.wantErr)
@@ -59,6 +92,98 @@ func TestParseStoriesFromResult(t *testing.T) {
 				t.Errorf("got %d stories, want %d", len(got), tc.wantCount)
 			}
 		})
+	}
+}
+
+// TestResolveStoryLabels_LabelDepsRewriteToCanonicalIDs covers the core
+// transformation: Sarah's depends_on_labels become canonical Story.ID refs
+// in workflow.Story.DependsOn; intra-story task depends_on_labels become
+// canonical Task.ID refs.
+func TestResolveStoryLabels_LabelDepsRewriteToCanonicalIDs(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "x",
+		Requirements: []workflow.Requirement{
+			{ID: "requirement.x.1", Title: "Auth"},
+			{ID: "requirement.x.2", Title: "Session"},
+		},
+	}
+	input := []positionalStoryInput{
+		{
+			Label: "lifecycle", RequirementIndex: 0, Title: "Lifecycle",
+			Tasks: []positionalTaskInput{
+				{Label: "test", Description: "Write tests"},
+				{Label: "impl", Description: "Implement", DependsOnLabels: []string{"test"}},
+			},
+		},
+		{
+			Label: "wire-up", RequirementIndex: 1, Title: "Wire-up",
+			DependsOnLabels: []string{"lifecycle"},
+			Tasks: []positionalTaskInput{
+				{Label: "wire", Description: "Wire it"},
+			},
+		},
+	}
+	got, err := resolveStoryLabels(input, plan, "x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 stories, got %d", len(got))
+	}
+	// Canonical IDs: story.<slug>.<reqseq>.<storyseq>
+	if got[0].ID != "story.x.1.1" {
+		t.Errorf("story[0].ID = %q, want story.x.1.1", got[0].ID)
+	}
+	if got[1].ID != "story.x.2.1" {
+		t.Errorf("story[1].ID = %q, want story.x.2.1", got[1].ID)
+	}
+	// RequirementID resolved from requirement_index.
+	if got[0].RequirementID != "requirement.x.1" {
+		t.Errorf("story[0].RequirementID = %q, want requirement.x.1", got[0].RequirementID)
+	}
+	// DependsOn label resolves to canonical story ID.
+	if len(got[1].DependsOn) != 1 || got[1].DependsOn[0] != "story.x.1.1" {
+		t.Errorf("story[1].DependsOn = %v, want [story.x.1.1]", got[1].DependsOn)
+	}
+	// Task canonical IDs + StoryID + intra-story DependsOn.
+	if len(got[0].Tasks) != 2 {
+		t.Fatalf("story[0] want 2 tasks, got %d", len(got[0].Tasks))
+	}
+	if got[0].Tasks[0].ID != "task.x.1.1.1" {
+		t.Errorf("task[0].ID = %q, want task.x.1.1.1", got[0].Tasks[0].ID)
+	}
+	if got[0].Tasks[0].StoryID != "story.x.1.1" {
+		t.Errorf("task[0].StoryID = %q, want story.x.1.1", got[0].Tasks[0].StoryID)
+	}
+	if len(got[0].Tasks[1].DependsOn) != 1 || got[0].Tasks[1].DependsOn[0] != "task.x.1.1.1" {
+		t.Errorf("task[1].DependsOn = %v, want [task.x.1.1.1]", got[0].Tasks[1].DependsOn)
+	}
+}
+
+// TestResolveStoryLabels_StoryseqIncrementsPerRequirement covers Sarah
+// sharding ONE requirement into multiple stories — storyseq counter
+// increments so the two stories get distinct IDs.
+func TestResolveStoryLabels_StoryseqIncrementsPerRequirement(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "x",
+		Requirements: []workflow.Requirement{
+			{ID: "requirement.x.1", Title: "Big req"},
+		},
+	}
+	input := []positionalStoryInput{
+		{Label: "a", RequirementIndex: 0, Title: "A"},
+		{Label: "b", RequirementIndex: 0, Title: "B"},
+		{Label: "c", RequirementIndex: 0, Title: "C"},
+	}
+	got, err := resolveStoryLabels(input, plan, "x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"story.x.1.1", "story.x.1.2", "story.x.1.3"}
+	for i, w := range want {
+		if got[i].ID != w {
+			t.Errorf("story[%d].ID = %q, want %q", i, got[i].ID, w)
+		}
 	}
 }
 

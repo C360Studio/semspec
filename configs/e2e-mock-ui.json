@@ -542,12 +542,12 @@
       }
     },
     "story-preparer": {
-      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). UI e2e infrastructure wired in PR 4d (story_preparation capability + mock-story-preparer endpoint above); Sarah enabled flip happens in PR 4e alongside per-scenario fixtures with real requirement IDs.",
+      "_comment": "ADR-043 Move 3 — Sarah (BMAD PO). Enabled in UI e2e as of PR 4e alongside the positional/labeled wire shape + per-scenario mock-story-preparer.json fixtures.",
       "name": "story-preparer",
       "type": "processor",
       "enabled": true,
       "config": {
-        "enabled": false,
+        "enabled": true,
         "default_capability": "story_preparation",
         "max_generation_retries": 2
       }
