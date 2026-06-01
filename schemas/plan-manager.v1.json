@@ -23,6 +23,12 @@
       "default": false,
       "category": "basic"
     },
+    "cascade_trigger_subject": {
+      "type": "string",
+      "description": "Subject for cascade trigger messages published on accept (must match plan-decision-handler.trigger_subject)",
+      "default": "workflow.trigger.plan-decision-cascade",
+      "category": "advanced"
+    },
     "default_capability": {
       "type": "string",
       "description": "Default model capability for coordination",

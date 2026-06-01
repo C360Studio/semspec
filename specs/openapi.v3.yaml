@@ -1333,6 +1333,29 @@ components:
                             - confidence
                         type: object
                     type: array
+                openspec_changes:
+                    items:
+                        properties:
+                            has_design:
+                                type: boolean
+                            has_proposal:
+                                type: boolean
+                            has_tasks:
+                                type: boolean
+                            name:
+                                type: string
+                            path:
+                                type: string
+                            spec_capabilities:
+                                items:
+                                    type: string
+                                type: array
+                        required:
+                            - name
+                            - path
+                            - has_proposal
+                        type: object
+                    type: array
                 proposed_checklist:
                     items:
                         properties:
@@ -1558,6 +1581,29 @@ components:
                                     - name
                                     - marker
                                     - confidence
+                                type: object
+                            type: array
+                        openspec_changes:
+                            items:
+                                properties:
+                                    has_design:
+                                        type: boolean
+                                    has_proposal:
+                                        type: boolean
+                                    has_tasks:
+                                        type: boolean
+                                    name:
+                                        type: string
+                                    path:
+                                        type: string
+                                    spec_capabilities:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - name
+                                    - path
+                                    - has_proposal
                                 type: object
                             type: array
                         proposed_checklist:
@@ -2046,7 +2092,15 @@ components:
                         component_boundaries:
                             items:
                                 properties:
+                                    capabilities:
+                                        items:
+                                            type: string
+                                        type: array
                                     dependencies:
+                                        items:
+                                            type: string
+                                        type: array
+                                    implementation_files:
                                         items:
                                             type: string
                                         type: array
@@ -2054,6 +2108,10 @@ components:
                                         type: string
                                     responsibility:
                                         type: string
+                                    upstream_refs:
+                                        items:
+                                            type: string
+                                        type: array
                                 required:
                                     - name
                                     - responsibility
@@ -2078,6 +2136,26 @@ components:
                                     - title
                                     - decision
                                     - rationale
+                                type: object
+                            type: array
+                        harness_profiles:
+                            items:
+                                properties:
+                                    covers:
+                                        items:
+                                            type: string
+                                        type: array
+                                    profile_id:
+                                        type: string
+                                    purpose:
+                                        type: string
+                                    used_by:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - profile_id
+                                    - purpose
                                 type: object
                             type: array
                         integrations:
@@ -2158,6 +2236,49 @@ components:
                                         type: object
                                     type: array
                             type: object
+                        upstream_resolutions:
+                            items:
+                                properties:
+                                    apis:
+                                        items:
+                                            properties:
+                                                citation:
+                                                    type: string
+                                                kind:
+                                                    type: string
+                                                lifecycle:
+                                                    type: string
+                                                notes:
+                                                    type: string
+                                                signature:
+                                                    type: string
+                                                symbol:
+                                                    type: string
+                                            required:
+                                                - symbol
+                                                - kind
+                                                - signature
+                                                - citation
+                                            type: object
+                                        type: array
+                                    coordinate:
+                                        type: string
+                                    name:
+                                        type: string
+                                    role:
+                                        type: string
+                                    source_ref:
+                                        type: string
+                                    used_by:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - name
+                                    - coordinate
+                                    - source_ref
+                                type: object
+                            type: array
                     required:
                         - technology_choices
                         - component_boundaries
@@ -2182,6 +2303,39 @@ components:
                     items:
                         type: string
                     type: array
+                exploration:
+                    nullable: true
+                    properties:
+                        capabilities:
+                            items:
+                                properties:
+                                    depends_on:
+                                        items:
+                                            type: string
+                                        type: array
+                                    description:
+                                        type: string
+                                    lifecycle:
+                                        type: string
+                                    name:
+                                        type: string
+                                    surfaces:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - name
+                                    - lifecycle
+                                    - description
+                                type: object
+                            type: array
+                        open_questions:
+                            items:
+                                type: string
+                            type: array
+                    required:
+                        - capabilities
+                    type: object
                 github:
                     nullable: true
                     properties:
@@ -2359,9 +2513,41 @@ components:
                         - duration_ms
                         - completed_at
                     type: object
+                qa_verdict_summary:
+                    nullable: true
+                    properties:
+                        dimensions:
+                            properties:
+                                assertion_quality:
+                                    type: string
+                                coverage:
+                                    type: string
+                                flake_judgment:
+                                    type: string
+                                regression_surface:
+                                    type: string
+                                requirement_fulfillment:
+                                    type: string
+                            type: object
+                        level:
+                            type: string
+                        recorded_at:
+                            format: date-time
+                            type: string
+                        summary:
+                            type: string
+                        verdict:
+                            type: string
+                    required:
+                        - verdict
+                        - level
+                        - recorded_at
+                    type: object
                 requirements:
                     items:
                         properties:
+                            capability_name:
+                                type: string
                             created_at:
                                 format: date-time
                                 type: string
@@ -2378,6 +2564,8 @@ components:
                             id:
                                 type: string
                             plan_id:
+                                type: string
+                            recovery_hint:
                                 type: string
                             status:
                                 type: string
@@ -2418,16 +2606,28 @@ components:
                                 type: string
                             given:
                                 type: string
+                            harness_profile_ids:
+                                items:
+                                    type: string
+                                type: array
                             id:
                                 type: string
                             requirement_id:
                                 type: string
                             status:
                                 type: string
+                            story_id:
+                                type: string
+                            tags:
+                                items:
+                                    type: string
+                                type: array
                             then:
                                 items:
                                     type: string
                                 type: array
+                            title:
+                                type: string
                             updated_at:
                                 format: date-time
                                 type: string
@@ -2468,6 +2668,82 @@ components:
                     type: string
                 status:
                     type: string
+                stories:
+                    items:
+                        properties:
+                            components:
+                                items:
+                                    type: string
+                                type: array
+                            created_at:
+                                format: date-time
+                                type: string
+                            depends_on:
+                                items:
+                                    type: string
+                                type: array
+                            files_owned:
+                                items:
+                                    type: string
+                                type: array
+                            id:
+                                type: string
+                            intent:
+                                type: string
+                            prepared_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            prepared_by:
+                                type: string
+                            recovery_hint:
+                                type: string
+                            requirement_id:
+                                type: string
+                            status:
+                                type: string
+                            tasks:
+                                items:
+                                    properties:
+                                        created_at:
+                                            format: date-time
+                                            type: string
+                                        depends_on:
+                                            items:
+                                                type: string
+                                            type: array
+                                        description:
+                                            type: string
+                                        id:
+                                            type: string
+                                        status:
+                                            type: string
+                                        story_id:
+                                            type: string
+                                        updated_at:
+                                            format: date-time
+                                            type: string
+                                    required:
+                                        - id
+                                        - story_id
+                                        - description
+                                        - created_at
+                                        - updated_at
+                                    type: object
+                                type: array
+                            title:
+                                type: string
+                            updated_at:
+                                format: date-time
+                                type: string
+                        required:
+                            - id
+                            - requirement_id
+                            - title
+                            - created_at
+                            - updated_at
+                        type: object
+                    type: array
                 title:
                     type: string
             required:
@@ -2528,7 +2804,15 @@ components:
                         component_boundaries:
                             items:
                                 properties:
+                                    capabilities:
+                                        items:
+                                            type: string
+                                        type: array
                                     dependencies:
+                                        items:
+                                            type: string
+                                        type: array
+                                    implementation_files:
                                         items:
                                             type: string
                                         type: array
@@ -2536,6 +2820,10 @@ components:
                                         type: string
                                     responsibility:
                                         type: string
+                                    upstream_refs:
+                                        items:
+                                            type: string
+                                        type: array
                                 required:
                                     - name
                                     - responsibility
@@ -2560,6 +2848,26 @@ components:
                                     - title
                                     - decision
                                     - rationale
+                                type: object
+                            type: array
+                        harness_profiles:
+                            items:
+                                properties:
+                                    covers:
+                                        items:
+                                            type: string
+                                        type: array
+                                    profile_id:
+                                        type: string
+                                    purpose:
+                                        type: string
+                                    used_by:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - profile_id
+                                    - purpose
                                 type: object
                             type: array
                         integrations:
@@ -2640,6 +2948,49 @@ components:
                                         type: object
                                     type: array
                             type: object
+                        upstream_resolutions:
+                            items:
+                                properties:
+                                    apis:
+                                        items:
+                                            properties:
+                                                citation:
+                                                    type: string
+                                                kind:
+                                                    type: string
+                                                lifecycle:
+                                                    type: string
+                                                notes:
+                                                    type: string
+                                                signature:
+                                                    type: string
+                                                symbol:
+                                                    type: string
+                                            required:
+                                                - symbol
+                                                - kind
+                                                - signature
+                                                - citation
+                                            type: object
+                                        type: array
+                                    coordinate:
+                                        type: string
+                                    name:
+                                        type: string
+                                    role:
+                                        type: string
+                                    source_ref:
+                                        type: string
+                                    used_by:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - name
+                                    - coordinate
+                                    - source_ref
+                                type: object
+                            type: array
                     required:
                         - technology_choices
                         - component_boundaries
@@ -2681,6 +3032,39 @@ components:
                     items:
                         type: string
                     type: array
+                exploration:
+                    nullable: true
+                    properties:
+                        capabilities:
+                            items:
+                                properties:
+                                    depends_on:
+                                        items:
+                                            type: string
+                                        type: array
+                                    description:
+                                        type: string
+                                    lifecycle:
+                                        type: string
+                                    name:
+                                        type: string
+                                    surfaces:
+                                        items:
+                                            type: string
+                                        type: array
+                                required:
+                                    - name
+                                    - lifecycle
+                                    - description
+                                type: object
+                            type: array
+                        open_questions:
+                            items:
+                                type: string
+                            type: array
+                    required:
+                        - capabilities
+                    type: object
                 github:
                     nullable: true
                     properties:
@@ -2858,9 +3242,41 @@ components:
                         - duration_ms
                         - completed_at
                     type: object
+                qa_verdict_summary:
+                    nullable: true
+                    properties:
+                        dimensions:
+                            properties:
+                                assertion_quality:
+                                    type: string
+                                coverage:
+                                    type: string
+                                flake_judgment:
+                                    type: string
+                                regression_surface:
+                                    type: string
+                                requirement_fulfillment:
+                                    type: string
+                            type: object
+                        level:
+                            type: string
+                        recorded_at:
+                            format: date-time
+                            type: string
+                        summary:
+                            type: string
+                        verdict:
+                            type: string
+                    required:
+                        - verdict
+                        - level
+                        - recorded_at
+                    type: object
                 requirements:
                     items:
                         properties:
+                            capability_name:
+                                type: string
                             created_at:
                                 format: date-time
                                 type: string
@@ -2877,6 +3293,8 @@ components:
                             id:
                                 type: string
                             plan_id:
+                                type: string
+                            recovery_hint:
                                 type: string
                             status:
                                 type: string
@@ -2917,16 +3335,28 @@ components:
                                 type: string
                             given:
                                 type: string
+                            harness_profile_ids:
+                                items:
+                                    type: string
+                                type: array
                             id:
                                 type: string
                             requirement_id:
                                 type: string
                             status:
                                 type: string
+                            story_id:
+                                type: string
+                            tags:
+                                items:
+                                    type: string
+                                type: array
                             then:
                                 items:
                                     type: string
                                 type: array
+                            title:
+                                type: string
                             updated_at:
                                 format: date-time
                                 type: string
@@ -2969,6 +3399,82 @@ components:
                     type: string
                 status:
                     type: string
+                stories:
+                    items:
+                        properties:
+                            components:
+                                items:
+                                    type: string
+                                type: array
+                            created_at:
+                                format: date-time
+                                type: string
+                            depends_on:
+                                items:
+                                    type: string
+                                type: array
+                            files_owned:
+                                items:
+                                    type: string
+                                type: array
+                            id:
+                                type: string
+                            intent:
+                                type: string
+                            prepared_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            prepared_by:
+                                type: string
+                            recovery_hint:
+                                type: string
+                            requirement_id:
+                                type: string
+                            status:
+                                type: string
+                            tasks:
+                                items:
+                                    properties:
+                                        created_at:
+                                            format: date-time
+                                            type: string
+                                        depends_on:
+                                            items:
+                                                type: string
+                                            type: array
+                                        description:
+                                            type: string
+                                        id:
+                                            type: string
+                                        status:
+                                            type: string
+                                        story_id:
+                                            type: string
+                                        updated_at:
+                                            format: date-time
+                                            type: string
+                                    required:
+                                        - id
+                                        - story_id
+                                        - description
+                                        - created_at
+                                        - updated_at
+                                    type: object
+                                type: array
+                            title:
+                                type: string
+                            updated_at:
+                                format: date-time
+                                type: string
+                        required:
+                            - id
+                            - requirement_id
+                            - title
+                            - created_at
+                            - updated_at
+                        type: object
+                    type: array
                 title:
                     type: string
             required:
@@ -3027,6 +3533,8 @@ components:
                     type: string
                 qa_level:
                     type: string
+                qa_skip_service_injection:
+                    type: boolean
                 qa_test_command:
                     type: string
                 repository:

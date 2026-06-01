@@ -78,6 +78,15 @@ const (
 	StatusGeneratingScenarios Status = "generating_scenarios"
 	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
 	StatusReviewingScenarios Status = "reviewing_scenarios"
+	// StatusPreparingStories indicates story-preparer (Sarah) has claimed
+	// architecture_generated and is sharding requirements into Stories
+	// with task checklists (ADR-043 Move 3). Sarah's readiness gate runs
+	// inside this state; on completion plan-reviewer R3 fires on
+	// ready_for_execution to validate story.* rules. New state, additive
+	// — wired into the happy path in ADR-043 PR 3 when story-preparer
+	// lands. The legacy architecture_generated → scenarios_generated
+	// path remains valid until PR 4 rewires Bob to consume Stories.
+	StatusPreparingStories Status = "preparing_stories"
 )
 
 const (
@@ -159,7 +168,8 @@ func (s Status) IsValid() bool {
 		StatusChanged, StatusReadyForQA, StatusReviewingQA,
 		StatusExploring, StatusExplored,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
-		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
+		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusPreparingStories:
 		return true
 	default:
 		return false
@@ -172,7 +182,8 @@ func (s Status) IsInProgress() bool {
 	switch s {
 	case StatusExploring,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
-		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
+		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusPreparingStories:
 		return true
 	default:
 		return false
@@ -235,12 +246,21 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// generating_architecture → rejected (fatal error)
 		return target == StatusArchitectureGenerated || target == StatusRejected
 	case StatusArchitectureGenerated:
-		// architecture_generated → generating_scenarios (scenario-generator claims)
-		// architecture_generated → scenarios_generated (auto-cascade)
+		// architecture_generated → generating_scenarios (scenario-generator claims; legacy pre-ADR-043 path)
+		// architecture_generated → scenarios_generated (auto-cascade; legacy)
+		// architecture_generated → preparing_stories (ADR-043 PR 3: story-preparer claims)
 		// architecture_generated → changed (change proposal deprecated requirements)
 		// architecture_generated → rejected (validation failure)
 		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated ||
+			target == StatusPreparingStories ||
 			target == StatusChanged || target == StatusRejected
+	case StatusPreparingStories:
+		// preparing_stories → ready_for_execution (Sarah done; plan-reviewer R3 will fire on this state per ADR-043 PR 3)
+		// preparing_stories → architecture_generated (R3 phase-targeted retry — architect must reshape components)
+		// preparing_stories → rejected (escalation: readiness gate exhausted retries)
+		return target == StatusReadyForExecution ||
+			target == StatusArchitectureGenerated ||
+			target == StatusRejected
 	case StatusGeneratingScenarios:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
@@ -601,12 +621,19 @@ type Plan struct {
 	// Nil when SkipArchitecture is true or before the phase completes.
 	Architecture *ArchitectureDocument `json:"architecture,omitempty"`
 
-	// Requirements, Scenarios, and PlanDecisions are populated when the plan
-	// is written to the PLAN_STATES KV bucket so downstream watchers have
-	// everything they need without follow-up queries.
-	// Not persisted to graph triples — use SaveRequirements/SaveScenarios/SavePlanDecisions for that.
-	Requirements  []Requirement  `json:"requirements,omitempty"`
-	Scenarios     []Scenario     `json:"scenarios,omitempty"`
+	// Requirements, Scenarios, Stories, and PlanDecisions are populated when
+	// the plan is written to the PLAN_STATES KV bucket so downstream watchers
+	// have everything they need without follow-up queries.
+	// Not persisted to graph triples — use SaveRequirements/SaveScenarios/SaveStories/SavePlanDecisions for that.
+	Requirements []Requirement `json:"requirements,omitempty"`
+	Scenarios    []Scenario    `json:"scenarios,omitempty"`
+
+	// Stories are Sarah-authored dev-ready units sharded from Requirements
+	// (ADR-043 Move 2). Empty on plans persisted before ADR-043 PR 3
+	// landed story-preparer; new plans populate this in the
+	// preparing_stories → ready_for_execution transition.
+	Stories []Story `json:"stories,omitempty"`
+
 	PlanDecisions []PlanDecision `json:"plan_decisions,omitempty"`
 
 	// GitHub contains GitHub integration metadata for plans originating from
@@ -799,6 +826,30 @@ type ComponentDef struct {
 	// component using an external lib has a populated UpstreamRefs" is
 	// a follow-up commit.
 	UpstreamRefs []string `json:"upstream_refs,omitempty"`
+
+	// ImplementationFiles are workspace-relative paths that house this
+	// component's code (ADR-043 Move 1, BMAD tech-spec scope). Sourced
+	// from plan.scope.create for new components or the existing project
+	// tree for modified components. Plan-reviewer R2 rule
+	// architecture.component_missing_implementation_files rejects empty
+	// lists; architecture.component_implementation_files_doc_only rejects
+	// docs-only lists (every component MUST own ≥1 source-code file).
+	//
+	// omitempty for back-compat read of plans persisted before ADR-043
+	// PR 2 landed Winston's schema enforcement; new plans require ≥1
+	// entry per component once PR 2 ships.
+	ImplementationFiles []string `json:"implementation_files,omitempty"`
+
+	// Capabilities are kebab-case Capability.Name entries this component
+	// implements (ADR-043 Move 1). Winston's bidirectional bridge between
+	// Mary's capability list and the file space he just declared.
+	// Plan-reviewer R2 rule capability.unresolved_in_architecture rejects
+	// capabilities that have no component whose Capabilities list contains
+	// them.
+	//
+	// omitempty for the same back-compat reason as ImplementationFiles;
+	// new plans require ≥1 entry per component once PR 2 ships.
+	Capabilities []string `json:"capabilities,omitempty"`
 }
 
 // ArchDecision is a single architecture decision record produced by the architect agent.
@@ -1006,6 +1057,59 @@ func (p *Plan) FindPlanDecision(id string) (*PlanDecision, int) {
 		}
 	}
 	return nil, -1
+}
+
+// FindStory returns a pointer into p.Stories and its index by ID.
+// Returns nil, -1 when the story is not found.
+func (p *Plan) FindStory(id string) (*Story, int) {
+	for i := range p.Stories {
+		if p.Stories[i].ID == id {
+			return &p.Stories[i], i
+		}
+	}
+	return nil, -1
+}
+
+// StoriesForRequirement returns all stories whose RequirementID matches reqID,
+// in their existing Plan.Stories order. ADR-043 Move 2 — one requirement may
+// be sharded into N stories with DependsOn edges between them.
+func (p *Plan) StoriesForRequirement(reqID string) []Story {
+	var out []Story
+	for _, s := range p.Stories {
+		if s.RequirementID == reqID {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// FindTask returns a pointer to a Task with the given ID across all Stories,
+// along with its parent Story's index and its index within that Story's Tasks
+// slice. Returns nil, -1, -1 when the task is not found. Task IDs are
+// plan-unique (format: task.<slug>.<reqseq>.<storyseq>.<taskseq>) so the first
+// hit is authoritative.
+func (p *Plan) FindTask(id string) (*Task, int, int) {
+	for si := range p.Stories {
+		for ti := range p.Stories[si].Tasks {
+			if p.Stories[si].Tasks[ti].ID == id {
+				return &p.Stories[si].Tasks[ti], si, ti
+			}
+		}
+	}
+	return nil, -1, -1
+}
+
+// ScenariosForStory returns all scenarios linked to the given storyID via
+// Scenario.StoryID (ADR-043 semantic primary). Empty for plans persisted
+// before ADR-043 PR 4 wired Bob to populate StoryID.
+func (p *Plan) ScenariosForStory(storyID string) []Scenario {
+	var out []Scenario
+	for _, s := range p.Scenarios {
+		if s.StoryID == storyID {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // LLMCallHistory tracks LLM request IDs per review iteration for both
@@ -1393,10 +1497,18 @@ func IsTierTag(s string) bool {
 	}
 }
 
-// Scenario represents a Given/When/Then behavioral contract derived from a Requirement.
+// Scenario represents a Given/When/Then behavioral contract derived from a
+// Story (ADR-043 semantic primary) or, for legacy plans, a Requirement.
 type Scenario struct {
-	ID            string `json:"id"`
+	ID string `json:"id"`
+	// RequirementID is the parent Requirement (legacy primary link, kept
+	// as a query-convenience back-pointer per ADR-043 Architecture section).
 	RequirementID string `json:"requirement_id"`
+	// StoryID is the parent Story (ADR-043 semantic primary link). Set by
+	// Bob (scenario-generator) post-Sarah when the scenario was authored
+	// against a specific Story; empty on plans persisted before ADR-043
+	// PR 4 wired the Bob/Story link.
+	StoryID string `json:"story_id,omitempty"`
 	// Title is the human-readable scenario heading (e.g. "MAVSDK heartbeat
 	// observed after driver start"). Required in scenariosSchema since
 	// ADR-041 PR 1; carried here as omitempty for back-compat with plans

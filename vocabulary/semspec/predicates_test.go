@@ -51,6 +51,23 @@ func TestPredicatesRegistered(t *testing.T) {
 		semspec.CapabilitySurface,
 		semspec.ScenarioTag,
 		semspec.ScenarioHarnessProfile,
+		// ADR-043: component + story + scenario.story + task extensions
+		semspec.ComponentImplementationFile,
+		semspec.ComponentCapability,
+		semspec.StoryTitle,
+		semspec.StoryIntent,
+		semspec.StoryRequirement,
+		semspec.StoryComponent,
+		semspec.StoryFilesOwned,
+		semspec.StoryDependsOn,
+		semspec.PredicateStoryStatus,
+		semspec.StoryPreparedBy,
+		semspec.StoryPreparedAt,
+		semspec.StoryCreatedAt,
+		semspec.StoryUpdatedAt,
+		semspec.ScenarioStory,
+		semspec.TaskStory,
+		semspec.TaskDependsOn,
 	}
 
 	for _, predicate := range predicates {
@@ -228,6 +245,74 @@ func TestCapabilityPredicatesAreThreePart(t *testing.T) {
 		semspec.CapabilitySurface,
 		semspec.ScenarioTag,
 		semspec.ScenarioHarnessProfile,
+	}
+	for _, p := range preds {
+		t.Run(p, func(t *testing.T) {
+			parts := 1
+			for _, c := range p {
+				if c == '.' {
+					parts++
+				}
+			}
+			if parts != 3 {
+				t.Errorf("predicate %q has %d dotted segments, want 3 (domain.category.property)", p, parts)
+			}
+		})
+	}
+}
+
+func TestComponentStoryPredicateValues(t *testing.T) {
+	tests := []struct {
+		name      string
+		predicate string
+		expected  string
+	}{
+		{"ComponentImplementationFile", semspec.ComponentImplementationFile, "semspec.component.implementation_file"},
+		{"ComponentCapability", semspec.ComponentCapability, "semspec.component.capability"},
+		{"StoryTitle", semspec.StoryTitle, "semspec.story.title"},
+		{"StoryIntent", semspec.StoryIntent, "semspec.story.intent"},
+		{"StoryRequirement", semspec.StoryRequirement, "semspec.story.requirement"},
+		{"StoryComponent", semspec.StoryComponent, "semspec.story.component"},
+		{"StoryFilesOwned", semspec.StoryFilesOwned, "semspec.story.files_owned"},
+		{"StoryDependsOn", semspec.StoryDependsOn, "semspec.story.depends_on"},
+		{"PredicateStoryStatus", semspec.PredicateStoryStatus, "semspec.story.status"},
+		{"StoryPreparedBy", semspec.StoryPreparedBy, "semspec.story.prepared_by"},
+		{"StoryPreparedAt", semspec.StoryPreparedAt, "semspec.story.prepared_at"},
+		{"StoryCreatedAt", semspec.StoryCreatedAt, "semspec.story.created_at"},
+		{"StoryUpdatedAt", semspec.StoryUpdatedAt, "semspec.story.updated_at"},
+		{"ScenarioStory", semspec.ScenarioStory, "semspec.scenario.story"},
+		{"TaskStory", semspec.TaskStory, "semspec.task.story"},
+		{"TaskDependsOn", semspec.TaskDependsOn, "semspec.task.depends_on"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.predicate != tc.expected {
+				t.Errorf("got %q, want %q", tc.predicate, tc.expected)
+			}
+		})
+	}
+}
+
+// TestADR043PredicatesAreThreePart enforces the same three-segment convention
+// for the ADR-043 additions.
+func TestADR043PredicatesAreThreePart(t *testing.T) {
+	preds := []string{
+		semspec.ComponentImplementationFile,
+		semspec.ComponentCapability,
+		semspec.StoryTitle,
+		semspec.StoryIntent,
+		semspec.StoryRequirement,
+		semspec.StoryComponent,
+		semspec.StoryFilesOwned,
+		semspec.StoryDependsOn,
+		semspec.PredicateStoryStatus,
+		semspec.StoryPreparedBy,
+		semspec.StoryPreparedAt,
+		semspec.StoryCreatedAt,
+		semspec.StoryUpdatedAt,
+		semspec.ScenarioStory,
+		semspec.TaskStory,
+		semspec.TaskDependsOn,
 	}
 	for _, p := range preds {
 		t.Run(p, func(t *testing.T) {

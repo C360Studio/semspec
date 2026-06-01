@@ -24,6 +24,14 @@
       "maximum": 5,
       "category": "advanced"
     },
+    "max_recovery_restarts": {
+      "type": "number",
+      "description": "Max times an exec can be resumed from awaiting-recovery",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 5,
+      "category": "advanced"
+    },
     "max_requirement_retries": {
       "type": "number",
       "description": "Max requirement-level retries on reviewer rejection",
@@ -45,10 +53,24 @@
       "description": "Optional override propagated to req-executor dispatches (empty = use capability registry)",
       "category": "basic"
     },
+    "plan_decision_accepted_subject": {
+      "type": "string",
+      "description": "Subject for accepted-PlanDecision events (must match plan-decision-handler.accepted_subject)",
+      "default": "workflow.events.plan-decision.accepted",
+      "category": "advanced"
+    },
     "ports": {
       "type": "object",
       "description": "Port configuration",
       "category": "basic"
+    },
+    "recovery_timeout_seconds": {
+      "type": "number",
+      "description": "Seconds to wait in phaseAwaitingRecovery before terminal-failing",
+      "default": 60,
+      "minimum": 5,
+      "maximum": 600,
+      "category": "advanced"
     },
     "require_commit_observation": {
       "type": "boolean",

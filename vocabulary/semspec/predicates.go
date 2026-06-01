@@ -753,6 +753,112 @@ const (
 	// semspec.requirement.depends_on / semspec.capability.depends_on
 	// convention (rev-5 ADR-040 predicate naming).
 	ScenarioHarnessProfile = "semspec.scenario.harness_profile"
+
+	// ScenarioStory links a Scenario to the Story it covers (ADR-043
+	// semantic primary link). ScenarioRequirement stays as a back-pointer
+	// for query convenience; Story is the dispatch unit, so Bob populates
+	// StoryID as the authoritative parent. One triple per scenario.
+	ScenarioStory = "semspec.scenario.story"
+)
+
+// Component predicates define attributes for architecture components
+// (ADR-043 Move 1, BMAD tech-spec scope). ComponentDef previously lived
+// only as a struct inside ArchitectureDocument; with Winston declaring
+// implementation files + capability mappings per component, components
+// become first-class graph entities so plan-reviewer R2 rules and Sarah
+// can query them.
+const (
+	// ComponentImplementationFile is a workspace-relative path housing this
+	// component's code (ADR-043 Move 1). Multi-valued — one triple per file.
+	// Plan-reviewer R2 rule architecture.component_missing_implementation_files
+	// rejects empty sets; architecture.component_implementation_files_doc_only
+	// rejects docs-only sets.
+	ComponentImplementationFile = "semspec.component.implementation_file"
+
+	// ComponentCapability is a kebab-case Capability.Name this component
+	// implements (ADR-043 Move 1). Multi-valued — one triple per capability.
+	// Plan-reviewer R2 rule capability.unresolved_in_architecture rejects
+	// capabilities with no component whose Capabilities list contains them.
+	ComponentCapability = "semspec.component.capability"
+)
+
+// Story predicates define attributes for Sarah-authored dev-ready units
+// (ADR-043 Move 2). A Story shards one Requirement into a single dispatch
+// unit with explicit Components, FilesOwned, DependsOn, and an ordered
+// Task checklist.
+const (
+	// StoryTitle is the human-readable story heading.
+	StoryTitle = "semspec.story.title"
+
+	// StoryIntent is the 1-2 sentence description of what implementing
+	// this story proves.
+	StoryIntent = "semspec.story.intent"
+
+	// StoryRequirement links a Story to its parent Requirement entity.
+	// One triple per story.
+	StoryRequirement = "semspec.story.requirement"
+
+	// StoryComponent records a ComponentDef.Name this story implements.
+	// Multi-valued — one triple per component. Plan-reviewer R3 rule
+	// story.unresolved_components rejects entries that don't match any
+	// declared component.
+	StoryComponent = "semspec.story.component"
+
+	// StoryFilesOwned is a workspace-relative path this story is allowed
+	// to modify (the union of selected components' implementation_files).
+	// Multi-valued — one triple per path. Plan-reviewer R3 rule
+	// story.missing_files_owned rejects empty sets;
+	// story.docs_only_files_owned rejects sets with no source-code file.
+	StoryFilesOwned = "semspec.story.files_owned"
+
+	// StoryDependsOn links a Story to a prerequisite Story entity that
+	// must reach StoryStatusComplete before this Story can dispatch.
+	// Multi-valued — one triple per dependency. Plan-reviewer R3 rules
+	// story.depends_on_orphan and story.depends_on_cycle reject unresolved
+	// IDs and DAG cycles.
+	StoryDependsOn = "semspec.story.depends_on"
+
+	// PredicateStoryStatus is the story lifecycle status predicate.
+	// Values: pending, ready, executing, complete, failed. Prefixed with
+	// Predicate to mirror PredicatePlanStatus / PredicateTaskStatus
+	// convention and avoid colliding with the StoryStatus type name in
+	// the workflow package.
+	PredicateStoryStatus = "semspec.story.status"
+
+	// StoryPreparedBy identifies the persona that signed off readiness.
+	// Value is the BMAD canonical role name — "sarah" — for stories
+	// emitted by the story-preparer; other manager-role agents may
+	// re-prepare during recovery (ADR-037).
+	StoryPreparedBy = "semspec.story.prepared_by"
+
+	// StoryPreparedAt is the RFC3339 timestamp when Sarah's readiness
+	// gate passed.
+	StoryPreparedAt = "semspec.story.prepared_at"
+
+	// StoryCreatedAt is the RFC3339 creation timestamp.
+	StoryCreatedAt = "semspec.story.created_at"
+
+	// StoryUpdatedAt is the RFC3339 last update timestamp.
+	StoryUpdatedAt = "semspec.story.updated_at"
+)
+
+// ADR-043 Task predicates extend the existing semspec.task.* namespace
+// (originally defined for the now-dormant plan-time task entity model
+// before reactive mode landed). Sarah's Task fills that slot:
+// TaskDescription, PredicateTaskStatus, TaskCreatedAt, TaskUpdatedAt are
+// reused unchanged; the new predicates below add the Story link and
+// intra-story DependsOn DAG edges.
+const (
+	// TaskStory links a Task to its parent Story entity. One triple per
+	// task. Replaces the role TaskSpec played for the dormant plan-time
+	// task model.
+	TaskStory = "semspec.task.story"
+
+	// TaskDependsOn links a Task to a prerequisite Task entity within the
+	// same Story (intra-story TDD ordering). Multi-valued — one triple per
+	// dependency. Plan-reviewer R3 rule task.depends_on_cycle rejects DAG
+	// cycles within a single Story.
+	TaskDependsOn = "semspec.task.depends_on"
 )
 
 // PlanDecision predicates define attributes for mid-stream change proposals.
@@ -1105,6 +1211,8 @@ func registerTaskPredicates() {
 	vocabulary.Register(TaskUpdatedAt,
 		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"))
+
+	registerADR043TaskExtensions()
 
 	// Register plan predicates
 	vocabulary.Register(PlanGoal,
@@ -1919,6 +2027,8 @@ func init() {
 	registerErrorCategoryPredicates()
 	registerAgentPredicates()
 	registerCapabilityPredicates()
+	registerComponentPredicates()
+	registerStoryPredicates()
 }
 
 // registerCapabilityPredicates registers predicate metadata for Capability
@@ -2079,6 +2189,104 @@ func registerScenarioPredicates() {
 		vocabulary.WithDescription("Harness profile ID this scenario binds to (catalog cross-reference; ADR-041 Move 1)"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"scenarioHarnessProfile"))
+
+	vocabulary.Register(ScenarioStory,
+		vocabulary.WithDescription("Link to the Story this scenario covers (ADR-043 semantic primary; scenarioRequirement stays as a back-pointer)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"scenarioStory"))
+}
+
+// registerADR043TaskExtensions adds the two Task predicates introduced by
+// ADR-043 (TaskStory + TaskDependsOn). Extracted from registerTaskPredicates
+// so it stays under revive's function-length limit; TaskDescription /
+// PredicateTaskStatus / TaskCreatedAt / TaskUpdatedAt are reused unchanged
+// from the dormant plan-time task model.
+func registerADR043TaskExtensions() {
+	vocabulary.Register(TaskStory,
+		vocabulary.WithDescription("Link to parent Story entity (ADR-043 Move 2)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"taskStory"))
+
+	vocabulary.Register(TaskDependsOn,
+		vocabulary.WithDescription("Link to prerequisite Task within the same Story (intra-story DAG); multi-valued"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"taskDependsOn"))
+}
+
+// registerComponentPredicates registers predicate metadata for architecture
+// component entities (ADR-043 Move 1). Winston declares implementation_files
+// and capability mappings per component as part of the BMAD tech-spec scope.
+func registerComponentPredicates() {
+	vocabulary.Register(ComponentImplementationFile,
+		vocabulary.WithDescription("Workspace-relative path housing this component's code (ADR-043 Move 1); multi-valued"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"componentImplementationFile"))
+
+	vocabulary.Register(ComponentCapability,
+		vocabulary.WithDescription("Kebab-case Capability.Name this component implements (ADR-043 Move 1); multi-valued"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"componentCapability"))
+}
+
+// registerStoryPredicates registers predicate metadata for Sarah-authored
+// Story entities (ADR-043 Move 2). Stories shard Requirements into
+// dev-ready dispatch units with explicit Components, FilesOwned, DependsOn
+// edges, and an ordered Task checklist.
+func registerStoryPredicates() {
+	vocabulary.Register(StoryTitle,
+		vocabulary.WithDescription("Human-readable story heading (ADR-043 Move 2)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"storyTitle"))
+
+	vocabulary.Register(StoryIntent,
+		vocabulary.WithDescription("1-2 sentence description of what implementing this story proves"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"storyIntent"))
+
+	vocabulary.Register(StoryRequirement,
+		vocabulary.WithDescription("Link to parent Requirement entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"storyRequirement"))
+
+	vocabulary.Register(StoryComponent,
+		vocabulary.WithDescription("ComponentDef.Name this story implements; multi-valued"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"storyComponent"))
+
+	vocabulary.Register(StoryFilesOwned,
+		vocabulary.WithDescription("Workspace-relative path this story owns (union of selected components' implementation_files); multi-valued"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"storyFilesOwned"))
+
+	vocabulary.Register(StoryDependsOn,
+		vocabulary.WithDescription("Link to prerequisite Story entity (DAG edge); multi-valued"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"storyDependsOn"))
+
+	vocabulary.Register(PredicateStoryStatus,
+		vocabulary.WithDescription("Story lifecycle status (pending, ready, executing, complete, failed)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"storyStatus"))
+
+	vocabulary.Register(StoryPreparedBy,
+		vocabulary.WithDescription("Persona that signed off readiness (typically the BMAD canonical \"sarah\")"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"storyPreparedBy"))
+
+	vocabulary.Register(StoryPreparedAt,
+		vocabulary.WithDescription("Timestamp at which Sarah's readiness gate passed (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"storyPreparedAt"))
+
+	vocabulary.Register(StoryCreatedAt,
+		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	vocabulary.Register(StoryUpdatedAt,
+		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
 }
 
 func registerPlanDecisionPredicates() {
