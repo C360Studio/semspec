@@ -41,6 +41,28 @@ const (
 	// (e.g. upstream artifact doesn't exist, fixture is malformed). Plan
 	// continues with reduced scope or fails cleanly with diagnostic.
 	RecoveryActionMarkUnrecoverable RecoveryActionKind = "mark_unrecoverable"
+
+	// RecoveryActionStoryReprepare — wedge analysis points at Sarah's
+	// Story-shaping (ADR-043 Move 3) as the source. The plan-time DAG is
+	// wrong: a Story's tasks don't cover the work, files_owned misses a
+	// path the dev needed, or the components selected don't match the
+	// implementation. Reaches back to story-preparer for a re-prep cycle
+	// on the affected requirement (cascade dirty-marks the requirement →
+	// plan-manager transitions back to preparing_stories → Sarah runs
+	// again with the recovery diagnosis as RecoveryHint).
+	//
+	// Distinct from split_req: split_req mutates plan structure at the
+	// requirement layer (one big req → two smaller reqs); story_reprepare
+	// keeps the requirements as authored and asks Sarah to re-shard.
+	// Distinct from narrow_scope: narrow_scope reduces the task's file
+	// surface; story_reprepare re-authors the task DAG itself.
+	//
+	// ADR-043 PR 4i lands the action vocabulary; callers materialize once
+	// execution dispatches per-Story (PR 4h). Until then this action is
+	// reserved infrastructure — the closed-set parser accepts it and the
+	// PlanDecision routing maps it, but no recovery dispatch currently
+	// emits it.
+	RecoveryActionStoryReprepare RecoveryActionKind = "story_reprepare"
 )
 
 // RecoveryLayer identifies which recovery layer attempted the action. Per

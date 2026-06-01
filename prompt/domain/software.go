@@ -1696,14 +1696,23 @@ Rules:
 			Content: `Output Format — submit_work arguments
 
 Required fields:
-- action: one of refine_prompt | narrow_scope | split_req | escalate_human | mark_unrecoverable
+- action: one of refine_prompt | narrow_scope | split_req | story_reprepare | escalate_human | mark_unrecoverable
 - diagnosis: 2-6 sentences describing what the trajectory shows the agent doing wrong and what the underlying mistake is. REQUIRED for every action.
-- recovery_succeeded: true when refine_prompt | narrow_scope | split_req plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
+- recovery_succeeded: true when refine_prompt | narrow_scope | split_req | story_reprepare plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
 
 Action-specific fields:
 - refine_prompt requires: refined_prompt — a complete replacement task prompt that, when handed to the wedged role, would produce the work the agent should have produced.
 - narrow_scope and split_req require: scope_changes — a structured JSON object describing the reduction (which files / which sub-requirements / which concerns to keep, which to drop).
+- story_reprepare: no extra fields beyond diagnosis — the diagnosis becomes Sarah's RecoveryHint when she re-shards the requirement's Stories.
 - escalate_human and mark_unrecoverable: no extra fields beyond diagnosis.
+
+Choosing between actions (ADR-043 PR 4i):
+- refine_prompt: the dev had the answer in front of it but didn't act. Same task, sharper prompt.
+- narrow_scope: the task's file surface was too broad; reduce it. Same DAG node, fewer files.
+- split_req: the plan-level decomposition was wrong; the requirement was too coarse. Heavier — mutates plan structure.
+- story_reprepare: Sarah's Story-shaping is the root cause — wrong task DAG, missing files_owned, mis-selected components. Reaches back to story-preparer for a re-prep cycle on the affected requirement; the diagnosis carries forward as Sarah's RecoveryHint.
+- escalate_human: analysis is the deliverable; no programmatic action fits.
+- mark_unrecoverable: the wedge cannot succeed from current state regardless of refinements.
 
 Quote 1-3 short trajectory excerpts in diagnosis when available — these become the evidence trail the lessons pipeline keys off.`,
 		},

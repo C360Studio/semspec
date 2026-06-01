@@ -90,6 +90,7 @@ func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 	case payloads.RecoveryActionRefinePrompt,
 		payloads.RecoveryActionNarrowScope,
 		payloads.RecoveryActionSplitReq,
+		payloads.RecoveryActionStoryReprepare,
 		payloads.RecoveryActionEscalateHuman,
 		payloads.RecoveryActionMarkUnrecoverable:
 	default:
