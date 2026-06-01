@@ -76,16 +76,30 @@ type requirementExecution struct {
 	LoopID    string
 	RequestID string
 
-	// --- Decomposition output ---
+	// --- Story sequencing (ADR-043 PR 4h) ---
 
-	// DAG is the validated task DAG from the decomposer agent.
+	// SortedStoryIDs is the topologically sorted list of Story.IDs for
+	// this requirement. The executor dispatches one Story at a time in
+	// this order. Empty before initialization; populated from
+	// plan.StoriesForRequirement via topoSortStoryIDs.
+	SortedStoryIDs []string
+
+	// CurrentStoryIdx is the index into SortedStoryIDs of the Story
+	// currently being executed. -1 before the first Story is dispatched.
+	CurrentStoryIdx int
+
+	// --- Per-Story DAG (re-populated on each Story transition) ---
+
+	// DAG is the synthesized TaskDAG for the CURRENT Story. Reset between
+	// Stories — at any moment the DAG carries only the nodes Sarah authored
+	// for SortedStoryIDs[CurrentStoryIdx].
 	DAG *TaskDAG
 
-	// SortedNodeIDs is the topologically sorted list of node IDs.
-	// Execution proceeds serially through this list.
+	// SortedNodeIDs is the topologically sorted list of node IDs for the
+	// CURRENT Story's DAG.
 	SortedNodeIDs []string
 
-	// NodeIndex maps nodeID → TaskNode for quick lookup.
+	// NodeIndex maps nodeID → TaskNode for the CURRENT Story's DAG.
 	NodeIndex map[string]*TaskNode
 
 	// --- Serial execution tracking ---

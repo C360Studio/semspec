@@ -2077,3 +2077,158 @@ func TestRequirementCompletion_RejectsApprovalWithoutCommitObservation(t *testin
 		t.Errorf("requirementsFailed = %d, want 1 (claim/observation mismatch should fail the requirement)", c.requirementsFailed.Load())
 	}
 }
+
+// ---------------------------------------------------------------------------
+// ADR-043 PR 4h: per-Story dispatch — Story advancement on reviewer approval
+// ---------------------------------------------------------------------------
+
+// TestPerStoryReviewer_ApprovedAdvancesToNextStory pins the load-bearing
+// behavior of PR 4h: when the reviewer approves and more Stories remain
+// in SortedStoryIDs, the requirement does NOT terminate; instead the
+// CurrentStoryIdx cursor advances and per-Story state resets in
+// preparation for the next Story's DAG.
+func TestPerStoryReviewer_ApprovedAdvancesToNextStory(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:      "semspec.local.exec.req.run.test-multi-story",
+		Slug:          "test-plan",
+		RequirementID: "requirement.test-plan.1",
+		// Two Stories. Reviewer approval on Story 1 must advance to Story 2.
+		SortedStoryIDs:  []string{"story.test-plan.1.1", "story.test-plan.1.2"},
+		CurrentStoryIdx: 0,
+		VisitedNodes:    map[string]bool{"impl": true},
+		NodeResults: []NodeResult{
+			{NodeID: "impl", FilesModified: []string{"main.go"}, CommitSHA: "abc123"},
+		},
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		Outcome:      agentic.OutcomeSuccess,
+		WorkflowSlug: "requirement-execution",
+		WorkflowStep: "requirement-review",
+		Result:       `{"verdict":"approved","feedback":"OK","scenario_verdicts":[]}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	// Requirement must NOT be marked completed — Story 2 still pending.
+	// (In unit-test mode, no NATS → loadPlanFromKV nil → markFailed fires
+	// from the synth-fail, so exec.terminated will be true. The load-
+	// bearing claim is the advancement decision: cursor moved, requirement
+	// did not complete.)
+	if c.requirementsCompleted.Load() != 0 {
+		t.Errorf("requirementsCompleted = %d, want 0 (Story 2 hasn't run yet)", c.requirementsCompleted.Load())
+	}
+	if exec.CurrentStoryIdx != 1 {
+		t.Errorf("CurrentStoryIdx = %d, want 1 (cursor advanced to Story 2)", exec.CurrentStoryIdx)
+	}
+}
+
+// TestPerStoryReviewer_ApprovedOnFinalStoryCompletesRequirement pins the
+// other side of the advancement decision: when the reviewer approves the
+// last Story (CurrentStoryIdx+1 == len(SortedStoryIDs)), markCompletedLocked
+// fires and the requirement terminates.
+func TestPerStoryReviewer_ApprovedOnFinalStoryCompletesRequirement(t *testing.T) {
+	c := newTestComponent(t)
+	gateOff := false
+	c.config.RequireCommitObservation = &gateOff // simplify — no claim/observation gate
+
+	exec := &requirementExecution{
+		EntityID:        "semspec.local.exec.req.run.test-final-story",
+		Slug:            "test-plan",
+		RequirementID:   "requirement.test-plan.1",
+		SortedStoryIDs:  []string{"story.test-plan.1.1"},
+		CurrentStoryIdx: 0, // 0 + 1 == 1 == len → final
+		VisitedNodes:    map[string]bool{"impl": true},
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		Outcome: agentic.OutcomeSuccess,
+		Result:  `{"verdict":"approved","feedback":"OK","scenario_verdicts":[]}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1 (final Story approved → requirement complete)", c.requirementsCompleted.Load())
+	}
+	if !exec.terminated {
+		t.Error("exec.terminated should be true after final Story approval")
+	}
+}
+
+// TestPerStoryReviewer_LegacyExecWithoutSortedStoryIDsCompletes pins the
+// backwards-compat path: an exec that never populated SortedStoryIDs
+// (CurrentStoryIdx+1 < len(SortedStoryIDs) is trivially false since
+// len==0). Such a requirement still terminates on approval via the
+// existing markCompletedLocked branch.
+func TestPerStoryReviewer_LegacyExecWithoutSortedStoryIDsCompletes(t *testing.T) {
+	c := newTestComponent(t)
+	gateOff := false
+	c.config.RequireCommitObservation = &gateOff
+
+	exec := &requirementExecution{
+		EntityID:      "semspec.local.exec.req.run.test-legacy",
+		Slug:          "test-plan",
+		RequirementID: "requirement.test-plan.1",
+		// SortedStoryIDs zero-len simulates a pre-PR-4h exec.
+		VisitedNodes: map[string]bool{"impl": true},
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		Outcome: agentic.OutcomeSuccess,
+		Result:  `{"verdict":"approved","feedback":"OK","scenario_verdicts":[]}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1", c.requirementsCompleted.Load())
+	}
+}
+
+// TestScopeScenariosToCurrentStory pins the reviewer-context scoping:
+// only scenarios whose StoryID matches the current Story make it into
+// the reviewer's prompt.
+func TestScopeScenariosToCurrentStory(t *testing.T) {
+	exec := &requirementExecution{
+		SortedStoryIDs:  []string{"story.x.1.1", "story.x.1.2"},
+		CurrentStoryIdx: 1, // Story 2
+		Scenarios: []workflow.Scenario{
+			{ID: "s1", StoryID: "story.x.1.1"},
+			{ID: "s2", StoryID: "story.x.1.2"},
+			{ID: "s3", StoryID: "story.x.1.2"},
+			{ID: "s4", StoryID: "story.x.1.3"}, // belongs to a different requirement; should not pass the filter
+		},
+	}
+	got := scopeScenariosToCurrentStory(exec)
+	if len(got) != 2 {
+		t.Fatalf("len(scoped) = %d, want 2", len(got))
+	}
+	if got[0].ID != "s2" || got[1].ID != "s3" {
+		t.Errorf("scoped IDs = %q,%q — want s2,s3", got[0].ID, got[1].ID)
+	}
+}
+
+// TestScopeScenariosToCurrentStory_LegacyExecFallsBackToAll pins the
+// backwards-compat fallback: when SortedStoryIDs is empty (legacy or
+// pre-init exec) the helper returns ALL scenarios so the reviewer still
+// sees a complete picture rather than nothing.
+func TestScopeScenariosToCurrentStory_LegacyExecFallsBackToAll(t *testing.T) {
+	exec := &requirementExecution{
+		Scenarios: []workflow.Scenario{
+			{ID: "s1"}, {ID: "s2"},
+		},
+	}
+	got := scopeScenariosToCurrentStory(exec)
+	if len(got) != 2 {
+		t.Errorf("legacy exec should return all scenarios; got len=%d", len(got))
+	}
+}

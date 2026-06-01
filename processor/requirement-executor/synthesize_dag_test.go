@@ -7,47 +7,24 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-func TestSynthesizeTaskDAGFromStories_NoStoriesReturnsNil(t *testing.T) {
-	plan := &workflow.Plan{Slug: "x", Requirements: []workflow.Requirement{{ID: "req.x.1"}}}
-	dag, err := synthesizeTaskDAGFromStories(plan, "req.x.1")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if dag != nil {
-		t.Errorf("expected nil DAG (fallthrough signal), got %+v", dag)
-	}
-}
-
-func TestSynthesizeTaskDAGFromStories_NilPlanReturnsNil(t *testing.T) {
-	dag, err := synthesizeTaskDAGFromStories(nil, "req.x.1")
-	if err != nil {
-		t.Fatalf("unexpected err: %v", err)
-	}
-	if dag != nil {
-		t.Errorf("expected nil DAG, got %+v", dag)
-	}
-}
-
-func TestSynthesizeTaskDAGFromStories_SingleStoryLinearTasks(t *testing.T) {
+func TestSynthesizeTaskDAGForStory_LinearTasks(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:         "x",
 		Requirements: []workflow.Requirement{{ID: "req.x.1"}},
-		Stories: []workflow.Story{
-			{
-				ID: "story.x.1.1", RequirementID: "req.x.1",
-				FilesOwned: []string{"src/x.go"},
-				Tasks: []workflow.Task{
-					{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "tests"},
-					{ID: "task.x.1.1.2", StoryID: "story.x.1.1", Description: "impl", DependsOn: []string{"task.x.1.1.1"}},
-					{ID: "task.x.1.1.3", StoryID: "story.x.1.1", Description: "verify", DependsOn: []string{"task.x.1.1.2"}},
-				},
-			},
-		},
 		Scenarios: []workflow.Scenario{
 			{ID: "scen.1", RequirementID: "req.x.1", StoryID: "story.x.1.1"},
 		},
 	}
-	dag, err := synthesizeTaskDAGFromStories(plan, "req.x.1")
+	story := workflow.Story{
+		ID: "story.x.1.1", RequirementID: "req.x.1",
+		FilesOwned: []string{"src/x.go"},
+		Tasks: []workflow.Task{
+			{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "tests"},
+			{ID: "task.x.1.1.2", StoryID: "story.x.1.1", Description: "impl", DependsOn: []string{"task.x.1.1.1"}},
+			{ID: "task.x.1.1.3", StoryID: "story.x.1.1", Description: "verify", DependsOn: []string{"task.x.1.1.2"}},
+		},
+	}
+	dag, err := synthesizeTaskDAGForStory(plan, story)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -57,96 +34,60 @@ func TestSynthesizeTaskDAGFromStories_SingleStoryLinearTasks(t *testing.T) {
 	if len(dag.Nodes) != 3 {
 		t.Fatalf("want 3 nodes, got %d", len(dag.Nodes))
 	}
-	// Node 0 is entry (no DependsOn).
 	if len(dag.Nodes[0].DependsOn) != 0 {
 		t.Errorf("entry task should have empty DependsOn, got %v", dag.Nodes[0].DependsOn)
 	}
-	// Node 1 depends on node 0.
 	if len(dag.Nodes[1].DependsOn) != 1 || dag.Nodes[1].DependsOn[0] != "task.x.1.1.1" {
 		t.Errorf("node[1].DependsOn = %v, want [task.x.1.1.1]", dag.Nodes[1].DependsOn)
 	}
-	// FileScope = Story.FilesOwned.
 	for i, n := range dag.Nodes {
 		if len(n.FileScope) != 1 || n.FileScope[0] != "src/x.go" {
 			t.Errorf("node[%d].FileScope = %v, want [src/x.go]", i, n.FileScope)
 		}
-	}
-	// ScenarioIDs from plan.ScenariosForStory.
-	for i, n := range dag.Nodes {
 		if len(n.ScenarioIDs) != 1 || n.ScenarioIDs[0] != "scen.1" {
 			t.Errorf("node[%d].ScenarioIDs = %v, want [scen.1]", i, n.ScenarioIDs)
 		}
-	}
-	// Role assigned to "developer".
-	if dag.Nodes[0].Role != "developer" {
-		t.Errorf("Role = %q, want developer", dag.Nodes[0].Role)
+		if n.Role != "developer" {
+			t.Errorf("node[%d].Role = %q, want developer", i, n.Role)
+		}
 	}
 }
 
-func TestSynthesizeTaskDAGFromStories_CrossStoryDependsOnExpansion(t *testing.T) {
-	// Story B depends on story A. The entry task(s) of B should inherit
-	// the exit task(s) of A as DependsOn.
+func TestSynthesizeTaskDAGForStory_PerStoryScopeNoCrossEdges(t *testing.T) {
+	// ADR-043 PR 4h: per-Story synthesis carries NO cross-Story DependsOn.
+	// Sequencing of Story B after Story A is the caller's job (topo-sort
+	// of Story.DependsOn). The DAG for B contains only B's own nodes.
 	plan := &workflow.Plan{
 		Slug:         "x",
 		Requirements: []workflow.Requirement{{ID: "req.x.1"}},
-		Stories: []workflow.Story{
-			{
-				ID: "story.x.1.1", RequirementID: "req.x.1",
-				FilesOwned: []string{"src/a.go"},
-				Tasks: []workflow.Task{
-					{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "A1"},
-					{ID: "task.x.1.1.2", StoryID: "story.x.1.1", Description: "A2", DependsOn: []string{"task.x.1.1.1"}},
-				},
-			},
-			{
-				ID: "story.x.1.2", RequirementID: "req.x.1",
-				FilesOwned: []string{"src/b.go"},
-				DependsOn:  []string{"story.x.1.1"},
-				Tasks: []workflow.Task{
-					{ID: "task.x.1.2.1", StoryID: "story.x.1.2", Description: "B1"},
-				},
-			},
+	}
+	storyB := workflow.Story{
+		ID: "story.x.1.2", RequirementID: "req.x.1",
+		FilesOwned: []string{"src/b.go"},
+		DependsOn:  []string{"story.x.1.1"}, // signals outer ordering — NOT a node edge
+		Tasks: []workflow.Task{
+			{ID: "task.x.1.2.1", StoryID: "story.x.1.2", Description: "B1"},
 		},
 	}
-	dag, err := synthesizeTaskDAGFromStories(plan, "req.x.1")
+	dag, err := synthesizeTaskDAGForStory(plan, storyB)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	// Find B1 node.
-	var b1 *struct {
-		ID, Prompt string
-		DependsOn  []string
+	if len(dag.Nodes) != 1 {
+		t.Fatalf("want 1 node, got %d", len(dag.Nodes))
 	}
-	for _, n := range dag.Nodes {
-		if n.ID == "task.x.1.2.1" {
-			b1 = &struct {
-				ID, Prompt string
-				DependsOn  []string
-			}{n.ID, n.Prompt, n.DependsOn}
-		}
-	}
-	if b1 == nil {
-		t.Fatal("did not find task.x.1.2.1")
-	}
-	// B1 had no intra-story DependsOn; cross-story expansion adds A's exit (task.x.1.1.2, the last task in A's chain).
-	if len(b1.DependsOn) != 1 || b1.DependsOn[0] != "task.x.1.1.2" {
-		t.Errorf("B1.DependsOn = %v, want [task.x.1.1.2] (A's exit task)", b1.DependsOn)
+	if len(dag.Nodes[0].DependsOn) != 0 {
+		t.Errorf("entry task DependsOn must be empty — cross-Story edges live on Story.DependsOn, not on the synthesized DAG; got %v", dag.Nodes[0].DependsOn)
 	}
 }
 
-func TestSynthesizeTaskDAGFromStories_EmptyTasksReturnsError(t *testing.T) {
-	plan := &workflow.Plan{
-		Slug:         "x",
-		Requirements: []workflow.Requirement{{ID: "req.x.1"}},
-		Stories: []workflow.Story{
-			{
-				ID: "story.x.1.1", RequirementID: "req.x.1",
-				FilesOwned: []string{"src/x.go"},
-				Tasks:      nil,
-			},
-		},
+func TestSynthesizeTaskDAGForStory_EmptyTasksReturnsError(t *testing.T) {
+	story := workflow.Story{
+		ID:         "story.x.1.1",
+		FilesOwned: []string{"src/x.go"},
+		Tasks:      nil,
 	}
-	_, err := synthesizeTaskDAGFromStories(plan, "req.x.1")
+	_, err := synthesizeTaskDAGForStory(nil, story)
 	if err == nil {
 		t.Fatal("expected error for story with no tasks")
 	}
@@ -155,21 +96,15 @@ func TestSynthesizeTaskDAGFromStories_EmptyTasksReturnsError(t *testing.T) {
 	}
 }
 
-func TestSynthesizeTaskDAGFromStories_EmptyFilesOwnedReturnsError(t *testing.T) {
-	plan := &workflow.Plan{
-		Slug:         "x",
-		Requirements: []workflow.Requirement{{ID: "req.x.1"}},
-		Stories: []workflow.Story{
-			{
-				ID: "story.x.1.1", RequirementID: "req.x.1",
-				FilesOwned: nil,
-				Tasks: []workflow.Task{
-					{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "tests"},
-				},
-			},
+func TestSynthesizeTaskDAGForStory_EmptyFilesOwnedReturnsError(t *testing.T) {
+	story := workflow.Story{
+		ID:         "story.x.1.1",
+		FilesOwned: nil,
+		Tasks: []workflow.Task{
+			{ID: "task.x.1.1.1", Description: "tests"},
 		},
 	}
-	_, err := synthesizeTaskDAGFromStories(plan, "req.x.1")
+	_, err := synthesizeTaskDAGForStory(nil, story)
 	if err == nil {
 		t.Fatal("expected error for story with empty files_owned")
 	}
@@ -178,58 +113,95 @@ func TestSynthesizeTaskDAGFromStories_EmptyFilesOwnedReturnsError(t *testing.T) 
 	}
 }
 
-func TestSynthesizeTaskDAGFromStories_OtherRequirementSkipped(t *testing.T) {
-	plan := &workflow.Plan{
-		Slug:         "x",
-		Requirements: []workflow.Requirement{{ID: "req.x.1"}, {ID: "req.x.2"}},
-		Stories: []workflow.Story{
-			{
-				ID: "story.x.2.1", RequirementID: "req.x.2", // belongs to req 2
-				FilesOwned: []string{"src/y.go"},
-				Tasks:      []workflow.Task{{ID: "task.x.2.1.1", StoryID: "story.x.2.1", Description: "y"}},
-			},
-		},
+func TestSynthesizeTaskDAGForStory_NilPlanOK(t *testing.T) {
+	// When plan is nil we can't look up scenarios — node.ScenarioIDs
+	// stays empty but synthesis still succeeds (the dispatcher would
+	// have already validated the plan exists).
+	story := workflow.Story{
+		ID:         "story.x.1.1",
+		FilesOwned: []string{"src/x.go"},
+		Tasks:      []workflow.Task{{ID: "task.x.1.1.1", Description: "tests"}},
 	}
-	dag, err := synthesizeTaskDAGFromStories(plan, "req.x.1")
+	dag, err := synthesizeTaskDAGForStory(nil, story)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
-	if dag != nil {
-		t.Errorf("expected nil DAG (no stories for req.x.1), got %+v", dag)
+	if len(dag.Nodes) != 1 {
+		t.Fatalf("want 1 node, got %d", len(dag.Nodes))
+	}
+	if len(dag.Nodes[0].ScenarioIDs) != 0 {
+		t.Errorf("nil plan should produce empty ScenarioIDs, got %v", dag.Nodes[0].ScenarioIDs)
 	}
 }
 
-func TestStoryExitTasks(t *testing.T) {
+func TestTopoSortStoryIDs_Linear(t *testing.T) {
 	stories := []workflow.Story{
-		{
-			ID: "s1",
-			Tasks: []workflow.Task{
-				{ID: "t1"},
-				{ID: "t2", DependsOn: []string{"t1"}},
-				{ID: "t3", DependsOn: []string{"t2"}},
-				// t3 is the exit (nothing depends on it).
-			},
-		},
-		{
-			ID: "s2",
-			Tasks: []workflow.Task{
-				{ID: "u1"},
-				// u1 has no dependents → exit.
-			},
-		},
-		{
-			ID:    "s3-empty",
-			Tasks: nil, // skipped entirely
-		},
+		{ID: "s2", DependsOn: []string{"s1"}},
+		{ID: "s1"},
+		{ID: "s3", DependsOn: []string{"s2"}},
 	}
-	got := storyExitTasks(stories)
-	if exits, ok := got["s1"]; !ok || len(exits) != 1 || exits[0] != "t3" {
-		t.Errorf("s1 exits = %v, want [t3]", exits)
+	sorted, err := topoSortStoryIDs(stories)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
 	}
-	if exits, ok := got["s2"]; !ok || len(exits) != 1 || exits[0] != "u1" {
-		t.Errorf("s2 exits = %v, want [u1]", exits)
+	want := []string{"s1", "s2", "s3"}
+	if len(sorted) != 3 {
+		t.Fatalf("len = %d, want 3", len(sorted))
 	}
-	if _, ok := got["s3-empty"]; ok {
-		t.Errorf("empty-tasks story s3-empty should not appear in exit map")
+	for i, w := range want {
+		if sorted[i] != w {
+			t.Errorf("sorted[%d] = %q, want %q", i, sorted[i], w)
+		}
+	}
+}
+
+func TestTopoSortStoryIDs_CycleErrors(t *testing.T) {
+	stories := []workflow.Story{
+		{ID: "s1", DependsOn: []string{"s2"}},
+		{ID: "s2", DependsOn: []string{"s1"}},
+	}
+	_, err := topoSortStoryIDs(stories)
+	if err == nil {
+		t.Fatal("expected cycle error")
+	}
+	if !strings.Contains(err.Error(), "cycle") {
+		t.Errorf("error %q missing 'cycle'", err.Error())
+	}
+}
+
+func TestTopoSortStoryIDs_UnknownDependencyErrors(t *testing.T) {
+	stories := []workflow.Story{
+		{ID: "s1", DependsOn: []string{"ghost"}},
+	}
+	_, err := topoSortStoryIDs(stories)
+	if err == nil {
+		t.Fatal("expected unknown-dependency error")
+	}
+	if !strings.Contains(err.Error(), "unknown") {
+		t.Errorf("error %q missing 'unknown'", err.Error())
+	}
+}
+
+func TestTopoSortStoryIDs_Empty(t *testing.T) {
+	sorted, err := topoSortStoryIDs(nil)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if sorted != nil {
+		t.Errorf("expected nil sorted, got %v", sorted)
+	}
+}
+
+func TestTopoSortStoryIDs_DuplicateIDErrors(t *testing.T) {
+	stories := []workflow.Story{
+		{ID: "s1"},
+		{ID: "s1"},
+	}
+	_, err := topoSortStoryIDs(stories)
+	if err == nil {
+		t.Fatal("expected duplicate-ID error")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Errorf("error %q missing 'duplicate'", err.Error())
 	}
 }
