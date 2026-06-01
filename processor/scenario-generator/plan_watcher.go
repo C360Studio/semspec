@@ -28,7 +28,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Watching PLAN_STATES for architecture_generated / stories_generated")
+	c.logger.Info("Watching PLAN_STATES for stories_generated")
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
@@ -42,12 +42,14 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		// ADR-043 PR 4c — Bob's watch source widened. Legacy path:
-		// arch_generated (when Sarah is dormant). Post-Sarah path:
-		// stories_generated (Sarah's terminal state). Either claims
-		// generating_scenarios next.
-		if plan.Status != workflow.StatusArchitectureGenerated &&
-			plan.Status != workflow.StatusStoriesGenerated {
+		// ADR-043 PR 4l — Bob watches only stories_generated. Sarah always
+		// runs first (PR 4l deleted her Enabled hedge); the strict
+		// sequential flow is architecture_generated → preparing_stories →
+		// stories_generated → generating_scenarios. PR 4c had Bob also
+		// watching architecture_generated as a back-compat fallback for
+		// Sarah-dormant plans — that path created a claim race; PR 4l
+		// removes it.
+		if plan.Status != workflow.StatusStoriesGenerated {
 			continue
 		}
 		if len(plan.Requirements) == 0 {

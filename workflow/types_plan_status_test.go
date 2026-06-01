@@ -80,10 +80,12 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// requirements_generated -> rejected
 		{StatusRequirementsGenerated, StatusRejected, true},
 
-		// architecture_generated -> generating_scenarios (scenario-generator claims)
-		{StatusArchitectureGenerated, StatusGeneratingScenarios, true},
-		// architecture_generated -> scenarios_generated (auto-cascade)
-		{StatusArchitectureGenerated, StatusScenariosGenerated, true},
+		// ADR-043 PR 4l — architecture_generated flows only into
+		// preparing_stories. The legacy direct paths to scenarios_* were
+		// the back-compat hedges for Sarah's deleted Enabled flag.
+		{StatusArchitectureGenerated, StatusPreparingStories, true},
+		{StatusArchitectureGenerated, StatusGeneratingScenarios, false},
+		{StatusArchitectureGenerated, StatusScenariosGenerated, false},
 		// architecture_generated -> rejected
 		{StatusArchitectureGenerated, StatusRejected, true},
 
@@ -133,8 +135,8 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// requirements_generated -> generating_scenarios (invalid — must go through architecture)
 		{StatusRequirementsGenerated, StatusGeneratingScenarios, false},
 
-		// architecture_generated -> generating_scenarios (scenario-generator claims)
-		{StatusArchitectureGenerated, StatusGeneratingScenarios, true},
+		// ADR-043 PR 4l — Bob claims from stories_generated, not architecture_generated.
+		{StatusStoriesGenerated, StatusGeneratingScenarios, true},
 		// generating_scenarios -> scenarios_generated
 		{StatusGeneratingScenarios, StatusScenariosGenerated, true},
 		// generating_scenarios -> rejected

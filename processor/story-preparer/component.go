@@ -152,15 +152,16 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized story-preparer",
-		"enabled", c.config.Enabled,
 		"plan_state_bucket", c.config.PlanStateBucket)
 	return nil
 }
 
-// Start begins watching for plans reaching architecture_generated. When
-// Config.Enabled is false, the watcher is established but the trigger
-// path short-circuits — this lets operators flip Enabled via config edit
-// without restarting the component.
+// Start begins watching for plans reaching architecture_generated.
+// ADR-043 PR 4l: story-preparer is always-on when registered. The watcher
+// claims preparing_stories from architecture_generated; scenario-generator
+// in turn watches stories_generated (PR 4l also removed Bob's
+// architecture_generated watch), making the flow strictly sequential and
+// race-free.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -189,7 +190,6 @@ func (c *Component) Start(ctx context.Context) error {
 	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("story-preparer started",
-		"enabled", c.config.Enabled,
 		"plan_state_bucket", c.config.PlanStateBucket)
 
 	return nil
@@ -250,17 +250,13 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Watching PLAN_STATES for architecture_generated",
-		"enabled", c.config.Enabled)
+	c.logger.Info("Watching PLAN_STATES for architecture_generated")
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
 			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
-			continue
-		}
-		if !c.config.Enabled {
 			continue
 		}
 
