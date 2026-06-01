@@ -1658,7 +1658,6 @@ func (c *Component) availableToolNames() []string {
 		"write_todos", "scratchpad",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
-		"decompose_task",
 	}
 }
 
@@ -1757,12 +1756,11 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		Role:   agentic.RoleGeneral,
 		Model:  devModel,
 		// Filter the wire tool palette by RoleDeveloper. Without this, the
-		// developer sees every registered tool — including decompose_task
-		// (a requirement-executor terminal) and review_scenario (a
-		// scenario-reviewer terminal). Take 11 (2026-05-08) had qwen3.6-27b
-		// call decompose_task instead of submit_work after exploring with
-		// bash, then wedge with finish_reason=stop because the dispatch had
-		// no developer-shaped next move. The prompt-side FilterTools above
+		// developer sees every registered tool — including review_scenario
+		// (a scenario-reviewer terminal). Take 11 (2026-05-08) had
+		// qwen3.6-27b call the wrong tool after exploring with bash, then
+		// wedge with finish_reason=stop because the dispatch had no
+		// developer-shaped next move. The prompt-side FilterTools above
 		// only filters guidance text; the wire palette must be filtered
 		// here too.
 		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", endpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleDeveloper)...),
@@ -2042,7 +2040,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		Model:  reviewerModel,
 		// Filter the wire tool palette by RoleReviewer — same rationale as
 		// the developer dispatch above. Reviewer's filter excludes
-		// decompose_task / review_scenario / web_search / http_request.
+		// review_scenario / web_search / http_request.
 		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, prompt.FilterTools(c.availableToolNames(), prompt.RoleReviewer)...),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,

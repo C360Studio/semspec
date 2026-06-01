@@ -20,14 +20,10 @@ type Config struct {
 	// Model is an OPTIONAL hard override propagated to req-executor's own
 	// dispatches (via exec.Model on the in-memory state). Empty signals
 	// "let each downstream dispatch resolve via capability registry."
-	// Distinct from DecomposerModel / ReviewerModel which override the
-	// req-executor's own role-specific dispatches. Do NOT default-fill;
-	// empty is load-bearing for the capability-resolution path.
+	// Distinct from ReviewerModel which overrides the req-executor's own
+	// role-specific dispatches. Do NOT default-fill; empty is load-bearing
+	// for the capability-resolution path.
 	Model string `json:"model,omitempty" schema:"type:string,description:Optional override propagated to req-executor dispatches (empty = use capability registry),category:basic"`
-
-	// DecomposerModel is the model endpoint for the decomposer agent. When empty,
-	// falls back to Model. Separate model allows independent mock fixtures.
-	DecomposerModel string `json:"decomposer_model" schema:"type:string,description:Model endpoint for decomposer agent,category:advanced"`
 
 	// ReviewerModel is the model endpoint for the post-merge requirement
 	// reviewer agent (semantic completeness + scenario coverage check). When
@@ -48,25 +44,10 @@ type Config struct {
 	// 0 disables retries (current behavior). Default: 2.
 	MaxRequirementRetries int `json:"max_requirement_retries" schema:"type:int,description:Max requirement-level retries on reviewer rejection,category:advanced,default:2,min:0,max:5"`
 
-	// MaxDecomposerRetries is the maximum number of times to re-dispatch the
-	// decomposer agent when its output cannot be parsed or produces an invalid
-	// DAG (e.g., empty nodes array from an under-powered model). The previous
-	// error is appended to the prompt as feedback so the LLM can correct.
-	// 0 disables retries. Default: 2.
-	MaxDecomposerRetries int `json:"max_decomposer_retries" schema:"type:int,description:Max retries when decomposer output fails to parse or produces an invalid DAG,category:advanced,default:2,min:0,max:5"`
-
 	// MaxReviewRetries is the maximum number of times to re-dispatch the
 	// requirement reviewer when its verdict is empty or unparseable. Independent
 	// of requirement-level retries. Default: 3.
 	MaxReviewRetries int `json:"max_review_retries" schema:"type:int,description:Max reviewer re-dispatches on parse/verdict failure,category:advanced,default:3,min:0,max:5"`
-
-	// EnforceScenarioCoverage rejects decomposer output whose DAG does not carry
-	// every input scenario ID on at least one node's scenario_ids. When false,
-	// coverage gaps are warn-only and the DAG proceeds (legacy behavior).
-	// Real-LLM runs should keep this on — it catches decomposer bugs early and
-	// gives actionable feedback. Mock-LLM runs must set it false until fixtures
-	// are updated to cite runtime-generated scenario IDs.
-	EnforceScenarioCoverage *bool `json:"enforce_scenario_coverage,omitempty" schema:"type:bool,description:Reject decomposer output that leaves input scenarios uncovered,category:advanced,default:true"`
 
 	// DeferTerminalOnRecovery opts the requirement-executor into ADR-037's
 	// race-closure path. When true, exhaustion call sites that just
@@ -119,16 +100,6 @@ type Config struct {
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
-}
-
-// enforceScenarioCoverage returns true when the gate is on. Defaults to true
-// when unset — primary enforcement is the stated design, opt-out is for mock
-// fixtures that can't cite runtime scenario IDs yet.
-func (c *Config) enforceScenarioCoverage() bool {
-	if c.EnforceScenarioCoverage == nil {
-		return true
-	}
-	return *c.EnforceScenarioCoverage
 }
 
 // requireCommitObservation returns true when the claim/observation gate is on.
@@ -192,17 +163,13 @@ func (c Config) withDefaults() Config {
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
 	}
-	// Intentionally NOT auto-defaulting Model / DecomposerModel /
-	// ReviewerModel. Empty fields signal "use capability registry
-	// resolution" — see model.ResolveModel. Auto-injecting "default"
-	// here would short-circuit ResolveModel and route every dispatch to
-	// registry defaults.Model instead of the role's capability. Caught
-	// 2026-05-08 take 8 trajectory inspection.
+	// Intentionally NOT auto-defaulting Model / ReviewerModel. Empty fields
+	// signal "use capability registry resolution" — see model.ResolveModel.
+	// Auto-injecting "default" here would short-circuit ResolveModel and
+	// route every dispatch to registry defaults.Model instead of the role's
+	// capability. Caught 2026-05-08 take 8 trajectory inspection.
 	if c.MaxRequirementRetries < 0 {
 		c.MaxRequirementRetries = 2
-	}
-	if c.MaxDecomposerRetries == 0 {
-		c.MaxDecomposerRetries = 2
 	}
 	if c.MaxReviewRetries == 0 {
 		c.MaxReviewRetries = 3

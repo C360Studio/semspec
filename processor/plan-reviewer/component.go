@@ -598,7 +598,6 @@ func (c *Component) availableToolNames() []string {
 		"write_todos", "scratchpad",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
-		"decompose_task",
 	}
 }
 

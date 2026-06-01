@@ -58,17 +58,13 @@ func ToolsForDeliverable(reg component.ToolRegistryReader, deliverableType strin
 // Audited terminals:
 //   - submit_work — schemas in schemas.go (TestSchemasNoAdditionalProperties +
 //     TestSchemasRequiredCompleteness pin compliance per deliverable type)
-//   - decompose_task — schema in tools/decompose/executor.go (audited
-//     2026-05-08 take-14 follow-up; required-completeness enforced and
-//     additionalProperties:false on both top-level and nested node items)
 func ToolsForEndpoint(reg component.ToolRegistryReader, deliverableType string, ep *ssmodel.EndpointConfig, allowedNames ...string) []agentic.ToolDefinition {
 	tools := ToolsForDeliverable(reg, deliverableType, allowedNames...)
 	if !EndpointSupportsResponseFormat(ep) {
 		return tools
 	}
 	for i := range tools {
-		switch tools[i].Name {
-		case "submit_work", "decompose_task":
+		if tools[i].Name == "submit_work" {
 			tools[i].Strict = true
 		}
 	}

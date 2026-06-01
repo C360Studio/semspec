@@ -3,7 +3,6 @@ package requirementexecutor
 import (
 	"time"
 
-	"github.com/c360studio/semspec/tools/decompose"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
@@ -139,14 +138,14 @@ func (e *RequirementExecutionEntity) Triples() []message.Triple {
 // DAGNodeEntity
 // ---------------------------------------------------------------------------
 
-// DAGNodeEntity converts a decompose.TaskNode to graph triples for the
+// DAGNodeEntity converts a TaskNode to graph triples for the
 // graph.ingest.entity subject.  It implements the same interface consumed by
 // publishEntity so no separate publish path is required.
 type DAGNodeEntity struct {
 	// executionID is the "{slug}-{requirementID}" suffix used in entity IDs.
 	executionID string
 	// node is the underlying DAG node from the decomposer.
-	node *decompose.TaskNode
+	node *TaskNode
 	// execEntityID is the parent requirement-execution entity ID (graph edge target).
 	execEntityID string
 	// status overrides the default "pending" status when set.
@@ -155,7 +154,7 @@ type DAGNodeEntity struct {
 
 // newDAGNodeEntity creates a DAGNodeEntity for initial publishing (status="pending").
 // execEntityID is the requirement-execution entity ID that owns this DAG.
-func newDAGNodeEntity(executionID string, node *decompose.TaskNode, execEntityID string) *DAGNodeEntity {
+func newDAGNodeEntity(executionID string, node *TaskNode, execEntityID string) *DAGNodeEntity {
 	return &DAGNodeEntity{
 		executionID:  executionID,
 		node:         node,

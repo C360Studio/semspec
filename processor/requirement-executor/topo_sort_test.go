@@ -2,13 +2,11 @@ package requirementexecutor
 
 import (
 	"testing"
-
-	"github.com/c360studio/semspec/tools/decompose"
 )
 
 func TestTopoSort_SingleNode(t *testing.T) {
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "a", Prompt: "do a", Role: "dev", FileScope: []string{"a.go"}},
 		},
 	}
@@ -22,8 +20,8 @@ func TestTopoSort_SingleNode(t *testing.T) {
 }
 
 func TestTopoSort_LinearChain(t *testing.T) {
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "a", Prompt: "first", Role: "dev", FileScope: []string{"a.go"}},
 			{ID: "b", Prompt: "second", Role: "dev", DependsOn: []string{"a"}, FileScope: []string{"b.go"}},
 			{ID: "c", Prompt: "third", Role: "dev", DependsOn: []string{"b"}, FileScope: []string{"c.go"}},
@@ -43,8 +41,8 @@ func TestTopoSort_LinearChain(t *testing.T) {
 
 func TestTopoSort_Diamond(t *testing.T) {
 	// a → b, a → c, b → d, c → d
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "a", Prompt: "root", Role: "dev", FileScope: []string{"a.go"}},
 			{ID: "b", Prompt: "left", Role: "dev", DependsOn: []string{"a"}, FileScope: []string{"b.go"}},
 			{ID: "c", Prompt: "right", Role: "dev", DependsOn: []string{"a"}, FileScope: []string{"c.go"}},
@@ -69,8 +67,8 @@ func TestTopoSort_Diamond(t *testing.T) {
 
 func TestTopoSort_IndependentNodes(t *testing.T) {
 	// All independent — slice order preserved.
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "x", Prompt: "p", Role: "dev", FileScope: []string{"x.go"}},
 			{ID: "y", Prompt: "p", Role: "dev", FileScope: []string{"y.go"}},
 			{ID: "z", Prompt: "p", Role: "dev", FileScope: []string{"z.go"}},
@@ -94,7 +92,7 @@ func TestTopoSort_NilDAG(t *testing.T) {
 }
 
 func TestTopoSort_EmptyDAG(t *testing.T) {
-	_, err := topoSort(&decompose.TaskDAG{})
+	_, err := topoSort(&TaskDAG{})
 	if err == nil {
 		t.Fatal("expected error for empty DAG")
 	}
@@ -104,8 +102,8 @@ func TestTopoSort_CycleDetection(t *testing.T) {
 	// Note: TaskDAG.Validate() normally catches cycles before topoSort is called.
 	// This tests the defensive guard in topoSort itself. We bypass Validate() here
 	// by constructing the DAG directly.
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "a", Prompt: "p", Role: "dev", DependsOn: []string{"b"}, FileScope: []string{"a.go"}},
 			{ID: "b", Prompt: "p", Role: "dev", DependsOn: []string{"a"}, FileScope: []string{"b.go"}},
 		},

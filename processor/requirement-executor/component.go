@@ -31,7 +31,6 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
-	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
@@ -39,7 +38,6 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -501,7 +499,6 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		Model:             reqExec.Model,
 		ProjectID:         reqExec.ProjectID,
 		Scenarios:         reqExec.Scenarios,
-		DecomposerTaskID:  reqExec.DecomposerTaskID,
 		CurrentNodeTaskID: reqExec.CurrentNodeTaskID,
 		ReviewerTaskID:    reqExec.ReviewerTaskID,
 		RequirementBranch: reqExec.RequirementBranch,
@@ -518,10 +515,10 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 
 	// Rebuild DAG and NodeIndex from the serialized DAGRaw blob.
 	if len(reqExec.DAGRaw) > 0 {
-		var dag decompose.TaskDAG
+		var dag TaskDAG
 		if err := json.Unmarshal(reqExec.DAGRaw, &dag); err == nil {
 			exec.DAG = &dag
-			exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dag.Nodes))
+			exec.NodeIndex = make(map[string]*TaskNode, len(dag.Nodes))
 			for i := range dag.Nodes {
 				exec.NodeIndex[dag.Nodes[i].ID] = &dag.Nodes[i]
 			}
@@ -543,86 +540,17 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 	return exec
 }
 
-// ---------------------------------------------------------------------------
-// Decomposer complete
-// ---------------------------------------------------------------------------
-
-func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-
-	if event.Outcome != agentic.OutcomeSuccess {
-		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("decomposer failed: outcome=%s", event.Outcome))
-		return
-	}
-
-	// Parse the DAG from decomposer result.
-	// The decompose_task tool returns {"goal": "...", "dag": {"nodes": [...]}}.
-	// Small models (qwen3, etc.) may wrap output in markdown code fences.
-	parsedRaw := jsonutil.ParseStrict(event.Result)
-	var dagResponse struct {
-		Goal string            `json:"goal"`
-		DAG  decompose.TaskDAG `json:"dag"`
-	}
-	var dagParseErr error
-	switch {
-	case parsedRaw.JSON == "":
-		dagParseErr = fmt.Errorf("no JSON found in result")
-	default:
-		if err := json.Unmarshal([]byte(parsedRaw.JSON), &dagResponse); err != nil {
-			dagParseErr = fmt.Errorf("unmarshal: %w", err)
-		} else if err := dagResponse.DAG.Validate(); err != nil {
-			dagParseErr = fmt.Errorf("invalid DAG: %w", err)
-		}
-	}
-
-	// CP-1 incident emit (ADR-035 audit B.4) — surface per-call quirk
-	// fires and parse rejections to the SKG. Best-effort; emit failures
-	// don't fail the decomposer flow.
-	c.emitParseIncident(ctx, "decomposer", event, exec, parsedRaw.QuirksFired, dagParseErr)
-
-	if dagParseErr != nil {
-		c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf("failed to parse decomposer result: %v", dagParseErr))
-		return
-	}
-
-	// Coverage gate: every scenario on the requirement must appear in at least
-	// one node's scenario_ids. Without it, the fixable-retry path can't target
-	// failed scenarios and the downstream executor escalates to restructure —
-	// catching the bug here saves a round-trip and gives the decomposer a
-	// specific list to fix rather than a vague "try again." The gate is
-	// toggleable so mock-LLM fixtures that can't cite runtime scenario IDs can
-	// opt out until they're updated.
-	if uncovered := uncoveredInputScenarios(exec.Scenarios, dagResponse.DAG.Nodes); len(uncovered) > 0 {
-		if c.config.enforceScenarioCoverage() {
-			c.retryOrFailDecomposerLocked(ctx, exec, fmt.Sprintf(
-				"DAG does not cover every scenario: uncovered scenario_ids=[%s]. Every scenario from the requirement's acceptance criteria must be assigned to at least one node's scenario_ids array.",
-				strings.Join(uncovered, ", "),
-			))
-			return
-		}
-		c.logger.Warn("Decomposer coverage gap — gate disabled, proceeding anyway",
-			"entity_id", exec.EntityID,
-			"uncovered_scenario_ids", uncovered,
-			"hint", "set enforce_scenario_coverage=true once decomposer is reliable",
-		)
-	}
-
-	// Successful parse — clear retry state.
-	exec.DecomposerLastError = ""
-
-	c.applyParsedDAGLocked(ctx, exec, &dagResponse.DAG, "decomposer-llm")
-}
-
-// applyParsedDAGLocked is the post-parse downstream shared by both the
-// legacy decomposer-LLM path (handleDecomposerCompleteLocked) and the
-// ADR-043 PR 4f decomposer-bypass path (dispatchDecomposerLocked, when
-// plan.Stories supplies the DAG without an LLM round-trip). It topo-sorts
-// the DAG, populates exec state for the per-node dispatch loop, persists
-// to EXECUTION_STATES, publishes graph entities, and kicks off the first
-// node dispatch.
+// applyParsedDAGLocked topo-sorts the DAG, populates exec state for the
+// per-node dispatch loop, persists to EXECUTION_STATES, publishes graph
+// entities, and kicks off the first node dispatch.
 //
-// source identifies the DAG origin for telemetry ("decomposer-llm" vs
-// "stories-synthesis"). All callers must hold exec.mu.
-func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementExecution, dag *decompose.TaskDAG, source string) {
+// source identifies the DAG origin for telemetry ("stories-synthesis").
+// All callers must hold exec.mu.
+//
+// ADR-043 PR 4g — the decomposer LLM path was retired; synthesis from
+// Sarah-prepared Stories is now the only DAG source. The function kept
+// its name to localize the rename diff.
+func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementExecution, dag *TaskDAG, source string) {
 	sorted, err := topoSort(dag)
 	if err != nil {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("topological sort failed: %v", err))
@@ -631,7 +559,7 @@ func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementE
 
 	exec.DAG = dag
 	exec.SortedNodeIDs = sorted
-	exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dag.Nodes))
+	exec.NodeIndex = make(map[string]*TaskNode, len(dag.Nodes))
 	for i := range dag.Nodes {
 		exec.NodeIndex[dag.Nodes[i].ID] = &dag.Nodes[i]
 	}
@@ -972,314 +900,45 @@ func (c *Component) recordNodeSuccessLocked(ctx context.Context, exec *requireme
 }
 
 // ---------------------------------------------------------------------------
-// Agent dispatch: Decomposer
+// DAG synthesis from Sarah-prepared Stories
 // ---------------------------------------------------------------------------
 
+// dispatchDecomposerLocked synthesizes the TaskDAG from Sarah-prepared
+// Stories on the plan and hands off to applyParsedDAGLocked. The function
+// kept its legacy name to localize the rename diff after ADR-043 PR 4g
+// retired the decomposer LLM path; conceptually it is now a synthesizer.
+//
+// Synthesis failure (no plan, no Stories for this requirement, invalid
+// DAG) marks the requirement failed — Sarah is always-on post-PR 4l, so
+// a missing Story is a planning-phase bug, not a runtime fallback case.
 func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirementExecution) {
-	// ADR-043 PR 4f — when plan.Stories carries Sarah-authored Stories for
-	// this requirement, synthesize the TaskDAG locally instead of dispatching
-	// the decomposer LLM. The downstream after parse is shared; both paths
-	// funnel through applyParsedDAGLocked. Fall through to the legacy LLM
-	// path when no Stories are present (pre-ADR-043 plans, or plans that
-	// reached requirement-execution before story-preparer was enabled).
-	if plan, err := c.loadPlanFromKV(ctx, exec.Slug); err == nil && plan != nil {
-		dag, synthErr := synthesizeTaskDAGFromStories(plan, exec.RequirementID)
-		if synthErr != nil {
-			c.logger.Warn("Story DAG synthesis failed, falling back to decomposer LLM",
-				"entity_id", exec.EntityID, "requirement_id", exec.RequirementID, "error", synthErr)
-		} else if dag != nil {
-			c.logger.Info("Bypassing decomposer LLM with synthesized DAG from plan.Stories",
-				"entity_id", exec.EntityID, "requirement_id", exec.RequirementID,
-				"node_count", len(dag.Nodes))
-			exec.DecomposerLastError = ""
-			c.applyParsedDAGLocked(ctx, exec, dag, "stories-synthesis")
-			return
-		}
+	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
+	if err != nil {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("load plan from KV failed: %v", err))
+		return
 	}
-
-	taskID := fmt.Sprintf("decompose-%s-%s", exec.EntityID, uuid.New().String())
-	exec.DecomposerTaskID = taskID
-
-	// Persist decomposer task ID to EXECUTION_STATES so execution-manager can
-	// route the completion back via KV (reqKeyByTaskID matches on this field).
-	if err := c.sendReqPhase(ctx, exec.storeKey, phaseDecomposing, map[string]any{
-		"decomposer_task_id": taskID,
-	}); err != nil {
-		c.logger.Warn("Failed to send req.phase mutation for decomposer dispatch", "error", err)
-	}
-
-	// Resolve decomposer model via capability registry. config.DecomposerModel
-	// is honored as a hard override (fixture pinning); the canonical path is
-	// CapabilityTaskDecomposition → registry, which routes to a planner-class
-	// model rather than a coder-class model. Matches the pattern at
-	// dispatchDeveloperLocked / dispatchCodeReviewer.
-	decomposerModel := model.ResolveModel(c.modelRegistry, c.config.DecomposerModel, model.CapabilityTaskDecomposition)
-
-	var (
-		decomposerEndpoint *ssmodel.EndpointConfig
-		maxTokens          int
-	)
-	if c.modelRegistry != nil {
-		if ep := c.modelRegistry.GetEndpoint(decomposerModel); ep != nil {
-			decomposerEndpoint = ep
-			maxTokens = ep.MaxTokens
-		}
-	}
-
-	// Assemble system + user prompts through the persona pipeline. The
-	// decomposer is RoleTaskGenerator; its fragments cover identity,
-	// completeness rules, the decompose_task tool directive, and the
-	// expected output shape. The user-prompt fragment reads from
-	// AssemblyContext.Decomposer and templates the requirement context.
-	// Replaces the hand-rolled buildDecomposerPrompt that bypassed the
-	// persona system — 2026-05-11 take 11 wedge surfaced the gap
-	// (decomposer emitted placeholder-only DAGs because no system prompt
-	// pushed it toward real implementation).
-	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RoleTaskGenerator,
-		Provider:          resolveProvider(decomposerModel),
-		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(decomposerEndpoint, nil),
-		Domain:            "software",
-		AvailableTools:    prompt.FilterTools(availableToolNames(), prompt.RoleTaskGenerator),
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleTaskGenerator),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
-		Decomposer:        c.buildDecomposerPromptContext(ctx, exec, exec.DecomposerLastError),
-	}
-
-	assembled := c.assembler.Assemble(asmCtx)
-	if assembled.RenderError != nil {
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("assemble decomposer prompt failed: %v", assembled.RenderError))
+	if plan == nil {
+		c.markFailedLocked(ctx, exec, "plan not found in PLAN_STATES — cannot synthesize DAG without Stories")
 		return
 	}
 
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
-		Model:        decomposerModel,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "developer", decomposerEndpoint, asmCtx.AvailableTools...),
-		WorkflowSlug: WorkflowSlugRequirementExecution,
-		WorkflowStep: stageDecompose,
-		Prompt:       assembled.UserMessage,
-		Context: &agentic.ConstructedContext{
-			Content: assembled.SystemMessage,
-		},
-		ToolChoice: &agentic.ToolChoice{Mode: "function", FunctionName: "decompose_task"},
-		Metadata: map[string]any{
-			"requirement_id": exec.RequirementID,
-			"plan_slug":      exec.Slug,
-			// role + model for SKG tool.recovery.incident partitioning.
-			"role":  string(prompt.RoleTaskGenerator),
-			"model": decomposerModel,
-		},
+	dag, synthErr := synthesizeTaskDAGFromStories(plan, exec.RequirementID)
+	if synthErr != nil {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("synthesize DAG from plan.Stories failed: %v", synthErr))
+		return
 	}
-
-	if err := c.publishTask(ctx, subjectDecomposer, task); err != nil {
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch decomposer failed: %v", err))
+	if dag == nil {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("no Stories on plan for requirement %s — story-preparer must run before execution", exec.RequirementID))
 		return
 	}
 
-	c.logger.Info("Dispatched decomposer",
+	c.logger.Info("Synthesized DAG from plan.Stories",
 		"entity_id", exec.EntityID,
-		"task_id", taskID,
-		"attempt", exec.DecomposerAttempt+1,
-		"max_attempts", c.config.MaxDecomposerRetries+1,
-	)
-	exec.DecomposerAttempt++
-}
-
-// buildDecomposerPromptContext projects a requirementExecution into the
-// prompt.DecomposerPromptContext the assembler's user-prompt fragment
-// consumes. Replaces the legacy hand-rolled buildDecomposerPrompt that
-// returned a complete string — see dispatchDecomposerLocked for the
-// wire-up rationale.
-func (c *Component) buildDecomposerPromptContext(ctx context.Context, exec *requirementExecution, previousError string) *prompt.DecomposerPromptContext {
-	pctx := buildDecomposerPromptContext(exec, previousError)
-	pctx.HarnessProfiles = c.loadPlanHarnessProfiles(ctx, exec.Slug)
-	return pctx
-}
-
-func buildDecomposerPromptContext(exec *requirementExecution, previousError string) *prompt.DecomposerPromptContext {
-	ctx := &prompt.DecomposerPromptContext{
-		RequirementTitle:       exec.Title,
-		RequirementDescription: exec.Description,
-		RetryFeedback:          previousError,
-	}
-	if exec.Scope != nil {
-		ctx.ScopeInclude = exec.Scope.Include
-		ctx.ScopeExclude = exec.Scope.Exclude
-		ctx.ScopeDoNotTouch = exec.Scope.DoNotTouch
-	}
-	if len(exec.DependsOn) > 0 {
-		ctx.DependsOn = make([]prompt.DecomposerPrereqContext, 0, len(exec.DependsOn))
-		for _, prereq := range exec.DependsOn {
-			ctx.DependsOn = append(ctx.DependsOn, prompt.DecomposerPrereqContext{
-				Title:         prereq.Title,
-				Description:   prereq.Description,
-				FilesModified: prereq.FilesModified,
-				Summary:       prereq.Summary,
-			})
-		}
-	}
-	if len(exec.Scenarios) > 0 {
-		ctx.Scenarios = make([]prompt.DecomposerScenario, 0, len(exec.Scenarios))
-		for _, sc := range exec.Scenarios {
-			ctx.Scenarios = append(ctx.Scenarios, prompt.DecomposerScenario{
-				ID:    sc.ID,
-				Given: sc.Given,
-				When:  sc.When,
-				Then:  sc.Then,
-			})
-		}
-	}
-	return ctx
-}
-
-func (c *Component) loadPlanHarnessProfiles(ctx context.Context, slug string) []prompt.ResolvedHarnessProfileContext {
-	if c.natsClient == nil || slug == "" {
-		return nil
-	}
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil
-	}
-	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
-	if err != nil {
-		return nil
-	}
-	entry, err := bucket.Get(ctx, slug)
-	if err != nil {
-		return nil
-	}
-	var plan workflow.Plan
-	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-		return nil
-	}
-	if plan.Architecture == nil || len(plan.Architecture.HarnessProfiles) == 0 {
-		return nil
-	}
-	catalog, err := harnesscatalog.Load("")
-	if err != nil {
-		c.logger.Warn("Failed to load harness catalog for decomposer context", "slug", slug, "error", err)
-		return nil
-	}
-	resolved, err := catalog.ResolveSelections(plan.Architecture.HarnessProfiles)
-	if err != nil {
-		c.logger.Warn("Invalid harness profile selection in plan", "slug", slug, "error", err)
-		return nil
-	}
-	return resolvedHarnessProfilesToPrompt(resolved)
-}
-
-func resolvedHarnessProfilesToPrompt(resolved []harnesscatalog.ResolvedSelection) []prompt.ResolvedHarnessProfileContext {
-	out := make([]prompt.ResolvedHarnessProfileContext, 0, len(resolved))
-	for _, r := range resolved {
-		p := r.Profile
-		out = append(out, prompt.ResolvedHarnessProfileContext{
-			ProfileID:          p.ID,
-			Tier:               p.Tier,
-			Orchestration:      p.EffectiveOrchestration(),
-			UsedBy:             append([]string(nil), r.Selection.UsedBy...),
-			Purpose:            r.Selection.Purpose,
-			Covers:             append([]string(nil), r.Selection.Covers...),
-			Proves:             append([]string(nil), p.Proves...),
-			RunnerSupport:      append([]string(nil), p.RunnerSupport...),
-			Cost:               p.Cost,
-			Constraints:        append([]string(nil), p.Constraints...),
-			RequiredAssertions: append([]string(nil), p.RequiredAssertions...),
-			EvidenceAnchors:    append([]string(nil), p.EvidenceAnchors...),
-			Images:             harnessImagesToPrompt(p.Images),
-			Ports:              harnessPortsToPrompt(p.Ports),
-			Env:                cloneStringStringMap(p.Env),
-			Readiness:          append([]string(nil), p.Readiness...),
-			TestGuidance:       append([]string(nil), p.TestGuidance...),
-		})
-	}
-	return out
-}
-
-func harnessImagesToPrompt(images []harnesscatalog.ImageRef) []prompt.HarnessImageContext {
-	out := make([]prompt.HarnessImageContext, 0, len(images))
-	for _, img := range images {
-		out = append(out, prompt.HarnessImageContext{Name: img.Name, Purpose: img.Purpose})
-	}
-	return out
-}
-
-func harnessPortsToPrompt(ports []harnesscatalog.PortRef) []prompt.HarnessPortContext {
-	out := make([]prompt.HarnessPortContext, 0, len(ports))
-	for _, port := range ports {
-		out = append(out, prompt.HarnessPortContext{
-			Name:          port.Name,
-			ContainerPort: port.ContainerPort,
-			Protocol:      port.Protocol,
-			Purpose:       port.Purpose,
-		})
-	}
-	return out
-}
-
-func cloneStringStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
-	return out
-}
-
-// retryOrFailDecomposerLocked re-dispatches the decomposer with the previous
-// error appended to the prompt when the retry budget is not exhausted,
-// otherwise marks the requirement failed.
-//
-// Why not workflow/dispatchretry: unlike the planning-phase processors
-// (qa-reviewer, plan-reviewer, planner, requirement/scenario/architecture
-// generators) which each migrated to the dispatchretry helper in WS2,
-// requirement-executor stores DecomposerAttempt + DecomposerLastError on
-// the persistent requirementExecution struct that is checkpointed to
-// EXECUTION_STATES KV. The counter survives process restarts via that
-// persistence, which dispatchretry — an in-memory map keyed by string —
-// cannot match without a separate KV-write path. Adding backoff here
-// would also need to coordinate with the per-execution lock the caller
-// holds, complicating the contract.
-//
-// If a retry-storm risk emerges in the executor path, evaluate either
-// (a) folding backoff into dispatchDecomposerLocked itself with an
-// explicit ctx-cancellable sleep, or (b) extending dispatchretry with
-// a "snapshot-write hook" that callers wire to their persistence layer.
-//
-// Caller must hold exec.mu.
-func (c *Component) retryOrFailDecomposerLocked(ctx context.Context, exec *requirementExecution, errorMsg string) {
-	if exec.DecomposerAttempt <= c.config.MaxDecomposerRetries {
-		c.logger.Warn("Decomposer output invalid, retrying with feedback",
-			"entity_id", exec.EntityID,
-			"slug", exec.Slug,
-			"requirement_id", exec.RequirementID,
-			"attempt", exec.DecomposerAttempt,
-			"max_attempts", c.config.MaxDecomposerRetries+1,
-			"error", errorMsg,
-		)
-		exec.DecomposerLastError = errorMsg
-		c.dispatchDecomposerLocked(ctx, exec)
-		return
-	}
-
-	c.logger.Error("Decomposer exhausted retries",
-		"entity_id", exec.EntityID,
-		"slug", exec.Slug,
 		"requirement_id", exec.RequirementID,
-		"attempts", exec.DecomposerAttempt,
-		"last_error", errorMsg,
-	)
-	c.markFailedLocked(ctx, exec, fmt.Sprintf("decomposer exhausted %d retries: %s", c.config.MaxDecomposerRetries, errorMsg))
+		"node_count", len(dag.Nodes))
+	c.applyParsedDAGLocked(ctx, exec, dag, "stories-synthesis")
 }
 
-// buildDecomposerPrompt constructs the decomposer prompt from the requirement context.
-// It includes the requirement title, description, prerequisite context, and scenarios
-// as acceptance criteria.
 // loadPlanScope reads the plan from PLAN_STATES KV and returns its scope.
 // Returns nil on any error (best-effort).
 func (c *Component) loadPlanScope(ctx context.Context, slug string) *workflow.Scope {
@@ -1661,9 +1320,9 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		// Filter the wire tool palette by RoleScenarioReviewer (req-level
 		// reviewer is scenario-shaped — see buildRequirementReviewContext
 		// at the symmetric prompt-side filter). Without this, the reviewer
-		// sees decompose_task / review_scenario / web_search / http_request
-		// — terminals from other roles that confuse small models. Same fix
-		// shape as execution-manager applied take 11.
+		// sees review_scenario / web_search / http_request — terminals
+		// from other roles that confuse small models. Same fix shape as
+		// execution-manager applied take 11.
 		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer)...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
@@ -1856,35 +1515,6 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		}
 		c.startFixableRetryLocked(ctx, exec, result.Feedback, result.ScenarioVerdicts)
 	}
-}
-
-// uncoveredInputScenarios returns the sorted IDs of requirement scenarios
-// that don't appear in any node's ScenarioIDs. Empty return means the DAG
-// covers every input scenario (or the requirement had no scenarios to begin
-// with — a pre-scenario flow or a requirement whose acceptance is implicit).
-// Package-level because it operates on plain inputs and is easier to test
-// without wiring a Component.
-func uncoveredInputScenarios(scenarios []workflow.Scenario, nodes []decompose.TaskNode) []string {
-	if len(scenarios) == 0 {
-		return nil
-	}
-	covered := make(map[string]bool, len(scenarios))
-	for _, n := range nodes {
-		for _, sid := range n.ScenarioIDs {
-			covered[sid] = true
-		}
-	}
-	var uncovered []string
-	for _, sc := range scenarios {
-		if sc.ID == "" {
-			continue
-		}
-		if !covered[sc.ID] {
-			uncovered = append(uncovered, sc.ID)
-		}
-	}
-	sort.Strings(uncovered)
-	return uncovered
 }
 
 // uncoveredFailedScenarios returns the sorted IDs of failed scenarios that
@@ -2126,19 +1756,13 @@ func resolveProvider(modelStr string) prompt.Provider {
 func availableToolNames() []string {
 	// review_scenario was registered for the legacy scenario-reviewer
 	// terminal that was deleted; dropped 2026-05-08 take-14 follow-up.
-	// No executor implements it, presence here just bloated the wire
-	// palette and risked small-model wrong-tool selection.
-	//
-	// decompose_task + scratchpad + write_todos surfaced 2026-05-11 when
-	// the decomposer dispatch was wired through the assembler. The
-	// per-role tool filter (prompt.FilterTools) keeps the decomposer's
-	// wire palette narrow (decompose_task + scratchpad + write_todos);
-	// other roles inherit the same FilterTools narrowing.
+	// decompose_task retired with ADR-043 PR 4g (synthesis from Sarah-
+	// prepared Stories now drives DAG construction; no LLM tool call).
 	return []string{
 		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
-		"decompose_task", "scratchpad", "write_todos",
+		"scratchpad", "write_todos",
 	}
 }
 

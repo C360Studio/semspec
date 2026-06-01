@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c360studio/semspec/tools/decompose"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 )
@@ -174,8 +173,8 @@ func TestRequirementExecutionEntity_Triples_SubjectMatchesEntityID(t *testing.T)
 }
 
 func TestNewRequirementExecutionEntity_FromState(t *testing.T) {
-	dag := &decompose.TaskDAG{
-		Nodes: []decompose.TaskNode{
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
 			{ID: "node-1"},
 			{ID: "node-2"},
 			{ID: "node-3"},

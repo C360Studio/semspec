@@ -71,7 +71,6 @@ const (
 	RoleTaskReviewer         Role = "task-reviewer"
 	RoleRequirementGenerator Role = "requirement-generator"
 	RoleScenarioGenerator    Role = "scenario-generator"
-	RoleTaskGenerator        Role = "task-generator"
 	RoleScenarioReviewer     Role = "scenario-reviewer"
 	RoleArchitect            Role = "architect"
 	RoleStoryPreparer        Role = "story-preparer"

@@ -100,14 +100,11 @@ Text is unconstrained — plain prose explaining your approach, things you consi
 		// context-flood wedge cause. See [[research-shelved-pivot-to-
 		// upstream-strengthening-2026-05-15]].
 
-		// Agentic tools
-		// decompose_task is registered with RoleTaskGenerator semantically
-		// (the requirement-executor decomposer is what calls it). The
-		// previous RoleDeveloper tag was a take-11 footgun that put it
-		// in the developer's prompt-side guidance — model picked it
-		// instead of submit_work. Keep the role tag aligned with the
-		// dispatcher.
-		{Name: "decompose_task", Order: 30, Guidance: "Break a task into a DAG of subtasks for parallel execution.", Roles: []Role{RoleTaskGenerator}},
+		// decompose_task was retired with ADR-043 PR 4g; requirement-executor
+		// now synthesizes the TaskDAG from Sarah-prepared Stories instead of
+		// dispatching a decomposer LLM. The RoleTaskGenerator role remains
+		// defined but has no fragments and no tools — left in place for the
+		// negative assertions in tool-filter tests.
 		// review_scenario was the terminal for the legacy scenario-
 		// reviewer dispatch that was deleted; the tool itself was never
 		// re-registered. Listing it in tool guidance pollutes the

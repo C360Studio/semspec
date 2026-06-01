@@ -1,6 +1,6 @@
 // Package tools registers agent tools with the semstreams agentic-tools component.
 // Follows the bash-first approach: bash is the universal tool, specialized tools
-// only for things bash can't do (graph queries, terminal signals, DAG decomposition).
+// only for things bash can't do (graph queries, terminal signals).
 //
 // All registration happens in RegisterAgenticTools, called once during component
 // startup. There are no init() registrations — semspec always runs with NATS.
@@ -19,7 +19,6 @@ import (
 	"log/slog"
 
 	"github.com/c360studio/semspec/tools/bash"
-	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/question"
 	"github.com/c360studio/semspec/tools/research"
@@ -120,10 +119,6 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 	}
 	errs = append(errs, reg.RegisterTool("submit_work", termExec))
 
-	// decompose_task — validates LLM-provided TaskDAG.
-	decomposeExec := decompose.NewExecutor()
-	errs = append(errs, reg.RegisterTool("decompose_task", decomposeExec))
-
 	// http_request — with NATS for graph persistence when available.
 	var httpOpts []httptool.Option
 	if deps.Timeouts.HTTP > 0 {
@@ -140,9 +135,11 @@ func RegisterAgenticToolsWithContext(_ context.Context, reg *agentictools.Execut
 	// --- Infrastructure-dependent tools ---
 
 	// spawn_agent was deleted in Phase 3 of the task-11 worktree audit. The
-	// reactive execution model (ADR-025) — decompose_task + serial DAG
-	// dispatch by requirement-executor — replaced the LLM-driven child-agent
-	// spawning pattern. See docs/audit/task-11-worktree-invariants.md (A4).
+	// reactive execution model (ADR-025) — originally decompose_task + serial
+	// DAG dispatch by requirement-executor — replaced the LLM-driven
+	// child-agent spawning pattern. ADR-043 PR 4g retired the decomposer
+	// LLM step itself: requirement-executor now synthesizes the DAG from
+	// Sarah-prepared Stories. See docs/audit/task-11-worktree-invariants.md (A4).
 
 	errs = append(errs, registerQuestionTools(reg, deps)...)
 	errs = append(errs, registerResearchTools(reg, deps)...)

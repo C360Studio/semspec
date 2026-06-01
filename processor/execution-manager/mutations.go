@@ -108,7 +108,6 @@ type ReqPhaseRequest struct {
 	ErrorReason    string `json:"error_reason,omitempty"`
 	ErrorClass     string `json:"error_class,omitempty"`
 	// Routing
-	DecomposerTaskID  string `json:"decomposer_task_id,omitempty"`
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`
 	ReviewerTaskID    string `json:"reviewer_task_id,omitempty"`
 	// Branch
@@ -437,9 +436,6 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 	}
 	if req.ErrorClass != "" {
 		exec.ErrorClass = req.ErrorClass
-	}
-	if req.DecomposerTaskID != "" {
-		exec.DecomposerTaskID = req.DecomposerTaskID
 	}
 	if req.CurrentNodeTaskID != "" {
 		exec.CurrentNodeTaskID = req.CurrentNodeTaskID

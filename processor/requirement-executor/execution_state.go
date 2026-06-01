@@ -3,7 +3,6 @@ package requirementexecutor
 import (
 	"sync"
 
-	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
@@ -80,27 +79,14 @@ type requirementExecution struct {
 	// --- Decomposition output ---
 
 	// DAG is the validated task DAG from the decomposer agent.
-	DAG *decompose.TaskDAG
+	DAG *TaskDAG
 
 	// SortedNodeIDs is the topologically sorted list of node IDs.
 	// Execution proceeds serially through this list.
 	SortedNodeIDs []string
 
 	// NodeIndex maps nodeID → TaskNode for quick lookup.
-	NodeIndex map[string]*decompose.TaskNode
-
-	// DecomposerTaskID is the agentic task ID of the decomposer agent.
-	DecomposerTaskID string
-
-	// DecomposerAttempt is the 1-based attempt counter for decomposer retries.
-	// Incremented each time the decomposer is dispatched. Gated by
-	// config.MaxDecomposerRetries.
-	DecomposerAttempt int
-
-	// DecomposerLastError carries the previous decomposer attempt's error
-	// message. Injected into the retry prompt so the LLM can correct empty
-	// DAGs, parse failures, or validation errors on the next attempt.
-	DecomposerLastError string
+	NodeIndex map[string]*TaskNode
 
 	// --- Serial execution tracking ---
 
