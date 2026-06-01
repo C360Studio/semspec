@@ -1126,62 +1126,66 @@ Do NOT emit files_owned on Requirements. File-collision sequencing is a per-Stor
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
 			ContentFunc: elideSchemaProse(
 				`When your requirements are ready, call the submit_work tool with these JSON fields:`,
-				`Example 1 — two requirements, chain pattern (one feature + its router wire-up).
-Note how files_owned mixes scope.create entries (the two new goodbye files) with a
-scope.include entry (the existing main.go). Both buckets are valid sources.
-
-Plan it's working from:
-  scope.include: ["main.go"]                             // existing, may modify
-  scope.create:  ["api/handlers/goodbye.go",             // new, will author
-                  "api/handlers/goodbye_test.go"]
+				`Example 1 — two requirements with a capability-level dependency. Notice that
+NO files_owned field appears: ADR-043 Move 4 removed it from the requirement
+wire shape. Files belong to Stories (Sarah authors them after Winston's
+architecture phase); your job stops at intent + acceptance criteria.
 
 {
   "requirements": [
     {
       "title": "Goodbye endpoint returns JSON",
-      "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field",
-      "files_owned": ["api/handlers/goodbye.go", "api/handlers/goodbye_test.go"]
+      "description": "GET /goodbye MUST return HTTP 200 with Content-Type application/json and a body containing a message field.",
+      "depends_on": [],
+      "capability_name": "goodbye-endpoint"
     },
     {
-      "title": "Goodbye endpoint surfaced through router",
-      "description": "GET /goodbye must be reachable via the main HTTP router, not only the handler in isolation",
+      "title": "UI displays goodbye message from new endpoint",
+      "description": "The browser UI SHALL fetch /goodbye and display the returned message to the user.",
       "depends_on": ["Goodbye endpoint returns JSON"],
-      "files_owned": ["main.go"]
+      "capability_name": "goodbye-ui-integration"
     }
   ]
 }
 
-Example 2 — three requirements, fan-in pattern (multiple features sharing main.go):
+Example 2 — three requirements; standalone capabilities with no cross-deps.
+A multi-capability plan emits one requirement per capability (the analyst's
+classification controls the count). depends_on stays [] when capabilities
+are independent.
 
 {
   "requirements": [
     {
       "title": "Hello endpoint returns JSON",
-      "description": "GET /hello must return HTTP 200 with Content-Type application/json and a body containing a message field",
-      "files_owned": ["api/handlers/hello.go", "api/handlers/hello_test.go"]
+      "description": "GET /hello MUST return HTTP 200 with Content-Type application/json and a body containing a message field.",
+      "depends_on": [],
+      "capability_name": "hello-endpoint"
     },
     {
       "title": "Goodbye endpoint returns JSON",
-      "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field",
-      "files_owned": ["api/handlers/goodbye.go", "api/handlers/goodbye_test.go"]
+      "description": "GET /goodbye MUST return HTTP 200 with Content-Type application/json and a body containing a message field.",
+      "depends_on": [],
+      "capability_name": "goodbye-endpoint"
     },
     {
       "title": "Endpoints surfaced through router",
-      "description": "Both /hello and /goodbye must be reachable via the main HTTP router",
+      "description": "The HTTP router MUST surface both /hello and /goodbye in the same request-handling chain so neither endpoint shadows the other.",
       "depends_on": ["Hello endpoint returns JSON", "Goodbye endpoint returns JSON"],
-      "files_owned": ["main.go"]
+      "capability_name": "router-integration"
     }
   ]
 }
 
-Note in Example 2: the feature requirements DO NOT list main.go in files_owned — only the final wire-up requirement does, and it depends_on every feature. Never list main.go (or any shared registration file) in multiple requirements' files_owned in parallel; the validator rejects every time.
-
 Required fields per requirement:
-- title (string)
-- description (string)
-- files_owned (array of workspace-relative paths) — MANDATORY. Empty arrays are not acceptable. If a requirement modifies no files, it isn't a code requirement.
-- depends_on (array of titles) — optional, use when one requirement must follow another or when sharing a file with another requirement.
-- capability_name (kebab-case string) — REQUIRED field; the strict response schema rejects requirements without it. When a "## Capabilities" block appears above in this prompt, set to one of the listed capability names exactly. When no Capabilities block appears, set to empty string "". DO NOT OMIT — the wire schema requires the field even when its value is empty.
+- title (string) — short, capability-flavored heading
+- description (string) — 1-3 sentences with SHALL/MUST normative language
+- depends_on (array of titles) — capability-level intent ordering; emit [] when no prereqs exist
+- capability_name (kebab-case string) — set to one of the names listed in the prompt's "## Capabilities" block; set to "" only when no Capabilities block is present. Required on the wire even when empty.
+
+File-path determination is NOT your concern (ADR-043 Move 4). Do NOT emit
+files_owned; the strict schema rejects the field. Winston (architect)
+declares implementation_files per ComponentDef in the next phase; Sarah
+(product owner) maps Stories to those files for execution.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 			),
