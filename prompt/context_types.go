@@ -42,6 +42,5 @@ type ExistingRequirementSummary struct {
 	Title       string
 	Description string
 	Status      string
-	FilesOwned  []string
 	DependsOn   []string
 }

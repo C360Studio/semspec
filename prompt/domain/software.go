@@ -1092,54 +1092,15 @@ Each requirement must:
 - Use active voice: "The system must...", "Users must be able to..."
 - Describe outcomes, not implementation (no function names, class names, or data structures)
 
-CRITICAL — Partition files across requirements (parallel execution rule):
+Capability-level prereq ordering (depends_on):
 
-Requirements run in parallel git worktrees. If two requirements both write to the same file with no dependency between them, the integration merge fails and the entire plan stalls.
+Use Requirement.depends_on to express CAPABILITY-level intent ordering: "users must be authenticated (auth capability) before they can manage their session (session capability)". This is about logical sequencing of intent, not execution-time file partitioning.
 
-For EVERY requirement, set files_owned to the workspace-relative paths that requirement is allowed to touch. **files_owned is drawn from BOTH scope.include AND scope.create** — these are two different bookkeeping buckets but both are valid sources for files_owned:
-- scope.include = existing files the requirement may MODIFY (already in the workspace)
-- scope.create = new files the plan intends to ADD (don't exist yet; the requirement that owns this path is the one that creates the file)
-- scope.protected = files NEVER in any requirement's files_owned (read-only)
+ADR-043 Move 4 moved file ownership downstream:
+- Winston (architect) declares implementation_files per ComponentDef — which files house which component's code.
+- Sarah (product owner) selects components per Story — which Story modifies which components, computing files_owned as the union of selected components' implementation_files.
 
-If the plan declares scope.create=["internal/health/health.go"], then the requirement responsible for the /health endpoint MUST list "internal/health/health.go" in its files_owned — picking only from scope.include and ignoring scope.create means the dev gets prompted with the wrong target path and writes code in the wrong directory. (Caught take 23: planner said internal/health/, req-gen ignored scope.create and assigned internal/auth/* from scope.include — dev wrote in internal/auth/ which already had a different package, broke the build five cycles in a row.)
-
-The set across all requirements must satisfy:
-- Cover the work — every path that needs editing or creating must appear in some requirement's files_owned.
-- Stay in scope — only list paths that appear in scope.include OR scope.create, and never in scope.protected.
-- Resolve overlap explicitly — when two requirements legitimately need the same file (impl + its test, define + use, refactor + feature), list both in files_owned AND add depends_on so the executor sequences them. The later requirement rebases on the earlier one's merge commit, so they don't collide.
-
-DO NOT lie about files_owned to dodge the overlap rule. If your reqs honestly touch the same file, that's expected — say so and add depends_on. Inventing fake file splits to make the partition look clean produces broken work at execution time.
-
-When the goal touches both implementation and tests for the same surface, prefer ONE requirement that owns BOTH files (impl + its test) over splitting them — but if you do split, the split MUST have a depends_on edge.
-
-ANTI-EXAMPLE — the rejection shape you keep regenerating:
-
-Wrong (validator REJECTS this every time):
-  {"id": "req-1", "title": "Implement /health", "files_owned": ["internal/auth/health.go", "internal/auth/health_test.go"]}
-  {"id": "req-2", "title": "Test /health",      "files_owned": ["internal/auth/health.go", "internal/auth/health_test.go"]}
-
-Two requirements claiming the same files with no depends_on edge. The plan-level merge deadlocks because both branches rewrite the same files in parallel. Splitting "implement" from "test" for the same surface is the SECOND most common rejection cause (after fan-in shared-registration). Don't do it. Instead:
-
-Right — Option (a), consolidate (preferred for impl + its test of the same surface):
-  {"id": "req-1", "title": "/health endpoint with tests", "files_owned": ["internal/auth/health.go", "internal/auth/health_test.go"]}
-
-Right — Option (b), depends_on (acceptable when the work is genuinely two phases):
-  {"id": "req-1", "title": "Implement /health",  "files_owned": ["internal/auth/health.go"]}
-  {"id": "req-2", "title": "Test /health",       "depends_on": ["req-1"], "files_owned": ["internal/auth/health_test.go"]}
-
-The validator only rejects on overlap-without-depends_on. Files that don't overlap are fine in parallel; files that do overlap need either consolidation or a depends_on edge — never both reqs claiming the same files in parallel.
-
-Shared registration files (fan-in pattern) — most common rejection cause:
-Files like main.go, app.tsx, router.go, server.go, cmd/main.go are typically touched by every feature that needs to register a route, command, or component. The wrong shape is to list the shared file in every feature requirement's files_owned in parallel — that's three+ requirements all claiming main.go with no depends_on between them, and the validator rejects it every time. The right shape is one of:
-- Fan-in (preferred for 3+ features): each feature requirement owns ONLY its own handler/component files; ONE final "wire-up" requirement owns the shared file and lists every feature in depends_on. The wire-up requirement merges last after all features are in place.
-- Chain (acceptable for 2 features): feature A owns its files; feature B owns its files AND the shared file, with depends_on: [feature A]. B rebases on A's merge so the shared-file edits compose.
-
-Validator enforcement (this is real, not advice):
-- Empty files_owned in any requirement of a multi-requirement plan: REJECTED. Regenerate with files_owned set on every requirement.
-- Two requirements claim the same file with no depends_on edge: REJECTED. Either consolidate them into one requirement or add a depends_on edge.
-- The validator only reports the FIRST conflicting pair it finds — if your plan has three requirements all touching main.go, fixing one pair won't fix the others. Re-check the whole partition before resubmitting.
-
-A rejected plan costs you the iteration. Get files_owned and depends_on right the first time.`,
+Do NOT emit files_owned on Requirements. File-collision sequencing is a per-Story concern handled at story preparation time, not a Requirement concern. The Requirement.files_owned field has been removed from your output schema.`,
 		},
 		{
 			// User-message renderer — replaces the legacy

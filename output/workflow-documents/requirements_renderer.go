@@ -83,13 +83,10 @@ func renderSingleRequirement(b *strings.Builder, plan *workflow.Plan, req workfl
 		b.WriteString(req.Description)
 		b.WriteString("\n\n")
 	}
-	if len(req.FilesOwned) > 0 {
-		b.WriteString("**Files owned:**\n\n")
-		for _, f := range req.FilesOwned {
-			b.WriteString(fmt.Sprintf("- `%s`\n", f))
-		}
-		b.WriteString("\n")
-	}
+	// ADR-043 Move 4 — file ownership moved to Story; the renderer derives
+	// the file list per Story instead of per Requirement. Stories are
+	// rendered under their parent Requirement in the post-PR-4b
+	// tasks.md / spec.md surfaces.
 	if len(req.DependsOn) > 0 {
 		b.WriteString(fmt.Sprintf("**Depends on:** %s\n\n",
 			strings.Join(req.DependsOn, ", ")))

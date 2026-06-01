@@ -39,14 +39,12 @@ func samplePlan() *workflow.Plan {
 				Title:          "Bootstrap mavsdk_server",
 				Description:    "The driver MUST boot mavsdk_server on plan startup.",
 				CapabilityName: "mavsdk-bootstrap",
-				FilesOwned:     []string{"src/main/java/Bootstrap.java", "src/test/java/BootstrapTest.java"},
 			},
 			{
 				ID:             "r2",
 				Title:          "Emit MAVSDK telemetry",
 				Description:    "The driver SHALL emit CS DataStream events for MAVSDK telemetry frames.",
 				CapabilityName: "telemetry-stream",
-				FilesOwned:     []string{"src/main/java/TelemetryStream.java"},
 				DependsOn:      []string{"r1"},
 			},
 		},
@@ -80,6 +78,22 @@ func samplePlan() *workflow.Plan {
 			},
 			HarnessProfiles: []workflow.HarnessProfileSelection{
 				{ProfileID: "mavlink.px4-sitl.mavsdk-smoke", UsedBy: []string{"MavsdkDriver"}, Purpose: "smoke-test integration"},
+			},
+		},
+		// ADR-043 Move 4 — spec.md applies_to derives from Story.FilesOwned
+		// across the stories that link to this capability's requirements.
+		Stories: []workflow.Story{
+			{
+				ID:            "story.test.1.1",
+				RequirementID: "r1",
+				Title:         "Bootstrap MAVSDK driver",
+				FilesOwned:    []string{"src/main/java/Bootstrap.java", "src/test/java/BootstrapTest.java"},
+			},
+			{
+				ID:            "story.test.2.1",
+				RequirementID: "r2",
+				Title:         "Wire telemetry stream",
+				FilesOwned:    []string{"src/main/java/TelemetryStream.java"},
 			},
 		},
 	}

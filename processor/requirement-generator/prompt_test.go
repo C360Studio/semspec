@@ -53,20 +53,20 @@ func TestBuildPromptContext_FreshGeneration(t *testing.T) {
 }
 
 // TestBuildPromptContext_PartialRegen confirms surviving requirements are
-// passed through with their dial-#1 fields intact (FilesOwned, DependsOn) so
-// the LLM can reason about scope partitioning, plus that RejectionReasons
-// flow through.
+// passed through with their identity + DependsOn fields intact so the LLM
+// can reason about prereq ordering. ADR-043 Move 4 removed FilesOwned —
+// only the surviving fields (ID, Title, Status, DependsOn) are projected
+// into the prompt context.
 func TestBuildPromptContext_PartialRegen(t *testing.T) {
 	trigger := &payloads.RequirementGeneratorRequest{
 		Slug: "test",
 		Goal: "Add endpoint",
 		ExistingRequirements: []workflow.Requirement{
 			{
-				ID:         "requirement.test.1",
-				Title:      "kept-req",
-				Status:     workflow.RequirementStatusActive,
-				FilesOwned: []string{"api/app.py"},
-				DependsOn:  []string{"requirement.test.0"},
+				ID:        "requirement.test.1",
+				Title:     "kept-req",
+				Status:    workflow.RequirementStatusActive,
+				DependsOn: []string{"requirement.test.0"},
 			},
 		},
 		ReplaceRequirementIDs: []string{"requirement.test.2"},
@@ -83,9 +83,6 @@ func TestBuildPromptContext_PartialRegen(t *testing.T) {
 	r := got.ExistingRequirements[0]
 	if r.ID != "requirement.test.1" || r.Title != "kept-req" || r.Status != "active" {
 		t.Errorf("kept requirement summary wrong: %+v", r)
-	}
-	if !reflect.DeepEqual(r.FilesOwned, []string{"api/app.py"}) {
-		t.Errorf("FilesOwned not mapped: %v", r.FilesOwned)
 	}
 	if !reflect.DeepEqual(r.DependsOn, []string{"requirement.test.0"}) {
 		t.Errorf("DependsOn not mapped: %v", r.DependsOn)

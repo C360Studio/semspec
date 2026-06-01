@@ -353,24 +353,20 @@ func TestValidateRequirementCapabilityCoverage(t *testing.T) {
 	}
 }
 
-func TestFindDocsOnlyCapabilities(t *testing.T) {
+// TestFindDocsOnlyCapabilities_IsNoOpPostADR043 pins that
+// FindDocsOnlyCapabilities returns nil unconditionally after ADR-043 Move 4
+// removed Requirement.FilesOwned. The architectural-layer + story-layer
+// equivalents (architecture.component_implementation_files_doc_only and
+// story.docs_only_files_owned) catch the same shape upstream.
+func TestFindDocsOnlyCapabilities_IsNoOpPostADR043(t *testing.T) {
 	exp := &Exploration{
 		Capabilities: []Capability{
 			{Name: "docs-cap", Lifecycle: CapabilityNew, Description: "Docs only."},
-			{Name: "mixed-cap", Lifecycle: CapabilityNew, Description: "Mixed files."},
-			{Name: "impl-cap", Lifecycle: CapabilityNew, Description: "Impl only."},
-			{Name: "no-req-cap", Lifecycle: CapabilityNew, Description: "Orphan."},
 		},
 	}
-	reqs := []Requirement{
-		{ID: "r1", CapabilityName: "docs-cap", FilesOwned: []string{"README.md", "docs/x.md"}},
-		{ID: "r2", CapabilityName: "mixed-cap", FilesOwned: []string{"x.go", "x.md"}},
-		{ID: "r3", CapabilityName: "impl-cap", FilesOwned: []string{"impl.go"}},
-		// no-req-cap has no req — caught by orphan check, not docs-only
-	}
-	got := FindDocsOnlyCapabilities(exp, reqs)
-	if len(got) != 1 || got[0] != "docs-cap" {
-		t.Errorf("expected [docs-cap], got %v", got)
+	reqs := []Requirement{{ID: "r1", CapabilityName: "docs-cap"}}
+	if got := FindDocsOnlyCapabilities(exp, reqs); got != nil {
+		t.Errorf("expected nil (no-op post-ADR-043), got %v", got)
 	}
 }
 

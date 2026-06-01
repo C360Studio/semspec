@@ -217,7 +217,7 @@ func requirementsSchema() map[string]any {
 		"properties": map[string]any{
 			"requirements": map[string]any{
 				"type":        "array",
-				"description": "List of testable requirements. Each requirement runs in a parallel git worktree at execution time; files_owned and depends_on are how the planner tells the executor whether two requirements can run concurrently or must serialize. Without these, the validator rejects.",
+				"description": "List of testable requirements — PRD scope per ADR-043 Move 4. Each Requirement carries intent + acceptance criteria; file-path determination lives downstream (Winston declares implementation_files per component, Sarah selects components per Story). The depends_on edges express capability-level ordering — execution sequencing moves to Story.depends_on after Sarah shards.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
@@ -227,24 +227,19 @@ func requirementsSchema() map[string]any {
 						},
 						"description": map[string]any{
 							"type":        "string",
-							"description": "Detailed requirement description",
-						},
-						"files_owned": map[string]any{
-							"type":        "array",
-							"items":       map[string]any{"type": "string"},
-							"description": "MANDATORY when there's more than one requirement. Workspace-relative paths this requirement is allowed to modify, drawn from plan.scope.include. Required by the partition validator: the executor uses this to decide whether two requirements can run in parallel branches or must serialize. Empty arrays are rejected.",
+							"description": "Detailed requirement description — intent + acceptance criteria. 1-3 sentences of what the system MUST do (SHALL/MUST normative language).",
 						},
 						"depends_on": map[string]any{
 							"type":        "array",
 							"items":       map[string]any{"type": "string"},
-							"description": "Optional list of prerequisite requirement titles. Use when one requirement must finish before another, or when two requirements legitimately need to write to the same file (impl + its test, define + use). The executor sequences depends_on chains so the dependent rebases on the prerequisite's merge commit.",
+							"description": "Prerequisite requirement titles. Express capability-level intent ordering (auth before session). Execution-time sequencing (parallel vs. serial) lives on Story.depends_on after the architecture + story-prep phases.",
 						},
 						"capability_name": map[string]any{
 							"type":        "string",
 							"description": "Kebab-case name of the capability this requirement implements. When the prompt includes a '## Capabilities' block, set this to one of the listed capability names exactly. When no Capabilities block is present, set to empty string. Field is required on the wire even when empty.",
 						},
 					},
-					"required":             []string{"title", "description", "files_owned", "depends_on", "capability_name"},
+					"required":             []string{"title", "description", "depends_on", "capability_name"},
 					"additionalProperties": false,
 				},
 			},

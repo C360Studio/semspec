@@ -821,12 +821,14 @@ func TestSoftwareToolErrorLoopEscapeHatch(t *testing.T) {
 	}
 }
 
-// TestSoftwareRequirementGeneratorFilesOwned pins the dial-#1 prompt landing
-// in the right persona. The first attempt edited workflow/prompts/
-// requirement_generator.go which was dead code and never reached Gemini —
-// the live persona is in this domain registry. This test fails if a future
-// refactor drops the files_owned guidance.
-func TestSoftwareRequirementGeneratorFilesOwned(t *testing.T) {
+// TestSoftwareRequirementGeneratorPostADR043 pins the ADR-043 Move 4 prompt
+// shape: John's persona is now PRD-scoped and explicitly does NOT emit
+// files_owned. Files belong to Stories (Sarah) per ADR-043. The previous
+// version of this test pinned the pre-ADR-043 files_owned-partition guidance;
+// that prompt block was deleted alongside the schema field. If a future
+// refactor accidentally re-introduces files_owned guidance to John's prompt,
+// this test catches it.
+func TestSoftwareRequirementGeneratorPostADR043(t *testing.T) {
 	r := prompt.NewRegistry()
 	r.RegisterAll(Software()...)
 	a := prompt.NewAssembler(r)
@@ -837,50 +839,29 @@ func TestSoftwareRequirementGeneratorFilesOwned(t *testing.T) {
 		AvailableTools: []string{"submit_work", "graph_summary"},
 	})
 
+	// John's PRD-scope content must still appear.
 	mustContain := []string{
-		"files_owned",
 		"depends_on",
-		"Partition files across requirements",
-		"merge fails",
-		"prefer ONE requirement that owns BOTH",
-		// Fan-in guidance for shared registration files (main.go, app.tsx, etc.).
-		// Without it, qwen3-class models put main.go in every requirement's
-		// files_owned in parallel and burn the retry budget on the same mistake.
-		"Shared registration files",
-		"fan-in",
-		"final \"wire-up\" requirement",
-		// 3-req example in the output-format fragment must mention the pattern.
-		"fan-in pattern",
-		"feature requirements DO NOT list main.go",
-		// First-conflict-only caveat lets retries see the whole partition,
-		// not just the validator's first complaint.
-		"only reports the FIRST conflicting pair",
-		// 2026-05-04 anti-example for impl + test on the same surface
-		// — qwen3-moe regenerated this exact shape after the
-		// 2026-05-02 fan-in fix. Worked-example anchor stops the
-		// reasoning-from-scratch loop on every retry.
-		"ANTI-EXAMPLE",
-		"Splitting \"implement\" from \"test\"",
-		"Option (a), consolidate",
-		"Option (b), depends_on",
-		// 2026-05-08 take-23 fix: req-gen had been told only
-		// "drawn from the plan's scope.include" — completely ignored
-		// scope.create. Result: planner said create internal/health/,
-		// req-gen put internal/auth/* into files_owned, dev wrote in
-		// the wrong dir for 5 cycles. Persona now must explicitly name
-		// BOTH buckets and call out the take-23 failure mode by name.
-		"files_owned is drawn from BOTH scope.include AND scope.create",
-		"existing files the requirement may MODIFY",
-		"new files the plan intends to ADD",
-		// Worked example must demonstrate the rule it's teaching:
-		// scope.create paths flowing into files_owned alongside
-		// scope.include paths.
-		"Plan it's working from",
-		"scope.create",
+		"Capability-level prereq ordering",
+		"ADR-043 Move 4 moved file ownership downstream",
+		"Do NOT emit files_owned",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(result.SystemMessage, want) {
-			t.Errorf("requirement-generator persona missing %q — dial #1 prompt did not land", want)
+			t.Errorf("requirement-generator persona missing %q — ADR-043 Move 4 narrowing didn't land", want)
+		}
+	}
+
+	// The pre-ADR-043 files_owned-partition guidance must NOT appear.
+	mustNotContain := []string{
+		"Partition files across requirements",
+		"prefer ONE requirement that owns BOTH",
+		"only reports the FIRST conflicting pair",
+		"Splitting \"implement\" from \"test\"",
+	}
+	for _, banned := range mustNotContain {
+		if strings.Contains(result.SystemMessage, banned) {
+			t.Errorf("requirement-generator persona still contains pre-ADR-043 %q — sweep was incomplete", banned)
 		}
 	}
 }
