@@ -169,16 +169,50 @@ func TestTopoSortStoryIDs_CycleErrors(t *testing.T) {
 	}
 }
 
-func TestTopoSortStoryIDs_UnknownDependencyErrors(t *testing.T) {
+// TestTopoSortStoryIDs_CrossRequirementDependsOnSilentlyDropped pins the
+// smoke-6 regression: when Sarah authors Story.DependsOn referencing a
+// Story on another requirement (e.g. story.x.2.1 depends_on=[story.x.1.1]
+// where story.x.1.1 belongs to req 1), the topo-sort over req 2's
+// Stories must NOT treat that cross-requirement reference as a fatal
+// "unknown story" error. Cross-requirement ordering is enforced upstream
+// by Requirement.DependsOn at the scenario-orchestrator; the topo-sort's
+// job is intra-requirement ordering only.
+//
+// Smoke 6 (2026-06-01 mavlink-hard) hit this when Sarah produced
+// Story.DependsOn that exactly mirrored the Requirement.DependsOn graph
+// — semantically redundant. Pre-fix, this rejected 3 of 5 requirements
+// with "topo-sort stories failed: story ... depends on unknown story ...".
+func TestTopoSortStoryIDs_CrossRequirementDependsOnSilentlyDropped(t *testing.T) {
+	// Simulate req 2's story slice. The lone story has a DependsOn that
+	// points at a story belonging to req 1 (not in this slice).
 	stories := []workflow.Story{
-		{ID: "s1", DependsOn: []string{"ghost"}},
+		{ID: "story.x.2.1", DependsOn: []string{"story.x.1.1"}},
 	}
-	_, err := topoSortStoryIDs(stories)
-	if err == nil {
-		t.Fatal("expected unknown-dependency error")
+	got, err := topoSortStoryIDs(stories)
+	if err != nil {
+		t.Fatalf("cross-requirement DependsOn must NOT error; got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "unknown") {
-		t.Errorf("error %q missing 'unknown'", err.Error())
+	if len(got) != 1 || got[0] != "story.x.2.1" {
+		t.Errorf("got %v, want [story.x.2.1]", got)
+	}
+}
+
+// TestTopoSortStoryIDs_MixedLocalAndCrossReqDepsRetainsLocalOrder pins
+// that local DependsOn is still honored when cross-req refs are mixed
+// in. The local ordering wins; cross-req refs are dropped silently.
+func TestTopoSortStoryIDs_MixedLocalAndCrossReqDepsRetainsLocalOrder(t *testing.T) {
+	stories := []workflow.Story{
+		{ID: "story.x.2.2", DependsOn: []string{"story.x.2.1", "story.x.1.1"}}, // local + cross-req
+		{ID: "story.x.2.1", DependsOn: []string{"story.x.1.1"}},                // cross-req only
+	}
+	got, err := topoSortStoryIDs(stories)
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	// Local dep wins: 2.1 must precede 2.2. Cross-req refs ignored.
+	want := []string{"story.x.2.1", "story.x.2.2"}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("got %v, want %v", got, want)
 	}
 }
 
