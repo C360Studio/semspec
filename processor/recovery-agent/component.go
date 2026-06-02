@@ -697,26 +697,29 @@ func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason st
 }
 
 // recoveryActionToPlanDecisionKind maps a RecoveryAction to the
-// PlanDecision kind that drives the cascade. Recoverable actions go
-// through requirement_change so the cascade dirty-marks the req for
-// re-run; terminal actions go through execution_exhausted so plan-manager
-// auto-archives when the subject req reaches a non-failed terminal state.
+// PlanDecision kind that drives the cascade.
 //
-// story_reprepare (ADR-043 PR 4i) maps to requirement_change because the
-// cascade target is the same: dirty-mark the parent requirement so the
-// downstream chain (Sarah's preparing_stories → ready_for_execution)
-// re-runs. The distinction between story_reprepare and the other
-// requirement_change actions surfaces in the PlanDecision rationale text,
-// which plan-manager threads into Sarah's RecoveryHint on the next
-// dispatch — Sarah sees "the wedge happened because <X>; re-shard with
-// <Y> in mind."
+//   - refine_prompt / narrow_scope / split_req → requirement_change.
+//     Cascade dirty-marks scenarios for the affected requirement; the
+//     executor re-runs with the same Story DAG.
+//   - story_reprepare → story_reprepare. Distinct from requirement_change
+//     because the cascade target is Stories + Scenarios (not just
+//     Scenarios) AND plan-manager drives stories_generated →
+//     preparing_stories on accept so Sarah actually re-runs with
+//     Story.RecoveryHint set. Pre-Train-C, story_reprepare mapped to
+//     requirement_change, which silently degraded into a scenarios-only
+//     cascade that left Sarah's stories unchanged.
+//   - escalate_human / mark_unrecoverable → execution_exhausted. Terminal;
+//     plan-manager auto-archives when the subject req reaches a non-failed
+//     terminal state.
 func recoveryActionToPlanDecisionKind(action payloads.RecoveryActionKind) workflow.PlanDecisionKind {
 	switch action {
 	case payloads.RecoveryActionRefinePrompt,
 		payloads.RecoveryActionNarrowScope,
-		payloads.RecoveryActionSplitReq,
-		payloads.RecoveryActionStoryReprepare:
+		payloads.RecoveryActionSplitReq:
 		return workflow.PlanDecisionKindRequirementChange
+	case payloads.RecoveryActionStoryReprepare:
+		return workflow.PlanDecisionKindStoryReprepare
 	case payloads.RecoveryActionEscalateHuman, payloads.RecoveryActionMarkUnrecoverable:
 		return workflow.PlanDecisionKindExecutionExhausted
 	default:

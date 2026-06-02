@@ -1638,14 +1638,21 @@ func (s PlanDecisionStatus) CanTransitionTo(target PlanDecisionStatus) bool {
 
 // PlanDecisionKind narrows the intent of a PlanDecision so downstream handlers
 // (cascade, UI, plan-manager auto-close) dispatch correctly. Same container,
-// two distinct semantics:
+// three distinct semantics:
 //
 //	requirement_change  — something proposes to mutate the plan's requirements
-//	                      (e.g. qa-reviewer needs_changes). Accept runs cascade.
+//	                      (e.g. qa-reviewer needs_changes). Accept runs cascade
+//	                      against scenarios for the affected requirement.
 //	execution_exhausted — a requirement exhausted its retry budget and needs a
 //	                      human to decide next step. Accept is acknowledgement
 //	                      only; the actual remedy is taken via existing retry /
 //	                      force-complete / reject endpoints.
+//	story_reprepare     — recovery analysis points at Sarah's story-shaping
+//	                      (ADR-043 Move 3) as the source of the wedge. Accept
+//	                      runs cascade against the affected Stories + scenarios,
+//	                      writes the diagnosis to Story.RecoveryHint, and drives
+//	                      stories_generated → preparing_stories so Sarah re-runs
+//	                      with the failure context.
 type PlanDecisionKind string
 
 const (
@@ -1658,6 +1665,20 @@ const (
 	// endpoints, and plan-manager auto-archives the decision when the
 	// subject requirement reaches a non-failed terminal state.
 	PlanDecisionKindExecutionExhausted PlanDecisionKind = "execution_exhausted"
+	// PlanDecisionKindStoryReprepare marks a decision proposing that Sarah
+	// re-prep the affected Stories. Distinct from requirement_change because
+	// the cascade target is Stories + Scenarios (not just Scenarios) AND
+	// accepting the decision drives the back-transition stories_generated →
+	// preparing_stories. Sarah's persona prompt consumes Story.RecoveryHint
+	// (written by applyRecoveryHint at accept time) so she sees the wedge
+	// diagnosis on re-prep.
+	//
+	// ADR-043 Move 3 introduced Story-level decomposition between
+	// requirements and execution; pre-this-kind the recovery vocabulary had
+	// no action targeting Sarah's layer, so wedges originating from
+	// story-shaping degraded into requirement_change cascades that didn't
+	// actually re-run Sarah. Closes the cross-pass synthesis Train C.
+	PlanDecisionKindStoryReprepare PlanDecisionKind = "story_reprepare"
 )
 
 // String returns the string representation of the plan decision kind.
@@ -1668,7 +1689,9 @@ func (k PlanDecisionKind) String() string {
 // IsValid reports whether the kind is a known value.
 func (k PlanDecisionKind) IsValid() bool {
 	switch k {
-	case PlanDecisionKindRequirementChange, PlanDecisionKindExecutionExhausted:
+	case PlanDecisionKindRequirementChange,
+		PlanDecisionKindExecutionExhausted,
+		PlanDecisionKindStoryReprepare:
 		return true
 	default:
 		return false
