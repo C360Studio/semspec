@@ -172,8 +172,16 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		const arch = plan.architecture!;
 		expect(Array.isArray(arch.actors)).toBe(true);
 		expect(arch.actors.length).toBeGreaterThan(0);
+		// integrations is OPTIONAL for purely-internal capabilities. The
+		// validator's validateIntegrationUpstreamPairing (Train D / Pass-4
+		// P4-H5) only requires the pairing when integrations[] is non-
+		// empty; an empty list is valid for capabilities with no external
+		// system. The /health endpoint is the canonical example —
+		// gemini-pro emitted integrations:[]any(0) on 2026-06-02 and the
+		// ADR-043 capability-coverage validator accepted it. Same shape
+		// as the May-3 technology_choices fix (commit c4b937c). Assert
+		// the wire type only; don't require a count > 0.
 		expect(Array.isArray(arch.integrations)).toBe(true);
-		expect(arch.integrations.length).toBeGreaterThan(0);
 		expect(arch.test_surface).toBeDefined();
 		const techChoiceCount = Array.isArray(arch.technology_choices)
 			? arch.technology_choices.length
