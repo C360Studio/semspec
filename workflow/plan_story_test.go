@@ -88,8 +88,37 @@ func TestValidateStory(t *testing.T) {
 			story: Story{ID: "s1", RequirementID: "r1", Title: "T", Status: StoryStatusPending},
 		},
 		{
-			name:  "empty status (freshly generated) is treated as pending",
-			story: Story{ID: "s1", RequirementID: "r1", Title: "T"},
+			name: "empty status (Sarah signed off via omitempty) — readiness invariants apply",
+			story: Story{
+				ID: "s1", RequirementID: "r1", Title: "T",
+				FilesOwned: []string{"src/a.go"},
+				Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "impl"}},
+			},
+		},
+		{
+			name:      "empty status + empty files_owned rejected (Train D — Pass-3 S-C1 / Pass-4 P4-C4)",
+			story:     Story{ID: "s1", RequirementID: "r1", Title: "T"},
+			wantErr:   ErrInvalidStoryStructure,
+			errPhrase: "empty files_owned",
+		},
+		{
+			name: "empty status + empty tasks rejected (Train D — Pass-3 S-C1 / Pass-4 P4-C4)",
+			story: Story{
+				ID: "s1", RequirementID: "r1", Title: "T",
+				FilesOwned: []string{"src/a.go"},
+			},
+			wantErr:   ErrInvalidStoryStructure,
+			errPhrase: "empty tasks",
+		},
+		{
+			name: "empty status + docs-only files_owned rejected (Train D — Pass-3 S-C1 / Pass-4 P4-C4)",
+			story: Story{
+				ID: "s1", RequirementID: "r1", Title: "T",
+				FilesOwned: []string{"docs/notes.md"},
+				Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "impl"}},
+			},
+			wantErr:   ErrInvalidStoryStructure,
+			errPhrase: "only documentation files",
 		},
 		{
 			name:      "missing ID rejected",
