@@ -287,8 +287,11 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 		return nil, fmt.Errorf("proposal %q not found in slug %q", req.ProposalID, req.Slug)
 	}
 
-	// Run the cascade: pure business logic, no I/O.
-	result, err := cascade.PlanDecision(target, plan.Scenarios)
+	// Run the cascade: pure business logic, no I/O. Stories are passed in
+	// so the cascade can branch on Kind=story_reprepare (Train C) — the
+	// existing requirement_change path ignores stories and stays
+	// behavior-identical.
+	result, err := cascade.PlanDecision(target, plan.Stories, plan.Scenarios)
 	if err != nil {
 		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}

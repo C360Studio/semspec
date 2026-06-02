@@ -9,7 +9,7 @@ import (
 // TestPlanDecision_NilProposal verifies that a nil proposal returns an error
 // immediately, before any scenario filtering.
 func TestPlanDecision_NilProposal(t *testing.T) {
-	_, err := PlanDecision(nil, nil)
+	_, err := PlanDecision(nil, nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil proposal")
 	}
@@ -23,7 +23,7 @@ func TestPlanDecision_NoAffectedRequirements(t *testing.T) {
 		AffectedReqIDs: []string{}, // empty — returns before filtering scenarios
 	}
 
-	result, err := PlanDecision(proposal, nil)
+	result, err := PlanDecision(proposal, nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
