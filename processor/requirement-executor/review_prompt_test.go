@@ -89,7 +89,7 @@ func TestBuildReviewPrompt_TierAwareContract(t *testing.T) {
 			},
 		},
 	}
-	prompt := c.buildReviewPrompt(exec)
+	prompt := c.buildReviewPrompt(exec, exec.Scenarios)
 
 	// Load-bearing contract phrases the persona prompt + this scaffold must
 	// carry to the LLM. If a future edit drops these, the issue-#37 fix is
@@ -132,7 +132,7 @@ func TestBuildReviewPrompt_SmokeAndE2EDoNotBlock(t *testing.T) {
 			{ID: "scn.e2e.1", Tags: []string{workflow.TierE2E}, Given: "g", When: "w", Then: []string{"t"}},
 		},
 	}
-	prompt := c.buildReviewPrompt(exec)
+	prompt := c.buildReviewPrompt(exec, exec.Scenarios)
 
 	// Both @smoke and @e2e sections must include the do-not-block clause.
 	occurrences := strings.Count(prompt, "Do NOT block dev approval")
@@ -152,7 +152,7 @@ func TestBuildReviewPrompt_LegacyUntaggedScenariosKeepWorking(t *testing.T) {
 			{ID: "scn.1", Given: "g", When: "w", Then: []string{"t"}},
 		},
 	}
-	prompt := c.buildReviewPrompt(exec)
+	prompt := c.buildReviewPrompt(exec, exec.Scenarios)
 
 	if !strings.Contains(prompt, "Untagged scenarios (legacy / pre-ADR-041)") {
 		t.Errorf("expected legacy section header, got:\n%s", prompt)
@@ -183,7 +183,7 @@ func TestBuildReviewPrompt_FullStackProducesAllTiers(t *testing.T) {
 			{ID: "e", Tags: []string{workflow.TierE2E}, Given: "g", When: "w", Then: []string{"t"}},
 		},
 	}
-	prompt := c.buildReviewPrompt(exec)
+	prompt := c.buildReviewPrompt(exec, exec.Scenarios)
 
 	// Find each section header's index; they must appear in pyramid order.
 	headers := []string{
