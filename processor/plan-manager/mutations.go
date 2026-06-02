@@ -56,10 +56,23 @@ type RequirementsMutationRequest struct {
 	TraceID      string                 `json:"trace_id,omitempty"`
 }
 
-// ScenariosMutationRequest is sent by the scenario-generator for a single requirement.
+// ScenariosMutationRequest is sent by the scenario-generator for a single
+// (Requirement, Story) batch.
+//
+// StoryID identifies the Story this batch belongs to and scopes the merge
+// semantics in handleScenariosMutation: when set, only scenarios for the
+// matching (RequirementID, StoryID) pair are wiped before appending — so
+// parallel per-Story dispatches under the same Requirement preserve each
+// other's batches.
+//
+// StoryID is omitempty for back-compat: pre-Sarah plans and mock fixtures
+// dispatch in legacy per-Requirement mode where Bob authors one batch for
+// the entire Requirement. The handler falls back to wipe-by-RequirementID
+// in that case, matching pre-ADR-043 behavior.
 type ScenariosMutationRequest struct {
 	Slug          string              `json:"slug"`
 	RequirementID string              `json:"requirement_id"`
+	StoryID       string              `json:"story_id,omitempty"`
 	Scenarios     []workflow.Scenario `json:"scenarios"`
 	TraceID       string              `json:"trace_id,omitempty"`
 }
@@ -431,6 +444,22 @@ func ensureScopeCreateCoversStories(scope workflow.Scope, stories []workflow.Sto
 	return scope
 }
 
+// scenarioMatchesMutationScope reports whether an existing scenario should be
+// wiped by the incoming mutation. Per-Story dispatch (StoryID non-empty) wipes
+// only scenarios matching BOTH (RequirementID, StoryID) so sibling Stories'
+// scenarios survive. Legacy per-Requirement dispatch (StoryID empty) wipes
+// every scenario under the RequirementID for back-compat with pre-Sarah
+// plans and mock fixtures.
+func scenarioMatchesMutationScope(existing workflow.Scenario, req ScenariosMutationRequest) bool {
+	if existing.RequirementID != req.RequirementID {
+		return false
+	}
+	if req.StoryID == "" {
+		return true
+	}
+	return existing.StoryID == req.StoryID
+}
+
 // handleScenariosMutation saves scenarios for a requirement inline on the plan and checks convergence.
 func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) MutationResponse {
 	var req ScenariosMutationRequest
@@ -453,13 +482,28 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 		return MutationResponse{Success: false, Error: "plan not found"}
 	}
 
-	// Merge: replace scenarios for this requirement, keep others.
+	// Merge semantic depends on whether the dispatch identified a Story.
+	//
+	//  - StoryID set (per-Story dispatch, ADR-043 PR 4j): wipe only scenarios
+	//    matching BOTH (RequirementID, StoryID), keep everything else. Two
+	//    parallel Story dispatches under the same Requirement preserve each
+	//    other's batches.
+	//  - StoryID empty (legacy per-Requirement dispatch, pre-Sarah / mock):
+	//    wipe ALL scenarios for the RequirementID, matching pre-ADR-043
+	//    behavior. Sarah's per-Story chain is opt-in via the wire shape; the
+	//    fallback keeps mock fixtures and pre-Sarah plans working unchanged.
+	//
+	// Closes go-reviewer Pass-2 finding C2: pre-fix, parallel per-Story
+	// dispatches under the same Requirement silently dropped each other's
+	// batches because the merge keyed only on RequirementID. Smoke-6 didn't
+	// surface it because every fixture had exactly 1 Story per Requirement.
 	if len(req.Scenarios) > 0 {
 		var kept []workflow.Scenario
 		for _, s := range plan.Scenarios {
-			if s.RequirementID != req.RequirementID {
-				kept = append(kept, s)
+			if scenarioMatchesMutationScope(s, req) {
+				continue
 			}
+			kept = append(kept, s)
 		}
 		plan.Scenarios = append(kept, req.Scenarios...)
 	}
@@ -467,6 +511,7 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 	c.logger.Info("Scenarios saved via mutation",
 		"slug", req.Slug,
 		"requirement_id", req.RequirementID,
+		"story_id", req.StoryID,
 		"count", len(req.Scenarios))
 
 	// Check convergence: do all requirements have at least one scenario?
