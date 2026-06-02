@@ -64,6 +64,40 @@ type Component struct {
 	// is no way to assert publishRecoveryRequested actually fires at the
 	// revision-cap / iteration-exhaustion / QA-rejection trigger points.
 	recoveryPublisher func(ctx context.Context, req *payloads.RecoveryRequested)
+
+	// slugMutexes serializes mutation handlers per plan slug. NATS dispatches
+	// each subscription's handler in its own goroutine, so two mutations for
+	// the same plan can interleave their get → mutate → save sequence and
+	// silently drop one update. Acquiring lockSlug(slug) at the top of every
+	// mutation handler bounds the read-modify-write to a single goroutine per
+	// slug. Mutations for distinct slugs continue to run in parallel.
+	//
+	// Lifecycle: lazy-create on first acquire via LoadOrStore; never deleted.
+	// Mutex memory is small and plan churn is low — leaving entries in place
+	// avoids the ABA issue of recreating a mutex while another goroutine still
+	// holds a reference to the old one. Closes go-reviewer Pass-4 P4-C1.
+	slugMutexes sync.Map
+}
+
+// lockSlug returns an unlock function that releases the per-slug mutex.
+// Empty slug returns a no-op unlock so the caller can still defer it; the
+// handler will fail validation on the empty slug separately. Lazy-creates
+// the mutex on first acquire — see slugMutexes godoc for the lifecycle
+// rationale.
+func (c *Component) lockSlug(slug string) func() {
+	if slug == "" {
+		return func() {}
+	}
+	v, _ := c.slugMutexes.LoadOrStore(slug, &sync.Mutex{})
+	m, ok := v.(*sync.Mutex)
+	if !ok {
+		// LoadOrStore stored or returned the *sync.Mutex we just initialized;
+		// the type assertion failing means another writer raced and stored a
+		// different type, which would be a bug. Defensive — should never fire.
+		return func() {}
+	}
+	m.Lock()
+	return m.Unlock
 }
 
 // loadPlanCached loads a plan from the store (cache → KV → graph fallback).
