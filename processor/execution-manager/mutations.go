@@ -12,14 +12,15 @@ import (
 // Mutation subjects — execution-manager is the single writer to EXECUTION_STATES.
 // requirement-executor and other components send mutations via request/reply.
 const (
-	execMutationTaskCreate   = "execution.mutation.task.create"
-	execMutationTaskPhase    = "execution.mutation.task.phase"
-	execMutationTaskComplete = "execution.mutation.task.complete"
-	execMutationReqCreate    = "execution.mutation.req.create"
-	execMutationReqPhase     = "execution.mutation.req.phase"
-	execMutationReqNode      = "execution.mutation.req.node"
-	execMutationReqReset     = "execution.mutation.req.reset"
-	execMutationClaim        = "execution.mutation.claim"
+	execMutationTaskCreate          = "execution.mutation.task.create"
+	execMutationTaskPhase           = "execution.mutation.task.phase"
+	execMutationTaskComplete        = "execution.mutation.task.complete"
+	execMutationReqCreate           = "execution.mutation.req.create"
+	execMutationReqPhase            = "execution.mutation.req.phase"
+	execMutationReqNode             = "execution.mutation.req.node"
+	execMutationReqReset            = "execution.mutation.req.reset"
+	execMutationReqResetNodeResults = "execution.mutation.req.reset_node_results"
+	execMutationClaim               = "execution.mutation.claim"
 )
 
 // ---------------------------------------------------------------------------
@@ -126,6 +127,18 @@ type ReqResetRequest struct {
 	Key string `json:"key"` // KV key: req.<slug>.<reqID>
 }
 
+// ReqResetNodeResultsRequest wipes the NodeResults slice on an existing
+// requirement execution KV entry without disturbing any other field.
+// Used by requirement-executor when a recovery resume or restructure
+// retry clears in-memory NodeResults — without this mutation, KV-side
+// NodeResults would accumulate stale entries from prior cycles and
+// reappear on the next restart via rebuildExecFromKV, inflating the
+// claim/observation gate's surface and the requirement-final file
+// aggregation. Closes go-reviewer Pass-1 finding H4.
+type ReqResetNodeResultsRequest struct {
+	Key string `json:"key"` // KV key: req.<slug>.<reqID>
+}
+
 // ReqNodeRequest updates DAG node state within a requirement execution.
 type ReqNodeRequest struct {
 	Key            string               `json:"key"`
@@ -170,6 +183,7 @@ func (c *Component) startExecMutationHandler(ctx context.Context) error {
 		{execMutationReqPhase, c.handleReqPhaseMutation},
 		{execMutationReqNode, c.handleReqNodeMutation},
 		{execMutationReqReset, c.handleReqResetMutation},
+		{execMutationReqResetNodeResults, c.handleReqResetNodeResultsMutation},
 		{execMutationClaim, c.handleExecClaimMutation},
 	}
 
@@ -514,6 +528,44 @@ func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) Exe
 	c.store.deleteReq(ctx, req.Key)
 
 	c.logger.Info("Requirement execution reset via mutation", "key", req.Key)
+	return ExecMutationResponse{Success: true}
+}
+
+// handleReqResetNodeResultsMutation wipes the NodeResults slice on an
+// existing requirement execution entry while leaving every other field
+// intact. Called from requirement-executor when a recovery resume or
+// restructure retry clears in-memory NodeResults; without this mutation
+// the KV-side slice (which handleReqNodeMutation only APPENDS to) would
+// accumulate stale entries from prior cycles and reappear on the next
+// restart via rebuildExecFromKV. Closes go-reviewer Pass-1 finding H4.
+//
+// Returns Success=true even when the key doesn't exist — the reset
+// semantics is idempotent and treating "no entry to reset" as success
+// keeps the producer's call site simple. A missing key here usually
+// means the exec was never persisted (unit-test mode or pre-create
+// failure); both are fine to no-op.
+func (c *Component) handleReqResetNodeResultsMutation(ctx context.Context, data []byte) ExecMutationResponse {
+	var req ReqResetNodeResultsRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Key == "" {
+		return ExecMutationResponse{Success: false, Error: "key required"}
+	}
+
+	exec, ok := c.store.getReq(req.Key)
+	if !ok {
+		c.logger.Debug("reset_node_results: no req entry, no-op", "key", req.Key)
+		return ExecMutationResponse{Success: true}
+	}
+
+	exec.NodeResults = nil
+
+	if err := c.store.saveReq(ctx, req.Key, exec); err != nil {
+		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Requirement NodeResults wiped via mutation", "key", req.Key)
 	return ExecMutationResponse{Success: true}
 }
 

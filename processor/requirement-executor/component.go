@@ -1760,6 +1760,13 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 	exec.CurrentNodeTaskID = ""
 	exec.VisitedNodes = make(map[string]bool)
 	exec.NodeResults = nil
+	// KV NodeResults is append-only; wipe it to mirror the in-memory reset
+	// or stale entries from the prior cycle reappear on the next restart.
+	// Closes Pass-1 H4 for the restructure-retry path.
+	if err := c.sendReqResetNodeResults(ctx, exec.storeKey); err != nil {
+		c.logger.Warn("Failed to wipe KV NodeResults on restructure retry",
+			"entity_id", exec.EntityID, "error", err)
+	}
 	exec.DirtyNodeIDs = nil
 	exec.ReviewVerdict = ""
 	exec.ReviewFeedback = ""
