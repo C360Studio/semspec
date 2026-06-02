@@ -53,7 +53,9 @@ const (
 // scenarioRetryPayload is the per-key context retryOrFail needs to re-dispatch
 // scenario generation: the original request and reviewFindings (preserved
 // across error retries per ADR-029 H1). Stored as the Payload field of a
-// dispatchretry.Entry under the composite "slug/requirementID" key.
+// dispatchretry.Entry under the composite key built by retryKey — that is
+// "slug/storyID" for per-Story dispatch (ADR-043 PR 4j) and "slug/requirementID"
+// for legacy per-Requirement dispatch.
 type scenarioRetryPayload struct {
 	req            *payloads.ScenarioGeneratorRequest
 	reviewFindings string
@@ -294,12 +296,12 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	// ADR-043 PR 4j — per-Story dispatch keys the retry/task state on
 	// StoryID; legacy per-Requirement dispatch falls back to RequirementID
 	// when no Story is in scope (pre-Sarah plans / mock fixtures).
-	retryKeyTail := req.RequirementID
+	taskIDSegment := req.RequirementID
 	if req.StoryID != "" {
-		retryKeyTail = req.StoryID
+		taskIDSegment = req.StoryID
 	}
-	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, retryKeyTail, uuid.New().String())
-	c.retry.SetActiveLoop(req.Slug+"/"+retryKeyTail, taskID)
+	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, taskIDSegment, uuid.New().String())
+	c.retry.SetActiveLoop(retryKey(req.Slug, req.RequirementID, req.StoryID), taskID)
 
 	scenCtx := &prompt.ScenarioGeneratorPromptContext{
 		PlanGoal:               req.PlanGoal,
@@ -527,12 +529,12 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 // PR 4b "first story owns the scenarios" lookup.
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug, requirementID, storyID string) {
 	c.updateLastActivity()
-	key := slug + "/" + requirementID
+	key := retryKey(slug, requirementID, storyID)
 
 	// Stale loop guard: drop completions from older dispatches that race a retry.
 	if c.retry.IsStaleLoop(key, loop.TaskID) {
 		c.logger.Debug("Dropping stale scenario loop completion (task ID mismatch)",
-			"slug", slug, "requirement_id", requirementID,
+			"slug", slug, "requirement_id", requirementID, "story_id", storyID,
 			"loop_task_id", loop.TaskID, "loop_id", loop.ID)
 		return
 	}
@@ -546,10 +548,11 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		c.logger.Error("Scenario generator agent loop failed",
 			"slug", slug,
 			"requirement_id", requirementID,
+			"story_id", storyID,
 			"loop_id", loop.ID,
 			"outcome", loop.Outcome,
 			"error", loopErrorMsg)
-		c.retryOrFail(ctx, slug, requirementID, loopErrorMsg)
+		c.retryOrFail(ctx, slug, requirementID, storyID, loopErrorMsg)
 		return
 	}
 
@@ -560,9 +563,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		c.logger.Error("Failed to parse scenarios from agent result",
 			"slug", slug,
 			"requirement_id", requirementID,
+			"story_id", storyID,
 			"loop_id", loop.ID,
 			"error", err)
-		c.retryOrFail(ctx, slug, requirementID, parseErrorMsg)
+		c.retryOrFail(ctx, slug, requirementID, storyID, parseErrorMsg)
 		return
 	}
 
@@ -652,12 +656,12 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // recovery path — the dispatch payload (request + reviewFindings) cannot be
 // reconstructed from the plan alone (we'd lose architecture context, etc.).
 // If the entry is missing on retry, fail-closed.
-func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, errorMsg string) {
-	key := slug + "/" + requirementID
+func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, storyID, errorMsg string) {
+	key := retryKey(slug, requirementID, storyID)
 
 	if _, ok := c.retry.Snapshot(key); !ok {
 		c.logger.Warn("retryOrFail: no retry state found, failing immediately",
-			"slug", slug, "requirement_id", requirementID)
+			"slug", slug, "requirement_id", requirementID, "story_id", storyID)
 		c.sendGenerationFailed(ctx, slug, errorMsg)
 		return
 	}
@@ -666,11 +670,11 @@ func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, errorM
 	if entry == nil {
 		if ctx.Err() != nil {
 			c.logger.Debug("retryOrFail aborted during backoff",
-				"slug", slug, "requirement_id", requirementID, "error", ctx.Err())
+				"slug", slug, "requirement_id", requirementID, "story_id", storyID, "error", ctx.Err())
 			return
 		}
 		c.logger.Warn("retryOrFail: lost retry context, failing immediately",
-			"slug", slug, "requirement_id", requirementID)
+			"slug", slug, "requirement_id", requirementID, "story_id", storyID)
 		c.sendGenerationFailed(ctx, slug, errorMsg)
 		return
 	}
@@ -864,6 +868,26 @@ func attachStoryIDs(scenarios []workflow.Scenario, plan *workflow.Plan, requirem
 	for i := range scenarios {
 		scenarios[i].StoryID = firstStoryID
 	}
+}
+
+// retryKey returns the dispatchretry.State key for a scenario-generator
+// dispatch. Per-Story dispatch (storyID non-empty) keys by storyID so two
+// Stories under one Requirement get distinct retry registry entries;
+// legacy per-Requirement dispatch keys by requirementID for back-compat
+// with pre-Sarah plans and mock fixtures.
+//
+// Closes go-reviewer Pass-2 finding C1: pre-fix, the producer
+// (dispatchPerStory / SetActiveLoop) keyed by storyID while the consumer
+// (handleLoopCompletion / retryOrFail / IsStaleLoop / Clear) keyed by
+// requirementID, so per-Story Track entries were written and never
+// looked up. The result was a silent disablement of the retry registry
+// in per-Story mode — a single Bob parse glitch hard-failed the entire
+// plan with zero retries despite MaxGenerationRetries.
+func retryKey(slug, requirementID, storyID string) string {
+	if storyID != "" {
+		return slug + "/" + storyID
+	}
+	return slug + "/" + requirementID
 }
 
 // requirementSequence extracts the trailing sequence suffix from a requirement ID.

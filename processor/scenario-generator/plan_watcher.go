@@ -123,7 +123,7 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 // carried in the payload so Bob's prompt can author Story-scoped scenarios.
 func (c *Component) dispatchPerStory(ctx context.Context, plan *workflow.Plan, req workflow.Requirement, story workflow.Story, required []payloads.RequiredTier, archContext string) {
 	genReq := buildStoryScopedRequest(plan, req, story, required, archContext)
-	key := plan.Slug + "/" + story.ID
+	key := retryKey(plan.Slug, req.ID, story.ID)
 	c.retry.Track(key, &scenarioRetryPayload{req: genReq, reviewFindings: plan.ReviewFormattedFindings})
 	c.dispatchScenarioGenerator(ctx, genReq, "", plan.ReviewFormattedFindings)
 }
@@ -134,7 +134,7 @@ func (c *Component) dispatchPerStory(ctx context.Context, plan *workflow.Plan, r
 // falls back to the "first story owns the scenarios" lookup.
 func (c *Component) dispatchPerRequirementLegacy(ctx context.Context, plan *workflow.Plan, req workflow.Requirement, required []payloads.RequiredTier, archContext string) {
 	genReq := buildRequirementScopedRequest(plan, req, required, archContext)
-	key := plan.Slug + "/" + req.ID
+	key := retryKey(plan.Slug, req.ID, "")
 	c.retry.Track(key, &scenarioRetryPayload{req: genReq, reviewFindings: plan.ReviewFormattedFindings})
 	c.dispatchScenarioGenerator(ctx, genReq, "", plan.ReviewFormattedFindings)
 }
