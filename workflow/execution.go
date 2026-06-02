@@ -106,10 +106,22 @@ func IsTerminalTaskStage(phase string) bool {
 }
 
 // NodeResult tracks output from a completed DAG node.
+//
+// CommitSHA is the merge commit produced when the node's worktree was
+// folded back onto the requirement branch. It is the durable observation
+// of "this node really wrote the files it claimed." requirement-executor's
+// RequireCommitObservation gate compares NodeResult.CommitSHA against
+// NodeResult.FilesModified to catch the bug-9 pattern (node claims
+// files_modified without producing a commit). Pre-this-field, the SHA
+// was set in the in-memory shadow type but dropped at the wire boundary,
+// so after a process restart the gate found every restored NodeResult
+// with empty CommitSHA → false-failed every requirement that hit it.
+// Closes go-reviewer Pass-1 finding C4.
 type NodeResult struct {
 	NodeID        string   `json:"node_id"`
 	FilesModified []string `json:"files_modified,omitempty"`
 	Summary       string   `json:"summary,omitempty"`
+	CommitSHA     string   `json:"commit_sha,omitempty"`
 }
 
 // RequirementExecution is the KV-serializable state for a requirement execution.
