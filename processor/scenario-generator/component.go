@@ -602,10 +602,13 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	// Build a synthetic trigger for publishResults — it only needs Slug,
-	// RequirementID, and TraceID (which we leave empty for agentic-dispatch path).
+	// RequirementID, StoryID, and TraceID (TraceID is left empty for the
+	// agentic-dispatch path). StoryID identifies the (Req, Story) merge
+	// scope plan-manager uses to avoid wiping sibling Stories' scenarios.
 	trigger := &payloads.ScenarioGeneratorRequest{
 		Slug:          slug,
 		RequirementID: requirementID,
+		StoryID:       storyID,
 	}
 
 	if err := c.publishResults(ctx, trigger, scenarios); err != nil {
@@ -915,6 +918,36 @@ func extractJSONObject(s string) string {
 // Event publication
 // ---------------------------------------------------------------------------
 
+// scenariosMutationPayload mirrors plan-manager's ScenariosMutationRequest
+// wire shape. Defined here so scenario-generator does not import plan-
+// manager (avoids a producer→consumer package cycle).
+//
+// StoryID is omitempty: empty for legacy per-Requirement dispatch (pre-Sarah
+// plans, mock fixtures), populated for per-Story dispatch (ADR-043 PR 4j).
+// The consumer (handleScenariosMutation) uses StoryID to scope its merge
+// wipe so parallel Stories under one Requirement preserve each other's
+// scenarios. Closes go-reviewer Pass-2 C2.
+type scenariosMutationPayload struct {
+	Slug          string              `json:"slug"`
+	RequirementID string              `json:"requirement_id"`
+	StoryID       string              `json:"story_id,omitempty"`
+	Scenarios     []workflow.Scenario `json:"scenarios"`
+	TraceID       string              `json:"trace_id,omitempty"`
+}
+
+// buildScenariosMutationPayload marshals the wire payload plan-manager's
+// scenarios mutation handler consumes. Extracted from publishResults so
+// the wire-shape contract is unit-testable without a NATS server.
+func buildScenariosMutationPayload(trigger *payloads.ScenarioGeneratorRequest, scenarios []workflow.Scenario) ([]byte, error) {
+	return json.Marshal(scenariosMutationPayload{
+		Slug:          trigger.Slug,
+		RequirementID: trigger.RequirementID,
+		StoryID:       trigger.StoryID,
+		Scenarios:     scenarios,
+		TraceID:       trigger.TraceID,
+	})
+}
+
 // publishResults publishes a ScenariosForRequirementGeneratedEvent carrying
 // the full scenario data. Plan-manager (the single writer) handles persistence,
 // convergence checking, and status transitions.
@@ -923,20 +956,9 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Scenar
 		return fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Send results to plan-manager via request/reply (KV twofer — manager writes, watchers react).
-	mutationReq := struct {
-		Slug          string              `json:"slug"`
-		RequirementID string              `json:"requirement_id"`
-		Scenarios     []workflow.Scenario `json:"scenarios"`
-		TraceID       string              `json:"trace_id,omitempty"`
-	}{
-		Slug:          trigger.Slug,
-		RequirementID: trigger.RequirementID,
-		Scenarios:     scenarios,
-		TraceID:       trigger.TraceID,
-	}
-
-	data, err := json.Marshal(mutationReq)
+	// Send results to plan-manager via request/reply (KV twofer — manager writes,
+	// watchers react).
+	data, err := buildScenariosMutationPayload(trigger, scenarios)
 	if err != nil {
 		return fmt.Errorf("marshal scenarios mutation: %w", err)
 	}
@@ -967,6 +989,7 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Scenar
 	c.logger.Info("Scenarios sent to plan-manager via mutation",
 		"slug", trigger.Slug,
 		"requirement_id", trigger.RequirementID,
+		"story_id", trigger.StoryID,
 		"scenario_count", len(scenarios))
 
 	return nil

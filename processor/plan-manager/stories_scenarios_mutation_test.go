@@ -268,7 +268,7 @@ func TestHandleScenariosMutation(t *testing.T) {
 			},
 		},
 		{
-			name: "wipe-by-RequirementID: second batch on same req replaces prior",
+			name: "legacy fallback (StoryID empty): second batch on same req replaces prior",
 			setup: func(t *testing.T) (*Component, string) {
 				c := setupTestComponent(t)
 				plan := setupTestPlan(t, c, "scen-wipe")
@@ -284,20 +284,140 @@ func TestHandleScenariosMutation(t *testing.T) {
 			req: ScenariosMutationRequest{
 				Slug:          "scen-wipe",
 				RequirementID: "req.scen-wipe.1",
+				// StoryID left empty → legacy per-Requirement dispatch fallback.
 				Scenarios: []workflow.Scenario{
 					{ID: "scen.new1", RequirementID: "req.scen-wipe.1"},
 				},
 			},
 			wantSuccess: true,
-			// Pins Pass-2 C2 current behavior: prior scenarios for this RequirementID
-			// are wiped. Pinning this lets us catch the change of shape when we move
-			// to per-(Req,Story) wipe-replace in a follow-up PR.
+			// Pre-Sarah plans and mock fixtures dispatch without StoryID; the
+			// handler wipes ALL prior scenarios under the RequirementID to
+			// match pre-ADR-043 behavior. Pinned so subsequent producer
+			// migrations that drop the legacy mode flag this as a regression.
 			checkPlan: func(t *testing.T, plan *workflow.Plan) {
 				if len(plan.Scenarios) != 1 {
 					t.Errorf("Scenarios = %d, want 1 (old batch wiped, new batch kept)", len(plan.Scenarios))
 				}
 				if plan.Scenarios[0].ID != "scen.new1" {
 					t.Errorf("Scenarios[0].ID = %q, want scen.new1", plan.Scenarios[0].ID)
+				}
+			},
+		},
+		{
+			name: "per-Story merge: two Stories under same Req each persist their scenarios",
+			setup: func(t *testing.T) (*Component, string) {
+				c := setupTestComponent(t)
+				plan := setupTestPlan(t, c, "scen-per-story")
+				plan.Status = workflow.StatusGeneratingScenarios
+				plan.Requirements = []workflow.Requirement{{ID: "req.scen-per-story.1", Title: "R1"}}
+				// Story A already landed its scenarios.
+				plan.Scenarios = []workflow.Scenario{
+					{ID: "scen.A.1", RequirementID: "req.scen-per-story.1", StoryID: "story.A"},
+				}
+				_ = c.plans.save(ctx, plan)
+				return c, "scen-per-story"
+			},
+			req: ScenariosMutationRequest{
+				Slug:          "scen-per-story",
+				RequirementID: "req.scen-per-story.1",
+				StoryID:       "story.B",
+				Scenarios: []workflow.Scenario{
+					{ID: "scen.B.1", RequirementID: "req.scen-per-story.1", StoryID: "story.B"},
+				},
+			},
+			wantSuccess: true,
+			// Closes Pass-2 C2: Story B's mutation must not wipe Story A's
+			// scenarios on the same Requirement.
+			checkPlan: func(t *testing.T, plan *workflow.Plan) {
+				if len(plan.Scenarios) != 2 {
+					t.Fatalf("Scenarios = %d, want 2 (Story A preserved + Story B added)", len(plan.Scenarios))
+				}
+				ids := map[string]bool{}
+				for _, s := range plan.Scenarios {
+					ids[s.ID] = true
+				}
+				if !ids["scen.A.1"] || !ids["scen.B.1"] {
+					t.Errorf("Scenarios IDs = %v, want both scen.A.1 and scen.B.1", ids)
+				}
+			},
+		},
+		{
+			name: "per-Story re-dispatch (same StoryID) wipes only that Story's prior scenarios",
+			setup: func(t *testing.T) (*Component, string) {
+				c := setupTestComponent(t)
+				plan := setupTestPlan(t, c, "scen-redispatch")
+				plan.Status = workflow.StatusGeneratingScenarios
+				plan.Requirements = []workflow.Requirement{{ID: "req.scen-redispatch.1", Title: "R1"}}
+				// Both Stories already landed; Story B is going to re-dispatch.
+				plan.Scenarios = []workflow.Scenario{
+					{ID: "scen.A.1", RequirementID: "req.scen-redispatch.1", StoryID: "story.A"},
+					{ID: "scen.B.old1", RequirementID: "req.scen-redispatch.1", StoryID: "story.B"},
+					{ID: "scen.B.old2", RequirementID: "req.scen-redispatch.1", StoryID: "story.B"},
+				}
+				_ = c.plans.save(ctx, plan)
+				return c, "scen-redispatch"
+			},
+			req: ScenariosMutationRequest{
+				Slug:          "scen-redispatch",
+				RequirementID: "req.scen-redispatch.1",
+				StoryID:       "story.B",
+				Scenarios: []workflow.Scenario{
+					{ID: "scen.B.new", RequirementID: "req.scen-redispatch.1", StoryID: "story.B"},
+				},
+			},
+			wantSuccess: true,
+			// Pinned: Story B's old scenarios are wiped (same StoryID),
+			// Story A's scenario survives (different StoryID).
+			checkPlan: func(t *testing.T, plan *workflow.Plan) {
+				if len(plan.Scenarios) != 2 {
+					t.Fatalf("Scenarios = %d, want 2 (Story A preserved + Story B's new batch)", len(plan.Scenarios))
+				}
+				ids := map[string]bool{}
+				for _, s := range plan.Scenarios {
+					ids[s.ID] = true
+				}
+				if !ids["scen.A.1"] {
+					t.Errorf("Story A's scen.A.1 should survive sibling-Story re-dispatch")
+				}
+				if !ids["scen.B.new"] {
+					t.Errorf("Story B's new batch (scen.B.new) should be present")
+				}
+				if ids["scen.B.old1"] || ids["scen.B.old2"] {
+					t.Errorf("Story B's old scenarios should be wiped on same-StoryID re-dispatch")
+				}
+			},
+		},
+		{
+			name: "per-Story dispatch with StoryID set does NOT wipe legacy (StoryID empty) scenarios on same Req",
+			setup: func(t *testing.T) (*Component, string) {
+				c := setupTestComponent(t)
+				plan := setupTestPlan(t, c, "scen-mixed")
+				plan.Status = workflow.StatusGeneratingScenarios
+				plan.Requirements = []workflow.Requirement{{ID: "req.scen-mixed.1", Title: "R1"}}
+				// A legacy scenario (no StoryID) is already attached to this Req.
+				plan.Scenarios = []workflow.Scenario{
+					{ID: "scen.legacy", RequirementID: "req.scen-mixed.1"},
+				}
+				_ = c.plans.save(ctx, plan)
+				return c, "scen-mixed"
+			},
+			req: ScenariosMutationRequest{
+				Slug:          "scen-mixed",
+				RequirementID: "req.scen-mixed.1",
+				StoryID:       "story.X",
+				Scenarios: []workflow.Scenario{
+					{ID: "scen.X.1", RequirementID: "req.scen-mixed.1", StoryID: "story.X"},
+				},
+			},
+			wantSuccess: true,
+			// Per-Story mutation must not wipe sibling scenarios with empty
+			// StoryID — they belong to "no Story / legacy" and would only be
+			// touched by another empty-StoryID dispatch. Documents the
+			// mixed-state shape; production plans should converge to one mode
+			// per Req but the merge must be safe during the transition.
+			checkPlan: func(t *testing.T, plan *workflow.Plan) {
+				if len(plan.Scenarios) != 2 {
+					t.Errorf("Scenarios = %d, want 2 (legacy preserved + new Story.X added)", len(plan.Scenarios))
 				}
 			},
 		},
