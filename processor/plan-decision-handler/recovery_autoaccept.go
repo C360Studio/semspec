@@ -122,11 +122,22 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 }
 
 // shouldAutoAcceptRecovery is the gated filter — narrow on purpose.
-// Returns true iff the proposal is a recovery-agent-emitted
-// requirement_change proposal in proposed status with at least one
-// affected req to target. Everything else (qa-reviewer proposals,
-// execution_exhausted terminal records, human proposals) is left for
-// human review.
+// Returns true iff the proposal is a recovery-agent-emitted decision in
+// proposed status with at least one affected req to target AND its Kind
+// is in the auto-acceptable set:
+//
+//   - PlanDecisionKindRequirementChange — refine_prompt / narrow_scope /
+//     split_req recovery actions (the existing path).
+//   - PlanDecisionKindStoryReprepare — story_reprepare action (Train C
+//     step 4). The cascade dirty-marks Stories + scenarios; plan-manager
+//     drives stories_generated → preparing_stories so Sarah re-runs with
+//     the diagnosis as Story.RecoveryHint.
+//
+// Other kinds (execution_exhausted terminal records, qa-reviewer
+// proposals, human proposals) stay human-gated. AffectedReqIDs is the
+// load-bearing predicate for both auto-acceptable kinds: it scopes the
+// cascade target, and an empty list signals "the wedge isn't scoped to
+// specific work — needs human triage."
 func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	if dec == nil {
 		return false
@@ -137,7 +148,11 @@ func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	if dec.Status != workflow.PlanDecisionStatusProposed {
 		return false
 	}
-	if dec.Kind != workflow.PlanDecisionKindRequirementChange {
+	switch dec.Kind {
+	case workflow.PlanDecisionKindRequirementChange,
+		workflow.PlanDecisionKindStoryReprepare:
+		// auto-acceptable
+	default:
 		return false
 	}
 	if len(dec.AffectedReqIDs) == 0 {

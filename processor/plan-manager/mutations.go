@@ -1952,6 +1952,18 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 		applyRecoveryHint(plan, proposal)
 	}
 
+	// Mirror HTTP path: drive the stories_generated → preparing_stories
+	// back-transition when a story_reprepare PlanDecision is accepted.
+	// Clearing Stories matching the proposal scope is the "dirty mark"
+	// that makes Sarah's re-prep land on a clean slate. Train C step 4.
+	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
+		clearStoriesForReprepare(plan, proposal)
+		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusPreparingStories); err != nil {
+			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
+				"slug", req.Slug, "proposal_id", req.ProposalID, "current_status", plan.EffectiveStatus(), "error", err)
+		}
+	}
+
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan after auto-accepting plan_decision",
 			"slug", req.Slug, "proposal_id", req.ProposalID, "error", err)
