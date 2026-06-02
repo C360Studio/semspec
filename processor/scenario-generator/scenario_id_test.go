@@ -35,10 +35,10 @@ func TestScenarioIDFor_PerStoryShape(t *testing.T) {
 // segment so it composes with reqseq into the scenario ID.
 func TestStorySequence_ExtractsTrailingSeq(t *testing.T) {
 	cases := map[string]string{
-		"story.demo.1.1":   "1",
-		"story.demo.1.42":  "42",
-		"story.x.2.3":      "3",
-		"":                 "",
+		"story.demo.1.1":     "1",
+		"story.demo.1.42":    "42",
+		"story.x.2.3":        "3",
+		"":                   "",
 		"story-without-dots": "story-without-dots",
 	}
 	for in, want := range cases {
