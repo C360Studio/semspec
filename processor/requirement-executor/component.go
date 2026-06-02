@@ -527,7 +527,9 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		}
 	}
 
-	// Rebuild VisitedNodes from NodeResults.
+	// Rebuild VisitedNodes from NodeResults. CommitSHA is round-tripped so the
+	// claim/observation gate (handleApprovedClaimMismatchLocked) sees the
+	// merge commit for nodes that completed before the restart.
 	exec.VisitedNodes = make(map[string]bool, len(reqExec.NodeResults))
 	exec.NodeResults = make([]NodeResult, 0, len(reqExec.NodeResults))
 	for _, nr := range reqExec.NodeResults {
@@ -536,6 +538,7 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 			NodeID:        nr.NodeID,
 			FilesModified: nr.FilesModified,
 			Summary:       nr.Summary,
+			CommitSHA:     nr.CommitSHA,
 		})
 	}
 
@@ -567,16 +570,30 @@ func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementE
 	}
 
 	// Persist DAG state to EXECUTION_STATES for crash recovery.
-	// The DAGRaw + SortedNodeIDs fields let reconcileFromKV rebuild the full
-	// execution state without re-running the decomposer.
+	// The DAGRaw + SortedNodeIDs + SortedStoryIDs + CurrentStoryIdx fields let
+	// reconcileFromKV rebuild the full execution state without re-running the
+	// decomposer AND without losing the per-Story cursor (Pass-1 C1/C2).
 	dagRaw, _ := json.Marshal(*dag)
 
 	nodeCount := len(sorted)
-	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
+	fields := map[string]any{
 		"node_count":      nodeCount,
 		"dag":             json.RawMessage(dagRaw),
 		"sorted_node_ids": sorted,
-	}); err != nil {
+	}
+	// Include the Story cursor when populated. dispatchDecomposerLocked seeds
+	// these the first time the requirement enters per-Story dispatch, and
+	// advanceToNextStoryLocked re-enters here after incrementing the cursor —
+	// so this single sendReqPhase site is the chokepoint for keeping KV in
+	// sync with the in-memory cursor.
+	if len(exec.SortedStoryIDs) > 0 {
+		fields["sorted_story_ids"] = exec.SortedStoryIDs
+		// Send as pointer to satisfy the *int wire shape — value 0 still
+		// distinguishes "set to 0" from "leave unchanged" on the consumer.
+		idx := exec.CurrentStoryIdx
+		fields["current_story_idx"] = &idx
+	}
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, fields); err != nil {
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseExecuting, "error", err)
 	}
 
@@ -882,6 +899,7 @@ func (c *Component) recordNodeSuccessLocked(ctx context.Context, exec *requireme
 		NodeID:        nodeResult.NodeID,
 		FilesModified: nodeResult.FilesModified,
 		Summary:       nodeResult.Summary,
+		CommitSHA:     nodeResult.CommitSHA,
 	}
 	if err := c.sendReqNode(ctx, exec.storeKey, exec.CurrentNodeIdx, "", wfResult); err != nil {
 		c.logger.Warn("Failed to send req.node mutation", "node_id", nodeID, "error", err)
