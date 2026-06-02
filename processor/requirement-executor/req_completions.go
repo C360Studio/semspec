@@ -239,19 +239,30 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 
 // findExecByTaskID scans active executions for one whose dispatched task IDs
 // match the given task ID. Returns nil if not found.
+//
+// CurrentNodeTaskID and ReviewerTaskID are mutated under exec.mu by
+// dispatchNextNodeLocked and dispatchRequirementReviewerLocked; the read
+// here must take the lock to avoid racing with a dispatch flipping the
+// task ID. Pre-fix the lock was missing, so a node-complete event arriving
+// concurrently with a dispatch could match the old taskID (routing the
+// completion to the wrong slot) OR miss the new dispatch entirely
+// (dropping the completion → watchdog timeout instead of normal
+// advancement). Mirrors the pattern at findAwaitingByRequirement. Closes
+// go-reviewer Pass-1 finding H2.
 func (c *Component) findExecByTaskID(taskID string) *requirementExecution {
-	var found *requirementExecution
 	for _, key := range c.activeExecs.Keys() {
 		exec, ok := c.activeExecs.Get(key)
-		if !ok {
+		if !ok || exec == nil {
 			continue
 		}
-		if exec.CurrentNodeTaskID == taskID || exec.ReviewerTaskID == taskID {
-			found = exec
-			break
+		exec.mu.Lock()
+		match := exec.CurrentNodeTaskID == taskID || exec.ReviewerTaskID == taskID
+		exec.mu.Unlock()
+		if match {
+			return exec
 		}
 	}
-	return found
+	return nil
 }
 
 // resumeInterruptedExecutions runs after all watcher replays are complete.

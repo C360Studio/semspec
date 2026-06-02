@@ -211,6 +211,15 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 	exec.CurrentNodeTaskID = ""
 	exec.VisitedNodes = make(map[string]bool)
 	exec.NodeResults = nil
+	// KV NodeResults is append-only via handleReqNodeMutation; the in-memory
+	// wipe above must be mirrored to KV or the stale entries reappear on
+	// rebuildExecFromKV after the next restart. Closes Pass-1 H4 for the
+	// recovery-resume path. Best-effort: a wipe failure logs but doesn't
+	// abort the resume (the recovery branch creation already succeeded).
+	if err := c.sendReqResetNodeResults(ctx, exec.storeKey); err != nil {
+		c.logger.Warn("Failed to wipe KV NodeResults on recovery resume",
+			"entity_id", exec.EntityID, "error", err)
+	}
 	exec.DirtyNodeIDs = nil
 	exec.ReviewVerdict = ""
 	exec.ReviewFeedback = ""

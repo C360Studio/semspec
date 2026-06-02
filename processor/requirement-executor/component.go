@@ -527,13 +527,35 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		}
 	}
 
-	// Rebuild VisitedNodes from NodeResults. CommitSHA is round-tripped so the
-	// claim/observation gate (handleApprovedClaimMismatchLocked) sees the
-	// merge commit for nodes that completed before the restart.
+	// Rebuild VisitedNodes from NodeResults, scoped to the current Story's
+	// node set. NodeResults accumulates across Stories (the requirement-level
+	// claim/observation gate at handleApprovedClaimMismatchLocked iterates
+	// all of them); but VisitedNodes tracks which nodes have finished in the
+	// CURRENT Story only. The reviewer-fires-when-done check at
+	// recordNodeSuccessLocked compares len(VisitedNodes) against
+	// len(SortedNodeIDs) — which only carries the current Story's nodes —
+	// so if VisitedNodes were populated from the full cross-Story
+	// accumulator, the comparison would trivially fire after the first
+	// resumed node completes and skip the rest of the Story. Closes
+	// go-reviewer Pass-1 finding C3.
+	//
+	// CommitSHA is round-tripped on the NodeResults so the claim/observation
+	// gate sees the merge commit for nodes that completed before the
+	// restart (Pass-1 C4 — closed in the prior commit of this stack).
+	currentStoryNodes := make(map[string]bool, len(reqExec.SortedNodeIDs))
+	for _, id := range reqExec.SortedNodeIDs {
+		currentStoryNodes[id] = true
+	}
 	exec.VisitedNodes = make(map[string]bool, len(reqExec.NodeResults))
 	exec.NodeResults = make([]NodeResult, 0, len(reqExec.NodeResults))
 	for _, nr := range reqExec.NodeResults {
-		exec.VisitedNodes[nr.NodeID] = true
+		// Only mark visited if this node belongs to the current Story's DAG.
+		// When SortedNodeIDs is empty (legacy / pre-DAG state), fall back to
+		// the prior behavior of treating every NodeResult as visited so
+		// non-Story-aware plans keep working.
+		if len(currentStoryNodes) == 0 || currentStoryNodes[nr.NodeID] {
+			exec.VisitedNodes[nr.NodeID] = true
+		}
 		exec.NodeResults = append(exec.NodeResults, NodeResult{
 			NodeID:        nr.NodeID,
 			FilesModified: nr.FilesModified,
@@ -1081,8 +1103,16 @@ func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.
 // an "untagged" group with the legacy "verify all aspects" instruction —
 // existing pre-ADR-041 plans keep working.
 //
+// scenarios is the per-Story-scoped subset to put before the reviewer (per
+// ADR-043 PR 4h). Callers must pass scopeScenariosToCurrentStory(exec) so
+// the Prompt and the Context.Content agree on the verdict surface — pre-
+// fix the Prompt used exec.Scenarios unfiltered while Context used the
+// scoped subset, so the Story-1 reviewer was asked to verify Stories 2-3
+// scenarios that the developer never authored. Closes go-reviewer Pass-1
+// finding C5.
+//
 //revive:disable-next-line:function-length // sequential tier-grouped prompt builder; splitting would obscure the load-bearing tier-aware contract.
-func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
+func (c *Component) buildReviewPrompt(exec *requirementExecution, scenarios []workflow.Scenario) string {
 	var sb strings.Builder
 
 	sb.WriteString("Requirement: ")
@@ -1095,8 +1125,8 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
 		sb.WriteString("\n")
 	}
 
-	if len(exec.Scenarios) > 0 {
-		groups := groupScenariosByTier(exec.Scenarios)
+	if len(scenarios) > 0 {
+		groups := groupScenariosByTier(scenarios)
 
 		sb.WriteString("\n## Scenarios to verify (grouped by test pyramid tier)\n")
 		sb.WriteString("\nApply tier-appropriate verification per ADR-041. The harness is NOT running in the dev sandbox — @integration scenarios are verified for AUTHORING CORRECTNESS, not runtime behavior. qa-runner gates @integration passing downstream.\n")
@@ -1376,7 +1406,14 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	// dispatchDeveloperLocked / dispatchCodeReviewer.
 	reviewerModel := model.ResolveModel(c.modelRegistry, c.config.ReviewerModel, model.CapabilityReviewing)
 
-	asmCtx := c.buildRequirementReviewContext(exec, reviewerModel)
+	// Resolve the per-Story scoped scenarios ONCE so the user prompt
+	// (buildReviewPrompt) and the system message (assembled.SystemMessage
+	// via buildRequirementReviewContext) agree on the verdict surface.
+	// Pre-fix the two sides could diverge, asking the reviewer to verify
+	// scenarios that weren't in its prompt context.
+	scopedScenarios := scopeScenariosToCurrentStory(exec)
+
+	asmCtx := c.buildRequirementReviewContext(exec, reviewerModel, scopedScenarios)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	var reviewerEndpoint *ssmodel.EndpointConfig
@@ -1397,7 +1434,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", reviewerEndpoint, prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer)...),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
-		Prompt:       c.buildReviewPrompt(exec),
+		Prompt:       c.buildReviewPrompt(exec, scopedScenarios),
 		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleScenarioReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
@@ -1670,6 +1707,26 @@ func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requireme
 	}
 	exec.NodeResults = cleanResults
 
+	// Mirror the in-memory trim to KV. KV NodeResults is otherwise
+	// append-only via handleReqNodeMutation; without this replace, the
+	// dirty entries would survive in KV and reappear on the next restart
+	// via rebuildExecFromKV. Closes Pass-1 H4b. Best-effort: failure logs
+	// but does not abort the retry — the retry can still proceed with
+	// the local view, and a future commit will re-mirror the state.
+	wfResults := make([]workflow.NodeResult, 0, len(cleanResults))
+	for _, nr := range cleanResults {
+		wfResults = append(wfResults, workflow.NodeResult{
+			NodeID:        nr.NodeID,
+			FilesModified: nr.FilesModified,
+			Summary:       nr.Summary,
+			CommitSHA:     nr.CommitSHA,
+		})
+	}
+	if err := c.sendReqReplaceNodeResults(ctx, exec.storeKey, wfResults); err != nil {
+		c.logger.Warn("Failed to replace KV NodeResults on fixable retry",
+			"entity_id", exec.EntityID, "dirty_nodes", len(dirtyNodes), "error", err)
+	}
+
 	// Reset node index to re-dispatch from the beginning.
 	// dispatchNextNodeLocked skips clean nodes automatically.
 	exec.CurrentNodeIdx = -1
@@ -1723,6 +1780,13 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 	exec.CurrentNodeTaskID = ""
 	exec.VisitedNodes = make(map[string]bool)
 	exec.NodeResults = nil
+	// KV NodeResults is append-only; wipe it to mirror the in-memory reset
+	// or stale entries from the prior cycle reappear on the next restart.
+	// Closes Pass-1 H4 for the restructure-retry path.
+	if err := c.sendReqResetNodeResults(ctx, exec.storeKey); err != nil {
+		c.logger.Warn("Failed to wipe KV NodeResults on restructure retry",
+			"entity_id", exec.EntityID, "error", err)
+	}
 	exec.DirtyNodeIDs = nil
 	exec.ReviewVerdict = ""
 	exec.ReviewFeedback = ""
@@ -1763,8 +1827,12 @@ func (c *Component) isNodeDirty(exec *requirementExecution, nodeID string) bool 
 // buildRequirementReviewContext assembles the prompt context for requirement-level review.
 // reviewerModel is the model the reviewer dispatch will hit; it determines
 // HasResponseFormat so the assembler can elide schema prose when the
-// endpoint honors response_format.
-func (c *Component) buildRequirementReviewContext(exec *requirementExecution, reviewerModel string) *prompt.AssemblyContext {
+// endpoint honors response_format. scoped is the per-Story scenario subset
+// the caller resolved via scopeScenariosToCurrentStory — passing it through
+// (rather than recomputing inside) guarantees buildReviewPrompt and this
+// function see the SAME verdict surface, which is the load-bearing contract
+// behind go-reviewer Pass-1 C5.
+func (c *Component) buildRequirementReviewContext(exec *requirementExecution, reviewerModel string, scoped []workflow.Scenario) *prompt.AssemblyContext {
 	var endpoint *ssmodel.EndpointConfig
 	if c.modelRegistry != nil {
 		endpoint = c.modelRegistry.GetEndpoint(reviewerModel)
@@ -1778,7 +1846,6 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution, re
 	// scenarios down to the current Story's scenarios — that is the verdict
 	// surface for THIS reviewer dispatch. Other Stories' scenarios are out
 	// of scope (they'll get their own reviewer pass).
-	scoped := scopeScenariosToCurrentStory(exec)
 	if len(scoped) > 0 {
 		specs := make([]prompt.ScenarioSpec, len(scoped))
 		for i, s := range scoped {

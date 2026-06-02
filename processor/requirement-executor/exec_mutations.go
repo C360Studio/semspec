@@ -16,9 +16,10 @@ import (
 
 // Mutation subjects — must match execution-manager/mutations.go constants.
 const (
-	mutReqPhase   = "execution.mutation.req.phase"
-	mutReqNode    = "execution.mutation.req.node"
-	mutTaskCreate = "execution.mutation.task.create"
+	mutReqPhase            = "execution.mutation.req.phase"
+	mutReqNode             = "execution.mutation.req.node"
+	mutReqResetNodeResults = "execution.mutation.req.reset_node_results"
+	mutTaskCreate          = "execution.mutation.task.create"
 	// mutPlanDecisionAdd targets plan-manager (different processor, different
 	// KV bucket). Used for emitting ExecutionExhausted decisions so the
 	// human has a decision record to act on.
@@ -42,6 +43,41 @@ func (c *Component) sendReqPhase(ctx context.Context, key, stage string, fields 
 		req[k] = v
 	}
 	_, err := c.sendMutation(ctx, mutReqPhase, req)
+	return err
+}
+
+// sendReqResetNodeResults asks execution-manager to wipe the NodeResults
+// slice on the existing requirement execution KV entry. Called from
+// recovery resume + restructure retry paths that wipe in-memory
+// NodeResults — without this, the KV-side slice (handleReqNodeMutation
+// only appends) would accumulate stale entries from prior cycles and
+// reappear on the next restart via rebuildExecFromKV. Closes
+// go-reviewer Pass-1 H4. nil natsClient short-circuits (unit tests).
+func (c *Component) sendReqResetNodeResults(ctx context.Context, key string) error {
+	if c.natsClient == nil {
+		return nil
+	}
+	_, err := c.sendMutation(ctx, mutReqResetNodeResults, map[string]any{
+		"key": key,
+	})
+	return err
+}
+
+// sendReqReplaceNodeResults asks execution-manager to REPLACE the
+// NodeResults slice on the existing KV entry with the supplied list.
+// Used by the fixable-retry path that keeps non-dirty NodeResults and
+// drops dirty ones — without this, the KV-side slice would still carry
+// the dirty entries (handleReqNodeMutation only appends) and the next
+// restart's rebuildExecFromKV would resurrect them. Closes go-reviewer
+// Pass-1 H4b. nil natsClient short-circuits (unit tests).
+func (c *Component) sendReqReplaceNodeResults(ctx context.Context, key string, results []workflow.NodeResult) error {
+	if c.natsClient == nil {
+		return nil
+	}
+	_, err := c.sendMutation(ctx, mutReqResetNodeResults, map[string]any{
+		"key":          key,
+		"node_results": results,
+	})
 	return err
 }
 

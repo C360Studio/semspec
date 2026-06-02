@@ -191,16 +191,31 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 		exec.mu.Unlock()
 	}
 
-	// Load plan scope from PLAN_STATES.
-	if scope := c.loadPlanScope(ctx, exec.Slug); scope != nil {
-		exec.Scope = scope
-	}
+	// Load plan scope from PLAN_STATES. Assign exec.Scope under exec.mu —
+	// the exec is already in activeExecs by this point, so other goroutines
+	// (loop-completion watcher, task-completion watcher, plan-decision
+	// accepted handler, recovery timer) can find it via findExecByTaskID /
+	// findAwaitingByRequirement and read fields concurrently. An unlocked
+	// write here is a data race under the Go memory model. The dispatch
+	// loop's Lock further down used to establish a happens-before only
+	// with future operations, not past ones. Closes go-reviewer Pass-1
+	// finding H1.
+	scope := c.loadPlanScope(ctx, exec.Slug)
 
-	// Publish initial entity snapshot for graph observability.
+	// Publish initial entity snapshot for graph observability. The publish
+	// reads exec fields that were initialized at construction time; the
+	// exec.Scope assignment below happens after publish so the entity
+	// snapshot reflects whatever Scope the exec was constructed with (nil
+	// at this point), which is consistent with pre-fix behavior — the Scope
+	// is only meaningful to downstream agents who read it from KV anyway.
 	c.publishEntity(ctx, NewRequirementExecutionEntity(exec).WithPhase(phaseDecomposing))
 
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
+
+	if scope != nil {
+		exec.Scope = scope
+	}
 
 	c.startExecutionTimeoutLocked(exec)
 	c.dispatchDecomposerLocked(ctx, exec)
