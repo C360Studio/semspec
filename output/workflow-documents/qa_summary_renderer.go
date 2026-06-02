@@ -22,10 +22,7 @@ func RenderQASummary(plan *workflow.Plan) string {
 	}
 	var b strings.Builder
 
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayTitle(plan)
 	b.WriteString(fmt.Sprintf("# QA Summary: %s\n\n", title))
 	b.WriteString(fmt.Sprintf("*Generated from the qa-reviewer verdict, the QA phase's executor result, and any plan-decisions the qa-reviewer raised. QA level for this plan: `%s`.*\n\n",
 		plan.EffectiveQALevel()))

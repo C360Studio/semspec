@@ -206,6 +206,7 @@ var phaseArtifacts = []phaseArtifact{
 	{"plan.md", RenderPlan},
 	{"architecture.md", RenderArchitecture},
 	{"requirements.md", RenderRequirements},
+	{"stories.md", RenderStories},
 	{"scenarios.md", RenderScenarios},
 	{"qa-summary.md", RenderQASummary},
 	{"run-summary.md", RenderRunSummary},

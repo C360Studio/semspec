@@ -30,10 +30,7 @@ func RenderRunSummary(plan *workflow.Plan) string {
 
 	var b strings.Builder
 
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayTitle(plan)
 	b.WriteString(fmt.Sprintf("# Run summary: %s\n\n", title))
 	b.WriteString(fmt.Sprintf("**Slug:** `%s` | **Terminal status:** `%s` | **QA level:** `%s`\n\n",
 		plan.Slug, status, plan.EffectiveQALevel()))

@@ -21,10 +21,7 @@ func RenderRequirements(plan *workflow.Plan) string {
 	}
 	var b strings.Builder
 
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayTitle(plan)
 	b.WriteString(fmt.Sprintf("# Requirements: %s\n\n", title))
 	b.WriteString(fmt.Sprintf("*Generated from the requirement-generator role's output. **%d requirements** partition the implementation work.*\n\n",
 		len(plan.Requirements)))

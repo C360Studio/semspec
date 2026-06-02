@@ -43,10 +43,7 @@ func RenderPlan(plan *workflow.Plan) string {
 }
 
 func renderHeader(b *strings.Builder, plan *workflow.Plan) {
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayTitle(plan)
 	b.WriteString(fmt.Sprintf("# %s\n\n", title))
 
 	b.WriteString(fmt.Sprintf("**Status:** %s", plan.EffectiveStatus()))

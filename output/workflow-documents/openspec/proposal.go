@@ -37,10 +37,7 @@ func RenderProposal(plan *workflow.Plan) string {
 	}
 	var sb strings.Builder
 
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayPlanTitle(plan)
 	fmt.Fprintf(&sb, "# Proposal: %s\n\n", title)
 
 	if plan.Goal != "" {

@@ -44,10 +44,7 @@ func RenderDesign(plan *workflow.Plan) string {
 	arch := plan.Architecture
 
 	var sb strings.Builder
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayPlanTitle(plan)
 	fmt.Fprintf(&sb, "# Design: %s\n\n", title)
 
 	if len(arch.TechnologyChoices) > 0 {
