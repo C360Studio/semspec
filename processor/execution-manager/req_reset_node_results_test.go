@@ -96,6 +96,61 @@ func TestHandleReqResetNodeResultsMutation_MissingKeyIsIdempotentSuccess(t *test
 	}
 }
 
+// TestHandleReqResetNodeResultsMutation_ReplaceSemanticTrimsDirtyEntries
+// is the headline regression test for go-reviewer Pass-1 finding H4b.
+//
+// startFixableRetryLocked trims in-memory NodeResults to drop dirty
+// entries and keep clean ones. Pre-H4b-fix the trim was in-memory-only
+// — KV-side NodeResults still carried the dirty entries (because
+// handleReqNodeMutation only appends), and the next restart's
+// rebuildExecFromKV resurrected them. Post-fix, the producer sends the
+// trimmed list via this mutation and KV is updated to match.
+func TestHandleReqResetNodeResultsMutation_ReplaceSemanticTrimsDirtyEntries(t *testing.T) {
+	c := newTestComponent(t)
+	ctx := context.Background()
+	key := "req.demo.req.demo.1"
+
+	exec := &workflow.RequirementExecution{
+		EntityID:      "entity-1",
+		Slug:          "demo",
+		RequirementID: "req.demo.1",
+		Stage:         "executing",
+		NodeResults: []workflow.NodeResult{
+			{NodeID: "n.clean", FilesModified: []string{"src/clean.go"}, CommitSHA: "cc"},
+			{NodeID: "n.dirty", FilesModified: []string{"src/dirty.go"}, CommitSHA: "dd"},
+		},
+	}
+	if err := c.store.saveReq(ctx, key, exec); err != nil {
+		t.Fatalf("seed saveReq: %v", err)
+	}
+
+	// Producer sends the clean-only subset (dirty entries removed).
+	reqBytes, _ := json.Marshal(ReqResetNodeResultsRequest{
+		Key: key,
+		NodeResults: []workflow.NodeResult{
+			{NodeID: "n.clean", FilesModified: []string{"src/clean.go"}, CommitSHA: "cc"},
+		},
+	})
+	resp := c.handleReqResetNodeResultsMutation(ctx, reqBytes)
+	if !resp.Success {
+		t.Fatalf("expected success, got %+v", resp)
+	}
+
+	after, ok := c.store.getReq(key)
+	if !ok {
+		t.Fatal("entry disappeared")
+	}
+	if len(after.NodeResults) != 1 {
+		t.Fatalf("NodeResults = %v, want 1 (clean entry only)", after.NodeResults)
+	}
+	if after.NodeResults[0].NodeID != "n.clean" {
+		t.Errorf("kept NodeID = %q, want n.clean", after.NodeResults[0].NodeID)
+	}
+	if after.NodeResults[0].CommitSHA != "cc" {
+		t.Errorf("kept CommitSHA = %q, want cc", after.NodeResults[0].CommitSHA)
+	}
+}
+
 // TestHandleReqResetNodeResultsMutation_EmptyKeyRejected pins the input-
 // validation contract — empty key is a wire-shape bug and must fail loud.
 func TestHandleReqResetNodeResultsMutation_EmptyKeyRejected(t *testing.T) {

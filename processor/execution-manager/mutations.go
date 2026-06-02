@@ -127,16 +127,21 @@ type ReqResetRequest struct {
 	Key string `json:"key"` // KV key: req.<slug>.<reqID>
 }
 
-// ReqResetNodeResultsRequest wipes the NodeResults slice on an existing
-// requirement execution KV entry without disturbing any other field.
-// Used by requirement-executor when a recovery resume or restructure
-// retry clears in-memory NodeResults — without this mutation, KV-side
-// NodeResults would accumulate stale entries from prior cycles and
-// reappear on the next restart via rebuildExecFromKV, inflating the
-// claim/observation gate's surface and the requirement-final file
-// aggregation. Closes go-reviewer Pass-1 finding H4.
+// ReqResetNodeResultsRequest replaces the NodeResults slice on an
+// existing requirement execution KV entry without disturbing any other
+// field. When NodeResults is nil/empty the slice is wiped (recovery
+// resume + restructure retry paths). When NodeResults is populated the
+// slice is REPLACED with the supplied list (fixable-retry path, which
+// trims dirty-node entries but keeps clean entries — closes go-reviewer
+// Pass-1 H4b).
+//
+// Closes go-reviewer Pass-1 findings H4 and H4b. The KV-side NodeResults
+// is otherwise append-only via handleReqNodeMutation; without this
+// mutation, in-memory trims/wipes would diverge from KV and rebuilt
+// state would carry stale entries on the next restart.
 type ReqResetNodeResultsRequest struct {
-	Key string `json:"key"` // KV key: req.<slug>.<reqID>
+	Key         string                `json:"key"`                    // KV key: req.<slug>.<reqID>
+	NodeResults []workflow.NodeResult `json:"node_results,omitempty"` // empty/nil = wipe; populated = replace
 }
 
 // ReqNodeRequest updates DAG node state within a requirement execution.
@@ -531,16 +536,21 @@ func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) Exe
 	return ExecMutationResponse{Success: true}
 }
 
-// handleReqResetNodeResultsMutation wipes the NodeResults slice on an
+// handleReqResetNodeResultsMutation replaces the NodeResults slice on an
 // existing requirement execution entry while leaving every other field
-// intact. Called from requirement-executor when a recovery resume or
-// restructure retry clears in-memory NodeResults; without this mutation
-// the KV-side slice (which handleReqNodeMutation only APPENDS to) would
-// accumulate stale entries from prior cycles and reappear on the next
-// restart via rebuildExecFromKV. Closes go-reviewer Pass-1 finding H4.
+// intact. Called from requirement-executor when in-memory NodeResults
+// state diverges from KV — without this mutation the KV-side slice
+// (which handleReqNodeMutation only APPENDS to) would accumulate stale
+// entries and reappear on the next restart via rebuildExecFromKV.
+//
+// When req.NodeResults is empty/nil the KV slice is wiped (recovery
+// resume + restructure retry — closes Pass-1 H4). When req.NodeResults
+// is populated the KV slice is REPLACED with the supplied list
+// (fixable-retry, which keeps clean-node entries and drops dirty-node
+// entries — closes Pass-1 H4b).
 //
 // Returns Success=true even when the key doesn't exist — the reset
-// semantics is idempotent and treating "no entry to reset" as success
+// semantic is idempotent and treating "no entry to reset" as success
 // keeps the producer's call site simple. A missing key here usually
 // means the exec was never persisted (unit-test mode or pre-create
 // failure); both are fine to no-op.
@@ -559,13 +569,21 @@ func (c *Component) handleReqResetNodeResultsMutation(ctx context.Context, data 
 		return ExecMutationResponse{Success: true}
 	}
 
-	exec.NodeResults = nil
+	// Empty/nil → wipe; populated → replace. The append-vs-replace split
+	// is the load-bearing contract; handleReqNodeMutation continues to
+	// own the append path for normal node completion.
+	exec.NodeResults = req.NodeResults
 
 	if err := c.store.saveReq(ctx, req.Key, exec); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
-	c.logger.Info("Requirement NodeResults wiped via mutation", "key", req.Key)
+	if len(req.NodeResults) == 0 {
+		c.logger.Info("Requirement NodeResults wiped via mutation", "key", req.Key)
+	} else {
+		c.logger.Info("Requirement NodeResults replaced via mutation",
+			"key", req.Key, "kept", len(req.NodeResults))
+	}
 	return ExecMutationResponse{Success: true}
 }
 

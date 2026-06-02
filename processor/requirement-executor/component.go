@@ -1707,6 +1707,26 @@ func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requireme
 	}
 	exec.NodeResults = cleanResults
 
+	// Mirror the in-memory trim to KV. KV NodeResults is otherwise
+	// append-only via handleReqNodeMutation; without this replace, the
+	// dirty entries would survive in KV and reappear on the next restart
+	// via rebuildExecFromKV. Closes Pass-1 H4b. Best-effort: failure logs
+	// but does not abort the retry — the retry can still proceed with
+	// the local view, and a future commit will re-mirror the state.
+	wfResults := make([]workflow.NodeResult, 0, len(cleanResults))
+	for _, nr := range cleanResults {
+		wfResults = append(wfResults, workflow.NodeResult{
+			NodeID:        nr.NodeID,
+			FilesModified: nr.FilesModified,
+			Summary:       nr.Summary,
+			CommitSHA:     nr.CommitSHA,
+		})
+	}
+	if err := c.sendReqReplaceNodeResults(ctx, exec.storeKey, wfResults); err != nil {
+		c.logger.Warn("Failed to replace KV NodeResults on fixable retry",
+			"entity_id", exec.EntityID, "dirty_nodes", len(dirtyNodes), "error", err)
+	}
+
 	// Reset node index to re-dispatch from the beginning.
 	// dispatchNextNodeLocked skips clean nodes automatically.
 	exec.CurrentNodeIdx = -1
