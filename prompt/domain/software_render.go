@@ -467,6 +467,26 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 			p.ReviewFindings, reviewFindingsActionDirective())
 	}
 
+	// Train C step 5: surface recovery diagnoses on Stories that wedged.
+	// plan-manager writes Story.RecoveryHint at PlanDecision-accept time
+	// when a story_reprepare proposal is approved; Sarah re-shapes the
+	// Story set from scratch, accounting for each diagnosis.
+	//
+	// Note: the prompt does NOT carry the prior Stories' content (only
+	// the IDs the recovery-agent flagged). Sarah re-derives the full
+	// Story set from the Requirements + Architecture inputs above, so
+	// her emission is fresh — story IDs may change across re-preps.
+	// Downstream consumers (Bob's scenarios) re-key on Sarah's new IDs
+	// via the handleStoriesMutation wipe-and-replace contract.
+	if len(p.StoryRecoveryHints) > 0 {
+		sb.WriteString("## Recovery Diagnoses for Previously Wedged Stories\n\n")
+		sb.WriteString("Each entry below identifies a Story whose prior execution wedged, plus the recovery-agent's diagnosis of WHY. Re-shape the Story set from scratch using the Requirements + Architecture above, accounting for each diagnosis as you re-author. The prior Story IDs are reference points only — your new emission may use different IDs.\n\n")
+		for _, h := range p.StoryRecoveryHints {
+			fmt.Fprintf(&sb, "- **%s**: %s\n", h.StoryID, h.Hint)
+		}
+		sb.WriteString("\n")
+	}
+
 	return sb.String()
 }
 

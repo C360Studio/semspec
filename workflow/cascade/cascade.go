@@ -1,5 +1,6 @@
 // Package cascade implements the dirty-cascade logic applied when a
-// PlanDecision is accepted, marking affected scenarios for re-execution.
+// PlanDecision is accepted, marking affected scenarios + stories for
+// re-execution / re-prep.
 package cascade
 
 import (
@@ -11,48 +12,121 @@ import (
 // Result summarizes the effect of accepting a PlanDecision.
 type Result struct {
 	AffectedRequirementIDs []string
-	AffectedScenarioIDs    []string
+	// AffectedStoryIDs lists Story IDs the cascade dirty-marked. Populated
+	// for Kind=story_reprepare (the cascade target is Stories + Scenarios)
+	// or, in back-compat mode, when the proposal's AffectedReqIDs match
+	// Stories under those Requirements. Empty for requirement_change /
+	// execution_exhausted cascades that don't touch Sarah's layer.
+	AffectedStoryIDs    []string
+	AffectedScenarioIDs []string
 }
 
 // PlanDecision executes the dirty cascade when a PlanDecision is accepted.
 //
-// Steps:
-//  1. Filter scenarios to those whose RequirementID is in proposal.AffectedReqIDs.
-//  2. Return a Result describing what changed.
+// Cascade shape branches on proposal.Kind:
 //
-// The function is pure business logic — it performs no I/O and can be tested
-// without any infrastructure. The caller is responsible for loading the plan
-// from KV and passing the current scenario list.
-func PlanDecision(proposal *workflow.PlanDecision, scenarios []workflow.Scenario) (*Result, error) {
+//   - Kind=story_reprepare: dirty-mark the Stories named in
+//     proposal.AffectedStoryIDs (Train C — Story-level granularity),
+//     PLUS every scenario whose StoryID matches. If AffectedStoryIDs is
+//     empty, falls back to "all Stories under AffectedReqIDs" so the
+//     cascade still reaches Sarah's layer.
+//   - Kind=requirement_change (or unset for back-compat): the existing
+//     scenarios-only cascade — filter scenarios to those whose
+//     RequirementID is in proposal.AffectedReqIDs. Stories untouched.
+//   - Kind=execution_exhausted: terminal acknowledgement; cascade is a
+//     no-op (callers shouldn't invoke PlanDecision for this kind, but
+//     the function returns empty Result safely if they do).
+//
+// Pure business logic — no I/O. Caller loads the plan from KV and passes
+// stories + scenarios. Returns the IDs that were dirty-marked so
+// downstream consumers (plan-manager status transition, executor reset)
+// can scope their actions.
+func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, scenarios []workflow.Scenario) (*Result, error) {
 	if proposal == nil {
 		return nil, fmt.Errorf("proposal is nil")
 	}
 
 	result := &Result{
 		AffectedRequirementIDs: make([]string, 0, len(proposal.AffectedReqIDs)),
+		AffectedStoryIDs:       make([]string, 0),
 		AffectedScenarioIDs:    make([]string, 0),
 	}
 
-	// Copy affected requirement IDs into result and build a lookup set.
-	// Scenario RequirementIDs in the KV plan match the raw (non-hashed) IDs stored
-	// in the plan's Scenarios slice, so no hashing is needed here.
+	// Always record the Requirement IDs the proposal targets — they're
+	// the entry-point context for downstream consumers regardless of Kind.
 	affectedReqs := make(map[string]bool, len(proposal.AffectedReqIDs))
 	for _, id := range proposal.AffectedReqIDs {
 		affectedReqs[id] = true
 		result.AffectedRequirementIDs = append(result.AffectedRequirementIDs, id)
 	}
 
-	if len(affectedReqs) == 0 {
-		// No requirements affected — nothing to cascade.
-		return result, nil
-	}
+	switch proposal.Kind {
+	case workflow.PlanDecisionKindStoryReprepare:
+		affectedStories := storiesForReprepare(proposal, stories, affectedReqs)
+		result.AffectedStoryIDs = append(result.AffectedStoryIDs, affectedStories...)
 
-	// Find scenarios belonging to affected requirements.
-	for _, sc := range scenarios {
-		if affectedReqs[sc.RequirementID] {
-			result.AffectedScenarioIDs = append(result.AffectedScenarioIDs, sc.ID)
+		affectedStorySet := make(map[string]bool, len(affectedStories))
+		for _, id := range affectedStories {
+			affectedStorySet[id] = true
+		}
+		// Scenarios are dirty when their parent Story is dirty. Falls back
+		// to "scenarios for affected reqs" when no Story IDs were resolved
+		// (e.g. legacy plan with empty plan.Stories but Kind=story_reprepare
+		// — should be rare; preserves a useful cascade rather than no-op).
+		for _, sc := range scenarios {
+			switch {
+			case len(affectedStorySet) > 0 && affectedStorySet[sc.StoryID]:
+				result.AffectedScenarioIDs = append(result.AffectedScenarioIDs, sc.ID)
+			case len(affectedStorySet) == 0 && affectedReqs[sc.RequirementID]:
+				result.AffectedScenarioIDs = append(result.AffectedScenarioIDs, sc.ID)
+			}
+		}
+
+	case workflow.PlanDecisionKindExecutionExhausted:
+		// Terminal kind — cascade is a no-op beyond recording the
+		// AffectedRequirementIDs already populated above for caller
+		// telemetry. Stories + Scenarios stay empty.
+
+	default:
+		// Kind=requirement_change OR unset (back-compat with pre-Kind records).
+		// Scenarios-only cascade matching pre-Train-C behavior.
+		if len(affectedReqs) == 0 {
+			return result, nil
+		}
+		for _, sc := range scenarios {
+			if affectedReqs[sc.RequirementID] {
+				result.AffectedScenarioIDs = append(result.AffectedScenarioIDs, sc.ID)
+			}
 		}
 	}
 
 	return result, nil
+}
+
+// storiesForReprepare resolves the Story IDs the cascade should dirty-mark
+// for a story_reprepare proposal. Three input shapes:
+//
+//   - proposal.AffectedStoryIDs populated → use those directly (the
+//     recovery-agent threaded them through from the wedged exec's cursor).
+//   - proposal.AffectedStoryIDs empty AND AffectedReqIDs populated → walk
+//     plan.Stories and select every Story whose RequirementID is in scope.
+//     Whole-Requirement re-prep — coarser but still reaches Sarah.
+//   - Both empty → return nil. Caller's downstream behavior is "no-op
+//     cascade"; plan-manager treats that as human-review territory.
+func storiesForReprepare(proposal *workflow.PlanDecision, stories []workflow.Story, affectedReqs map[string]bool) []string {
+	if len(proposal.AffectedStoryIDs) > 0 {
+		out := make([]string, 0, len(proposal.AffectedStoryIDs))
+		out = append(out, proposal.AffectedStoryIDs...)
+		return out
+	}
+	if len(affectedReqs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(stories))
+	for _, s := range stories {
+		if affectedReqs[s.RequirementID] {
+			out = append(out, s.ID)
+		}
+	}
+	return out
 }

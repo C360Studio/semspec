@@ -144,6 +144,17 @@ type RecoveryRequested struct {
 	// outcome.
 	AffectedRequirementIDs []string `json:"affected_requirement_ids,omitempty"`
 
+	// AffectedStoryIDs lists Story IDs the wedge implicates when recovery
+	// reaches Sarah's layer (ADR-043). Populated by requirement-executor
+	// from the wedged exec's SortedStoryIDs at the time the
+	// RecoveryRequested fires. The recovery-agent threads this list into
+	// PlanDecision.AffectedStoryIDs so the cascade can dirty-mark the
+	// specific Stories rather than the whole Requirement. Empty for
+	// recovery requests whose wedge is requirement-scoped (refine_prompt,
+	// narrow_scope) — the absence signals the recovery-agent should not
+	// propose story_reprepare. Train C step 2.
+	AffectedStoryIDs []string `json:"affected_story_ids,omitempty"`
+
 	// TaskID identifies the specific TDD task that wedged. Empty for
 	// plan-phase wedges.
 	TaskID string `json:"task_id,omitempty"`

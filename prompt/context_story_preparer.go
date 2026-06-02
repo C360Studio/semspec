@@ -43,6 +43,27 @@ type StoryPreparerPromptContext struct {
 	// ReviewFindings carries plan-reviewer R3 findings from a prior
 	// review round, injected so Sarah can address them on regen.
 	ReviewFindings string
+
+	// StoryRecoveryHints carries Story.RecoveryHint values written by
+	// plan-manager when a story_reprepare PlanDecision was accepted
+	// (Train C step 4). Populated only on back-transition dispatches
+	// (stories_generated → preparing_stories); empty on the forward
+	// flow. Each entry pairs the original Story ID + the recovery
+	// agent's diagnosis so Sarah's re-prep prompt sees "Story X failed
+	// because Y; re-shard with Z in mind."
+	StoryRecoveryHints []StoryRecoveryHint
+}
+
+// StoryRecoveryHint pairs a Story ID with the recovery-agent diagnosis
+// that triggered Sarah's re-prep. Train C re-prep KEEPS the Story in
+// plan.Stories with its RecoveryHint set so the (StoryID, Hint) pairs
+// can be projected onto the prompt context; Sarah's emission replaces
+// plan.Stories wholesale per the handleStoriesMutation wipe-and-replace
+// contract, so the prior Story content survives only long enough to
+// guide the next emission.
+type StoryRecoveryHint struct {
+	StoryID string
+	Hint    string
 }
 
 // StoryPreparerCapability is the projection of workflow.Capability into the

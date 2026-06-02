@@ -77,6 +77,15 @@ type Component struct {
 
 	retry *dispatchretry.State
 
+	// claimedSlugs records slugs whose preparing_stories status this
+	// watcher's own ClaimPlanStatus call just produced. The watcher will
+	// observe the corresponding KV-put event next (because plan-manager
+	// echoes the status change back), and without this dedup it would
+	// treat the echo as a back-transition (Train C step 5) and double-
+	// dispatch. Entries are removed once the echo is consumed.
+	claimedSlugsMu sync.Mutex
+	claimedSlugs   map[string]bool
+
 	triggersProcessed atomic.Int64
 	generationsFailed atomic.Int64
 	lastActivityMu    sync.RWMutex
@@ -138,6 +147,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		toolRegistry:  deps.ToolRegistry,
 		assembler:     assembler,
 		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
+		claimedSlugs:  make(map[string]bool),
 		retry: dispatchretry.New(dispatchretry.Config{
 			MaxRetries: config.MaxGenerationRetries,
 			BackoffMs:  config.RetryBackoffMs,
@@ -250,7 +260,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Watching PLAN_STATES for architecture_generated")
+	c.logger.Info("Watching PLAN_STATES for architecture_generated / preparing_stories")
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
@@ -264,15 +274,37 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		if plan.Status != workflow.StatusArchitectureGenerated {
-			continue
-		}
-
-		// Claim the plan to prevent re-trigger on watcher restarts. If the
-		// claim fails another watcher already advanced — usually because
-		// PR 3 ships dormant and scenario-generator claims generating_scenarios
-		// first.
-		if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusPreparingStories, c.logger) {
+		// Two claim points for Sarah's dispatch:
+		//   (A) architecture_generated → preparing_stories: forward flow
+		//       on a freshly architected plan. ClaimPlanStatus does an
+		//       atomic CAS via plan-manager so only one replica wins.
+		//   (B) preparing_stories already set: back-transition driven by
+		//       plan-manager when a story_reprepare PlanDecision is
+		//       accepted (Train C step 4). plan-manager has already
+		//       cleared the affected Stories + written Story.RecoveryHint;
+		//       Sarah's re-prep reads those hints via the prompt context.
+		//       Already-in-target-state means ClaimPlanStatus rejects (a
+		//       → a is not a valid transition), so we don't claim — the
+		//       transition is already done; we just need to dispatch and
+		//       dedup against the echo from path (A) below.
+		switch plan.Status {
+		case workflow.StatusArchitectureGenerated:
+			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusPreparingStories, c.logger) {
+				continue
+			}
+			// Track the claim so the corresponding preparing_stories echo
+			// the watcher sees next does NOT trigger a second dispatch.
+			c.markClaimedSlug(plan.Slug)
+			plan.Status = workflow.StatusPreparingStories
+		case workflow.StatusPreparingStories:
+			// Was THIS watcher's claim the cause of this echo? If yes, the
+			// dispatch already happened in path (A) — drop the echo and
+			// clear the flag. If no, plan-manager drove the back-
+			// transition and we dispatch now.
+			if c.consumeClaimedSlug(plan.Slug) {
+				continue
+			}
+		default:
 			continue
 		}
 
@@ -281,6 +313,33 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 
 		go c.processStoryPhase(ctx, &plan)
 	}
+}
+
+// markClaimedSlug records that THIS watcher just produced a
+// preparing_stories status for the named slug via ClaimPlanStatus. The
+// next preparing_stories KV-put echo this watcher observes for the slug
+// will be the corresponding self-echo (the status mutation plan-manager
+// performed in response to our claim) and should be skipped, not
+// treated as a back-transition.
+func (c *Component) markClaimedSlug(slug string) {
+	c.claimedSlugsMu.Lock()
+	defer c.claimedSlugsMu.Unlock()
+	c.claimedSlugs[slug] = true
+}
+
+// consumeClaimedSlug reports whether THIS watcher had a pending claim
+// for the slug and clears the flag. Returns true when the caller should
+// SKIP processing the current event (it's the self-echo); false when
+// the event came from elsewhere (e.g., plan-manager back-transition)
+// and the caller should dispatch.
+func (c *Component) consumeClaimedSlug(slug string) bool {
+	c.claimedSlugsMu.Lock()
+	defer c.claimedSlugsMu.Unlock()
+	if c.claimedSlugs[slug] {
+		delete(c.claimedSlugs, slug)
+		return true
+	}
+	return false
 }
 
 // processStoryPhase handles the story-preparation phase for a single plan.
@@ -447,6 +506,25 @@ func buildPromptContext(plan *workflow.Plan, previousError string) *prompt.Story
 		}
 	}
 
+	// Train C step 5: surface Story.RecoveryHint values onto the prompt
+	// context. plan-manager wrote these onto the affected Stories at
+	// PlanDecision-accept time (Train C step 4 applyRecoveryHint); the
+	// Stories themselves stay in plan.Stories so Sarah's emission
+	// replaces the whole set per the existing handleStoriesMutation
+	// wipe-and-replace contract. Empty on the forward flow
+	// (architecture_generated → preparing_stories); populated on the
+	// back-transition flow where Sarah is being asked to re-prep.
+	var recoveryHints []prompt.StoryRecoveryHint
+	for _, s := range plan.Stories {
+		if s.RecoveryHint == "" {
+			continue
+		}
+		recoveryHints = append(recoveryHints, prompt.StoryRecoveryHint{
+			StoryID: s.ID,
+			Hint:    s.RecoveryHint,
+		})
+	}
+
 	return &prompt.StoryPreparerPromptContext{
 		PlanTitle:              plan.Title,
 		PlanGoal:               plan.Goal,
@@ -455,6 +533,7 @@ func buildPromptContext(plan *workflow.Plan, previousError string) *prompt.Story
 		ArchitectureComponents: components,
 		Requirements:           reqs,
 		PreviousError:          previousError,
+		StoryRecoveryHints:     recoveryHints,
 	}
 }
 

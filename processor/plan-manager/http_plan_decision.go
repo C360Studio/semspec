@@ -493,15 +493,44 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 	proposal.DecidedAt = &now
 
 	// ADR-037 stage-1 (a3): when accepting a recovery PlanDecision, apply
-	// the rationale as supplementary feedback on the affected req(s) via
-	// req.RecoveryHint. Execution-manager prepends this onto exec.Feedback
-	// at next-cycle developer dispatch so the manager-role agent's
-	// recommendation reaches the wedged role through the existing
-	// retry-feedback channel. No new prompt fragment, no new wire shape.
-	// Gated by ProposedBy="recovery-agent" so qa-reviewer + req-executor
-	// proposals (which use the same wire) don't get hint application.
+	// the rationale as supplementary feedback on the affected entity(ies)
+	// via RecoveryHint. Execution-manager prepends Req.RecoveryHint onto
+	// exec.Feedback at next-cycle developer dispatch; Sarah reads
+	// Story.RecoveryHint at re-prep time (Train C step 4) so the
+	// manager-role agent's recommendation reaches the wedged role through
+	// the existing retry-feedback channel. No new prompt fragment, no new
+	// wire shape. Gated by ProposedBy="recovery-agent" so qa-reviewer +
+	// req-executor proposals (which use the same wire) don't get hint
+	// application.
 	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
 		applyRecoveryHint(plan, proposal)
+	}
+
+	// Train C step 4: when a story_reprepare PlanDecision is accepted,
+	// drive the back-transition stories_generated → preparing_stories so
+	// Sarah's watcher claims and re-preps. The affected Stories STAY in
+	// plan.Stories with their RecoveryHint set (written by
+	// applyRecoveryHint above) so Sarah's prompt iterates the full Story
+	// set and sees which entries need re-authoring; her emission then
+	// REPLACES plan.Stories per the existing handleStoriesMutation
+	// wipe-and-replace contract.
+	//
+	// In-place transition check (NOT setPlanStatusCached) avoids a double
+	// KV put: setPlanStatusCached would save, then the trailing ps.save
+	// below would save again — both putting status=preparing_stories. The
+	// watcher would see two identical events and dispatch Sarah twice. The
+	// inline check + mutation lets the existing trailing save be the sole
+	// persist point. An invalid transition (plan moved past
+	// stories_generated while the human review window was open) leaves the
+	// plan in place + logs a warning.
+	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
+		current := plan.EffectiveStatus()
+		if current.CanTransitionTo(workflow.StatusPreparingStories) {
+			plan.Status = workflow.StatusPreparingStories
+		} else {
+			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
+				"slug", slug, "proposal_id", proposalID, "current_status", current)
+		}
 	}
 
 	if err := c.plans.save(r.Context(), plan); err != nil {
@@ -587,32 +616,87 @@ func (c *Component) handleRejectPlanDecision(w http.ResponseWriter, r *http.Requ
 }
 
 // applyRecoveryHint writes the recovery agent's diagnosis onto each
-// affected requirement's RecoveryHint field. Execution-manager reads
+// affected entity's RecoveryHint field. Execution-manager reads
 // req.RecoveryHint at developer dispatch time and prepends it to
 // exec.Feedback so the agent sees the manager-role recommendation in
-// the same channel as prior reviewer feedback.
+// the same channel as prior reviewer feedback; Sarah reads
+// Story.RecoveryHint at re-prep time for the same purpose.
+//
+// Branches on proposal.Kind:
+//
+//   - Kind=story_reprepare: write proposal.Rationale onto every Story
+//     in proposal.AffectedStoryIDs (Train C step 4). If
+//     AffectedStoryIDs is empty, fall back to "every Story under
+//     proposal.AffectedReqIDs" — matches the cascade's whole-
+//     Requirement re-prep fallback so Sarah sees the diagnosis on every
+//     Story she's about to re-author.
+//   - Kind=requirement_change OR unset (back-compat): write
+//     proposal.Rationale onto every Requirement in
+//     proposal.AffectedReqIDs (the pre-Train-C contract).
 //
 // Idempotent: repeated accepts of the same proposal overwrite the hint
 // with the same content. The hint is cleared on req completion (the next
 // cycle of a different req doesn't carry stale recovery context).
 //
-// Best-effort: a missing affected req (deleted between propose + accept)
-// is logged and skipped, not an error — the cascade re-run will surface
-// the missing-req case through the existing dirty-mark machinery.
+// Best-effort: a missing affected entity (deleted between propose +
+// accept) is logged and skipped, not an error — the cascade re-run will
+// surface the missing-entity case through the existing dirty-mark
+// machinery.
 func applyRecoveryHint(plan *workflow.Plan, proposal *workflow.PlanDecision) {
 	if proposal == nil || proposal.Rationale == "" {
 		return
 	}
+	now := time.Now()
+
+	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
+		applyRecoveryHintToStories(plan, proposal, now)
+		return
+	}
+
 	affected := make(map[string]bool, len(proposal.AffectedReqIDs))
 	for _, id := range proposal.AffectedReqIDs {
 		affected[id] = true
 	}
-	now := time.Now()
 	for i := range plan.Requirements {
 		if !affected[plan.Requirements[i].ID] {
 			continue
 		}
 		plan.Requirements[i].RecoveryHint = proposal.Rationale
 		plan.Requirements[i].UpdatedAt = now
+	}
+}
+
+// applyRecoveryHintToStories writes proposal.Rationale onto every Story
+// in proposal.AffectedStoryIDs (or, if empty, every Story under
+// proposal.AffectedReqIDs). Mirrors the cascade.storiesForReprepare
+// fallback so applyRecoveryHint and cascade agree on which Stories are
+// in scope.
+func applyRecoveryHintToStories(plan *workflow.Plan, proposal *workflow.PlanDecision, now time.Time) {
+	target := make(map[string]bool, len(proposal.AffectedStoryIDs))
+	for _, id := range proposal.AffectedStoryIDs {
+		target[id] = true
+	}
+
+	if len(target) == 0 {
+		// Fallback: every Story under any affected Requirement.
+		reqs := make(map[string]bool, len(proposal.AffectedReqIDs))
+		for _, id := range proposal.AffectedReqIDs {
+			reqs[id] = true
+		}
+		for i := range plan.Stories {
+			if reqs[plan.Stories[i].RequirementID] {
+				plan.Stories[i].RecoveryHint = proposal.Rationale
+				plan.Stories[i].UpdatedAt = now
+			}
+		}
+		return
+	}
+
+	for i := range plan.Stories {
+		if !target[plan.Stories[i].ID] {
+			continue
+		}
+		plan.Stories[i].RecoveryHint = proposal.Rationale
+		plan.Stories[i].UpdatedAt = now
 	}
 }
