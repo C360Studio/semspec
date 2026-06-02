@@ -137,6 +137,80 @@ func TestHandleApprovedClaimMismatch_DoesNotFalseFailRestoredNodes(t *testing.T)
 	}
 }
 
+// TestRebuildExecFromKV_VisitedNodesScopedToCurrentStory pins go-reviewer
+// Pass-1 finding C3. Pre-fix, rebuildExecFromKV pre-populated VisitedNodes
+// from the entire cross-Story NodeResults accumulator. When a 2+ Story
+// requirement was mid-Story-2 at restart:
+//
+//	NodeResults restored = [story1.A, story1.B] (from Story 1)
+//	SortedNodeIDs restored = [story2.C, story2.D, story2.E] (current Story 2 DAG)
+//	VisitedNodes built from NodeResults = {story1.A, story1.B} (2 entries)
+//
+// First Story-2 node completes → VisitedNodes = {story1.A, story1.B, story2.C} (3)
+// Check: len(VisitedNodes) >= len(SortedNodeIDs) → 3 >= 3 → TRUE
+// Reviewer fires early, Story 2's D and E nodes never run.
+//
+// Post-fix: VisitedNodes is scoped to the current Story's SortedNodeIDs,
+// so the check correctly waits for all 3 Story-2 nodes.
+func TestRebuildExecFromKV_VisitedNodesScopedToCurrentStory(t *testing.T) {
+	c := newTestComponent(t)
+	persisted := &workflow.RequirementExecution{
+		EntityID:      "entity-1",
+		Slug:          "demo",
+		RequirementID: "req.demo.1",
+		// Story 1's nodes already completed; recorded as NodeResults.
+		NodeResults: []workflow.NodeResult{
+			{NodeID: "story1.A", FilesModified: []string{"src/a.go"}, CommitSHA: "aa"},
+			{NodeID: "story1.B", FilesModified: []string{"src/b.go"}, CommitSHA: "bb"},
+		},
+		// Current Story 2 DAG persisted: 3 nodes, none visited yet.
+		SortedNodeIDs:   []string{"story2.C", "story2.D", "story2.E"},
+		SortedStoryIDs:  []string{"story.demo.1.1", "story.demo.1.2"},
+		CurrentStoryIdx: 1,
+	}
+
+	exec := c.rebuildExecFromKV("req.demo.req.demo.1", persisted)
+
+	// NodeResults preserves the cross-Story accumulator (the claim/observation
+	// gate needs both Stories' results).
+	if len(exec.NodeResults) != 2 {
+		t.Errorf("NodeResults = %d, want 2 (cross-Story accumulator preserved)", len(exec.NodeResults))
+	}
+
+	// VisitedNodes is the headline assertion: only current Story's nodes
+	// count. Story 1's completed nodes must NOT pre-populate it.
+	if len(exec.VisitedNodes) != 0 {
+		t.Errorf("VisitedNodes = %v (len=%d), want empty (Story 1 nodes do not belong to Story 2's dispatch surface)", exec.VisitedNodes, len(exec.VisitedNodes))
+	}
+	if exec.VisitedNodes["story1.A"] {
+		t.Errorf("VisitedNodes wrongly contains story1.A — pre-fix C3 shape would trip reviewer-fires-early")
+	}
+}
+
+// TestRebuildExecFromKV_VisitedNodesLegacyFallbackWhenNoDAG pins the
+// back-compat behavior: when SortedNodeIDs is empty (legacy KV record
+// from before the DAG was persisted, or pre-Sarah plan), VisitedNodes
+// falls back to the pre-C3 semantic of populating from every NodeResult.
+// Important so legacy KV state still rebuilds correctly.
+func TestRebuildExecFromKV_VisitedNodesLegacyFallbackWhenNoDAG(t *testing.T) {
+	c := newTestComponent(t)
+	persisted := &workflow.RequirementExecution{
+		EntityID:      "entity-1",
+		Slug:          "demo",
+		RequirementID: "req.demo.1",
+		NodeResults: []workflow.NodeResult{
+			{NodeID: "node.X", FilesModified: []string{"src/x.go"}, CommitSHA: "xx"},
+		},
+		// SortedNodeIDs intentionally empty — legacy KV state.
+	}
+
+	exec := c.rebuildExecFromKV("req.demo.req.demo.1", persisted)
+
+	if !exec.VisitedNodes["node.X"] {
+		t.Errorf("legacy fallback: VisitedNodes should contain node.X when SortedNodeIDs is empty (pre-C3 behavior preserved)")
+	}
+}
+
 // TestHandleApprovedClaimMismatch_FiresWhenObservationGenuinelyMissing
 // pins the positive direction of the gate: a NodeResult that claims
 // FilesModified but truly has no CommitSHA (the bug-9 pattern this gate

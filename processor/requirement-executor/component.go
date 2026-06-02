@@ -527,13 +527,35 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		}
 	}
 
-	// Rebuild VisitedNodes from NodeResults. CommitSHA is round-tripped so the
-	// claim/observation gate (handleApprovedClaimMismatchLocked) sees the
-	// merge commit for nodes that completed before the restart.
+	// Rebuild VisitedNodes from NodeResults, scoped to the current Story's
+	// node set. NodeResults accumulates across Stories (the requirement-level
+	// claim/observation gate at handleApprovedClaimMismatchLocked iterates
+	// all of them); but VisitedNodes tracks which nodes have finished in the
+	// CURRENT Story only. The reviewer-fires-when-done check at
+	// recordNodeSuccessLocked compares len(VisitedNodes) against
+	// len(SortedNodeIDs) — which only carries the current Story's nodes —
+	// so if VisitedNodes were populated from the full cross-Story
+	// accumulator, the comparison would trivially fire after the first
+	// resumed node completes and skip the rest of the Story. Closes
+	// go-reviewer Pass-1 finding C3.
+	//
+	// CommitSHA is round-tripped on the NodeResults so the claim/observation
+	// gate sees the merge commit for nodes that completed before the
+	// restart (Pass-1 C4 — closed in the prior commit of this stack).
+	currentStoryNodes := make(map[string]bool, len(reqExec.SortedNodeIDs))
+	for _, id := range reqExec.SortedNodeIDs {
+		currentStoryNodes[id] = true
+	}
 	exec.VisitedNodes = make(map[string]bool, len(reqExec.NodeResults))
 	exec.NodeResults = make([]NodeResult, 0, len(reqExec.NodeResults))
 	for _, nr := range reqExec.NodeResults {
-		exec.VisitedNodes[nr.NodeID] = true
+		// Only mark visited if this node belongs to the current Story's DAG.
+		// When SortedNodeIDs is empty (legacy / pre-DAG state), fall back to
+		// the prior behavior of treating every NodeResult as visited so
+		// non-Story-aware plans keep working.
+		if len(currentStoryNodes) == 0 || currentStoryNodes[nr.NodeID] {
+			exec.VisitedNodes[nr.NodeID] = true
+		}
 		exec.NodeResults = append(exec.NodeResults, NodeResult{
 			NodeID:        nr.NodeID,
 			FilesModified: nr.FilesModified,
