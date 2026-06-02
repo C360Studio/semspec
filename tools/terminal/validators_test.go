@@ -602,3 +602,151 @@ func TestExpectedFieldsHint_ArchitectureMatchesNewSchema(t *testing.T) {
 	}
 	// Optional fields can stay out of the hint to keep it readable; not pinned.
 }
+
+// TestValidateIntegrationUpstreamPairing pins the Rule 7a structural
+// check added in response to smoke 5 (mavlink-hard 2026-06-01) where
+// gemini-pro Winston repeatedly produced integrations[].name that did
+// not match any upstream_resolutions[].name. The validator only fires
+// when BOTH arrays are non-empty — a pure-library architecture is
+// allowed to leave upstream_resolutions empty.
+func TestValidateIntegrationUpstreamPairing(t *testing.T) {
+	tests := []struct {
+		name      string
+		doc       map[string]any
+		wantError string // empty = should pass
+	}{
+		{
+			name: "both arrays empty passes",
+			doc:  map[string]any{},
+		},
+		{
+			name: "integrations only, no upstream_resolutions passes (pure-library architecture)",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "HTTP API", "direction": "inbound", "protocol": "http"},
+				},
+			},
+		},
+		{
+			name: "integration name matched in upstream_resolutions passes",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "MAVLink Network", "direction": "outbound", "protocol": "udp"},
+				},
+				"upstream_resolutions": []any{
+					map[string]any{
+						"name":       "MAVLink Network",
+						"coordinate": "github.com/mavlink/mavlink-go@v0.7.0",
+						"role":       "integration_target",
+					},
+				},
+			},
+		},
+		{
+			name: "integration without matching upstream_resolution fails (smoke 5 root cause)",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "MAVLink Network", "direction": "outbound", "protocol": "udp"},
+					map[string]any{"name": "OGC Connected Systems API", "direction": "inbound", "protocol": "http"},
+				},
+				"upstream_resolutions": []any{
+					// Only one of the two integrations has a resolution.
+					map[string]any{
+						"name":       "MAVLink Network",
+						"coordinate": "github.com/mavlink/mavlink-go@v0.7.0",
+						"role":       "integration_target",
+					},
+				},
+			},
+			wantError: "integrations[1].name=\"OGC Connected Systems API\" has no matching upstream_resolutions",
+		},
+		{
+			name: "renamed upstream_resolution (smoke 5 round-2 pattern) fails with both names in error message",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "MAVLink Network", "direction": "outbound", "protocol": "udp"},
+				},
+				"upstream_resolutions": []any{
+					// Architect renamed the resolution instead of matching the integration name.
+					map[string]any{
+						"name":       "Raw MAVLink Endpoint",
+						"coordinate": "github.com/mavlink/mavlink-go@v0.7.0",
+						"role":       "integration_target",
+					},
+				},
+			},
+			wantError: "integrations[0].name=\"MAVLink Network\" has no matching upstream_resolutions",
+		},
+		{
+			name: "integration_target upstream without matching integration fails",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "HTTP API", "direction": "inbound", "protocol": "http"},
+				},
+				"upstream_resolutions": []any{
+					map[string]any{
+						"name":       "HTTP API",
+						"coordinate": "stdlib",
+						"role":       "runtime_dep",
+					},
+					map[string]any{
+						"name":       "Postgres",
+						"coordinate": "postgres:16",
+						"role":       "integration_target",
+					},
+				},
+			},
+			wantError: "upstream_resolutions[].name=\"Postgres\" has role=\"integration_target\" but no matching integrations",
+		},
+		{
+			name: "non-integration_target upstream (runtime_dep) without matching integration passes",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "HTTP API", "direction": "inbound", "protocol": "http"},
+				},
+				"upstream_resolutions": []any{
+					map[string]any{
+						"name":       "HTTP API",
+						"coordinate": "stdlib",
+						"role":       "runtime_dep",
+					},
+					// Lombok is a build_dep with no matching integration — allowed.
+					map[string]any{
+						"name":       "Lombok",
+						"coordinate": "org.projectlombok:lombok:1.18.30",
+						"role":       "build_dep",
+					},
+				},
+			},
+		},
+		{
+			name: "upstream_resolution missing name fails with index",
+			doc: map[string]any{
+				"integrations": []any{
+					map[string]any{"name": "HTTP API", "direction": "inbound", "protocol": "http"},
+				},
+				"upstream_resolutions": []any{
+					map[string]any{"coordinate": "stdlib"}, // missing name
+				},
+			},
+			wantError: "upstream_resolutions[0] missing required name",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateIntegrationUpstreamPairing(tc.doc)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Errorf("want no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want error containing %q, got nil", tc.wantError)
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Errorf("error %q missing substring %q", err.Error(), tc.wantError)
+			}
+		})
+	}
+}

@@ -342,6 +342,9 @@ func ValidateArchitectDeliverable(d map[string]any) error {
 	if err := validateIntegrations(d); err != nil {
 		return err
 	}
+	if err := validateIntegrationUpstreamPairing(d); err != nil {
+		return err
+	}
 	if err := validateTestSurface(d); err != nil {
 		return err
 	}
@@ -607,6 +610,100 @@ func validateIntegrations(d map[string]any) error {
 			return fmt.Errorf("integrations[%d] direction must be one of: inbound, outbound, bidirectional (got %q)", i, direction)
 		}
 	}
+	return nil
+}
+
+// validateIntegrationUpstreamPairing enforces the bidirectional name
+// invariant between integrations[] and upstream_resolutions[] — Rule 7a
+// "Upstream Resolution Discipline" from Winston's persona prompt.
+//
+// The check fires only when BOTH arrays are non-empty. An architecture
+// that legitimately has no external surface (pure-library / stdlib-only)
+// can leave upstream_resolutions empty; this validator does not force
+// the architect to invent a resolution where there's nothing to resolve.
+// But once the architect has authored resolutions, the names MUST match
+// across both arrays:
+//
+//   - Every integration name MUST appear as an upstream_resolutions[].name.
+//   - Every upstream_resolutions[] entry with role="integration_target"
+//     MUST have a matching integration name.
+//
+// The rule has lived in Winston's persona prompt since 2026-05-15, but
+// real-LLM smokes (mavlink-hard 2026-06-01) reproducibly showed
+// gemini-pro Winston either renaming one side or partially populating
+// resolutions — burning 3 LLM plan-reviewer rounds for what is a
+// deterministic check. Catching it here surfaces the exact mismatched
+// name in the architecture-generator's retry feedback so Winston gets a
+// precise edit instruction on attempt 2 instead of an LLM-paraphrased
+// rejection 3 rounds later.
+//
+// Matching is exact-string equality — no fuzzy-matching. The persona
+// prompt is the one place where authoring discipline lives; the
+// operator-friendly mismatch error here is the convergence lever.
+func validateIntegrationUpstreamPairing(d map[string]any) error {
+	integrations, _ := d["integrations"].([]any)
+	resolutions, _ := d["upstream_resolutions"].([]any)
+
+	if len(integrations) == 0 || len(resolutions) == 0 {
+		return nil
+	}
+
+	resByName := make(map[string]struct{}, len(resolutions))
+	for i, r := range resolutions {
+		obj, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := obj["name"].(string)
+		if name == "" {
+			return fmt.Errorf("upstream_resolutions[%d] missing required name", i)
+		}
+		resByName[name] = struct{}{}
+	}
+
+	for i, ig := range integrations {
+		obj, ok := ig.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := obj["name"].(string)
+		if name == "" {
+			continue // validateIntegrations already catches this; don't double-error
+		}
+		if _, ok := resByName[name]; !ok {
+			return fmt.Errorf("integrations[%d].name=%q has no matching upstream_resolutions[] entry — every integration must be paired with an upstream_resolutions[] entry of the same name (Rule 7a). Add the resolution with role=\"integration_target\" and the resolved coordinate + apis citations, OR remove the integration if it is not a real external dependency", i, name)
+		}
+	}
+
+	for _, r := range resolutions {
+		obj, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		role, _ := obj["role"].(string)
+		if role != "integration_target" {
+			continue
+		}
+		name, _ := obj["name"].(string)
+		if name == "" {
+			continue
+		}
+		matched := false
+		for _, ig := range integrations {
+			io, ok := ig.(map[string]any)
+			if !ok {
+				continue
+			}
+			if igName, _ := io["name"].(string); igName == name {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return fmt.Errorf("upstream_resolutions[].name=%q has role=\"integration_target\" but no matching integrations[] entry — every integration_target upstream resolution must be paired with an integration of the same name (Rule 7a). Add the integration with direction + protocol, OR change the role if the dependency is in-process", name)
+		}
+	}
+
 	return nil
 }
 
