@@ -840,6 +840,27 @@ func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug 
 			Tasks:         tasks,
 		}
 	}
+
+	// Per-Requirement coverage gate: every plan.Requirements entry MUST have
+	// at least one Story. Pre-fix, Sarah could omit a Requirement entirely;
+	// the parser passed, scenario-generator's legacy fallback engaged for
+	// the uncovered Req, and execution-manager later hard-failed with "no
+	// Stories on plan for requirement %s." Closes go-reviewer Pass-3 S-C2
+	// (also closes Pass-2 C5 from the producer side).
+	covered := make(map[string]struct{}, len(canonicalReqIDs))
+	for _, id := range canonicalReqIDs {
+		covered[id] = struct{}{}
+	}
+	var uncovered []string
+	for _, req := range plan.Requirements {
+		if _, ok := covered[req.ID]; !ok {
+			uncovered = append(uncovered, req.ID)
+		}
+	}
+	if len(uncovered) > 0 {
+		return nil, fmt.Errorf("Sarah must emit at least one story per requirement; uncovered: %v", uncovered)
+	}
+
 	return out, nil
 }
 
