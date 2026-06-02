@@ -764,16 +764,32 @@ func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.Lo
 
 	decisionID := fmt.Sprintf("plan-decision.%s.recovery.%s", req.Slug, req.RecoveryID[:8])
 
+	// Story IDs are passed through unconditionally. They're only
+	// load-bearing when Kind=story_reprepare (cascade + applyRecoveryHint
+	// look here); for other kinds the field is omitempty on the wire and
+	// harmless to set. Pre-ADR-043-Train-C consumers ignore the unknown
+	// field, so the wire shape is back-compat.
+	//
+	// The explicit nil-vs-empty distinction is preserved: empty input
+	// leaves affectedStories nil so the JSON omitempty drops the field
+	// entirely (legacy / single-Story wedges), while populated input
+	// forces explicit serialization.
+	var affectedStories []string
+	if len(req.AffectedStoryIDs) > 0 {
+		affectedStories = append(affectedStories, req.AffectedStoryIDs...)
+	}
+
 	return workflow.PlanDecision{
-		ID:             decisionID,
-		PlanID:         workflow.PlanEntityID(req.Slug),
-		Kind:           kind,
-		Title:          title,
-		Rationale:      rationale,
-		Status:         workflow.PlanDecisionStatusProposed,
-		ProposedBy:     componentName,
-		AffectedReqIDs: affectedReqs,
-		CreatedAt:      now,
+		ID:               decisionID,
+		PlanID:           workflow.PlanEntityID(req.Slug),
+		Kind:             kind,
+		Title:            title,
+		Rationale:        rationale,
+		Status:           workflow.PlanDecisionStatusProposed,
+		ProposedBy:       componentName,
+		AffectedReqIDs:   affectedReqs,
+		AffectedStoryIDs: affectedStories,
+		CreatedAt:        now,
 	}
 }
 

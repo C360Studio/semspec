@@ -2137,11 +2137,22 @@ func (c *Component) emitExhaustionDecision(ctx context.Context, exec *requiremen
 	// signal landed in the proposed PlanDecision and stopped. Wiring this
 	// publish gives the recovery agent the same chance to dispatch a
 	// manager-role diagnosis here as on the other two routes.
+	// Forward the exec's Story cursor so the recovery-agent can reach back
+	// to Sarah's layer when its diagnosis points at story-shaping (ADR-043
+	// PR 4i + Train C). Empty in legacy / single-Story plans, which is
+	// fine — recovery-agent won't propose story_reprepare without Stories
+	// in scope.
+	var affectedStories []string
+	if len(exec.SortedStoryIDs) > 0 {
+		affectedStories = append(affectedStories, exec.SortedStoryIDs...)
+	}
+
 	c.publishRecoveryRequested(ctx, &payloads.RecoveryRequested{
 		RecoveryID:          uuid.New().String(),
 		Layer:               payloads.RecoveryLayerPhaseLocal,
 		Slug:                exec.Slug,
 		RequirementID:       exec.RequirementID,
+		AffectedStoryIDs:    affectedStories,
 		LoopID:              exec.LoopID,
 		EscalationReason:    fmt.Sprintf("requirement retries exhausted (%d/%d); last verdict=%q", exec.RetryCount, exec.MaxRetries, verdict),
 		LastFailureFeedback: feedback,

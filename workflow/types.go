@@ -1719,13 +1719,20 @@ type PlanDecision struct {
 	PlanID string `json:"plan_id"`
 	// Kind narrows the intent. Defaults to requirement_change for back-compat
 	// with old records that predate the Kind field.
-	Kind             PlanDecisionKind   `json:"kind,omitempty"`
-	Title            string             `json:"title"`
-	Rationale        string             `json:"rationale"`
-	Status           PlanDecisionStatus `json:"status"`
-	ProposedBy       string             `json:"proposed_by"`
-	AffectedReqIDs   []string           `json:"affected_requirement_ids"`
-	RejectionReasons map[string]string  `json:"rejection_reasons,omitempty"`
+	Kind           PlanDecisionKind   `json:"kind,omitempty"`
+	Title          string             `json:"title"`
+	Rationale      string             `json:"rationale"`
+	Status         PlanDecisionStatus `json:"status"`
+	ProposedBy     string             `json:"proposed_by"`
+	AffectedReqIDs []string           `json:"affected_requirement_ids"`
+	// AffectedStoryIDs lists specific Story IDs the decision targets. Used
+	// by Kind=story_reprepare to scope the cascade + re-prep to just the
+	// affected Stories rather than the whole Requirement. Empty when
+	// Kind=requirement_change or execution_exhausted (those operate at the
+	// Requirement granularity). Populated by recovery-agent from the
+	// wedged exec's SortedStoryIDs at the time of diagnosis.
+	AffectedStoryIDs []string          `json:"affected_story_ids,omitempty"`
+	RejectionReasons map[string]string `json:"rejection_reasons,omitempty"`
 	// ArtifactReferences links artifacts (logs, screenshots, traces, trajectory
 	// steps) to this decision. Populated by qa-reviewer on needs_changes and
 	// by requirement-executor on retry exhaustion so the human reviewer can
