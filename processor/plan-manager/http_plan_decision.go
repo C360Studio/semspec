@@ -508,22 +508,28 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 
 	// Train C step 4: when a story_reprepare PlanDecision is accepted,
 	// drive the back-transition stories_generated → preparing_stories so
-	// Sarah's watcher claims and re-preps. Cascade has already dirty-
-	// marked the affected Stories at the cache level; this clears them
-	// from plan.Stories so Sarah's gate sees them as needing fresh work
-	// rather than treating stale content as already-done. Only the named
-	// Stories (or, if AffectedStoryIDs empty, every Story under
-	// AffectedReqIDs — matches the cascade fallback) are removed; sibling
-	// Stories survive.
+	// Sarah's watcher claims and re-preps. The affected Stories STAY in
+	// plan.Stories with their RecoveryHint set (written by
+	// applyRecoveryHint above) so Sarah's prompt iterates the full Story
+	// set and sees which entries need re-authoring; her emission then
+	// REPLACES plan.Stories per the existing handleStoriesMutation
+	// wipe-and-replace contract.
 	//
-	// Transition validation happens in setPlanStatusCached; an invalid
-	// transition (e.g., plan moved past stories_generated while the human
-	// review window was open) leaves the plan in place + logs a warning.
+	// In-place transition check (NOT setPlanStatusCached) avoids a double
+	// KV put: setPlanStatusCached would save, then the trailing ps.save
+	// below would save again — both putting status=preparing_stories. The
+	// watcher would see two identical events and dispatch Sarah twice. The
+	// inline check + mutation lets the existing trailing save be the sole
+	// persist point. An invalid transition (plan moved past
+	// stories_generated while the human review window was open) leaves the
+	// plan in place + logs a warning.
 	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
-		clearStoriesForReprepare(plan, proposal)
-		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusPreparingStories); err != nil {
+		current := plan.EffectiveStatus()
+		if current.CanTransitionTo(workflow.StatusPreparingStories) {
+			plan.Status = workflow.StatusPreparingStories
+		} else {
 			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
-				"slug", slug, "proposal_id", proposalID, "current_status", plan.EffectiveStatus(), "error", err)
+				"slug", slug, "proposal_id", proposalID, "current_status", current)
 		}
 	}
 
@@ -658,47 +664,6 @@ func applyRecoveryHint(plan *workflow.Plan, proposal *workflow.PlanDecision) {
 		plan.Requirements[i].RecoveryHint = proposal.Rationale
 		plan.Requirements[i].UpdatedAt = now
 	}
-}
-
-// clearStoriesForReprepare removes the Stories named in
-// proposal.AffectedStoryIDs from plan.Stories (or, when AffectedStoryIDs
-// is empty, every Story under proposal.AffectedReqIDs — matches the
-// cascade.storiesForReprepare fallback). Sibling Stories survive.
-//
-// Removing the Stories from plan.Stories is the "dirty mark" that Sarah's
-// re-prep relies on: workflow.ValidateStories runs on Sarah's emission at
-// the next mutation boundary, and Sarah's prompt context iterates
-// plan.Stories to see what's already authored. Stale-Story content
-// passing through would silently overwrite the diagnosis-shaped re-prep.
-func clearStoriesForReprepare(plan *workflow.Plan, proposal *workflow.PlanDecision) {
-	if len(plan.Stories) == 0 {
-		return
-	}
-	target := make(map[string]bool, len(proposal.AffectedStoryIDs))
-	for _, id := range proposal.AffectedStoryIDs {
-		target[id] = true
-	}
-	if len(target) == 0 {
-		reqs := make(map[string]bool, len(proposal.AffectedReqIDs))
-		for _, id := range proposal.AffectedReqIDs {
-			reqs[id] = true
-		}
-		kept := plan.Stories[:0]
-		for _, s := range plan.Stories {
-			if !reqs[s.RequirementID] {
-				kept = append(kept, s)
-			}
-		}
-		plan.Stories = kept
-		return
-	}
-	kept := plan.Stories[:0]
-	for _, s := range plan.Stories {
-		if !target[s.ID] {
-			kept = append(kept, s)
-		}
-	}
-	plan.Stories = kept
 }
 
 // applyRecoveryHintToStories writes proposal.Rationale onto every Story

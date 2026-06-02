@@ -1954,13 +1954,22 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 
 	// Mirror HTTP path: drive the stories_generated → preparing_stories
 	// back-transition when a story_reprepare PlanDecision is accepted.
-	// Clearing Stories matching the proposal scope is the "dirty mark"
-	// that makes Sarah's re-prep land on a clean slate. Train C step 4.
+	// The affected Stories stay in plan.Stories with their RecoveryHint
+	// set (applyRecoveryHint above); Sarah's prompt iterates the full
+	// Story set on re-prep and her emission replaces plan.Stories per
+	// the existing handleStoriesMutation wipe-and-replace contract.
+	// Train C step 4.
+	//
+	// In-place transition check (NOT setPlanStatusCached) avoids a
+	// double-save / double-event — see the matching block in
+	// handleAcceptPlanDecision for the explanation.
 	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
-		clearStoriesForReprepare(plan, proposal)
-		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusPreparingStories); err != nil {
+		current := plan.EffectiveStatus()
+		if current.CanTransitionTo(workflow.StatusPreparingStories) {
+			plan.Status = workflow.StatusPreparingStories
+		} else {
 			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
-				"slug", req.Slug, "proposal_id", req.ProposalID, "current_status", plan.EffectiveStatus(), "error", err)
+				"slug", req.Slug, "proposal_id", req.ProposalID, "current_status", current)
 		}
 	}
 

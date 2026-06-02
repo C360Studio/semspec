@@ -103,61 +103,6 @@ func TestApplyRecoveryHint_RequirementChangePreservesBackCompat(t *testing.T) {
 	}
 }
 
-// TestClearStoriesForReprepare_NamedStoriesRemoved pins the dirty-mark
-// semantic: clearStoriesForReprepare drops the named Stories from
-// plan.Stories so Sarah's re-prep starts from a clean slate. Sibling
-// Stories survive.
-func TestClearStoriesForReprepare_NamedStoriesRemoved(t *testing.T) {
-	plan := &workflow.Plan{
-		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1"},
-			{ID: "story.demo.1.3", RequirementID: "req.demo.1"},
-		},
-	}
-	proposal := &workflow.PlanDecision{
-		Kind:             workflow.PlanDecisionKindStoryReprepare,
-		AffectedStoryIDs: []string{"story.demo.1.2"},
-	}
-
-	clearStoriesForReprepare(plan, proposal)
-
-	if len(plan.Stories) != 2 {
-		t.Fatalf("plan.Stories len = %d, want 2 (story 2 removed)", len(plan.Stories))
-	}
-	for _, s := range plan.Stories {
-		if s.ID == "story.demo.1.2" {
-			t.Errorf("story.demo.1.2 should have been removed; still present")
-		}
-	}
-}
-
-// TestClearStoriesForReprepare_FallbackRemovesByReqScope pins the
-// fallback: empty AffectedStoryIDs → remove every Story under
-// AffectedReqIDs. Matches the cascade + applyRecoveryHint fallback.
-func TestClearStoriesForReprepare_FallbackRemovesByReqScope(t *testing.T) {
-	plan := &workflow.Plan{
-		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1"},
-			{ID: "story.demo.2.1", RequirementID: "req.demo.2"},
-		},
-	}
-	proposal := &workflow.PlanDecision{
-		Kind:           workflow.PlanDecisionKindStoryReprepare,
-		AffectedReqIDs: []string{"req.demo.1"},
-	}
-
-	clearStoriesForReprepare(plan, proposal)
-
-	if len(plan.Stories) != 1 {
-		t.Fatalf("plan.Stories len = %d, want 1 (req.demo.1 Stories all removed)", len(plan.Stories))
-	}
-	if plan.Stories[0].ID != "story.demo.2.1" {
-		t.Errorf("plan.Stories[0].ID = %q, want story.demo.2.1 (different req survives)", plan.Stories[0].ID)
-	}
-}
-
 // TestApplyRecoveryHint_StoryUpdatedAtSet pins that Story.UpdatedAt is
 // bumped on hint write so downstream consumers (UI badges, graph
 // observers) see the freshness.
