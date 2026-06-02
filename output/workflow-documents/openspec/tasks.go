@@ -28,10 +28,7 @@ func RenderTasks(plan *workflow.Plan, execs map[string]workflow.RequirementExecu
 		return ""
 	}
 	var sb strings.Builder
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayPlanTitle(plan)
 	fmt.Fprintf(&sb, "# Tasks: %s\n\n", title)
 
 	for _, c := range plan.Exploration.Capabilities {

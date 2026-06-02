@@ -20,10 +20,7 @@ func RenderScenarios(plan *workflow.Plan) string {
 	}
 	var b strings.Builder
 
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayTitle(plan)
 	b.WriteString(fmt.Sprintf("# Scenarios: %s\n\n", title))
 	b.WriteString(fmt.Sprintf("*Generated from the scenario-generator role's output. **%d scenarios** verify the implementation, grouped by the requirement they cover.*\n\n",
 		len(plan.Scenarios)))

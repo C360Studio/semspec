@@ -40,10 +40,7 @@ func RenderArchitecture(plan *workflow.Plan) string {
 }
 
 func renderArchitectureHeader(b *strings.Builder, plan *workflow.Plan) {
-	title := plan.Title
-	if title == "" {
-		title = plan.Slug
-	}
+	title := displayTitle(plan)
 	b.WriteString(fmt.Sprintf("# Architecture: %s\n\n", title))
 	b.WriteString("*Generated from the architect role's structured deliverable. The architecture is the bridge between the goal and the implementation.*\n\n")
 }
