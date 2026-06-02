@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -366,6 +367,18 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 	plan.Stories = req.Stories
 	plan.Status = workflow.StatusStoriesGenerated
 
+	// ADR-043 follow-up — auto-derive plan.Scope.Create from the union of
+	// Story.FilesOwned. Sarah declares which files each Story will create,
+	// but pre-PR-4j the planner had to anticipate those paths in
+	// scope.create at plan-draft time. That created a consistency burden
+	// the planner reliably failed (smoke 5 / mavlink-hard 2026-06-01 saw
+	// plan-reviewer reject 3× because story.files_owned drifted from
+	// scope.create). Deriving here eliminates the drift: scope.create
+	// always reflects what stories actually intend to create. Files
+	// already in scope.include are excluded — they exist already, no
+	// creation intent needed.
+	plan.Scope = ensureScopeCreateCoversStories(plan.Scope, req.Stories)
+
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save stories via mutation", "slug", req.Slug, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
@@ -373,9 +386,43 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 
 	c.logger.Info("Stories saved via mutation",
 		"slug", req.Slug,
-		"count", len(req.Stories))
+		"count", len(req.Stories),
+		"scope_create_count", len(plan.Scope.Create))
 
 	return MutationResponse{Success: true}
+}
+
+// ensureScopeCreateCoversStories augments scope.Create with every
+// Story.FilesOwned path that is not already in scope.Include or scope.Create.
+// The returned Scope preserves the original Include / Exclude / DoNotTouch
+// fields; only Create may change. Result Create entries are sorted for
+// deterministic output.
+func ensureScopeCreateCoversStories(scope workflow.Scope, stories []workflow.Story) workflow.Scope {
+	have := make(map[string]struct{}, len(scope.Include)+len(scope.Create))
+	for _, p := range scope.Include {
+		have[p] = struct{}{}
+	}
+	for _, p := range scope.Create {
+		have[p] = struct{}{}
+	}
+	added := false
+	for _, s := range stories {
+		for _, p := range s.FilesOwned {
+			if p == "" {
+				continue
+			}
+			if _, ok := have[p]; ok {
+				continue
+			}
+			have[p] = struct{}{}
+			scope.Create = append(scope.Create, p)
+			added = true
+		}
+	}
+	if added {
+		sort.Strings(scope.Create)
+	}
+	return scope
 }
 
 // handleScenariosMutation saves scenarios for a requirement inline on the plan and checks convergence.
