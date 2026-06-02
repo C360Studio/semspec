@@ -53,6 +53,21 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		RoleScenarioGenerator: {
 			AllowExact: []string{"bash", "submit_work", "scratchpad"},
 		},
+		// Story-preparer (Sarah, ADR-043). Reads architecture +
+		// requirements and emits Stories with Tasks. Single-shot generator
+		// shape — same minimal palette as the other generators plus
+		// write_todos because Sarah's prompt instructs her to track
+		// readiness-gate progress across her own reasoning steps.
+		//
+		// Without this entry FilterTools falls through to "unknown role
+		// returns all tools," which today is invisible because story-
+		// preparer's own availableToolNames() returns only 4 tools — but
+		// the gap is a latent risk if that list ever broadens. Added 2026-
+		// 06-02 as defense-in-depth after the semteams 51-tools-leak
+		// investigation.
+		RoleStoryPreparer: {
+			AllowExact: []string{"bash", "submit_work", "write_todos", "scratchpad"},
+		},
 		// Recovery agent (manager-role wedge diagnosis) — closed action
 		// set is enforced at parse time; the palette here is "the tools
 		// you'll actually call." submit_work is the terminal commit;
