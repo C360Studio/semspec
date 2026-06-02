@@ -1,0 +1,173 @@
+2026/06/02 17:47:19 INFO Connecting to NATS urls=nats://localhost:4223
+2026/06/02 17:47:19 INFO Successfully connected to NATS urls=nats://localhost:4223
+semspec watch --live · interval=10s · http=http://localhost:3000 · snapshot=1m0s→/tmp/semspec-watch-gemini-easy-20260602-174553
+[17:47:19] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=0
+[17:47:29] plans=1 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=0
+[17:47:39] plans=1 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=0
+[17:47:49] plans=1 loops=5 msgs=35 active_loops=1 ctx_util=0.00 errors=0
+[17:47:59] plans=1 loops=7 msgs=42 active_loops=1 ctx_util=0.00 errors=0
+[17:48:09] plans=1 loops=9 msgs=65 active_loops=1 ctx_util=0.01 errors=0
+[17:48:19] plans=1 loops=9 msgs=81 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-224820.tar.gz (plans=1 loops=9 trajectories=5)
+[17:48:29] plans=1 loops=9 msgs=81 active_loops=1 ctx_util=0.01 errors=0
+[17:48:39] plans=1 loops=9 msgs=81 active_loops=1 ctx_util=0.01 errors=0
+[17:48:49] plans=1 loops=9 msgs=85 active_loops=1 ctx_util=0.01 errors=0
+[17:48:59] plans=1 loops=9 msgs=93 active_loops=1 ctx_util=0.01 errors=0
+[17:49:09] plans=1 loops=11 msgs=112 active_loops=1 ctx_util=0.01 errors=0
+[17:49:19] plans=1 loops=11 msgs=116 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-224920.tar.gz (plans=1 loops=11 trajectories=6)
+[17:49:29] plans=1 loops=13 msgs=135 active_loops=1 ctx_util=0.00 errors=0
+[17:49:39] plans=1 loops=13 msgs=135 active_loops=1 ctx_util=0.00 errors=0
+[17:49:49] plans=1 loops=13 msgs=135 active_loops=1 ctx_util=0.00 errors=0
+[17:49:59] plans=1 loops=13 msgs=135 active_loops=1 ctx_util=0.00 errors=0
+[17:50:10] plans=1 loops=17 msgs=161 active_loops=1 ctx_util=0.01 errors=0
+[17:50:20] plans=1 loops=18 msgs=169 active_loops=0 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225020.tar.gz (plans=1 loops=19 trajectories=10)
+[17:50:30] plans=1 loops=19 msgs=184 active_loops=1 ctx_util=0.01 errors=0
+[17:50:40] plans=1 loops=19 msgs=186 active_loops=1 ctx_util=0.01 errors=0
+[17:50:50] plans=1 loops=19 msgs=188 active_loops=1 ctx_util=0.01 errors=0
+[17:51:00] plans=1 loops=19 msgs=196 active_loops=1 ctx_util=0.01 errors=0
+[17:51:10] plans=1 loops=19 msgs=204 active_loops=1 ctx_util=0.01 errors=0
+[17:51:20] plans=1 loops=21 msgs=223 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260602-225120.tar.gz (plans=1 loops=21 trajectories=11)
+[17:51:30] plans=1 loops=21 msgs=243 active_loops=1 ctx_util=0.01 errors=0
+[17:51:40] plans=1 loops=21 msgs=247 active_loops=1 ctx_util=0.01 errors=0
+[17:51:50] plans=1 loops=24 msgs=257 active_loops=2 ctx_util=0.01 errors=0
+[17:52:00] plans=1 loops=25 msgs=269 active_loops=1 ctx_util=0.02 errors=0
+[17:52:10] plans=1 loops=25 msgs=277 active_loops=1 ctx_util=0.02 errors=0
+[17:52:23] plans=1 loops=25 msgs=277 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260602-225224.tar.gz (plans=1 loops=25 trajectories=13)
+[17:52:30] plans=1 loops=25 msgs=285 active_loops=1 ctx_util=0.02 errors=0
+[17:52:41] plans=1 loops=25 msgs=297 active_loops=1 ctx_util=0.02 errors=0
+[17:52:50] plans=1 loops=25 msgs=301 active_loops=1 ctx_util=0.02 errors=0
+[17:53:03] plans=1 loops=25 msgs=301 active_loops=1 ctx_util=0.02 errors=0
+[17:53:10] plans=1 loops=25 msgs=309 active_loops=1 ctx_util=0.02 errors=0
+[17:53:20] plans=1 loops=27 msgs=320 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225321.tar.gz (plans=1 loops=27 trajectories=14)
+[17:53:30] plans=1 loops=27 msgs=328 active_loops=1 ctx_util=0.01 errors=0
+[17:53:40] plans=1 loops=27 msgs=326 active_loops=1 ctx_util=0.01 errors=0
+[17:53:50] plans=1 loops=27 msgs=338 active_loops=1 ctx_util=0.01 errors=0
+[17:54:00] plans=1 loops=27 msgs=338 active_loops=1 ctx_util=0.01 errors=0
+[17:54:10] plans=1 loops=27 msgs=330 active_loops=1 ctx_util=0.01 errors=0
+[17:54:20] plans=1 loops=27 msgs=338 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225421.tar.gz (plans=1 loops=27 trajectories=14)
+[17:54:30] plans=1 loops=27 msgs=346 active_loops=1 ctx_util=0.01 errors=0
+[17:54:40] plans=1 loops=29 msgs=299 active_loops=1 ctx_util=0.01 errors=0
+[17:54:50] plans=1 loops=29 msgs=311 active_loops=1 ctx_util=0.01 errors=0
+[17:55:00] plans=1 loops=29 msgs=311 active_loops=1 ctx_util=0.01 errors=0
+[17:55:10] plans=1 loops=29 msgs=284 active_loops=1 ctx_util=0.01 errors=0
+[17:55:20] plans=1 loops=29 msgs=284 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225521.tar.gz (plans=1 loops=29 trajectories=15)
+[17:55:30] plans=1 loops=29 msgs=284 active_loops=1 ctx_util=0.01 errors=0
+[17:55:40] plans=1 loops=29 msgs=277 active_loops=1 ctx_util=0.01 errors=0
+[17:55:50] plans=1 loops=29 msgs=281 active_loops=1 ctx_util=0.01 errors=0
+[17:56:00] plans=1 loops=29 msgs=289 active_loops=1 ctx_util=0.01 errors=0
+[17:56:10] plans=1 loops=29 msgs=274 active_loops=1 ctx_util=0.01 errors=0
+[17:56:20] plans=1 loops=29 msgs=278 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225621.tar.gz (plans=1 loops=29 trajectories=15)
+[17:56:30] plans=1 loops=29 msgs=279 active_loops=1 ctx_util=0.01 errors=0
+[17:56:40] plans=1 loops=29 msgs=267 active_loops=1 ctx_util=0.01 errors=0
+[17:56:50] plans=1 loops=29 msgs=275 active_loops=1 ctx_util=0.01 errors=0
+[17:57:00] plans=1 loops=31 msgs=259 active_loops=1 ctx_util=0.01 errors=0
+[17:57:10] plans=1 loops=31 msgs=235 active_loops=1 ctx_util=0.01 errors=0
+[17:57:20] plans=1 loops=31 msgs=239 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225721.tar.gz (plans=1 loops=31 trajectories=16)
+[17:57:30] plans=1 loops=31 msgs=239 active_loops=1 ctx_util=0.01 errors=0
+[17:57:40] plans=1 loops=31 msgs=226 active_loops=1 ctx_util=0.01 errors=0
+[17:57:50] plans=1 loops=31 msgs=226 active_loops=1 ctx_util=0.01 errors=0
+[17:58:00] plans=1 loops=31 msgs=226 active_loops=1 ctx_util=0.01 errors=0
+[17:58:10] plans=1 loops=33 msgs=196 active_loops=1 ctx_util=0.01 errors=0
+[17:58:20] plans=1 loops=33 msgs=196 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-225821.tar.gz (plans=1 loops=33 trajectories=17)
+[17:58:30] plans=1 loops=33 msgs=204 active_loops=1 ctx_util=0.01 errors=0
+[17:58:40] plans=1 loops=33 msgs=193 active_loops=1 ctx_util=0.01 errors=0
+[17:58:50] plans=1 loops=33 msgs=193 active_loops=1 ctx_util=0.01 errors=0
+[17:59:00] plans=1 loops=33 msgs=193 active_loops=1 ctx_util=0.01 errors=0
+[17:59:10] plans=1 loops=33 msgs=181 active_loops=1 ctx_util=0.01 errors=0
+[17:59:20] plans=1 loops=35 msgs=188 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260602-225921.tar.gz (plans=1 loops=35 trajectories=18)
+[17:59:30] plans=1 loops=35 msgs=191 active_loops=1 ctx_util=0.01 errors=0
+[17:59:40] plans=1 loops=35 msgs=152 active_loops=1 ctx_util=0.01 errors=0
+[17:59:50] plans=1 loops=36 msgs=156 active_loops=0 ctx_util=0.01 errors=0
+[18:00:00] plans=1 loops=36 msgs=156 active_loops=0 ctx_util=0.01 errors=0
+[18:00:10] plans=1 loops=36 msgs=153 active_loops=0 ctx_util=0.01 errors=0
+[18:00:20] plans=1 loops=36 msgs=153 active_loops=0 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-230021.tar.gz (plans=1 loops=36 trajectories=18)
+[18:00:30] plans=1 loops=36 msgs=153 active_loops=0 ctx_util=0.01 errors=0
+[18:00:40] plans=1 loops=36 msgs=137 active_loops=0 ctx_util=0.01 errors=0
+[18:00:50] plans=1 loops=37 msgs=132 active_loops=1 ctx_util=0.01 errors=0
+[18:01:00] plans=1 loops=37 msgs=144 active_loops=1 ctx_util=0.01 errors=0
+[18:01:10] plans=1 loops=37 msgs=132 active_loops=1 ctx_util=0.01 errors=0
+[18:01:20] plans=1 loops=37 msgs=148 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-230120.tar.gz (plans=1 loops=37 trajectories=19)
+[18:01:30] plans=1 loops=37 msgs=160 active_loops=1 ctx_util=0.01 errors=0
+[18:01:40] plans=1 loops=39 msgs=146 active_loops=1 ctx_util=0.00 errors=0
+[18:01:50] plans=1 loops=39 msgs=160 active_loops=1 ctx_util=0.01 errors=0
+[18:02:00] plans=1 loops=39 msgs=172 active_loops=1 ctx_util=0.01 errors=0
+[18:02:10] plans=1 loops=39 msgs=176 active_loops=1 ctx_util=0.01 errors=0
+[18:02:20] plans=1 loops=41 msgs=171 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-230220.tar.gz (plans=1 loops=41 trajectories=21)
+[18:02:30] plans=1 loops=42 msgs=175 active_loops=0 ctx_util=0.00 errors=0
+[18:02:40] plans=1 loops=42 msgs=164 active_loops=0 ctx_util=0.00 errors=0
+[18:02:50] plans=1 loops=42 msgs=164 active_loops=0 ctx_util=0.00 errors=0
+[18:03:00] plans=1 loops=42 msgs=164 active_loops=0 ctx_util=0.00 errors=0
+[18:03:10] plans=1 loops=42 msgs=152 active_loops=0 ctx_util=0.00 errors=0
+[18:03:20] plans=1 loops=43 msgs=163 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-230320.tar.gz (plans=1 loops=43 trajectories=22)
+[18:03:30] plans=1 loops=43 msgs=179 active_loops=1 ctx_util=0.02 errors=0
+[18:03:40] plans=1 loops=43 msgs=182 active_loops=1 ctx_util=0.02 errors=0
+[18:03:50] plans=1 loops=43 msgs=181 active_loops=1 ctx_util=0.02 errors=0
+[18:04:00] plans=1 loops=43 msgs=180 active_loops=1 ctx_util=0.02 errors=0
+[18:04:10] plans=1 loops=43 msgs=189 active_loops=1 ctx_util=0.02 errors=0
+[18:04:20] plans=1 loops=43 msgs=193 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260602-230420.tar.gz (plans=1 loops=43 trajectories=22)
+[18:04:30] plans=1 loops=43 msgs=197 active_loops=1 ctx_util=0.02 errors=0
+[18:04:40] plans=1 loops=45 msgs=196 active_loops=1 ctx_util=0.00 errors=0
+[18:04:50] plans=1 loops=45 msgs=214 active_loops=1 ctx_util=0.01 errors=0
+[18:05:00] plans=1 loops=47 msgs=223 active_loops=1 ctx_util=0.01 errors=0
+[18:05:10] plans=1 loops=47 msgs=191 active_loops=1 ctx_util=0.01 errors=0
+[18:05:20] plans=1 loops=48 msgs=192 active_loops=0 ctx_util=0.00 errors=0
+snapshot: snapshot-20260602-230521.tar.gz (plans=1 loops=48 trajectories=24)
+[18:05:30] plans=1 loops=48 msgs=192 active_loops=0 ctx_util=0.00 errors=0
+[18:05:40] plans=1 loops=48 msgs=148 active_loops=0 ctx_util=0.00 errors=0
+[18:05:50] plans=1 loops=48 msgs=148 active_loops=0 ctx_util=0.00 errors=0
+[18:06:00] plans=1 loops=48 msgs=148 active_loops=0 ctx_util=0.00 errors=0
+[18:06:10] plans=1 loops=49 msgs=148 active_loops=1 ctx_util=0.01 errors=0
+[18:06:20] plans=1 loops=49 msgs=160 active_loops=1 ctx_util=0.02 errors=0
+snapshot: snapshot-20260602-230620.tar.gz (plans=1 loops=49 trajectories=25)
+[18:06:30] plans=1 loops=49 msgs=172 active_loops=1 ctx_util=0.02 errors=0
+[18:06:40] plans=1 loops=49 msgs=176 active_loops=1 ctx_util=0.02 errors=0
+[18:06:50] plans=1 loops=49 msgs=190 active_loops=1 ctx_util=0.02 errors=0
+[18:07:00] plans=1 loops=51 msgs=205 active_loops=1 ctx_util=0.00 errors=0
+[18:07:10] plans=1 loops=51 msgs=154 active_loops=1 ctx_util=0.01 errors=0
+[18:07:20] plans=1 loops=53 msgs=169 active_loops=1 ctx_util=0.01 errors=0
+snapshot: snapshot-20260602-230720.tar.gz (plans=1 loops=53 trajectories=27)
+[18:07:30] plans=1 loops=54 msgs=177 active_loops=0 ctx_util=0.00 errors=0
+[18:07:40] plans=1 loops=54 msgs=157 active_loops=0 ctx_util=0.00 errors=0
+[18:07:50] plans=1 loops=54 msgs=154 active_loops=0 ctx_util=0.00 errors=0
+[18:08:00] plans=1 loops=54 msgs=154 active_loops=0 ctx_util=0.00 errors=0
+[18:08:10] plans=1 loops=54 msgs=116 active_loops=0 ctx_util=0.00 errors=0
+[18:08:20] plans=1 loops=54 msgs=116 active_loops=0 ctx_util=0.00 errors=0
+snapshot: snapshot-20260602-230820.tar.gz (plans=1 loops=54 trajectories=27)
+[18:08:30] plans=1 loops=55 msgs=131 active_loops=1 ctx_util=0.01 errors=0
+[18:08:40] plans=1 loops=55 msgs=143 active_loops=1 ctx_util=0.01 errors=0
+[18:08:50] plans=1 loops=55 msgs=151 active_loops=1 ctx_util=0.01 errors=0
+[18:09:00] plans=1 loops=57 msgs=169 active_loops=1 ctx_util=0.00 errors=0
+[18:09:10] plans=1 loops=59 msgs=177 active_loops=1 ctx_util=0.00 errors=0
+[18:09:20] plans=1 loops=59 msgs=181 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260602-230920.tar.gz (plans=1 loops=59 trajectories=30)
+[18:09:30] plans=1 loops=60 msgs=181 active_loops=0 ctx_util=0.01 errors=0
+[18:09:40] plans=1 loops=60 msgs=132 active_loops=0 ctx_util=0.01 errors=0
+[18:09:50] plans=1 loops=60 msgs=132 active_loops=0 ctx_util=0.01 errors=0
+[18:10:00] plans=1 loops=60 msgs=132 active_loops=0 ctx_util=0.01 errors=0
+[18:10:10] plans=1 loops=61 msgs=111 active_loops=1 ctx_util=0.00 errors=0
+[18:10:20] plans=1 loops=63 msgs=130 active_loops=1 ctx_util=0.00 errors=0
+snapshot: snapshot-20260602-231020.tar.gz (plans=1 loops=63 trajectories=32)
+[18:10:29] plans=1 loops=64 msgs=132 active_loops=0 ctx_util=0.00 errors=0
+[18:10:39] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7 [new: jetstream,kv:AGENT_LOOPS,kv:PLAN_STATES,messages:agent.*,messages:tool.*,metrics,trajectories]
+[18:10:49] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[18:10:59] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[18:11:09] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+[18:11:19] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7
+snapshot: skipped (no plans/loops/messages — likely stack tear-down)
+[18:11:29] plans=0 loops=0 msgs=0 active_loops=0 ctx_util=0.00 errors=7

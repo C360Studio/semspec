@@ -1,0 +1,191 @@
+{
+  "id": "semspec.local.wf.plan.plan.4683eb7e5bf7c045",
+  "slug": "84360c511c18",
+  "title": "Add a /health endpoint to the Go HTTP service. The endpoint should return JSON with:\n\"status\": \"ok\", \"uptime\": seconds since server start, \"version\": Go runtime version.\nInclude unit tests for the health handler.\n\nTest run: 1780440440128",
+  "project_id": "semspec.local.wf.project.project.37a8eec1ce19687d",
+  "status": "ready_for_execution",
+  "approved": true,
+  "created_at": "2026-06-02T22:47:20.138679051Z",
+  "approved_at": "2026-06-02T22:47:55.406526387Z",
+  "review_verdict": "approved",
+  "review_summary": "Plan is well-structured and complete.",
+  "reviewed_at": "2026-06-02T22:47:53.659946011Z",
+  "goal": "Add a /health endpoint to the Go HTTP service that returns a JSON response containing the status ('ok'), uptime in seconds, and the Go runtime version. Implement the handler and its registration in main.go, and add unit tests in a new main_test.go file.",
+  "context": "The project is a simple Go HTTP service. It currently has a root endpoint and some auth utilities. A /health endpoint is needed for monitoring purposes, providing the service status, uptime, and the Go runtime version.",
+  "scope": {
+    "include": [
+      "main.go"
+    ],
+    "create": [
+      "main_test.go"
+    ]
+  },
+  "exploration": {
+    "capabilities": [
+      {
+        "name": "service-health-check",
+        "lifecycle": "new",
+        "description": "Expose a /health endpoint that returns JSON containing the service status, uptime, and Go runtime version.",
+        "surfaces": [
+          "api"
+        ]
+      }
+    ]
+  },
+  "architecture": {
+    "technology_choices": [
+      {
+        "category": "language",
+        "choice": "Go",
+        "rationale": "Existing project language (go.mod)"
+      }
+    ],
+    "component_boundaries": [
+      {
+        "name": "http-service",
+        "responsibility": "HTTP Server and Route Handlers",
+        "dependencies": [],
+        "implementation_files": [
+          "main.go"
+        ],
+        "capabilities": [
+          "service-health-check"
+        ]
+      }
+    ],
+    "data_flow": "Monitoring System -\u003e /health handler -\u003e JSON Response",
+    "decisions": [
+      {
+        "id": "ARCH-001",
+        "title": "Health Endpoint Format",
+        "decision": "Return JSON containing status, uptime, and Go runtime version",
+        "rationale": "Requirement dictates JSON response with specific fields (status, uptime, version) in main.go"
+      }
+    ],
+    "actors": [
+      {
+        "name": "Monitoring System",
+        "type": "system",
+        "triggers": [
+          "Periodic HTTP GET to /health"
+        ]
+      }
+    ],
+    "integrations": [],
+    "test_surface": {
+      "e2e_flows": [
+        {
+          "actor": "Monitoring System",
+          "steps": [
+            "Send GET request to /health endpoint"
+          ],
+          "success_criteria": [
+            "Response status is 200 OK",
+            "Response body is JSON containing status 'ok', uptime, and version"
+          ]
+        }
+      ]
+    }
+  },
+  "requirements": [
+    {
+      "id": "requirement.84360c511c18.1",
+      "plan_id": "semspec.local.wf.plan.plan.4683eb7e5bf7c045",
+      "title": "Health endpoint MUST return JSON with status, uptime, and version",
+      "description": "The system MUST expose a /health HTTP endpoint. WHEN a client issues a GET request to /health, THEN the system MUST return an HTTP 200 OK response with a JSON body containing \"status\": \"ok\", \"uptime\" as seconds since server start, and \"version\" as the Go runtime version. The handler MUST be covered by unit tests verifying this behavior.",
+      "status": "active",
+      "capability_name": "service-health-check",
+      "created_at": "2026-06-02T22:48:02.444955334Z",
+      "updated_at": "2026-06-02T22:48:02.444955334Z"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "scenario.84360c511c18.1.1.1",
+      "requirement_id": "requirement.84360c511c18.1",
+      "story_id": "story.84360c511c18.1.1",
+      "title": "Health endpoint returns successful JSON response with required fields",
+      "given": "the HTTP server is initialized with a health handler",
+      "when": "a GET request is made to the health handler function",
+      "then": [
+        "the response status code is 200 OK",
+        "the response Content-Type is 'application/json'",
+        "the response body contains 'status' equal to 'ok'",
+        "the response body contains 'uptime' as a non-negative integer representing seconds since start",
+        "the response body contains 'version' matching the Go runtime version"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-02T22:50:08.965712671Z",
+      "updated_at": "2026-06-02T22:50:08.965712671Z"
+    }
+  ],
+  "stories": [
+    {
+      "id": "story.84360c511c18.1.1",
+      "requirement_id": "requirement.84360c511c18.1",
+      "title": "Implement /health endpoint",
+      "intent": "Add a /health endpoint to the Go HTTP service that returns JSON status, uptime, and Go runtime version for monitoring.",
+      "components": [
+        "http-service"
+      ],
+      "files_owned": [
+        "main.go"
+      ],
+      "tasks": [
+        {
+          "id": "task.84360c511c18.1.1.1",
+          "story_id": "story.84360c511c18.1.1",
+          "description": "Write failing unit tests for the health handler (targeting main_test.go) verifying JSON structure and 200 OK",
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.84360c511c18.1.1.2",
+          "story_id": "story.84360c511c18.1.1",
+          "description": "Initialize a start time variable in main.go to track service uptime from boot",
+          "depends_on": [
+            "task.84360c511c18.1.1.1"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.84360c511c18.1.1.3",
+          "story_id": "story.84360c511c18.1.1",
+          "description": "Implement the health handler returning JSON with status 'ok', uptime in seconds, and runtime.Version()",
+          "depends_on": [
+            "task.84360c511c18.1.1.2"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.84360c511c18.1.1.4",
+          "story_id": "story.84360c511c18.1.1",
+          "description": "Register the /health endpoint in the main HTTP ServeMux",
+          "depends_on": [
+            "task.84360c511c18.1.1.3"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.84360c511c18.1.1.5",
+          "story_id": "story.84360c511c18.1.1",
+          "description": "Verify the /health endpoint returns the expected JSON response via a smoke test",
+          "depends_on": [
+            "task.84360c511c18.1.1.4"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        }
+      ],
+      "created_at": "0001-01-01T00:00:00Z",
+      "updated_at": "0001-01-01T00:00:00Z"
+    }
+  ],
+  "qa_level": "synthesis"
+}
