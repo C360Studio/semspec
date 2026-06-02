@@ -32,7 +32,7 @@ type PlanReviewFinding struct {
 	Severity string `json:"severity"`
 	Status   string `json:"status"`
 	Category string `json:"category,omitempty"`  // "sop" or "completeness" (ADR-029)
-	Phase    string `json:"phase,omitempty"`     // "plan", "requirements", "architecture", "scenarios"
+	Phase    string `json:"phase,omitempty"`     // "plan", "requirements", "architecture", "stories", "scenarios"
 	TargetID string `json:"target_id,omitempty"` // specific entity ID (e.g., "REQ-2", "SCEN-3")
 	// Action is the imperative remediation verb. Required on every error-
 	// severity violation when verdict=needs_changes. Allowed values: "add",
