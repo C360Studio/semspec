@@ -553,7 +553,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	scenarios, err := c.parseScenariosFromResult(loop.Result, slug, requirementID)
+	scenarios, err := c.parseScenariosFromResult(loop.Result, slug, requirementID, storyID)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		parseErrorMsg := fmt.Sprintf("failed to parse scenarios: %s", err.Error())
@@ -744,8 +744,24 @@ func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback str
 }
 
 // parseScenariosFromResult extracts and validates scenario JSON from an agent
-// loop result string, then assigns IDs based on the slug and requirement ID.
-func (c *Component) parseScenariosFromResult(result, slug, requirementID string) ([]workflow.Scenario, error) {
+// loop result string, then assigns IDs based on the slug, requirement ID, and
+// (when non-empty) story ID.
+//
+// Scenario ID format:
+//   - Per-Story dispatch (storyID non-empty): scenario.<slug>.<reqseq>.<storyseq>.<i+1>
+//     Mirrors Sarah's task ID convention (task.<slug>.<reqseq>.<storyseq>.<taskseq>).
+//   - Legacy per-Requirement dispatch (storyID empty): scenario.<slug>.<reqseq>.<i+1>
+//     Pre-ADR-043 shape, kept for mock fixtures and pre-Sarah plans.
+//
+// Pre-this-change, IDs collided across Stories under the same Requirement
+// because the storyseq segment was missing — Story A and Story B both
+// produced scenario.<slug>.<reqseq>.1, scenario.<slug>.<reqseq>.2, etc. The
+// collision was masked by Pass-2 C2 (the consumer wiped one batch on every
+// mutation), so the system "worked" by accidentally dropping duplicates. PR
+// #73 closed C2, which surfaces this collision — and this PR closes it.
+//
+// Closes go-reviewer Pass-2 finding C3.
+func (c *Component) parseScenariosFromResult(result, slug, requirementID, storyID string) ([]workflow.Scenario, error) {
 	if result == "" {
 		return nil, fmt.Errorf("empty result")
 	}
@@ -783,6 +799,7 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID string)
 	}
 
 	reqSeq := requirementSequence(requirementID)
+	storySeq := storySequence(storyID)
 
 	now := time.Now()
 	scenarios := make([]workflow.Scenario, len(raw))
@@ -797,7 +814,7 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID string)
 			return nil, fmt.Errorf("scenario %d missing 'then' field (must be non-empty array)", i+1)
 		}
 
-		scenarioID := fmt.Sprintf("scenario.%s.%s.%d", slug, reqSeq, i+1)
+		scenarioID := scenarioIDFor(slug, reqSeq, storySeq, i+1)
 		scenarios[i] = workflow.Scenario{
 			ID:                scenarioID,
 			RequirementID:     requirementID,
@@ -858,6 +875,33 @@ func requirementSequence(requirementID string) string {
 		return parts[len(parts)-1]
 	}
 	return requirementID
+}
+
+// storySequence extracts the storyseq suffix from a Story ID like
+// "story.<slug>.<reqseq>.<storyseq>". Returns "" for an empty input so the
+// scenario ID falls back to the legacy 3-segment shape — this is the
+// signal scenarioIDFor uses to switch between per-Story and legacy formats.
+func storySequence(storyID string) string {
+	if storyID == "" {
+		return ""
+	}
+	parts := strings.Split(storyID, ".")
+	if len(parts) > 0 {
+		return parts[len(parts)-1]
+	}
+	return storyID
+}
+
+// scenarioIDFor builds the canonical scenario ID. When storySeq is empty
+// the legacy shape scenario.<slug>.<reqseq>.<i> is emitted (pre-ADR-043 /
+// mock-fixture compatibility); otherwise the per-Story shape
+// scenario.<slug>.<reqseq>.<storyseq>.<i> is used so two Stories under one
+// Requirement produce distinct IDs.
+func scenarioIDFor(slug, reqSeq, storySeq string, index int) string {
+	if storySeq == "" {
+		return fmt.Sprintf("scenario.%s.%s.%d", slug, reqSeq, index)
+	}
+	return fmt.Sprintf("scenario.%s.%s.%s.%d", slug, reqSeq, storySeq, index)
 }
 
 // extractJSONArray returns the first JSON array found in s, or "".
