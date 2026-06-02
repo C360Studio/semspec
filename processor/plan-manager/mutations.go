@@ -233,6 +233,8 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -290,6 +292,8 @@ func (c *Component) handleArchitectureMutation(ctx context.Context, data []byte)
 	if req.Slug == "" {
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -349,6 +353,8 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 	if err := workflow.ValidateStories(req.Stories); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("validate stories: %v", err)}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -436,6 +442,8 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 		return MutationResponse{Success: false, Error: "slug and requirement_id required"}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -515,6 +523,8 @@ func (c *Component) handleGenerationFailedMutation(ctx context.Context, data []b
 	c.logger.Error("Generation failed via mutation",
 		"slug", req.Slug, "phase", req.Phase, "error", req.Error)
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -561,6 +571,8 @@ func (c *Component) handleExploredMutation(ctx context.Context, data []byte) Mut
 		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -600,6 +612,8 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	if req.Slug == "" || req.Goal == "" {
 		return MutationResponse{Success: false, Error: "slug and goal required"}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -645,6 +659,8 @@ func (c *Component) handleReviewedMutation(ctx context.Context, data []byte) Mut
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -682,6 +698,8 @@ func (c *Component) handleApprovedMutation(ctx context.Context, data []byte) Mut
 	if req.Slug == "" {
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -726,6 +744,8 @@ func (c *Component) handleClaimMutation(ctx context.Context, data []byte) Mutati
 		return MutationResponse{Success: false, Error: fmt.Sprintf("can only claim in-progress statuses, got %q", req.Status)}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -764,6 +784,8 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -797,6 +819,8 @@ func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []
 	if req.Slug == "" {
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -974,6 +998,8 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 		return MutationResponse{Success: false, Error: "revision handler only accepts verdict=needs_changes"}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -1076,6 +1102,8 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -1130,6 +1158,8 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 	default:
 		return MutationResponse{Success: false, Error: fmt.Sprintf("verdict must be approved|needs_changes|rejected, got %q", req.Verdict)}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -1277,6 +1307,8 @@ func (c *Component) handleReviewApproveMutation(ctx context.Context, data []byte
 		return MutationResponse{Success: false, Error: "slug is required"}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -1330,11 +1362,14 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 		return MutationResponse{Success: false, Error: fmt.Sprintf("validate: %v", err)}
 	}
 
+	// Slug must be computed before lockSlug — see slugMutexes godoc.
+	slug := fmt.Sprintf("%d-%s", req.IssueNumber, paths.Slugify(req.Title))
+	defer c.lockSlug(slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
 
-	slug := fmt.Sprintf("%d-%s", req.IssueNumber, paths.Slugify(req.Title))
 	if ps.exists(slug) {
 		c.logger.Info("GitHub plan already exists, skipping", "slug", slug, "issue", req.IssueNumber)
 		return MutationResponse{Success: true}
@@ -1395,6 +1430,8 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 		return MutationResponse{Success: false, Error: fmt.Sprintf("validate: %v", err)}
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -1436,25 +1473,7 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 	}
 
 	// Create PlanDecision(s) for audit trail.
-	now := time.Now()
-	for _, reqID := range affectedReqIDs {
-		proposalID := fmt.Sprintf("plan-decision.%s.pr-feedback.%d.%s", req.Slug, req.ReviewID, reqID)
-		rationale := fmt.Sprintf("PR review feedback from @%s (review %d)", req.Reviewer, req.ReviewID)
-		if req.Body != "" {
-			rationale += ": " + req.Body
-		}
-		plan.PlanDecisions = append(plan.PlanDecisions, workflow.PlanDecision{
-			ID:             proposalID,
-			PlanID:         workflow.PlanEntityID(req.Slug),
-			Title:          fmt.Sprintf("PR feedback round %d", plan.GitHub.PRRevision+1),
-			Rationale:      rationale,
-			Status:         workflow.PlanDecisionStatusAccepted,
-			ProposedBy:     "github-pr-review",
-			AffectedReqIDs: []string{reqID},
-			CreatedAt:      now,
-			DecidedAt:      &now,
-		})
-	}
+	appendPRFeedbackPlanDecisions(plan, &req, affectedReqIDs)
 
 	// Update GitHub metadata.
 	plan.GitHub.PRRevision++
@@ -1486,6 +1505,32 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 		"pr_revision", plan.GitHub.PRRevision)
 
 	return MutationResponse{Success: true}
+}
+
+// appendPRFeedbackPlanDecisions records one PlanDecision per affected
+// requirement so the PR review feedback round becomes part of the plan's
+// audit trail. Extracted from handleGitHubPRFeedbackMutation to keep that
+// handler within the per-function statement budget.
+func appendPRFeedbackPlanDecisions(plan *workflow.Plan, req *payloads.GitHubPRFeedbackRequest, affectedReqIDs []string) {
+	now := time.Now()
+	for _, reqID := range affectedReqIDs {
+		proposalID := fmt.Sprintf("plan-decision.%s.pr-feedback.%d.%s", req.Slug, req.ReviewID, reqID)
+		rationale := fmt.Sprintf("PR review feedback from @%s (review %d)", req.Reviewer, req.ReviewID)
+		if req.Body != "" {
+			rationale += ": " + req.Body
+		}
+		plan.PlanDecisions = append(plan.PlanDecisions, workflow.PlanDecision{
+			ID:             proposalID,
+			PlanID:         workflow.PlanEntityID(req.Slug),
+			Title:          fmt.Sprintf("PR feedback round %d", plan.GitHub.PRRevision+1),
+			Rationale:      rationale,
+			Status:         workflow.PlanDecisionStatusAccepted,
+			ProposedBy:     "github-pr-review",
+			AffectedReqIDs: []string{reqID},
+			CreatedAt:      now,
+			DecidedAt:      &now,
+		})
+	}
 }
 
 // buildFileToReqMap builds a file→requirementID reverse index from EXECUTION_STATES.
@@ -1564,6 +1609,8 @@ func (c *Component) handleGitHubPRMetadataMutation(ctx context.Context, data []b
 	if req.Slug == "" || req.PRNumber == 0 {
 		return MutationResponse{Success: false, Error: "slug and pr_number are required"}
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
@@ -1723,6 +1770,8 @@ func (c *Component) handlePlanDecisionAddMutation(ctx context.Context, data []by
 		req.Decision.CreatedAt = time.Now()
 	}
 
+	defer c.lockSlug(req.Slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -1798,6 +1847,8 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 	if acceptedBy == "" {
 		acceptedBy = "auto"
 	}
+
+	defer c.lockSlug(req.Slug)()
 
 	c.mu.RLock()
 	ps := c.plans
