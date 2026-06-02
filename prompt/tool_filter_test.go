@@ -113,3 +113,58 @@ func TestFilterTools_UnknownRoleReturnsAll(t *testing.T) {
 		t.Errorf("unknown role should return all tools unchanged; got %v", got)
 	}
 }
+
+// TestFilterTools_StoryPreparerPalette pins Sarah's tight palette so a
+// future tool addition doesn't silently leak into the story-preparer
+// dispatch. Added 2026-06-02 alongside the explicit DefaultToolFilters
+// entry that closes the unknown-role fall-through gap for RoleStoryPreparer.
+func TestFilterTools_StoryPreparerPalette(t *testing.T) {
+	allTools := []string{
+		"bash", "submit_work", "ask_question", "answer_question",
+		"write_todos", "scratchpad", "web_search", "http_request",
+		"graph_search", "graph_query", "graph_summary",
+		"research", "answer_research", "spawn_agent",
+	}
+	allowed := FilterTools(allTools, RoleStoryPreparer)
+	want := []string{"bash", "submit_work", "write_todos", "scratchpad"}
+	if !slices.Equal(allowed, want) {
+		t.Errorf("RoleStoryPreparer palette = %v, want %v", allowed, want)
+	}
+}
+
+// TestFilterTools_AllDispatchRolesHaveExplicitEntry pins the contract
+// that every role used by an actual processor dispatcher has an
+// explicit entry in DefaultToolFilters — not a fall-through to "all
+// tools." Drift on this list = the semteams 51-tools-leak surface.
+//
+// Roles intentionally excluded (used only for telemetry tagging, NOT
+// dispatch):
+//   - RoleQA — qa-reviewer tags its loop with this string, but the
+//     actual FilterTools call uses RolePlanQAReviewer.
+//   - RoleCapabilities / RoleContext — sub-role labels used inside
+//     persona fragments, not standalone dispatch roles.
+func TestFilterTools_AllDispatchRolesHaveExplicitEntry(t *testing.T) {
+	filters := DefaultToolFilters()
+	dispatchRoles := []Role{
+		RolePlanner,
+		RoleArchitect,
+		RoleRequirementGenerator,
+		RoleScenarioGenerator,
+		RoleStoryPreparer,
+		RoleScenarioReviewer,
+		RolePlanReviewer,
+		RoleTaskReviewer,
+		RoleReviewer,
+		RoleValidator,
+		RoleDeveloper,
+		RolePlanQAReviewer,
+		RoleLessonDecomposer,
+		RoleRecoveryAgent,
+		RoleResearcher,
+	}
+	for _, role := range dispatchRoles {
+		if _, ok := filters[role]; !ok {
+			t.Errorf("dispatch role %q missing from DefaultToolFilters() — falls through to 'all tools' return and risks the 51-tool leak shape", role)
+		}
+	}
+}
