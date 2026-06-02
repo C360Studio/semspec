@@ -63,10 +63,27 @@ func synthesizeTaskDAGForStory(plan *workflow.Plan, story workflow.Story) (*Task
 // DependsOn entries appear before it. ADR-043 PR 4h: the requirement-
 // executor consumes this order to dispatch Stories sequentially.
 //
-// Cycles are an upstream planning bug (plan-reviewer R3
-// `story.depends_on_cycle` catches them); returning an error here is the
-// fail-loudly path that surfaces a planning regression as a synthesis
-// error rather than silently flattening into a non-deterministic order.
+// Scope: this function operates on a single requirement's Stories. Cross-
+// requirement Story.DependsOn entries (Sarah-authored references to
+// Stories on OTHER requirements) are intentionally ignored — that
+// ordering is enforced upstream by Requirement.DependsOn at the
+// scenario-orchestrator level, which already serializes requirement
+// dispatch on the inter-requirement graph. Smoke 6 (2026-06-01
+// mavlink-hard) surfaced this when Sarah produced Story.DependsOn that
+// mirrored the Requirement.DependsOn graph — semantically redundant but
+// the early implementation treated every unknown ID as a fatal error,
+// rejecting 3 of 5 requirements.
+//
+// Cycles within the local set are still an upstream planning bug
+// (plan-reviewer R3 catches them); returning an error here is the
+// fail-loudly path that surfaces a regression as a synthesis error
+// rather than silently flattening into non-deterministic order.
+//
+// Typo'd Story.DependsOn references (story IDs that don't exist anywhere
+// in the plan) are caught upstream by `workflow.ValidateStoryDAG`, which
+// runs against the full plan Stories list before persistence. We can
+// therefore trust that any DependsOn id absent from the local slice is
+// a legitimate cross-requirement reference, not a typo.
 func topoSortStoryIDs(stories []workflow.Story) ([]string, error) {
 	if len(stories) == 0 {
 		return nil, nil
@@ -101,7 +118,9 @@ func topoSortStoryIDs(stories []workflow.Story) ([]string, error) {
 		color[id] = gray
 		for _, dep := range deps[id] {
 			if _, ok := idIndex[dep]; !ok {
-				return fmt.Errorf("story %q depends on unknown story %q", id, dep)
+				// Cross-requirement reference. Skip — Requirement.DependsOn
+				// already serializes inter-requirement dispatch upstream.
+				continue
 			}
 			if err := visit(dep); err != nil {
 				return err
