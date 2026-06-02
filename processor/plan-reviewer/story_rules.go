@@ -110,10 +110,12 @@ func storyStructuralFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
 		}
 
 		// Readiness-gated invariants fire when Sarah's gate should have run.
-		// Empty status (the b7r50o9ov omitempty pattern for freshly-emitted
-		// stories) is treated as "Sarah signed off" because the story-preparer
-		// emits stories that have completed the gate; persistence has not yet
-		// set the runtime status.
+		// Empty Status is Sarah's omitempty emission shape after sign-off
+		// (b7r50o9ov) — workflow.ValidateStory enforces the same invariants
+		// at the mutation boundary post Train-D step 1 (Pass-3 S-C1), so
+		// by the time R3 runs here those defects are already caught. R3
+		// remains the defensive backstop layer: pending stories (Sarah
+		// explicitly mid-flight) are exempt, every other shape is checked.
 		if s.Status == workflow.StoryStatusPending {
 			continue
 		}

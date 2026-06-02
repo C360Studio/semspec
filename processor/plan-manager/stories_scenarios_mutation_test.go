@@ -25,14 +25,20 @@ func marshalJSON(t *testing.T, v any) []byte {
 	return data
 }
 
-// validStory returns a minimal Story that passes workflow.ValidateStory. No
-// Status set — matches Sarah's emission shape, which the empty-Status branch
-// in ValidateStory accepts without running readiness invariants.
+// validStory returns a minimal Story that passes workflow.ValidateStory.
+// Status is left empty — matches Sarah's omitempty emission shape. Post-
+// Train-D, the readiness invariants apply on empty Status, so the helper
+// supplies one source file and one task. Callers that need to test the
+// invariant failures should build a Story inline with the missing field.
 func validStory(id, reqID, title string) workflow.Story {
 	return workflow.Story{
 		ID:            id,
 		RequirementID: reqID,
 		Title:         title,
+		FilesOwned:    []string{"src/" + id + ".go"},
+		Tasks: []workflow.Task{
+			{ID: "task." + id + ".1", StoryID: id, Description: "implement"},
+		},
 	}
 }
 
@@ -161,6 +167,9 @@ func TestHandleStoriesMutation(t *testing.T) {
 						RequirementID: "req.story-scope.1",
 						Title:         "T",
 						FilesOwned:    []string{"src/new.go"},
+						Tasks: []workflow.Task{
+							{ID: "task.story.story-scope.1.1.1", StoryID: "story.story-scope.1.1", Description: "implement"},
+						},
 					},
 				},
 			},

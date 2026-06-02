@@ -43,9 +43,21 @@ func TestParseStoriesFromResult(t *testing.T) {
 			wantErr: "stories list is empty",
 		},
 		{
-			name:      "single story with positional shape parses cleanly",
-			input:     `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on_labels":[],"tasks":[{"label":"t1","description":"d","depends_on_labels":[]}]}]}`,
-			wantCount: 1,
+			name:      "stories covering every requirement parse cleanly",
+			input:     `{"stories":[{"label":"l1","requirement_index":0,"title":"T1","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on_labels":[],"tasks":[{"label":"t1","description":"d","depends_on_labels":[]}]},{"label":"l2","requirement_index":1,"title":"T2","intent":"i","components":["c"],"files_owned":["src/y.go"],"depends_on_labels":[],"tasks":[{"label":"t2","description":"d","depends_on_labels":[]}]}]}`,
+			wantCount: 2,
+		},
+		{
+			// Pass-3 S-C2 / Pass-2 C5: Sarah must emit at least one story
+			// per requirement. Pre-fix the parser passed on partial output,
+			// scenario-generator's legacy fallback engaged for the
+			// uncovered req, and execution-manager hard-failed later with
+			// "no Stories on plan for requirement %s". The error message
+			// names the uncovered requirement so Sarah's retry prompt
+			// pinpoints the gap.
+			name:    "partial coverage (2 reqs, 1 story) rejected — Pass-3 S-C2",
+			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on_labels":[],"tasks":[{"label":"t1","description":"d","depends_on_labels":[]}]}]}`,
+			wantErr: "uncovered: [requirement.x.2]",
 		},
 		{
 			name:    "requirement_index out of range rejected",

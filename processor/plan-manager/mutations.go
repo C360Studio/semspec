@@ -1704,16 +1704,26 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 // point for Round 2. When findings carry phase markers, the plan can retry only
 // the affected phase instead of clearing everything.
 //
-// Priority (highest first): plan > requirements > architecture > scenarios.
+// Priority (highest first): plan > requirements > architecture > stories > scenarios.
 // If ANY error finding targets an earlier phase, re-entry cascades from there.
 // Without phase markers, falls back to StatusApproved (clear everything).
+//
+// The "stories" phase case closes go-reviewer Pass-4 finding P4-C3.
+// Pre-fix, story_rules.go emitted findings with Phase:"stories" but the
+// switch had no matching case, so the cascade fell through to default and
+// nuked Requirements + Architecture + Scenarios to re-run req-gen.
+// Sarah's defective Story output survived the regen because the plan
+// re-traversed the requirements path that didn't fail. With this case
+// in place, story-phase findings clear only Stories + Scenarios and
+// return to StatusArchitectureGenerated — Sarah's watcher claim point.
 func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON json.RawMessage) workflow.Status {
 	var findings []workflow.PlanReviewFinding
 	if err := json.Unmarshal(findingsJSON, &findings); err != nil {
 		// Can't parse findings — fall back to clear everything.
 		plan.Requirements = nil
-		plan.Scenarios = nil
 		plan.Architecture = nil
+		plan.Stories = nil
+		plan.Scenarios = nil
 		return workflow.StatusApproved
 	}
 
@@ -1731,10 +1741,13 @@ func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON js
 	}
 
 	if !hasPhaseMarker {
-		// No phase markers — fall back to clear everything.
+		// No phase markers — fall back to clear everything (including Stories;
+		// pre-fix the Stories slice survived this branch, which on a Sarah-
+		// authored plan would leave stale Stories pinned to wiped Requirements).
 		plan.Requirements = nil
-		plan.Scenarios = nil
 		plan.Architecture = nil
+		plan.Stories = nil
+		plan.Scenarios = nil
 		return workflow.StatusApproved
 	}
 
@@ -1743,33 +1756,47 @@ func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON js
 	case phaseHit["plan"]:
 		// Re-draft from scratch.
 		plan.Requirements = nil
-		plan.Scenarios = nil
 		plan.Architecture = nil
+		plan.Stories = nil
+		plan.Scenarios = nil
 		return workflow.StatusCreated
 
 	case phaseHit["requirements"]:
-		// Re-generate requirements (and downstream).
+		// Re-generate requirements (and downstream architecture / stories / scenarios).
 		plan.Requirements = nil
-		plan.Scenarios = nil
 		plan.Architecture = nil
+		plan.Stories = nil
+		plan.Scenarios = nil
 		return workflow.StatusApproved
 
 	case phaseHit["architecture"]:
-		// Re-generate architecture (and downstream scenarios).
+		// Re-generate architecture (and downstream stories + scenarios).
 		plan.Architecture = nil
+		plan.Stories = nil
 		plan.Scenarios = nil
 		return workflow.StatusRequirementsGenerated
 
+	case phaseHit["stories"]:
+		// Re-run Sarah only; preserve Requirements + Architecture. Closes
+		// Pass-4 P4-C3 — pre-fix this case was missing and story findings
+		// fell to default, nuking everything.
+		plan.Stories = nil
+		plan.Scenarios = nil
+		return workflow.StatusArchitectureGenerated
+
 	case phaseHit["scenarios"]:
-		// Re-generate scenarios only, preserve requirements and architecture.
+		// Re-generate scenarios only, preserve requirements + architecture +
+		// stories. The architect's Sarah-prepared Stories stay; only Bob's
+		// scenario emission is re-run.
 		plan.Scenarios = nil
 		return workflow.StatusArchitectureGenerated
 
 	default:
 		// Unknown phase values — fall back to clear everything.
 		plan.Requirements = nil
-		plan.Scenarios = nil
 		plan.Architecture = nil
+		plan.Stories = nil
+		plan.Scenarios = nil
 		return workflow.StatusApproved
 	}
 }

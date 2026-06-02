@@ -78,15 +78,22 @@ func ValidateStoryDAG(stories []Story) error {
 
 // ValidateStory checks structural invariants for a single Story:
 //   - ID and RequirementID and Title non-empty
-//   - FilesOwned non-empty when Sarah has signed off (Status != pending)
+//   - FilesOwned non-empty when Sarah has signed off (Status empty OR != pending)
 //   - FilesOwned has at least one source-code file when sign-off requires
 //     it (docs-only is rejected by Sarah's readiness gate)
 //   - At least one Task present when Sarah has signed off
 //
+// Empty Status is Sarah's emission shape — `omitempty` on the wire elides
+// the field after she's signed off (b7r50o9ov 2026-05-08). The readiness
+// invariants apply to empty AND non-pending statuses; only StoryStatusPending
+// (Sarah explicitly mid-flight) is exempt. Pre-fix the empty-Status branch
+// ALSO bypassed the gate, which meant Sarah's primary readiness layer was
+// silently disabled — every defect rode through to plan-reviewer R3.
+//
 // Plan-reviewer R3 rules (story.missing_files_owned, story.docs_only_files_owned,
-// task.missing_within_story) wrap this as the defensive backstop layer.
-// Sarah's readiness gate is the primary layer (fails fast on the
-// architect's side).
+// task.missing_within_story) remain the defensive backstop layer. Now Sarah's
+// readiness gate actually fires first, matching the doc contract at
+// workflow/story_task.go:88. Closes go-reviewer Pass-3 S-C1 / Pass-4 P4-C4.
 func ValidateStory(s Story) error {
 	if s.ID == "" {
 		return fmt.Errorf("%w: story missing ID", ErrInvalidStoryStructure)
@@ -99,22 +106,23 @@ func ValidateStory(s Story) error {
 	}
 
 	// Pending stories are in-flight by Sarah and may not yet have files /
-	// tasks populated. The readiness invariants apply only on sign-off.
-	if s.Status == StoryStatusPending || s.Status == "" {
+	// tasks populated. The readiness invariants apply on every other shape,
+	// including the empty-Status emission Sarah produces post-sign-off.
+	if s.Status == StoryStatusPending {
 		return nil
 	}
 
 	if len(s.FilesOwned) == 0 {
-		return fmt.Errorf("%w: story %q has empty files_owned but status %q indicates Sarah signed off — readiness gate requires at least one workspace-relative path",
-			ErrInvalidStoryStructure, s.ID, s.Status)
+		return fmt.Errorf("%w: story %q has empty files_owned — readiness gate requires at least one workspace-relative path",
+			ErrInvalidStoryStructure, s.ID)
 	}
 	if !hasSourceFile(s.FilesOwned) {
 		return fmt.Errorf("%w: story %q files_owned %v contains only documentation files — readiness gate requires at least one source-code file",
 			ErrInvalidStoryStructure, s.ID, s.FilesOwned)
 	}
 	if len(s.Tasks) == 0 {
-		return fmt.Errorf("%w: story %q has empty tasks but status %q indicates Sarah signed off — readiness gate requires at least one task",
-			ErrInvalidStoryStructure, s.ID, s.Status)
+		return fmt.Errorf("%w: story %q has empty tasks — readiness gate requires at least one task",
+			ErrInvalidStoryStructure, s.ID)
 	}
 	return nil
 }

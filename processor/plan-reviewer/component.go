@@ -343,6 +343,30 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	// @integration for a services-class harness; the structural rules
 	// don't. NormalizeVerdict in each merge bumps "approved" to
 	// "needs_changes" when any error finding lands.
+	//
+	// R3 co-fire shape (P4-C5): plan-reviewer claims only StatusDrafted
+	// (R1) and StatusScenariosGenerated (R2). The story-phase rules in
+	// mergeStoryFindings DO NOT have a dedicated R3 round; they co-fire
+	// with R2 here. The reviewer agent's LLM prompt for R2 is scenario-
+	// shaped, but the structural rules in this file run on plan state,
+	// not on the LLM verdict — so the rules ARE correctly evaluated
+	// against the post-R2 plan even though the LLM's own verdict is on
+	// the wrong subject. Verdict alignment happens via NormalizeVerdict.
+	//
+	// End-to-end story-phase routing in the co-fire shape:
+	//   1. Rule emits finding with Phase:"stories" (story_rules.go).
+	//   2. determineR2ReentryPoint's stories case clears Stories +
+	//      Scenarios and returns StatusArchitectureGenerated → Sarah
+	//      re-prep claim point (Train D step 3 / P4-C3).
+	//   3. phaseToRole maps "stories" → "story-preparer" so the
+	//      lesson-learning counts roll up to Sarah's role correctly
+	//      (Train D step 4).
+	//
+	// A dedicated R3 round (its own claim path, story-shaped LLM prompt)
+	// is the longer-term shape but materially larger: separate ADR + new
+	// transition + prompt context. Tracked as P4-C5 (full implementation)
+	// in [[go-reviewer-cross-pass-synthesis-adr043]]; the co-fire shape
+	// here is the interim contract.
 	if planForRules, loadErr := c.loadPlanForRules(ctx, slug); loadErr == nil {
 		mergeCapabilityFindings(planForRules, result)
 		mergeArchitectureFindings(planForRules, result)
@@ -878,6 +902,8 @@ func phaseToRole(phase string) string {
 		return "requirement-generator"
 	case "architecture":
 		return "architect"
+	case "stories":
+		return "story-preparer"
 	case "scenarios":
 		return "scenario-generator"
 	default:
