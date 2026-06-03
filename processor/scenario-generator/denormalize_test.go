@@ -18,8 +18,8 @@ import (
 func denormCatalog() *harnesscatalog.Catalog {
 	return fakeCatalog(
 		harnesscatalog.Profile{
-			ID:                 "mavlink.px4-sitl.mavsdk-smoke",
-			Env:                map[string]string{"PX4_SIM_MODEL": "iris"},
+			ID:  "mavlink.px4-sitl.mavsdk-smoke",
+			Env: map[string]string{"PX4_SIM_MODEL": "iris"},
 			RequiredAssertions: []string{
 				"Observe a MAVLink heartbeat from the SITL target.",
 				"Assert MAVSDK reports a connected vehicle before plugin calls run.",

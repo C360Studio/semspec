@@ -19,15 +19,17 @@ warningCode = 1
 [rule.error-strings]
 [rule.error-naming]
 [rule.exported]
-  # Sponsor-pack code is fossilized agent-generated output preserved verbatim
-  # as a historical artifact; do not retroactively add doc comments to it.
-  exclude = ["**/docs/sponsor-packages/**"]
+  # Sponsor-pack code (docs/sponsor-packages/) and run-evidence code
+  # (docs/runs/, e.g. smoke-N forensic packs) is fossilized agent-generated
+  # output preserved verbatim as a historical artifact; do not retroactively
+  # add doc comments to it.
+  exclude = ["**/docs/sponsor-packages/**", "**/docs/runs/**"]
 [rule.if-return]
 [rule.increment-decrement]
 [rule.var-naming]
 [rule.var-declaration]
 [rule.package-comments]
-  exclude = ["**/docs/sponsor-packages/**"]
+  exclude = ["**/docs/sponsor-packages/**", "**/docs/runs/**"]
 [rule.range]
 [rule.receiver-naming]
 [rule.time-naming]
