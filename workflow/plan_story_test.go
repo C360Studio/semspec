@@ -357,6 +357,184 @@ func TestValidateStoriesAggregate(t *testing.T) {
 	if err := ValidateStories(storyStructBad); !errors.Is(err, ErrInvalidStoryStructure) {
 		t.Errorf("story struct error not surfaced: %v", err)
 	}
+
+	// Aggregate hook for file-ownership: two stories share a file but neither
+	// depends on the other. ValidateStories must surface
+	// ErrInvalidStoryFileOwnership (not the per-Story / DAG error classes).
+	fileRace := []Story{
+		{ID: "s1", RequirementID: "r1", Title: "A", Status: StoryStatusReady,
+			FilesOwned: []string{"src/x.go"},
+			Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "tests"}}},
+		{ID: "s2", RequirementID: "r2", Title: "B", Status: StoryStatusReady,
+			FilesOwned: []string{"src/x.go"}, // same file, no depends_on edge
+			Tasks:      []Task{{ID: "t2", StoryID: "s2", Description: "tests"}}},
+	}
+	if err := ValidateStories(fileRace); !errors.Is(err, ErrInvalidStoryFileOwnership) {
+		t.Errorf("file-ownership race error not surfaced by ValidateStories: %v", err)
+	}
+}
+
+// TestValidateStoryFileOwnership covers ADR-043 issue #88: when two Stories
+// share a file in FilesOwned, the DependsOn DAG must sequence them — otherwise
+// the scenario-orchestrator's parallel dispatch races on the shared file.
+//
+// Smoke 9 (2026-06-02 hybrid-gpt5 mavlink-hard, plan ebe27a10f9e4) had
+// stories 1.1, 2.1, 3.1 all owning the same 7-file MAVSDK driver set with
+// 2.1 and 3.1 both depending only on 1.1 — at dispatch time, 2.1 and 3.1
+// would race-write UnmannedSystem.java. The aborted run never reached that
+// point, but this validator now catches the shape at plan-time.
+func TestValidateStoryFileOwnership(t *testing.T) {
+	t.Run("empty input is valid", func(t *testing.T) {
+		if err := ValidateStoryFileOwnership(nil); err != nil {
+			t.Errorf("nil stories should validate: %v", err)
+		}
+		if err := ValidateStoryFileOwnership([]Story{}); err != nil {
+			t.Errorf("empty stories should validate: %v", err)
+		}
+	})
+
+	t.Run("single story validates", func(t *testing.T) {
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", Title: "A",
+				FilesOwned: []string{"src/x.go"}},
+		}
+		if err := ValidateStoryFileOwnership(stories); err != nil {
+			t.Errorf("single story should validate: %v", err)
+		}
+	})
+
+	t.Run("disjoint files validate", func(t *testing.T) {
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/a.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/b.go"}},
+		}
+		if err := ValidateStoryFileOwnership(stories); err != nil {
+			t.Errorf("disjoint files should validate: %v", err)
+		}
+	})
+
+	t.Run("shared file with direct dependency validates", func(t *testing.T) {
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/x.go"},
+				DependsOn: []string{"s1"}},
+		}
+		if err := ValidateStoryFileOwnership(stories); err != nil {
+			t.Errorf("shared file with direct dependency should validate: %v", err)
+		}
+	})
+
+	t.Run("shared file with transitive dependency validates", func(t *testing.T) {
+		// s1 → s2 → s3 ; s1 and s3 share a file but s3 transitively
+		// depends on s1 via s2. Safe to dispatch serially.
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/y.go"},
+				DependsOn: []string{"s1"}},
+			{ID: "s3", RequirementID: "r3", FilesOwned: []string{"src/x.go"},
+				DependsOn: []string{"s2"}},
+		}
+		if err := ValidateStoryFileOwnership(stories); err != nil {
+			t.Errorf("transitive dependency should validate: %v", err)
+		}
+	})
+
+	t.Run("shared file without dependency fails", func(t *testing.T) {
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/x.go"}},
+		}
+		err := ValidateStoryFileOwnership(stories)
+		if !errors.Is(err, ErrInvalidStoryFileOwnership) {
+			t.Fatalf("expected ErrInvalidStoryFileOwnership, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "src/x.go") {
+			t.Errorf("error should name the shared file: %v", err)
+		}
+		if !strings.Contains(err.Error(), "s1") || !strings.Contains(err.Error(), "s2") {
+			t.Errorf("error should name both stories: %v", err)
+		}
+	})
+
+	t.Run("siblings sharing files via same parent fail", func(t *testing.T) {
+		// This is the smoke-9 shape: s2 and s3 both depend_on s1, share a
+		// file, but do NOT depend on each other. Parallel dispatch would race.
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/base.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/shared.go"},
+				DependsOn: []string{"s1"}},
+			{ID: "s3", RequirementID: "r3", FilesOwned: []string{"src/shared.go"},
+				DependsOn: []string{"s1"}},
+		}
+		err := ValidateStoryFileOwnership(stories)
+		if !errors.Is(err, ErrInvalidStoryFileOwnership) {
+			t.Fatalf("expected smoke-9 shape to fail validation, got %v", err)
+		}
+	})
+
+	t.Run("multiple shared files all surface in error", func(t *testing.T) {
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1",
+				FilesOwned: []string{"src/x.go", "src/y.go", "src/z.go"}},
+			{ID: "s2", RequirementID: "r2",
+				FilesOwned: []string{"src/x.go", "src/y.go"}},
+		}
+		err := ValidateStoryFileOwnership(stories)
+		if !errors.Is(err, ErrInvalidStoryFileOwnership) {
+			t.Fatalf("expected error, got %v", err)
+		}
+		// Both shared files should appear in the message (sorted).
+		if !strings.Contains(err.Error(), "src/x.go") || !strings.Contains(err.Error(), "src/y.go") {
+			t.Errorf("error should list all shared files: %v", err)
+		}
+	})
+
+	t.Run("path normalization catches equivalent spellings", func(t *testing.T) {
+		// `src/x.go` and `./src/x.go` should normalize to the same path
+		// and the overlap should be detected.
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"./src/x.go"}},
+		}
+		err := ValidateStoryFileOwnership(stories)
+		if !errors.Is(err, ErrInvalidStoryFileOwnership) {
+			t.Fatalf("non-canonical paths should still detect overlap, got %v", err)
+		}
+	})
+
+	t.Run("diamond closure validates", func(t *testing.T) {
+		// Diamond:
+		//   s1 ──→ s2 ──→ s4
+		//    └──→ s3 ────┘
+		// s1 and s4 share a file; s4 transitively depends on s1 via both
+		// s2 and s3. Reachability through either path satisfies the check.
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/a.go"},
+				DependsOn: []string{"s1"}},
+			{ID: "s3", RequirementID: "r3", FilesOwned: []string{"src/b.go"},
+				DependsOn: []string{"s1"}},
+			{ID: "s4", RequirementID: "r4", FilesOwned: []string{"src/x.go"},
+				DependsOn: []string{"s2", "s3"}},
+		}
+		if err := ValidateStoryFileOwnership(stories); err != nil {
+			t.Errorf("diamond closure should validate s1↔s4 via s2 OR s3: %v", err)
+		}
+	})
+
+	t.Run("empty FilesOwned does not trip validation", func(t *testing.T) {
+		// ValidateStory enforces non-empty FilesOwned on signed-off Stories,
+		// but ValidateStoryFileOwnership is called with raw input — including
+		// possibly pending stories. Empty FilesOwned must be treated as "no
+		// overlap candidate" and pass through this validator silently.
+		stories := []Story{
+			{ID: "s1", RequirementID: "r1", FilesOwned: nil},
+			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/x.go"}},
+		}
+		if err := ValidateStoryFileOwnership(stories); err != nil {
+			t.Errorf("empty FilesOwned should pass file-ownership check: %v", err)
+		}
+	})
 }
 
 func TestValidateCapabilityCoverage(t *testing.T) {
