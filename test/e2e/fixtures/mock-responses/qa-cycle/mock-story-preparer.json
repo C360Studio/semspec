@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"stories\": [{\"label\": \"shard-0\", \"requirement_index\": 0, \"title\": \"Mock shard for math\", \"intent\": \"Mock fixture: shard the first requirement into a single Story for e2e pipeline validation.\", \"components\": [\"math\"], \"files_owned\": [\"src/math.go\"], \"depends_on_labels\": [], \"tasks\": [{\"label\": \"test-first\", \"description\": \"Write failing test for this story's behavior\", \"depends_on_labels\": []}, {\"label\": \"impl\", \"description\": \"Implement to make the failing test pass\", \"depends_on_labels\": [\"test-first\"]}, {\"label\": \"verify\", \"description\": \"Verify all scenarios pass\", \"depends_on_labels\": [\"impl\"]}]}]}"
+        "arguments": "{\"stories\": [{\"label\": \"math\", \"component_name\": \"math\", \"requirement_indices\": [0], \"capability_indices\": [], \"title\": \"Implement math component\", \"intent\": \"Mock fixture: implement the math component covering requirement 0.\", \"tasks\": [{\"label\": \"test-first\", \"description\": \"Write failing test for this story's behavior\", \"depends_on_labels\": []}, {\"label\": \"impl\", \"description\": \"Implement to make the failing test pass\", \"depends_on_labels\": [\"test-first\"]}, {\"label\": \"verify\", \"description\": \"Verify all scenarios pass\", \"depends_on_labels\": [\"impl\"]}]}]}"
       }
     }
   ],
