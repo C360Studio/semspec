@@ -32,11 +32,11 @@ import (
 //     ErrCoveragePartitionCyclic with the offending Story IDs and a
 //     remediation hint.
 //
-// MUTATES the DependsOn slices of the input stories in place. Callers must
-// not assume that pre-existing DependsOn values are preserved; run this
-// function on the raw Sarah-emitted slice (DependsOn empty) for correctness.
-// Idempotent: appendUnique prevents duplicates so calling twice yields the
-// same DependsOn set.
+// MUTATES the DependsOn slices of the input stories in place. Pre-existing
+// DependsOn values are RETAINED and deduplicated against derived edges via
+// appendUnique — for the documented use case (Sarah's freshly-emitted
+// stories), callers should pass DependsOn=nil; for re-derivation on a plan
+// where stories already carry edges, the function is idempotent.
 //
 // Returns nil when all edges are derived and the graph is acyclic. Returns a
 // wrapped ErrSameComponentFileConflict or ErrCoveragePartitionCyclic on
@@ -48,10 +48,6 @@ func DeriveStoryScheduling(stories []Story, reqs []Requirement) error {
 
 	// Pass 1 — Semantic edges.
 	reqClosure := buildReqClosure(reqs)
-	storyByID := make(map[string]*Story, len(stories))
-	for i := range stories {
-		storyByID[stories[i].ID] = &stories[i]
-	}
 
 	// coverers maps requirementID → IDs of all Stories covering it.
 	coverers := make(map[string][]string, len(reqs))

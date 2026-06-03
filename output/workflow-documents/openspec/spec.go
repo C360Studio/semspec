@@ -86,13 +86,14 @@ func RenderSpec(plan *workflow.Plan, capName string) string {
 		reqIDs[r.ID] = struct{}{}
 	}
 	for _, s := range plan.Stories {
-		// ADR-044: Story covers M:N requirements; include if any match.
-		// TODO ADR-044 commit 3+: iterate all RequirementIDs for full coverage.
-		rid := s.PrimaryRequirementID()
-		if rid == "" {
-			continue
+		matches := false
+		for _, rid := range s.RequirementIDs {
+			if _, ok := reqIDs[rid]; ok {
+				matches = true
+				break
+			}
 		}
-		if _, ok := reqIDs[rid]; !ok {
+		if !matches {
 			continue
 		}
 		for _, f := range s.FilesOwned {

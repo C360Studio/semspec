@@ -71,7 +71,6 @@ func storyStructuralFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
 	for _, s := range plan.Stories {
 		// RequirementIDs resolution — ADR-044: check every entry in the M:N
 		// coverage join. Always checked regardless of story status.
-		// TODO ADR-044 commit 3+: iterate RequirementIDs properly.
 		for _, rid := range s.RequirementIDs {
 			if _, ok := requirementIDs[rid]; !ok {
 				findings = append(findings, workflow.PlanReviewFinding{

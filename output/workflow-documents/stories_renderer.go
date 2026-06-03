@@ -28,19 +28,21 @@ func RenderStories(plan *workflow.Plan) string {
 	b.WriteString(fmt.Sprintf("*Generated from the story-preparer role (Sarah). **%d stories** ready the per-Requirement work for the executor pipeline, each carrying its own Tasks checklist and FilesOwned scope.*\n\n",
 		len(plan.Stories)))
 
-	// Group stories by primary requirement ID, preserving requirement order.
-	// ADR-044: Stories carry M:N RequirementIDs; use PrimaryRequirementID for
-	// the legacy per-requirement grouping in this renderer.
-	// TODO ADR-044 commit 3+: render M:N coverage joins properly.
+	// Group stories by every covered requirement (ADR-044 M:N). A Story
+	// covering [R1, R2] appears under BOTH R1's and R2's sections — the
+	// renderer answers "what's covering this requirement?" so showing the
+	// Story everywhere it provides evidence is correct. Stories with empty
+	// RequirementIDs land in the orphans bucket and are flagged.
 	byReq := make(map[string][]workflow.Story)
 	var orphans []workflow.Story
 	for _, s := range plan.Stories {
-		rid := s.PrimaryRequirementID()
-		if rid == "" {
+		if len(s.RequirementIDs) == 0 {
 			orphans = append(orphans, s)
 			continue
 		}
-		byReq[rid] = append(byReq[rid], s)
+		for _, rid := range s.RequirementIDs {
+			byReq[rid] = append(byReq[rid], s)
+		}
 	}
 
 	for _, req := range plan.Requirements {
@@ -86,8 +88,14 @@ func writeStory(b *strings.Builder, s workflow.Story) {
 	if s.Intent != "" {
 		fmt.Fprintf(b, "%s\n\n", s.Intent)
 	}
-	if len(s.Components) > 0 {
-		fmt.Fprintf(b, "**Components:** %s\n\n", strings.Join(s.Components, ", "))
+	if s.ComponentName != "" {
+		fmt.Fprintf(b, "**Component:** %s\n\n", s.ComponentName)
+	}
+	if len(s.RequirementIDs) > 1 {
+		fmt.Fprintf(b, "**Covers requirements:** %s\n\n", strings.Join(s.RequirementIDs, ", "))
+	}
+	if len(s.CapabilityNames) > 0 {
+		fmt.Fprintf(b, "**Covers capabilities:** %s\n\n", strings.Join(s.CapabilityNames, ", "))
 	}
 	if len(s.FilesOwned) > 0 {
 		b.WriteString("**Files owned:**\n\n")

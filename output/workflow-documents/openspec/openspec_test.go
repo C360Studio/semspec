@@ -168,6 +168,35 @@ func TestRenderSpec_Happy(t *testing.T) {
 	}
 }
 
+// TestRenderSpec_AppliesTo_MultiReqCoverage pins the ADR-044 M:N invariant
+// for the spec.md applies_to section: when a single Story covers multiple
+// Requirements across multiple Capabilities (the mavlink-hard cohesive
+// component shape), the Story's FilesOwned must appear under EVERY
+// capability spec.md whose requirements it covers. HIGH 2 from
+// ADR-044 commit-2 review.
+func TestRenderSpec_AppliesTo_MultiReqCoverage(t *testing.T) {
+	plan := samplePlan()
+	plan.Stories = []workflow.Story{
+		{
+			ID:             "story.test.cohesive",
+			RequirementIDs: []string{"r1", "r2"}, // covers BOTH bootstrap + telemetry
+			ComponentName:  "mavsdk-driver",
+			Title:          "Cohesive MAVSDK driver",
+			FilesOwned:     []string{"src/main/java/Driver.java"},
+		},
+	}
+
+	gotBootstrap := RenderSpec(plan, "mavsdk-bootstrap")
+	if !strings.Contains(gotBootstrap, "`src/main/java/Driver.java`") {
+		t.Errorf("mavsdk-bootstrap spec.md missing Driver.java in applies_to (M:N coverage missed):\n%s", gotBootstrap)
+	}
+
+	gotTelemetry := RenderSpec(plan, "telemetry-stream")
+	if !strings.Contains(gotTelemetry, "`src/main/java/Driver.java`") {
+		t.Errorf("telemetry-stream spec.md missing Driver.java in applies_to (M:N coverage missed):\n%s", gotTelemetry)
+	}
+}
+
 func TestRenderSpec_UnknownCapabilityReturnsEmpty(t *testing.T) {
 	if got := RenderSpec(samplePlan(), "no-such-cap"); got != "" {
 		t.Errorf("expected empty for unknown cap, got %q", got)

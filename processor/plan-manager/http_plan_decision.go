@@ -684,12 +684,12 @@ func applyRecoveryHintToStories(plan *workflow.Plan, proposal *workflow.PlanDeci
 			reqs[id] = true
 		}
 		for i := range plan.Stories {
-			// ADR-044: check M:N RequirementIDs; use PrimaryRequirementID for
-			// singleton-slice compat in this fallback path.
-			// TODO ADR-044 commit 3+: iterate RequirementIDs fully.
-			if reqs[plan.Stories[i].PrimaryRequirementID()] {
-				plan.Stories[i].RecoveryHint = proposal.Rationale
-				plan.Stories[i].UpdatedAt = now
+			for _, rid := range plan.Stories[i].RequirementIDs {
+				if reqs[rid] {
+					plan.Stories[i].RecoveryHint = proposal.Rationale
+					plan.Stories[i].UpdatedAt = now
+					break
+				}
 			}
 		}
 		return

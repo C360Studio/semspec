@@ -114,8 +114,6 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 //     but still reaches Sarah.
 //   - Both empty → return nil. Caller's downstream behavior is "no-op
 //     cascade"; plan-manager treats that as human-review territory.
-//
-// TODO ADR-044 commit 3+: iterate RequirementIDs fully instead of singleton.
 func storiesForReprepare(proposal *workflow.PlanDecision, stories []workflow.Story, affectedReqs map[string]bool) []string {
 	if len(proposal.AffectedStoryIDs) > 0 {
 		out := make([]string, 0, len(proposal.AffectedStoryIDs))
@@ -127,14 +125,10 @@ func storiesForReprepare(proposal *workflow.PlanDecision, stories []workflow.Sto
 	}
 	out := make([]string, 0, len(stories))
 	for _, s := range stories {
-		// ADR-044: check M:N RequirementIDs slice.
-		// TODO ADR-044 commit 3+: use PrimaryRequirementID only as fallback.
-		if len(s.RequirementIDs) > 0 {
-			for _, rid := range s.RequirementIDs {
-				if affectedReqs[rid] {
-					out = append(out, s.ID)
-					break
-				}
+		for _, rid := range s.RequirementIDs {
+			if affectedReqs[rid] {
+				out = append(out, s.ID)
+				break
 			}
 		}
 	}

@@ -262,6 +262,35 @@ func TestDeriveStoryScheduling_Idempotent(t *testing.T) {
 	}
 }
 
+func TestDeriveStoryScheduling_IdempotentWithPass2Edges(t *testing.T) {
+	// Idempotence must hold when Pass-2 resource edges fire too. Two
+	// cross-component stories share a file with no semantic prereq between
+	// them → Pass 2 adds a deterministic edge; second call must not append
+	// a duplicate. (MEDIUM 7 from ADR-044 commit-2 review.)
+	stories := []Story{
+		{ID: "s1", ComponentName: "comp-a", RequirementIDs: []string{"R1"},
+			FilesOwned: []string{"src/shared.go"}},
+		{ID: "s2", ComponentName: "comp-b", RequirementIDs: []string{"R2"},
+			FilesOwned: []string{"src/shared.go"}},
+	}
+	reqs := []Requirement{{ID: "R1"}, {ID: "R2"}}
+
+	if err := DeriveStoryScheduling(stories, reqs); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	firstS2Deps := append([]string(nil), stories[1].DependsOn...)
+	if len(firstS2Deps) != 1 || firstS2Deps[0] != "s1" {
+		t.Fatalf("first call: expected s2.DependsOn=[s1], got %v", firstS2Deps)
+	}
+
+	if err := DeriveStoryScheduling(stories, reqs); err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if len(stories[1].DependsOn) != 1 || stories[1].DependsOn[0] != "s1" {
+		t.Errorf("idempotence broken: s2.DependsOn=%v after second call", stories[1].DependsOn)
+	}
+}
+
 func TestDeriveStoryScheduling_CrossComponentPrereqNoDoubleEdge(t *testing.T) {
 	// Pass 1 orders s1 before s2 via prereq. Pass 2 sees overlap but the
 	// pair is already ordered — no double edge should appear.
