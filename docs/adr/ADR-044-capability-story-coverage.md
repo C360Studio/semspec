@@ -112,40 +112,124 @@ Sarah's new prompt shifts from algorithmic (`files_owned = union of...`) to cons
 > 1. **Coverage closure** — every capability appears in ≥1 Story's `capability_names`; every requirement appears in ≥1 Story's `requirement_ids`.
 > 2. **One component per Story** — `component_name` is a single declared component.
 > 3. **Files derived, not chosen** — `files_owned = component.implementation_files`. You don't pick files; the component pick determines them.
-> 4. **Story-level DependsOn is NOT yours to author** — the system derives `Story.DependsOn` from `Requirement.DependsOn` closure post-emission. Focus on the coverage joins; the dispatch graph follows.
+> 4. **Story-level DependsOn is NOT yours to author** — the system derives `Story.DependsOn` from (a) `Requirement.DependsOn` closure and (b) file-ownership conflicts post-emission. Focus on the coverage joins; the dispatch graph follows.
 >
-> For each architectural component, emit ONE Story covering every requirement whose capabilities map into this component. For requirements spanning multiple components, emit multiple Stories (one per component) with depends_on edges expressing prereq ordering.
+> For each architectural component, emit ONE Story covering every requirement whose capabilities map into this component. (Requirements spanning multiple components are blocked upstream by plan-reviewer — see `requirement.spans_multiple_components`.)
 >
 > Apply your readiness gate before signing off each Story. If a constraint cannot be satisfied, flag back rather than emit unready output."
 
+On retry, the system may surface scheduler-derivation errors for Sarah to act on:
+
+- `story.same_component_file_conflict` — two Stories anchor the same component and share files; collapse to one Story.
+- `coverage_partition_cyclic` — a Story covers non-contiguous layers of the Requirement DAG; split or merge per the error message.
+
+Both are emission shape bugs, not LLM-judgment ambiguity. Sarah's retry context includes the offending Story IDs and remediation hint.
+
 This restores Sarah's PO role (judgment-driven, BMAD canonical) while honoring OpenSpec's spec-as-contract premise.
 
-### Story DAG derived from Requirement DAG (not Sarah-authored)
+### Story scheduling — system-derived from two sources
 
-**Critical:** Sarah does NOT author `Story.DependsOn` under M:N. The Story-level execution DAG is derived deterministically from `Requirement.DependsOn` closure post-emission. This is a non-trivial change from today's single-author-graph model.
+**Critical:** Sarah does NOT author `Story.DependsOn` under M:N. The Story-level execution DAG is derived deterministically post-emission by `workflow.DeriveStoryScheduling(stories, requirements) error`.
 
-**Why:** Under M:N, a Story covers multiple Requirements. A correct cross-Story dependency edge requires transitive closure across the M:N join:
+This is a **scheduler graph**, not merely a lifted Requirement DAG. Lifting requirement prereqs alone catches semantic ordering but leaves sibling Stories parallel even when they race on shared files — the original mavlink-hard failure shape. The derivation runs in two passes plus a validity check.
+
+**Why two sources:** Under M:N, a Story covers multiple Requirements. A correct execution edge requires (a) transitive closure across the M:N join for semantic prereqs, plus (b) explicit resource-conflict resolution for file-overlap races. Asking Sarah to author either directly is fragile — both are graph computations, the wrong tool for LLM judgment.
+
+#### Pass 1 — Semantic edges (requirement prerequisite closure)
+
+For each Story `S` covering requirements `R_S = {r1, r2, …}`:
+
+1. Compute the transitive prereq closure of `R_S` over the Requirement DAG.
+2. For each `r ∈ closure(R_S) \ R_S`, find the set `coverers(r)` = every Story whose `requirement_ids` contains `r`.
+3. `S.DependsOn ⊇ coverers(r)` for **every** prereq `r`, not just one.
+
+**Correctness detail (Codex):** `S` must wait for the union of **all** Stories covering each prerequisite. A requirement is only complete when every covering Story has completed; if `S` dispatches after just one coverer of a multi-covered prereq, downstream evidence is incomplete.
 
 ```
-Reqs:      R1 (deps=[]), R2 (deps=[R1]), R3 (deps=[R1])
-Components: A covers R1; B covers R2 + R3
-Stories:   Story-A {covers: [R1]}; Story-B {covers: [R2, R3]}
+Reqs:  R1, R2 (no deps); R4 (deps=[R1, R2])
+Stories:
+  s1 covers [R1]
+  s2 covers [R1, R2]      ← overlaps s1 on R1
+  s4 covers [R4]
 
-Required Story.DependsOn:
-   Story-B.DependsOn must contain Story-A  (because both R2 and R3 transitively need R1)
+Pass-1 edges for s4 (closure = {R1, R2}):
+  coverers(R1) = {s1, s2}  → s4.DependsOn ⊇ {s1, s2}
+  coverers(R2) = {s2}      → s4.DependsOn ⊇ {s2}
+  Result: s4.DependsOn = {s1, s2}
 ```
 
-Asking Sarah to author this directly is fragile — she'd need to compute the transitive closure correctly across both the Req graph AND her own component → requirement coverage. LLM judgment is the wrong tool for graph closure.
+#### Pass 2 — Resource edges (file-ownership conflicts)
 
-**The right shape:**
+For each pair `(S_a, S_b)` not already ordered by Pass 1:
 
-- **Sarah picks:** `component_name`, `requirement_ids[]`, `capability_names[]`, `tasks[]`, intra-story task deps
-- **System derives** (post-emission, deterministic):
-  - `Story.DependsOn` = set of other Story IDs whose `requirement_ids` include any Requirement in the closure of `this.requirement_ids[*].DependsOn`
-  - Computed by `workflow.DeriveStoryDAG(stories, requirements) error` — closure algorithm
-  - Validation: post-derivation, the Story DAG must be acyclic. A cycle here indicates an inconsistent Sarah emission (a Story whose requirements transitively depend on themselves through other Stories), surfaced as a hard validator error.
+1. Compute writable file overlap `S_a.FilesOwned ∩ S_b.FilesOwned`.
+2. If overlap is non-empty, apply policies in order:
+   - **(a) Reject as Sarah emission bug** — if `S_a.ComponentName == S_b.ComponentName` AND files overlap, Sarah emitted two Stories for the same execution unit. Under ADR-044's "one Story per (component × coverage group)" rule this is invalid; reject the plan and surface to Sarah on retry: "Stories `S_a` and `S_b` anchor the same component and share files — collapse to one Story covering both capability/requirement sets."
+   - **(b) Serialize across components** — if components differ but `implementation_files` overlap (a Winston-side overlap that escaped `ValidateStoryFileOwnership`), derive a deterministic serialization edge: lower `Story.ID` runs first; the other gets the dependency. This formalizes PR #97's runtime workaround as a planned edge rather than a recovery patch.
+   - **(c) Reject as ill-shaped coverage** — fallthrough; should be unreachable if the validator chain is healthy. Surface as a hard error.
 
-**Today's single-author graph** (Sarah emits both Story shape AND cross-Story DependsOn labels) becomes **two-step:** Sarah emits Story shape; system derives DependsOn.
+Case (a) is the common race today; case (b) only fires when Winston's `implementation_files` overlap across components; case (c) is a chain-of-validators bug if reached.
+
+#### Pass 3 — Cycle detection (coverage-partition validity)
+
+Run cycle detection on the merged DAG. A cycle here is NOT a requirement-DAG bug; it indicates an **invalid coverage partition** — a Story covering non-contiguous layers of the Requirement DAG (Codex's example):
+
+```
+Reqs:  R_A → R_B → R_C   (linear chain)
+Stories:
+  s1 covers [R_B]
+  s2 covers [R_A, R_C]
+
+Pass-1 edges:
+  s1.DependsOn ⊇ {s2}   (R_B's prereq R_A is covered by s2)
+  s2.DependsOn ⊇ {s1}   (R_C's prereq R_B is covered by s1)
+  → Cycle s1 ↔ s2
+```
+
+Remediation: reject the plan with `coverage_partition_cyclic` — surface to Sarah: "Story `s2` covers requirements on both sides of Story `s1`. Split `s2` into per-layer Stories (one for `R_A`, one for `R_C`) or merge with `s1` into a single Story covering the full chain."
+
+#### Algorithm sketch
+
+```go
+// workflow/derive_story_scheduling.go
+func DeriveStoryScheduling(stories []Story, reqs []Requirement) error {
+    // Pass 1: semantic edges from requirement prereq closure (all coverers).
+    for i := range stories {
+        for _, prereq := range transitiveClosure(stories[i].RequirementIDs, reqs) {
+            if contains(stories[i].RequirementIDs, prereq) { continue }
+            for _, other := range stories {
+                if other.ID != stories[i].ID && contains(other.RequirementIDs, prereq) {
+                    stories[i].DependsOn = appendUnique(stories[i].DependsOn, other.ID)
+                }
+            }
+        }
+    }
+    // Pass 2: resource edges from file-ownership conflicts.
+    for i, a := range stories {
+        for j := i + 1; j < len(stories); j++ {
+            b := stories[j]
+            if orderedByPass1(a, b, stories) { continue }
+            if !filesOverlap(a.FilesOwned, b.FilesOwned) { continue }
+            switch {
+            case a.ComponentName == b.ComponentName:
+                return fmt.Errorf("story.same_component_file_conflict: %q and %q anchor %q and share files — collapse to one Story",
+                    a.ID, b.ID, a.ComponentName)
+            default:
+                lower, higher := orderByID(a, b)
+                higher.DependsOn = appendUnique(higher.DependsOn, lower.ID)
+            }
+        }
+    }
+    // Pass 3: cycle detection on derived scheduler DAG.
+    if cycle := detectCycle(stories); cycle != nil {
+        return fmt.Errorf("coverage_partition_cyclic: cycle %v — a Story covers non-contiguous layers of the Requirement DAG; split or merge",
+            cycle)
+    }
+    return nil
+}
+```
+
+**Today's single-author graph** (Sarah emits Story shape AND cross-Story DependsOn labels) becomes **two-step:** Sarah emits coverage joins; system derives the scheduler graph from semantic + resource edges and rejects invalid partitions.
 
 ### Capability spec as acceptance contract
 
@@ -217,7 +301,7 @@ No back-compat path. Single PR train rewrites the contract end-to-end:
 
 1. **Story.ID generation scheme.** Today: `story.<slug>.<reqseq>.<storyseq>` — anchored by parent requirement. Under ADR-044, Stories no longer have a parent requirement (the relationship is M:N). The schema PR must pick a new scheme — likely `story.<slug>.<componentName>` (with kebab-case-clean componentName) or `story.<slug>.<componentSeq>`. The component-anchored form is preferred for human readability + stability across architecture revisions where component count stays but capability mapping shifts.
 
-2. **Open bug #68 (cross-req `Story.DependsOn` topo-sort) likely closes under ADR-044.** Under M:N with derived Story DAG (`DeriveStoryDAG`), the Story.DependsOn graph is computed deterministically from the Requirement DAG via transitive closure. The classes of failure #68 was tracking — Sarah getting cross-requirement DependsOn wrong — are eliminated because Sarah no longer authors that field. The schema PR should evaluate whether #68 closes outright or restates to a narrower scope.
+2. **Open bug #68 (cross-req `Story.DependsOn` topo-sort) likely closes under ADR-044.** Under M:N with derived scheduling (`DeriveStoryScheduling`), the Story.DependsOn graph is computed deterministically from semantic + resource edges. The classes of failure #68 was tracking — Sarah getting cross-requirement DependsOn wrong — are eliminated because Sarah no longer authors that field. The schema PR should evaluate whether #68 closes outright or restates to a narrower scope.
 
 3. **What if a capability genuinely spans multiple components?** Example: "GDPR-compliant user data export" might require auth + storage + audit components. ADR-044 says: capability appears in the `capability_names` of multiple Stories (one per component); spec.md accumulates evidence from all. This works — the spec is the acceptance contract; evidence rolls up.
 
@@ -239,6 +323,7 @@ No back-compat path. Single PR train rewrites the contract end-to-end:
 - Capabilities and requirements bind via `capability_names []` + `requirement_ids []` on Story.
 - OpenSpec spec.md remains per-capability (acceptance contract); BMAD component remains per-cohesive-code-unit.
 - Sarah shifts from algorithmic (compute files = union) to constraint-satisfying (pick component, derive files, cover capabilities).
+- `Story.DependsOn` is **system-derived**, not Sarah-authored. The scheduler graph is built from (1) requirement prereq closure across the M:N join with all-coverers wait semantics, plus (2) file-ownership conflict resolution. Cycles in the derived graph are surfaced as `coverage_partition_cyclic` and retried.
 - No back-compat for `Story.RequirementID` singular — greenfield rewrite.
 
 ## Cross-references
