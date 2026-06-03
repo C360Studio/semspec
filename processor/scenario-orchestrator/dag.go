@@ -1,6 +1,10 @@
 package scenarioorchestrator
 
-import "github.com/c360studio/semspec/workflow"
+import (
+	"sort"
+
+	"github.com/c360studio/semspec/workflow"
+)
 
 // requirementComplete returns true when the requirement has reached
 // terminal "completed" stage in EXECUTION_STATES.
@@ -66,6 +70,79 @@ func filterReadyRequirements(
 	}
 
 	return ready
+}
+
+// filterByM2NStoryReservations applies ADR-044's M:N story-ownership gate
+// on top of filterReadyRequirements. The contract:
+//
+//  1. Each Story has a deterministic "owner" requirement = the
+//     lexicographically smallest req ID in Story.RequirementIDs. Under
+//     the canonical cohesive-component shape (smoke 9 / mavlink-hard: 1
+//     Story covering N requirements), this picks exactly one of those
+//     N requirements to actually dispatch the dev loop.
+//  2. A non-owner requirement may dispatch ONLY when every covering
+//     Story it does NOT own has reached Story.Status == complete. The
+//     post-completion executor's Tier-1 dedup at component.go:dispatchCurrentStoryLocked
+//     immediately fires markCompletedLocked without re-running the dev
+//     loop — correct, because the work has actually shipped under the
+//     owner's executor.
+//
+// Without this gate, the post-claim-rejection path in requirement-executor
+// would call markCompletedLocked for a non-owner requirement BEFORE the
+// owner's Story has shipped, producing a false-positive completion that
+// QA-reviewer's capability-evidence rollup consumes as ground truth.
+//
+// When stories is empty (legacy plans pre-Sarah, mock fixtures without
+// Stories), the gate is a no-op pass-through.
+//
+// Story.Status transitions to Complete are observed when plan-manager
+// re-fires scenario.orchestrate.<slug> on plan KV updates — the next
+// sweep sees Status=complete and releases the non-owner.
+func filterByM2NStoryReservations(ready []workflow.Requirement, stories []workflow.Story) []workflow.Requirement {
+	if len(ready) == 0 || len(stories) == 0 {
+		return ready
+	}
+
+	// Index Stories by every requirement they cover (M:N).
+	storiesByReq := make(map[string][]workflow.Story, len(stories))
+	for _, s := range stories {
+		for _, rid := range s.RequirementIDs {
+			storiesByReq[rid] = append(storiesByReq[rid], s)
+		}
+	}
+
+	out := make([]workflow.Requirement, 0, len(ready))
+	for _, req := range ready {
+		gated := false
+		for _, s := range storiesByReq[req.ID] {
+			if storyOwner(s) == req.ID {
+				continue // we own this Story — dispatch normally
+			}
+			if s.Status == workflow.StoryStatusComplete {
+				continue // owner already shipped this Story — we can dispatch and Tier-1 fast-completes
+			}
+			// Non-owner Story not yet complete — defer until owner ships.
+			gated = true
+			break
+		}
+		if !gated {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// storyOwner returns the deterministic "owning" requirement ID for a Story
+// under the ADR-044 M:N reservation pattern. The lexicographically smallest
+// req ID in Story.RequirementIDs wins. Stable across re-evaluations so the
+// owner picked on one orchestration sweep is the same on the next.
+func storyOwner(s workflow.Story) string {
+	if len(s.RequirementIDs) == 0 {
+		return ""
+	}
+	ids := append([]string(nil), s.RequirementIDs...)
+	sort.Strings(ids)
+	return ids[0]
 }
 
 // depsComplete returns true when every requirement listed in req.DependsOn is

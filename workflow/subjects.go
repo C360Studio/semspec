@@ -178,7 +178,8 @@ const (
 // consumers distinguish "not assessed" from "assessed-and-failed" via the
 // level recorded on QAVerdictEvent.
 type QAVerdictDimensions struct {
-	RequirementFulfillment string `json:"requirement_fulfillment,omitempty"` // always — old rollup responsibility
+	RequirementFulfillment string `json:"requirement_fulfillment,omitempty"` // always — ADR-043 rollup responsibility
+	CapabilityEvidence     string `json:"capability_evidence,omitempty"`     // always — ADR-044 M:N release-readiness gate
 	Coverage               string `json:"coverage,omitempty"`                // level ≥ unit
 	AssertionQuality       string `json:"assertion_quality,omitempty"`       // level ≥ unit
 	RegressionSurface      string `json:"regression_surface,omitempty"`      // level ≥ unit

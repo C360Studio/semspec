@@ -327,12 +327,15 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		}
 	}
 	toDispatch := filterReadyRequirements(requirements, completedReqIDs)
+	preStoryGateCount := len(toDispatch)
+	toDispatch = filterByM2NStoryReservations(toDispatch, trigger.Stories)
 
 	c.logger.Info("requirement DAG gating applied",
 		"plan_slug", trigger.PlanSlug,
 		"total_requirements", len(requirements),
 		"ready_count", len(toDispatch),
-		"blocked_count", len(requirements)-len(toDispatch))
+		"blocked_by_deps", len(requirements)-preStoryGateCount,
+		"blocked_by_m_n_story_reservation", preStoryGateCount-len(toDispatch))
 
 	if len(toDispatch) == 0 {
 		return nil

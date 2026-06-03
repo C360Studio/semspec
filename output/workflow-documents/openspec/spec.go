@@ -86,7 +86,14 @@ func RenderSpec(plan *workflow.Plan, capName string) string {
 		reqIDs[r.ID] = struct{}{}
 	}
 	for _, s := range plan.Stories {
-		if _, ok := reqIDs[s.RequirementID]; !ok {
+		matches := false
+		for _, rid := range s.RequirementIDs {
+			if _, ok := reqIDs[rid]; ok {
+				matches = true
+				break
+			}
+		}
+		if !matches {
 			continue
 		}
 		for _, f := range s.FilesOwned {

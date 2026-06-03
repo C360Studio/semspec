@@ -31,6 +31,7 @@ const (
 	mutationRequirementsGenerated = "plan.mutation.requirements.generated"
 	mutationArchitectureGenerated = "plan.mutation.architecture.generated"
 	mutationStoriesGenerated      = "plan.mutation.stories.generated"
+	mutationStoryStatus           = "plan.mutation.story.status"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationScenariosReviewed     = "plan.mutation.scenarios.reviewed"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
@@ -147,6 +148,21 @@ type ReadyForExecutionMutationRequest struct {
 	TraceID string `json:"trace_id,omitempty"`
 }
 
+// StoryStatusMutationRequest is sent by the requirement-executor to atomically
+// transition a Story's lifecycle state. Compare-and-swap is enforced via
+// Story.Status.CanTransitionTo: handler reads current Story.Status, checks
+// transition validity, persists on success, returns Success=false on
+// contention. Used by the executor's per-Story dispatch to reserve a Story
+// (target=executing) before dispatching the dev loop — closes the ADR-044
+// parallel-executor race window where N requirement-executors covering the
+// same M:N Story would otherwise all race-dispatch.
+type StoryStatusMutationRequest struct {
+	Slug    string               `json:"slug"`
+	StoryID string               `json:"story_id"`
+	Target  workflow.StoryStatus `json:"target"`
+	TraceID string               `json:"trace_id,omitempty"`
+}
+
 // ClaimMutationRequest is sent by watchers to atomically claim a plan for processing.
 // The target status must be an in-progress status (IsInProgress() == true).
 // Plan-manager's single-writer serialization ensures only one claim succeeds.
@@ -192,6 +208,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationRequirementsGenerated, c.handleRequirementsMutation},
 		{mutationArchitectureGenerated, c.handleArchitectureMutation},
 		{mutationStoriesGenerated, c.handleStoriesMutation},
+		{mutationStoryStatus, c.handleStoryStatusMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationScenariosReviewed, c.handleScenariosReviewedMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
@@ -770,6 +787,86 @@ func (c *Component) handleApprovedMutation(ctx context.Context, data []byte) Mut
 	}
 
 	c.logger.Info("Plan approved via mutation", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
+// handleStoryStatusMutation atomically transitions a Story.Status via the
+// Story.CanTransitionTo state machine. Returns Success=false on contention
+// (another caller already advanced the Story), invalid transition (caller
+// supplied a target unreachable from current state), or missing Story ID.
+//
+// Used by requirement-executor to (a) reserve a Story before dispatching
+// the dev loop (target=executing) — the first executor wins, others see
+// the rejection and skip — closing the ADR-044 parallel-executor race
+// window where N requirement-executors covering the same M:N Story would
+// otherwise all race-dispatch the dev loop. Then (b) record terminal
+// outcome (target=complete or failed) on dispatch end.
+func (c *Component) handleStoryStatusMutation(ctx context.Context, data []byte) MutationResponse {
+	var req StoryStatusMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" || req.StoryID == "" || req.Target == "" {
+		return MutationResponse{Success: false, Error: "slug, story_id, target required"}
+	}
+	if !req.Target.IsValid() {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid target status %q", req.Target)}
+	}
+
+	defer c.lockSlug(req.Slug)()
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	storyPtr, _ := plan.FindStory(req.StoryID)
+	if storyPtr == nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("story %q not found in plan", req.StoryID)}
+	}
+
+	current := storyPtr.Status
+	// Empty/zero-value Status is Sarah's emission shape (omitempty on the
+	// wire); treat as Ready for transition purposes since Sarah only emits
+	// Stories that passed her readiness gate.
+	if current == "" {
+		current = workflow.StoryStatusReady
+	}
+	if !current.CanTransitionTo(req.Target) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → %s", current, req.Target)}
+	}
+
+	storyPtr.Status = req.Target
+	storyPtr.UpdatedAt = time.Now()
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save story status via mutation", "slug", req.Slug, "story_id", req.StoryID, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
+	}
+
+	c.logger.Info("Story status transitioned via mutation",
+		"slug", req.Slug, "story_id", req.StoryID,
+		"from", current, "to", req.Target)
+
+	// ADR-044: when a Story reaches Complete or Failed, re-fire the
+	// scenario orchestrator so non-owner requirements gated by
+	// filterByM2NStoryReservations are released. Without this, deferred
+	// non-owners would never wake up — execution_events.go re-fires only
+	// on requirement-level completion, not Story-level. Only fire while
+	// the plan is still implementing; post-convergence re-fires would
+	// race with terminal-state transitions.
+	if req.Target == workflow.StoryStatusComplete || req.Target == workflow.StoryStatusFailed {
+		if plan.EffectiveStatus() == workflow.StatusImplementing {
+			if err := c.triggerScenarioOrchestrator(ctx, plan); err != nil {
+				c.logger.Warn("Failed to re-fire scenario orchestrator after story status change",
+					"slug", req.Slug, "story_id", req.StoryID, "target", req.Target, "error", err)
+			}
+		}
+	}
 	return MutationResponse{Success: true}
 }
 

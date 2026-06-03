@@ -16,7 +16,7 @@ func TestSynthesizeTaskDAGForStory_LinearTasks(t *testing.T) {
 		},
 	}
 	story := workflow.Story{
-		ID: "story.x.1.1", RequirementID: "req.x.1",
+		ID: "story.x.1.1", RequirementIDs: []string{"req.x.1"}, ComponentName: "placeholder-component",
 		FilesOwned: []string{"src/x.go"},
 		Tasks: []workflow.Task{
 			{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "tests"},
@@ -62,7 +62,7 @@ func TestSynthesizeTaskDAGForStory_PerStoryScopeNoCrossEdges(t *testing.T) {
 		Requirements: []workflow.Requirement{{ID: "req.x.1"}},
 	}
 	storyB := workflow.Story{
-		ID: "story.x.1.2", RequirementID: "req.x.1",
+		ID: "story.x.1.2", RequirementIDs: []string{"req.x.1"}, ComponentName: "placeholder-component-2",
 		FilesOwned: []string{"src/b.go"},
 		DependsOn:  []string{"story.x.1.1"}, // signals outer ordering — NOT a node edge
 		Tasks: []workflow.Task{

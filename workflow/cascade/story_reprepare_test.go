@@ -21,9 +21,9 @@ func TestPlanDecision_StoryReprepare_ExplicitStoryIDs(t *testing.T) {
 		AffectedStoryIDs: []string{"story.demo.1.2"}, // only Story 2
 	}
 	stories := []workflow.Story{
-		{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "Story 1 (untouched)"},
-		{ID: "story.demo.1.2", RequirementID: "req.demo.1", Title: "Story 2 (targeted)"},
-		{ID: "story.demo.1.3", RequirementID: "req.demo.1", Title: "Story 3 (untouched)"},
+		{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Story 1 (untouched)"},
+		{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Story 2 (targeted)"},
+		{ID: "story.demo.1.3", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Story 3 (untouched)"},
 	}
 	scenarios := []workflow.Scenario{
 		{ID: "scen.demo.1.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},
@@ -57,9 +57,9 @@ func TestPlanDecision_StoryReprepare_FallbackToReqScope(t *testing.T) {
 		// AffectedStoryIDs intentionally empty
 	}
 	stories := []workflow.Story{
-		{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
-		{ID: "story.demo.1.2", RequirementID: "req.demo.1"},
-		{ID: "story.demo.2.1", RequirementID: "req.demo.2"}, // different req — must NOT match
+		{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
+		{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
+		{ID: "story.demo.2.1", RequirementIDs: []string{"req.demo.2"}, ComponentName: "placeholder-component"}, // different req — must NOT match
 	}
 	scenarios := []workflow.Scenario{
 		{ID: "scen.demo.1.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},
@@ -95,7 +95,7 @@ func TestPlanDecision_RequirementChangePreservesBackCompat(t *testing.T) {
 		AffectedReqIDs: []string{"req.demo.1"},
 	}
 	stories := []workflow.Story{
-		{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
+		{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
 	}
 	scenarios := []workflow.Scenario{
 		{ID: "scen.demo.1.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},
@@ -151,7 +151,7 @@ func TestPlanDecision_ExecutionExhaustedIsNoOp(t *testing.T) {
 		Kind:           workflow.PlanDecisionKindExecutionExhausted,
 		AffectedReqIDs: []string{"req.demo.1"},
 	}
-	stories := []workflow.Story{{ID: "story.demo.1.1", RequirementID: "req.demo.1"}}
+	stories := []workflow.Story{{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"}}
 	scenarios := []workflow.Scenario{{ID: "scen.demo.1.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"}}
 
 	result, err := PlanDecision(proposal, stories, scenarios)

@@ -175,10 +175,10 @@ func mustContain(t *testing.T, got, want string) {
 // (after the original Task.Description, separated by ---).
 func TestSynthesizeTaskDAGForStory_BindingBlockAppendedToPrompts(t *testing.T) {
 	story := workflow.Story{
-		ID:            "story.demo.1.1",
-		RequirementID: "req.demo.1",
-		Title:         "Lifecycle",
-		FilesOwned:    []string{"src/x.go"},
+		ID:             "story.demo.1.1",
+		RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component",
+		Title:      "Lifecycle",
+		FilesOwned: []string{"src/x.go"},
 		Tasks: []workflow.Task{
 			{ID: "task.demo.1.1.1", StoryID: "story.demo.1.1", Description: "Write failing test for lifecycle."},
 			{ID: "task.demo.1.1.2", StoryID: "story.demo.1.1", Description: "Implement to pass."},
@@ -265,10 +265,10 @@ func TestBuildBindingContextBlock_AssertionCap(t *testing.T) {
 // change for trivial scopes).
 func TestSynthesizeTaskDAGForStory_NoBindingForUnitOnlyStory(t *testing.T) {
 	story := workflow.Story{
-		ID:            "story.demo.1.1",
-		RequirementID: "req.demo.1",
-		Title:         "Simple",
-		FilesOwned:    []string{"src/x.go"},
+		ID:             "story.demo.1.1",
+		RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component",
+		Title:      "Simple",
+		FilesOwned: []string{"src/x.go"},
 		Tasks: []workflow.Task{
 			{ID: "task.demo.1.1.1", StoryID: "story.demo.1.1", Description: "Write a test."},
 		},

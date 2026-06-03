@@ -798,18 +798,21 @@ func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.
 // Result parsing — ADR-043 PR 4e positional/labeled wire shape
 // ---------------------------------------------------------------------------
 
-// positionalStoryInput is the LLM-facing shape per ADR-043 PR 4e: Sarah
-// authors labels (her own short kebab-case strings) and requirement_index
-// (0-based into plan.Requirements); the system resolves to canonical IDs.
+// positionalStoryInput is the LLM-facing shape under ADR-044 M:N coverage:
+// Sarah picks ONE component_name (1:1 anchor), N requirement_indices
+// (M:N coverage join, 0-based into plan.Requirements), and N
+// capability_indices (M:N coverage join, 0-based into the rendered
+// Capabilities list). She does NOT author files_owned (system derives
+// from component.ImplementationFiles) nor depends_on_labels (system
+// derives via DeriveStoryScheduling).
 type positionalStoryInput struct {
-	Label            string                `json:"label"`
-	RequirementIndex int                   `json:"requirement_index"`
-	Title            string                `json:"title"`
-	Intent           string                `json:"intent,omitempty"`
-	Components       []string              `json:"components,omitempty"`
-	FilesOwned       []string              `json:"files_owned,omitempty"`
-	DependsOnLabels  []string              `json:"depends_on_labels,omitempty"`
-	Tasks            []positionalTaskInput `json:"tasks,omitempty"`
+	Label              string                `json:"label"`
+	ComponentName      string                `json:"component_name"`
+	RequirementIndices []int                 `json:"requirement_indices"`
+	CapabilityIndices  []int                 `json:"capability_indices"`
+	Title              string                `json:"title"`
+	Intent             string                `json:"intent,omitempty"`
+	Tasks              []positionalTaskInput `json:"tasks,omitempty"`
 }
 
 // positionalTaskInput is the per-task LLM shape — task-local label plus
@@ -854,8 +857,19 @@ func parseStoriesFromResult(result string, plan *workflow.Plan, slug string) ([]
 }
 
 // resolveStoryLabels transforms Sarah's positional output into canonical
-// workflow.Story shape. Extracted as a separate function for testability —
-// see component_test.go for the input → output conversion contract.
+// workflow.Story shape under the ADR-044 M:N contract. Extracted as a
+// separate function for testability — see component_test.go for the
+// input → output conversion contract.
+//
+// The function (a) validates each Story's component_name resolves to an
+// architecture component, (b) validates every requirement_index +
+// capability_index is in range, (c) derives FilesOwned from the
+// component's ImplementationFiles (no union, no Sarah authorship), (d)
+// assigns canonical Story.ID = story.<slug>.<reqseq>.<storyseq> using
+// the FIRST RequirementIndex as the "primary" for seq purposes, (e)
+// runs DeriveStoryScheduling to populate Story.DependsOn from semantic
+// + resource edges, (f) enforces coverage closure — every Requirement
+// and every Capability appears in at least one Story's join.
 func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug string) ([]workflow.Story, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("plan required for label resolution")
@@ -864,83 +878,172 @@ func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug 
 		return nil, fmt.Errorf("slug required for canonical ID assignment")
 	}
 
-	// Pass 1: assign canonical story IDs and build label → ID map.
-	// storyseq counts per requirement so two stories sharing a requirement
-	// produce story.<slug>.<reqseq>.1 and story.<slug>.<reqseq>.2.
+	// Build architecture component lookup: ComponentDef.Name → ImplementationFiles.
+	componentFiles := make(map[string][]string)
+	if plan.Architecture != nil {
+		for _, c := range plan.Architecture.ComponentBoundaries {
+			if c.Name == "" {
+				continue
+			}
+			componentFiles[c.Name] = append([]string(nil), c.ImplementationFiles...)
+		}
+	}
+
+	// Build capability index → Name lookup (positional, matching prompt order).
+	var capabilityNames []string
+	if plan.Exploration != nil {
+		capabilityNames = make([]string, 0, len(plan.Exploration.Capabilities))
+		for _, c := range plan.Exploration.Capabilities {
+			capabilityNames = append(capabilityNames, c.Name)
+		}
+	}
+
+	// Pass 1: assign canonical story IDs (using FIRST RequirementIndex as
+	// primary), validate component_name resolves, validate index ranges.
 	storiesByReqseq := make(map[string]int)
 	labelToStoryID := make(map[string]string, len(input))
 	canonicalIDs := make([]string, len(input))
-	canonicalReqIDs := make([]string, len(input))
+	resolvedReqIDs := make([][]string, len(input))
+	resolvedCapNames := make([][]string, len(input))
 
 	for i, s := range input {
-		if s.RequirementIndex < 0 || s.RequirementIndex >= len(plan.Requirements) {
-			return nil, fmt.Errorf("story %q: requirement_index %d out of range [0, %d)",
-				s.Label, s.RequirementIndex, len(plan.Requirements))
-		}
-		req := plan.Requirements[s.RequirementIndex]
-		reqseq := requirementSeq(req.ID)
-		storiesByReqseq[reqseq]++
-		storyseq := storiesByReqseq[reqseq]
-		canonicalID := fmt.Sprintf("story.%s.%s.%d", slug, reqseq, storyseq)
-		canonicalIDs[i] = canonicalID
-		canonicalReqIDs[i] = req.ID
-		if s.Label == "" {
-			return nil, fmt.Errorf("story at index %d: missing label", i)
-		}
-		if _, exists := labelToStoryID[s.Label]; exists {
+		if _, exists := labelToStoryID[s.Label]; s.Label != "" && exists {
 			return nil, fmt.Errorf("story label %q appears more than once", s.Label)
 		}
-		labelToStoryID[s.Label] = canonicalID
-	}
-
-	// Pass 2: construct workflow.Story values, resolving depends_on_labels
-	// to canonical Story.ID values and recursively resolving task labels
-	// to canonical Task.ID values.
-	out := make([]workflow.Story, len(input))
-	for i, s := range input {
-		dependsOn, err := resolveLabels(s.DependsOnLabels, labelToStoryID, "story depends_on", s.Label)
+		reqIDs, capNames, err := validateStoryIndices(s, plan, componentFiles, capabilityNames)
 		if err != nil {
 			return nil, err
 		}
+		resolvedReqIDs[i] = reqIDs
+		resolvedCapNames[i] = capNames
 
+		// Primary reqseq for ID generation = first listed requirement.
+		primaryReq := plan.Requirements[s.RequirementIndices[0]]
+		reqseq := requirementSeq(primaryReq.ID)
+		storiesByReqseq[reqseq]++
+		canonicalID := fmt.Sprintf("story.%s.%s.%d", slug, reqseq, storiesByReqseq[reqseq])
+		canonicalIDs[i] = canonicalID
+		labelToStoryID[s.Label] = canonicalID
+	}
+
+	// Pass 2: construct workflow.Story values with derived FilesOwned.
+	// Story.DependsOn left empty here; DeriveStoryScheduling populates it.
+	out := make([]workflow.Story, len(input))
+	for i, s := range input {
 		tasks, err := resolveTasks(s.Tasks, canonicalIDs[i], canonicalIDs[i], s.Label)
 		if err != nil {
 			return nil, err
 		}
-
 		out[i] = workflow.Story{
-			ID:            canonicalIDs[i],
-			RequirementID: canonicalReqIDs[i],
-			Title:         s.Title,
-			Intent:        s.Intent,
-			Components:    append([]string(nil), s.Components...),
-			FilesOwned:    append([]string(nil), s.FilesOwned...),
-			DependsOn:     dependsOn,
-			Tasks:         tasks,
+			ID:              canonicalIDs[i],
+			ComponentName:   s.ComponentName,
+			RequirementIDs:  resolvedReqIDs[i],
+			CapabilityNames: resolvedCapNames[i],
+			Title:           s.Title,
+			Intent:          s.Intent,
+			FilesOwned:      append([]string(nil), componentFiles[s.ComponentName]...),
+			Tasks:           tasks,
 		}
 	}
 
-	// Per-Requirement coverage gate: every plan.Requirements entry MUST have
-	// at least one Story. Pre-fix, Sarah could omit a Requirement entirely;
-	// the parser passed, scenario-generator's legacy fallback engaged for
-	// the uncovered Req, and execution-manager later hard-failed with "no
-	// Stories on plan for requirement %s." Closes go-reviewer Pass-3 S-C2
-	// (also closes Pass-2 C5 from the producer side).
-	covered := make(map[string]struct{}, len(canonicalReqIDs))
-	for _, id := range canonicalReqIDs {
-		covered[id] = struct{}{}
+	// Coverage closure: every Requirement appears in at least one Story's
+	// RequirementIDs; every Capability appears in at least one Story's
+	// CapabilityNames. Under ADR-044 the analyst's capabilities and John's
+	// requirements together define the work Sarah must cover; gaps surface
+	// as parse errors so Sarah retries.
+	if err := assertFullCoverage(out, plan, capabilityNames); err != nil {
+		return nil, err
 	}
-	var uncovered []string
-	for _, req := range plan.Requirements {
-		if _, ok := covered[req.ID]; !ok {
-			uncovered = append(uncovered, req.ID)
-		}
-	}
-	if len(uncovered) > 0 {
-		return nil, fmt.Errorf("Sarah must emit at least one story per requirement; uncovered: %v", uncovered)
+
+	// Derive Story.DependsOn from (1) semantic prereq closure and (2)
+	// file-ownership conflicts. ADR-044 makes Sarah the constraint-author
+	// and the system the scheduler-graph author — see workflow/derive_story_scheduling.go.
+	if err := workflow.DeriveStoryScheduling(out, plan.Requirements); err != nil {
+		return nil, fmt.Errorf("story scheduling derivation: %w", err)
 	}
 
 	return out, nil
+}
+
+// validateStoryIndices does the per-Story shape + index-range checks
+// for resolveStoryLabels Pass 1. Returns the resolved Requirement IDs
+// and Capability names on success.
+func validateStoryIndices(s positionalStoryInput, plan *workflow.Plan, componentFiles map[string][]string, capabilityNames []string) (reqIDs []string, capNames []string, err error) {
+	if s.Label == "" {
+		return nil, nil, fmt.Errorf("story at label position: missing label")
+	}
+	if s.ComponentName == "" {
+		return nil, nil, fmt.Errorf("story %q: missing component_name (ADR-044 requires one architectural component anchor)", s.Label)
+	}
+	if _, ok := componentFiles[s.ComponentName]; !ok {
+		return nil, nil, fmt.Errorf("story %q: component_name %q does not resolve to any declared architecture component", s.Label, s.ComponentName)
+	}
+	if len(s.RequirementIndices) == 0 {
+		return nil, nil, fmt.Errorf("story %q: requirement_indices is empty (Story must cover at least one Requirement)", s.Label)
+	}
+	reqIDs = make([]string, 0, len(s.RequirementIndices))
+	seenReq := make(map[int]struct{}, len(s.RequirementIndices))
+	for _, idx := range s.RequirementIndices {
+		if idx < 0 || idx >= len(plan.Requirements) {
+			return nil, nil, fmt.Errorf("story %q: requirement_index %d out of range [0, %d)",
+				s.Label, idx, len(plan.Requirements))
+		}
+		if _, dup := seenReq[idx]; dup {
+			return nil, nil, fmt.Errorf("story %q: requirement_index %d listed more than once", s.Label, idx)
+		}
+		seenReq[idx] = struct{}{}
+		reqIDs = append(reqIDs, plan.Requirements[idx].ID)
+	}
+	capNames = make([]string, 0, len(s.CapabilityIndices))
+	seenCap := make(map[int]struct{}, len(s.CapabilityIndices))
+	for _, idx := range s.CapabilityIndices {
+		if idx < 0 || idx >= len(capabilityNames) {
+			return nil, nil, fmt.Errorf("story %q: capability_index %d out of range [0, %d)",
+				s.Label, idx, len(capabilityNames))
+		}
+		if _, dup := seenCap[idx]; dup {
+			return nil, nil, fmt.Errorf("story %q: capability_index %d listed more than once", s.Label, idx)
+		}
+		seenCap[idx] = struct{}{}
+		capNames = append(capNames, capabilityNames[idx])
+	}
+	return reqIDs, capNames, nil
+}
+
+// assertFullCoverage checks that every Requirement appears in some
+// Story.RequirementIDs and every Capability appears in some
+// Story.CapabilityNames. Reported as parse errors so retry-feedback
+// surfaces them in Sarah's next prompt.
+func assertFullCoverage(stories []workflow.Story, plan *workflow.Plan, capabilityNames []string) error {
+	coveredReq := make(map[string]struct{})
+	coveredCap := make(map[string]struct{})
+	for _, s := range stories {
+		for _, rid := range s.RequirementIDs {
+			coveredReq[rid] = struct{}{}
+		}
+		for _, cn := range s.CapabilityNames {
+			coveredCap[cn] = struct{}{}
+		}
+	}
+	var missReq []string
+	for _, req := range plan.Requirements {
+		if _, ok := coveredReq[req.ID]; !ok {
+			missReq = append(missReq, req.ID)
+		}
+	}
+	if len(missReq) > 0 {
+		return fmt.Errorf("Sarah's stories do not cover every requirement; missing: %v — add the requirement_index to one of your stories (M:N coverage allows a single Story to cover multiple)", missReq)
+	}
+	var missCap []string
+	for _, cap := range capabilityNames {
+		if _, ok := coveredCap[cap]; !ok {
+			missCap = append(missCap, cap)
+		}
+	}
+	if len(missCap) > 0 {
+		return fmt.Errorf("Sarah's stories do not cover every capability; missing: %v — add the capability_index to one of your stories", missCap)
+	}
+	return nil
 }
 
 // resolveTasks assigns canonical Task.IDs and resolves intra-story task

@@ -84,16 +84,18 @@ func samplePlan() *workflow.Plan {
 		// across the stories that link to this capability's requirements.
 		Stories: []workflow.Story{
 			{
-				ID:            "story.test.1.1",
-				RequirementID: "r1",
-				Title:         "Bootstrap MAVSDK driver",
-				FilesOwned:    []string{"src/main/java/Bootstrap.java", "src/test/java/BootstrapTest.java"},
+				ID:             "story.test.1.1",
+				RequirementIDs: []string{"r1"},
+				ComponentName:  "placeholder-component",
+				Title:          "Bootstrap MAVSDK driver",
+				FilesOwned:     []string{"src/main/java/Bootstrap.java", "src/test/java/BootstrapTest.java"},
 			},
 			{
-				ID:            "story.test.2.1",
-				RequirementID: "r2",
-				Title:         "Wire telemetry stream",
-				FilesOwned:    []string{"src/main/java/TelemetryStream.java"},
+				ID:             "story.test.2.1",
+				RequirementIDs: []string{"r2"},
+				ComponentName:  "placeholder-component",
+				Title:          "Wire telemetry stream",
+				FilesOwned:     []string{"src/main/java/TelemetryStream.java"},
 			},
 		},
 	}
@@ -163,6 +165,35 @@ func TestRenderSpec_Happy(t *testing.T) {
 	// emit shape.
 	if strings.Contains(got, "#### Scenarios\n") {
 		t.Errorf("legacy bucket header '#### Scenarios' should be replaced by per-scenario headings, got:\n%s", got)
+	}
+}
+
+// TestRenderSpec_AppliesTo_MultiReqCoverage pins the ADR-044 M:N invariant
+// for the spec.md applies_to section: when a single Story covers multiple
+// Requirements across multiple Capabilities (the mavlink-hard cohesive
+// component shape), the Story's FilesOwned must appear under EVERY
+// capability spec.md whose requirements it covers. HIGH 2 from
+// ADR-044 commit-2 review.
+func TestRenderSpec_AppliesTo_MultiReqCoverage(t *testing.T) {
+	plan := samplePlan()
+	plan.Stories = []workflow.Story{
+		{
+			ID:             "story.test.cohesive",
+			RequirementIDs: []string{"r1", "r2"}, // covers BOTH bootstrap + telemetry
+			ComponentName:  "mavsdk-driver",
+			Title:          "Cohesive MAVSDK driver",
+			FilesOwned:     []string{"src/main/java/Driver.java"},
+		},
+	}
+
+	gotBootstrap := RenderSpec(plan, "mavsdk-bootstrap")
+	if !strings.Contains(gotBootstrap, "`src/main/java/Driver.java`") {
+		t.Errorf("mavsdk-bootstrap spec.md missing Driver.java in applies_to (M:N coverage missed):\n%s", gotBootstrap)
+	}
+
+	gotTelemetry := RenderSpec(plan, "telemetry-stream")
+	if !strings.Contains(gotTelemetry, "`src/main/java/Driver.java`") {
+		t.Errorf("telemetry-stream spec.md missing Driver.java in applies_to (M:N coverage missed):\n%s", gotTelemetry)
 	}
 }
 

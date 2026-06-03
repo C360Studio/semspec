@@ -116,15 +116,16 @@ func TestStoryJSONRoundTrip(t *testing.T) {
 	now := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
 	prepared := now.Add(5 * time.Minute)
 	in := Story{
-		ID:            "story.x.1.1",
-		RequirementID: "req.x.1",
-		Title:         "MAVSDK Lifecycle Bootstrap",
-		Intent:        "Boot mavsdk_server and observe HEARTBEAT.",
-		Components:    []string{"mavsdk-server-lifecycle"},
-		FilesOwned:    []string{"src/Lifecycle.java"},
-		DependsOn:     []string{},
+		ID:              "story.x.mavsdk-driver",
+		ComponentName:   "mavsdk-driver",
+		RequirementIDs:  []string{"req.x.1", "req.x.2"},
+		CapabilityNames: []string{"mavsdk-lifecycle", "mavsdk-telemetry"},
+		Title:           "MAVSDK Driver",
+		Intent:          "Boot mavsdk_server and observe HEARTBEAT.",
+		FilesOwned:      []string{"src/Lifecycle.java"},
+		DependsOn:       []string{},
 		Tasks: []Task{
-			{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "Write failing test",
+			{ID: "task.x.mavsdk-driver.1", StoryID: "story.x.mavsdk-driver", Description: "Write failing test",
 				CreatedAt: now, UpdatedAt: now},
 		},
 		Status:     StoryStatusReady,
@@ -141,8 +142,14 @@ func TestStoryJSONRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(b, &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if out.ID != in.ID || out.RequirementID != in.RequirementID || out.Title != in.Title {
+	if out.ID != in.ID || out.ComponentName != in.ComponentName || out.Title != in.Title {
 		t.Errorf("identity fields drifted: in=%+v out=%+v", in, out)
+	}
+	if len(out.RequirementIDs) != 2 || out.RequirementIDs[0] != "req.x.1" {
+		t.Errorf("requirement_ids drifted: %v", out.RequirementIDs)
+	}
+	if len(out.CapabilityNames) != 2 || out.CapabilityNames[0] != "mavsdk-lifecycle" {
+		t.Errorf("capability_names drifted: %v", out.CapabilityNames)
 	}
 	if out.Status != StoryStatusReady {
 		t.Errorf("status drifted: %q", out.Status)
@@ -150,7 +157,7 @@ func TestStoryJSONRoundTrip(t *testing.T) {
 	if out.PreparedAt == nil || !out.PreparedAt.Equal(prepared) {
 		t.Errorf("prepared_at drifted: %v", out.PreparedAt)
 	}
-	if len(out.Tasks) != 1 || out.Tasks[0].ID != "task.x.1.1.1" {
+	if len(out.Tasks) != 1 || out.Tasks[0].ID != "task.x.mavsdk-driver.1" {
 		t.Errorf("tasks drifted: %+v", out.Tasks)
 	}
 }
@@ -159,7 +166,7 @@ func TestStoryJSONRoundTrip(t *testing.T) {
 // empty, no PreparedAt, no Tasks) marshals without "status":"" / null fields
 // that would poison plan-reviewer asymmetry checks (b7r50o9ov pattern).
 func TestStoryJSONOmitemptyOnZero(t *testing.T) {
-	in := Story{ID: "story.x.1.1", RequirementID: "req.x.1", Title: "Untouched"}
+	in := Story{ID: "story.x.comp-a", ComponentName: "comp-a", RequirementIDs: []string{"req.x.1"}, Title: "Untouched"}
 	b, err := json.Marshal(in)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -168,6 +175,7 @@ func TestStoryJSONOmitemptyOnZero(t *testing.T) {
 	for _, banned := range []string{
 		`"status"`, `"prepared_by"`, `"prepared_at"`, `"recovery_hint"`,
 		`"intent"`, `"components"`, `"files_owned"`, `"depends_on"`, `"tasks"`,
+		`"capability_names"`,
 	} {
 		if strings.Contains(s, banned) {
 			t.Errorf("zero-value Story emitted %s; want omitempty: %s", banned, s)
@@ -272,13 +280,13 @@ func TestPlanStoryHelpers(t *testing.T) {
 			{ID: "req.x.2"},
 		},
 		Stories: []Story{
-			{ID: "story.x.1.1", RequirementID: "req.x.1", Title: "A",
+			{ID: "story.x.1.1", RequirementIDs: []string{"req.x.1"}, ComponentName: "comp-a", Title: "A",
 				Tasks: []Task{
 					{ID: "task.x.1.1.1", StoryID: "story.x.1.1", Description: "t1"},
 					{ID: "task.x.1.1.2", StoryID: "story.x.1.1", Description: "t2"},
 				}},
-			{ID: "story.x.1.2", RequirementID: "req.x.1", Title: "B"},
-			{ID: "story.x.2.1", RequirementID: "req.x.2", Title: "C",
+			{ID: "story.x.1.2", RequirementIDs: []string{"req.x.1"}, ComponentName: "comp-b", Title: "B"},
+			{ID: "story.x.2.1", RequirementIDs: []string{"req.x.2"}, ComponentName: "comp-c", Title: "C",
 				Tasks: []Task{{ID: "task.x.2.1.1", StoryID: "story.x.2.1", Description: "t3"}}},
 		},
 		Scenarios: []Scenario{

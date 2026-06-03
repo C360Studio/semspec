@@ -684,9 +684,12 @@ func applyRecoveryHintToStories(plan *workflow.Plan, proposal *workflow.PlanDeci
 			reqs[id] = true
 		}
 		for i := range plan.Stories {
-			if reqs[plan.Stories[i].RequirementID] {
-				plan.Stories[i].RecoveryHint = proposal.Rationale
-				plan.Stories[i].UpdatedAt = now
+			for _, rid := range plan.Stories[i].RequirementIDs {
+				if reqs[rid] {
+					plan.Stories[i].RecoveryHint = proposal.Rationale
+					plan.Stories[i].UpdatedAt = now
+					break
+				}
 			}
 		}
 		return

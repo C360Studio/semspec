@@ -30,10 +30,9 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 		},
 		Stories: []workflow.Story{
 			{
-				ID: "story.p.1.1", RequirementID: "req.p.1",
+				ID: "story.p.1.1", RequirementIDs: []string{"req.p.1"}, ComponentName: "auth-service",
 				Title:      "Lifecycle",
 				Intent:     "Set up the auth lifecycle component.",
-				Components: []string{"auth-service"},
 				FilesOwned: []string{"src/auth.go", "src/auth_test.go"},
 				Tasks: []workflow.Task{
 					{ID: "task.p.1.1.1", Description: "write failing test"},
@@ -41,7 +40,7 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 				},
 			},
 			{
-				ID: "story.p.2.1", RequirementID: "req.p.2",
+				ID: "story.p.2.1", RequirementIDs: []string{"req.p.2"}, ComponentName: "session-store",
 				Title:      "Wire-up",
 				DependsOn:  []string{"story.p.1.1"},
 				FilesOwned: []string{"src/session.go"},
@@ -63,7 +62,7 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 		"### Lifecycle",
 		"`story.p.1.1`",
 		"Set up the auth lifecycle component.",
-		"**Components:** auth-service",
+		"**Component:** auth-service",
 		"**Files owned:**",
 		"`src/auth.go`",
 		"**Tasks:**",
@@ -77,6 +76,52 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("missing %q in render output", want)
 		}
+	}
+}
+
+// TestRenderStories_MultiReqStoryRendersUnderEachCoveredRequirement pins
+// the ADR-044 M:N invariant for stories.md: a Story covering [R1, R2]
+// must appear under BOTH the R1 and R2 sections — the renderer answers
+// "what's covering this requirement?" so the Story is shown wherever it
+// provides evidence. HIGH 3 from ADR-044 commit-2 review.
+func TestRenderStories_MultiReqStoryRendersUnderEachCoveredRequirement(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:  "p",
+		Title: "Cohesive driver",
+		Requirements: []workflow.Requirement{
+			{ID: "req.p.1", Title: "Bootstrap"},
+			{ID: "req.p.2", Title: "Telemetry"},
+		},
+		Stories: []workflow.Story{
+			{
+				ID:              "story.p.cohesive",
+				RequirementIDs:  []string{"req.p.1", "req.p.2"},
+				CapabilityNames: []string{"bootstrap", "telemetry"},
+				ComponentName:   "driver",
+				Title:           "Cohesive driver impl",
+				FilesOwned:      []string{"src/driver.go"},
+				Tasks:           []workflow.Task{{ID: "task.p.cohesive.1", Description: "implement"}},
+			},
+		},
+	}
+	got := RenderStories(plan)
+	if !strings.Contains(got, "## Bootstrap") || !strings.Contains(got, "## Telemetry") {
+		t.Errorf("expected story under BOTH Bootstrap and Telemetry sections:\n%s", got)
+	}
+	// The Story heading should appear twice (once per requirement section)
+	// since it covers both.
+	if n := strings.Count(got, "### Cohesive driver impl"); n != 2 {
+		t.Errorf("expected Story heading rendered under both req sections, got %d occurrences:\n%s", n, got)
+	}
+	// Covers-requirements roll-up surfaces the M:N nature on the Story block.
+	if !strings.Contains(got, "**Covers requirements:** req.p.1, req.p.2") {
+		t.Errorf("expected covers-requirements roll-up:\n%s", got)
+	}
+	if !strings.Contains(got, "**Covers capabilities:** bootstrap, telemetry") {
+		t.Errorf("expected covers-capabilities roll-up:\n%s", got)
+	}
+	if !strings.Contains(got, "**Component:** driver") {
+		t.Errorf("expected singular Component anchor:\n%s", got)
 	}
 }
 
@@ -105,7 +150,7 @@ func TestRenderStories_OverlongTitleFallsBackToSlug(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:    "compact-slug",
 		Title:   verbose,
-		Stories: []workflow.Story{{ID: "s1", RequirementID: "r1"}},
+		Stories: []workflow.Story{{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component"}},
 		Requirements: []workflow.Requirement{
 			{ID: "r1", Title: "R1"},
 		},

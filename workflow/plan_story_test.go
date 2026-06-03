@@ -85,26 +85,26 @@ func TestValidateStory(t *testing.T) {
 	}{
 		{
 			name:  "minimal pending story (Sarah in flight) is valid",
-			story: Story{ID: "s1", RequirementID: "r1", Title: "T", Status: StoryStatusPending},
+			story: Story{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T", Status: StoryStatusPending},
 		},
 		{
 			name: "empty status (Sarah signed off via omitempty) — readiness invariants apply",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T",
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T",
 				FilesOwned: []string{"src/a.go"},
 				Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "impl"}},
 			},
 		},
 		{
 			name:      "empty status + empty files_owned rejected (Train D — Pass-3 S-C1 / Pass-4 P4-C4)",
-			story:     Story{ID: "s1", RequirementID: "r1", Title: "T"},
+			story:     Story{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T"},
 			wantErr:   ErrInvalidStoryStructure,
 			errPhrase: "empty files_owned",
 		},
 		{
 			name: "empty status + empty tasks rejected (Train D — Pass-3 S-C1 / Pass-4 P4-C4)",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T",
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T",
 				FilesOwned: []string{"src/a.go"},
 			},
 			wantErr:   ErrInvalidStoryStructure,
@@ -113,7 +113,7 @@ func TestValidateStory(t *testing.T) {
 		{
 			name: "empty status + docs-only files_owned rejected (Train D — Pass-3 S-C1 / Pass-4 P4-C4)",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T",
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T",
 				FilesOwned: []string{"docs/notes.md"},
 				Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "impl"}},
 			},
@@ -122,26 +122,32 @@ func TestValidateStory(t *testing.T) {
 		},
 		{
 			name:      "missing ID rejected",
-			story:     Story{RequirementID: "r1", Title: "T"},
+			story:     Story{RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T"},
 			wantErr:   ErrInvalidStoryStructure,
 			errPhrase: "missing ID",
 		},
 		{
-			name:      "missing requirement_id rejected",
-			story:     Story{ID: "s1", Title: "T"},
+			name:      "missing requirement_ids rejected (ADR-044)",
+			story:     Story{ID: "s1", ComponentName: "comp-a", Title: "T"},
 			wantErr:   ErrInvalidStoryStructure,
-			errPhrase: "missing requirement_id",
+			errPhrase: "missing requirement_ids",
+		},
+		{
+			name:      "missing component_name rejected (ADR-044)",
+			story:     Story{ID: "s1", RequirementIDs: []string{"r1"}, Title: "T"},
+			wantErr:   ErrInvalidStoryStructure,
+			errPhrase: "missing component_name",
 		},
 		{
 			name:      "missing title rejected",
-			story:     Story{ID: "s1", RequirementID: "r1", Title: "  "},
+			story:     Story{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "  "},
 			wantErr:   ErrInvalidStoryStructure,
 			errPhrase: "missing title",
 		},
 		{
 			name: "ready story without files_owned rejected",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T", Status: StoryStatusReady,
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T", Status: StoryStatusReady,
 				Tasks: []Task{{ID: "t1", StoryID: "s1", Description: "x"}},
 			},
 			wantErr:   ErrInvalidStoryStructure,
@@ -150,7 +156,7 @@ func TestValidateStory(t *testing.T) {
 		{
 			name: "ready story with docs-only files_owned rejected",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T", Status: StoryStatusReady,
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T", Status: StoryStatusReady,
 				FilesOwned: []string{"README.md", "docs/coverage.md"},
 				Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "x"}},
 			},
@@ -160,7 +166,7 @@ func TestValidateStory(t *testing.T) {
 		{
 			name: "ready story without tasks rejected",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T", Status: StoryStatusReady,
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T", Status: StoryStatusReady,
 				FilesOwned: []string{"src/x.go"},
 			},
 			wantErr:   ErrInvalidStoryStructure,
@@ -169,7 +175,7 @@ func TestValidateStory(t *testing.T) {
 		{
 			name: "ready story with source + companion doc + tasks is valid",
 			story: Story{
-				ID: "s1", RequirementID: "r1", Title: "T", Status: StoryStatusReady,
+				ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "T", Status: StoryStatusReady,
 				FilesOwned: []string{"src/x.go", "README.md"},
 				Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "x"}},
 			},
@@ -314,13 +320,13 @@ func TestValidateTaskDAG(t *testing.T) {
 // all funnel through a single happy-path call and a few targeted failures.
 func TestValidateStoriesAggregate(t *testing.T) {
 	good := []Story{
-		{ID: "s1", RequirementID: "r1", Title: "A", Status: StoryStatusReady,
+		{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "A", Status: StoryStatusReady,
 			FilesOwned: []string{"src/a.go"},
 			Tasks: []Task{
 				{ID: "t1", StoryID: "s1", Description: "tests"},
 				{ID: "t2", StoryID: "s1", Description: "impl", DependsOn: []string{"t1"}},
 			}},
-		{ID: "s2", RequirementID: "r1", Title: "B", Status: StoryStatusReady,
+		{ID: "s2", RequirementIDs: []string{"r1"}, ComponentName: "comp-b", Title: "B", Status: StoryStatusReady,
 			FilesOwned: []string{"src/b.go"},
 			DependsOn:  []string{"s1"},
 			Tasks: []Task{
@@ -338,7 +344,7 @@ func TestValidateStoriesAggregate(t *testing.T) {
 	}
 
 	taskDAGBad := []Story{
-		{ID: "s1", RequirementID: "r1", Title: "A", Status: StoryStatusReady,
+		{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "A", Status: StoryStatusReady,
 			FilesOwned: []string{"src/a.go"},
 			Tasks: []Task{
 				{ID: "t1", StoryID: "s1", Description: "x", DependsOn: []string{"t2"}},
@@ -350,7 +356,7 @@ func TestValidateStoriesAggregate(t *testing.T) {
 	}
 
 	storyStructBad := []Story{
-		{ID: "s1", RequirementID: "r1", Title: "A", Status: StoryStatusReady,
+		{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "A", Status: StoryStatusReady,
 			FilesOwned: []string{"README.md"}, // docs-only
 			Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
 	}
@@ -362,10 +368,10 @@ func TestValidateStoriesAggregate(t *testing.T) {
 	// depends on the other. ValidateStories must surface
 	// ErrInvalidStoryFileOwnership (not the per-Story / DAG error classes).
 	fileRace := []Story{
-		{ID: "s1", RequirementID: "r1", Title: "A", Status: StoryStatusReady,
+		{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "A", Status: StoryStatusReady,
 			FilesOwned: []string{"src/x.go"},
 			Tasks:      []Task{{ID: "t1", StoryID: "s1", Description: "tests"}}},
-		{ID: "s2", RequirementID: "r2", Title: "B", Status: StoryStatusReady,
+		{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", Title: "B", Status: StoryStatusReady,
 			FilesOwned: []string{"src/x.go"}, // same file, no depends_on edge
 			Tasks:      []Task{{ID: "t2", StoryID: "s2", Description: "tests"}}},
 	}
@@ -395,7 +401,7 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 
 	t.Run("single story validates", func(t *testing.T) {
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", Title: "A",
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", Title: "A",
 				FilesOwned: []string{"src/x.go"}},
 		}
 		if err := ValidateStoryFileOwnership(stories); err != nil {
@@ -405,8 +411,8 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 
 	t.Run("disjoint files validate", func(t *testing.T) {
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/a.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/b.go"}},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/a.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/b.go"}},
 		}
 		if err := ValidateStoryFileOwnership(stories); err != nil {
 			t.Errorf("disjoint files should validate: %v", err)
@@ -415,8 +421,8 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 
 	t.Run("shared file with direct dependency validates", func(t *testing.T) {
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/x.go"},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/x.go"},
 				DependsOn: []string{"s1"}},
 		}
 		if err := ValidateStoryFileOwnership(stories); err != nil {
@@ -428,10 +434,10 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 		// s1 → s2 → s3 ; s1 and s3 share a file but s3 transitively
 		// depends on s1 via s2. Safe to dispatch serially.
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/y.go"},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/y.go"},
 				DependsOn: []string{"s1"}},
-			{ID: "s3", RequirementID: "r3", FilesOwned: []string{"src/x.go"},
+			{ID: "s3", RequirementIDs: []string{"r3"}, ComponentName: "comp-c", FilesOwned: []string{"src/x.go"},
 				DependsOn: []string{"s2"}},
 		}
 		if err := ValidateStoryFileOwnership(stories); err != nil {
@@ -441,8 +447,8 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 
 	t.Run("shared file without dependency fails", func(t *testing.T) {
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/x.go"}},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/x.go"}},
 		}
 		err := ValidateStoryFileOwnership(stories)
 		if !errors.Is(err, ErrInvalidStoryFileOwnership) {
@@ -460,10 +466,10 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 		// This is the smoke-9 shape: s2 and s3 both depend_on s1, share a
 		// file, but do NOT depend on each other. Parallel dispatch would race.
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/base.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/shared.go"},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/base.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/shared.go"},
 				DependsOn: []string{"s1"}},
-			{ID: "s3", RequirementID: "r3", FilesOwned: []string{"src/shared.go"},
+			{ID: "s3", RequirementIDs: []string{"r3"}, ComponentName: "comp-c", FilesOwned: []string{"src/shared.go"},
 				DependsOn: []string{"s1"}},
 		}
 		err := ValidateStoryFileOwnership(stories)
@@ -474,9 +480,9 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 
 	t.Run("multiple shared files all surface in error", func(t *testing.T) {
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1",
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a",
 				FilesOwned: []string{"src/x.go", "src/y.go", "src/z.go"}},
-			{ID: "s2", RequirementID: "r2",
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b",
 				FilesOwned: []string{"src/x.go", "src/y.go"}},
 		}
 		err := ValidateStoryFileOwnership(stories)
@@ -493,8 +499,8 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 		// `src/x.go` and `./src/x.go` should normalize to the same path
 		// and the overlap should be detected.
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"./src/x.go"}},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"./src/x.go"}},
 		}
 		err := ValidateStoryFileOwnership(stories)
 		if !errors.Is(err, ErrInvalidStoryFileOwnership) {
@@ -509,12 +515,12 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 		// s1 and s4 share a file; s4 transitively depends on s1 via both
 		// s2 and s3. Reachability through either path satisfies the check.
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: []string{"src/x.go"}},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/a.go"},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: []string{"src/x.go"}},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/a.go"},
 				DependsOn: []string{"s1"}},
-			{ID: "s3", RequirementID: "r3", FilesOwned: []string{"src/b.go"},
+			{ID: "s3", RequirementIDs: []string{"r3"}, ComponentName: "comp-c", FilesOwned: []string{"src/b.go"},
 				DependsOn: []string{"s1"}},
-			{ID: "s4", RequirementID: "r4", FilesOwned: []string{"src/x.go"},
+			{ID: "s4", RequirementIDs: []string{"r4"}, ComponentName: "comp-d", FilesOwned: []string{"src/x.go"},
 				DependsOn: []string{"s2", "s3"}},
 		}
 		if err := ValidateStoryFileOwnership(stories); err != nil {
@@ -528,8 +534,8 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 		// possibly pending stories. Empty FilesOwned must be treated as "no
 		// overlap candidate" and pass through this validator silently.
 		stories := []Story{
-			{ID: "s1", RequirementID: "r1", FilesOwned: nil},
-			{ID: "s2", RequirementID: "r2", FilesOwned: []string{"src/x.go"}},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "comp-a", FilesOwned: nil},
+			{ID: "s2", RequirementIDs: []string{"r2"}, ComponentName: "comp-b", FilesOwned: []string{"src/x.go"}},
 		}
 		if err := ValidateStoryFileOwnership(stories); err != nil {
 			t.Errorf("empty FilesOwned should pass file-ownership check: %v", err)

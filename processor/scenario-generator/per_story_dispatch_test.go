@@ -16,12 +16,12 @@ func TestBuildStoryScopedRequest(t *testing.T) {
 	plan := &workflow.Plan{Slug: "x", Goal: "G", Context: "C"}
 	req := workflow.Requirement{ID: "req.x.1", Title: "T", Description: "D"}
 	story := workflow.Story{
-		ID:            "story.x.1.1",
-		RequirementID: "req.x.1",
-		Title:         "Story title",
-		Intent:        "Story intent",
-		FilesOwned:    []string{"src/a.go", "src/a_test.go"},
-		Components:    []string{"comp-a"},
+		ID:             "story.x.1.1",
+		RequirementIDs: []string{"req.x.1"},
+		ComponentName:  "comp-a",
+		Title:          "Story title",
+		Intent:         "Story intent",
+		FilesOwned:     []string{"src/a.go", "src/a_test.go"},
 	}
 	required := []payloads.RequiredTier{{Tag: "@unit"}}
 
@@ -39,8 +39,8 @@ func TestBuildStoryScopedRequest(t *testing.T) {
 	if len(got.StoryFilesOwned) != 2 || got.StoryFilesOwned[0] != "src/a.go" {
 		t.Errorf("StoryFilesOwned = %v, want [src/a.go src/a_test.go]", got.StoryFilesOwned)
 	}
-	if len(got.StoryComponents) != 1 || got.StoryComponents[0] != "comp-a" {
-		t.Errorf("StoryComponents = %v, want [comp-a]", got.StoryComponents)
+	if got.StoryComponentName != "comp-a" {
+		t.Errorf("StoryComponentName = %q, want comp-a", got.StoryComponentName)
 	}
 	// Requirement context still travels alongside Story context.
 	if got.RequirementID != "req.x.1" {
@@ -67,7 +67,7 @@ func TestBuildRequirementScopedRequest_NoStoryFields(t *testing.T) {
 	if got.StoryID != "" {
 		t.Errorf("legacy dispatch should leave StoryID empty, got %q", got.StoryID)
 	}
-	if got.StoryTitle != "" || got.StoryIntent != "" || len(got.StoryFilesOwned) != 0 || len(got.StoryComponents) != 0 {
+	if got.StoryTitle != "" || got.StoryIntent != "" || len(got.StoryFilesOwned) != 0 || got.StoryComponentName != "" {
 		t.Errorf("legacy dispatch should leave all Story fields empty; got %+v", got)
 	}
 	if got.RequirementID != "req.x.1" {
@@ -75,23 +75,21 @@ func TestBuildRequirementScopedRequest_NoStoryFields(t *testing.T) {
 	}
 }
 
-// TestBuildStoryScopedRequest_FilesOwnedAndComponentsCloned guards against
-// aliasing — if a caller mutates Story.FilesOwned or Story.Components after
-// build, the captured payload must NOT change.
-func TestBuildStoryScopedRequest_FilesOwnedAndComponentsCloned(t *testing.T) {
+// TestBuildStoryScopedRequest_FilesOwnedCloned guards against aliasing —
+// if a caller mutates Story.FilesOwned after build, the captured payload
+// must NOT change. (ADR-044: ComponentName is a string, so it's
+// value-copied; no aliasing risk.)
+func TestBuildStoryScopedRequest_FilesOwnedCloned(t *testing.T) {
 	files := []string{"src/a.go"}
-	comps := []string{"comp-a"}
-	story := workflow.Story{ID: "story.x.1.1", FilesOwned: files, Components: comps}
+	story := workflow.Story{ID: "story.x.1.1", FilesOwned: files, ComponentName: "comp-a"}
 	got := buildStoryScopedRequest(&workflow.Plan{}, workflow.Requirement{}, story, nil, "")
 
-	// Mutate originals.
 	files[0] = "src/MUTATED.go"
-	comps[0] = "MUTATED-comp"
 
 	if got.StoryFilesOwned[0] != "src/a.go" {
 		t.Errorf("StoryFilesOwned aliased: got %q after caller mutated source slice", got.StoryFilesOwned[0])
 	}
-	if got.StoryComponents[0] != "comp-a" {
-		t.Errorf("StoryComponents aliased: got %q after caller mutated source slice", got.StoryComponents[0])
+	if got.StoryComponentName != "comp-a" {
+		t.Errorf("StoryComponentName = %q, want comp-a", got.StoryComponentName)
 	}
 }

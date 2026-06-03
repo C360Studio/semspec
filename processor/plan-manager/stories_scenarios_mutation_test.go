@@ -32,10 +32,11 @@ func marshalJSON(t *testing.T, v any) []byte {
 // invariant failures should build a Story inline with the missing field.
 func validStory(id, reqID, title string) workflow.Story {
 	return workflow.Story{
-		ID:            id,
-		RequirementID: reqID,
-		Title:         title,
-		FilesOwned:    []string{"src/" + id + ".go"},
+		ID:             id,
+		RequirementIDs: []string{reqID},
+		ComponentName:  "placeholder-component",
+		Title:          title,
+		FilesOwned:     []string{"src/" + id + ".go"},
 		Tasks: []workflow.Task{
 			{ID: "task." + id + ".1", StoryID: id, Description: "implement"},
 		},
@@ -163,10 +164,11 @@ func TestHandleStoriesMutation(t *testing.T) {
 				Slug: "story-scope",
 				Stories: []workflow.Story{
 					{
-						ID:            "story.story-scope.1.1",
-						RequirementID: "req.story-scope.1",
-						Title:         "T",
-						FilesOwned:    []string{"src/new.go"},
+						ID:             "story.story-scope.1.1",
+						RequirementIDs: []string{"req.story-scope.1"},
+						ComponentName:  "placeholder-component",
+						Title:          "T",
+						FilesOwned:     []string{"src/new.go"},
 						Tasks: []workflow.Task{
 							{ID: "task.story.story-scope.1.1.1", StoryID: "story.story-scope.1.1", Description: "implement"},
 						},

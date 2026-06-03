@@ -1088,14 +1088,22 @@ func (p *Plan) FindStory(id string) (*Story, int) {
 	return nil, -1
 }
 
-// StoriesForRequirement returns all stories whose RequirementID matches reqID,
-// in their existing Plan.Stories order. ADR-043 Move 2 — one requirement may
-// be sharded into N stories with DependsOn edges between them.
+// StoriesForRequirement returns all stories whose RequirementIDs slice
+// contains reqID, in their existing Plan.Stories order. Under ADR-044 M:N
+// coverage, a Story may cover multiple requirements; this method returns
+// every Story that covers reqID in any coverage slot.
+//
+// TODO ADR-044 commit 3+: callers that previously relied on a 1:1 mapping
+// should be audited to ensure they handle multiple Stories per requirement
+// correctly.
 func (p *Plan) StoriesForRequirement(reqID string) []Story {
 	var out []Story
 	for _, s := range p.Stories {
-		if s.RequirementID == reqID {
-			out = append(out, s)
+		for _, rid := range s.RequirementIDs {
+			if rid == reqID {
+				out = append(out, s)
+				break
+			}
 		}
 	}
 	return out

@@ -66,6 +66,86 @@ func TestRequirementComplete_EmptySet(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// filterByM2NStoryReservations — ADR-044 reservation gate
+// ---------------------------------------------------------------------------
+
+// TestFilterByM2NStoryReservations_OwnerOnlyDispatchInitial pins the
+// ADR-044 reservation gate's load-bearing contract: under the cohesive-
+// component shape (1 Story covers N requirements), the FIRST sweep
+// dispatches ONLY the owner requirement. Non-owners are gated behind
+// Story.Status==Complete. Pre-fix, all 4 reqs raced; one won the
+// Executing claim, three lost and falsely marked their reqs complete
+// before the Story actually shipped any evidence.
+func TestFilterByM2NStoryReservations_OwnerOnlyDispatchInitial(t *testing.T) {
+	requirements := []workflow.Requirement{
+		makeReq("req.mav.1"), makeReq("req.mav.2"), makeReq("req.mav.3"), makeReq("req.mav.4"),
+	}
+	stories := []workflow.Story{
+		{
+			ID:             "story.mav.driver",
+			ComponentName:  "mavsdk-driver",
+			RequirementIDs: []string{"req.mav.2", "req.mav.3", "req.mav.4", "req.mav.1"},
+			Status:         "",
+		},
+	}
+	got := filterByM2NStoryReservations(requirements, stories)
+	if len(got) != 1 {
+		t.Fatalf("want 1 owner-only dispatch, got %d: %v", len(got), requirementIDs(got))
+	}
+	if got[0].ID != "req.mav.1" {
+		t.Errorf("expected owner req.mav.1 (lexicographic smallest), got %s", got[0].ID)
+	}
+}
+
+// TestFilterByM2NStoryReservations_ReleasesNonOwnersOnceStoryComplete
+// pins the second half: after the owner ships the Story, the next sweep
+// releases the gated non-owners.
+func TestFilterByM2NStoryReservations_ReleasesNonOwnersOnceStoryComplete(t *testing.T) {
+	requirements := []workflow.Requirement{
+		makeReq("req.mav.1"), makeReq("req.mav.2"), makeReq("req.mav.3"),
+	}
+	stories := []workflow.Story{
+		{
+			ID:             "story.mav.driver",
+			RequirementIDs: []string{"req.mav.1", "req.mav.2", "req.mav.3"},
+			Status:         workflow.StoryStatusComplete,
+		},
+	}
+	got := filterByM2NStoryReservations(requirements, stories)
+	if len(got) != 3 {
+		t.Errorf("post-completion sweep should release all 3 reqs, got %d", len(got))
+	}
+}
+
+// TestFilterByM2NStoryReservations_DisjointStoriesPassThrough pins the
+// e-commerce-shape negative case: each Story has exactly one covering
+// requirement (disjoint partition). The gate is a no-op pass-through.
+func TestFilterByM2NStoryReservations_DisjointStoriesPassThrough(t *testing.T) {
+	requirements := []workflow.Requirement{
+		makeReq("req.ec.auth"), makeReq("req.ec.payments"), makeReq("req.ec.checkout"),
+	}
+	stories := []workflow.Story{
+		{ID: "s1", RequirementIDs: []string{"req.ec.auth"}, Status: workflow.StoryStatusReady},
+		{ID: "s2", RequirementIDs: []string{"req.ec.payments"}, Status: workflow.StoryStatusReady},
+		{ID: "s3", RequirementIDs: []string{"req.ec.checkout"}, Status: workflow.StoryStatusReady},
+	}
+	got := filterByM2NStoryReservations(requirements, stories)
+	if len(got) != 3 {
+		t.Errorf("disjoint partition should pass all 3 reqs through, got %d", len(got))
+	}
+}
+
+// TestFilterByM2NStoryReservations_EmptyStoriesNoOp pins the back-compat
+// path: legacy plans / mock fixtures with no Stories pass through.
+func TestFilterByM2NStoryReservations_EmptyStoriesNoOp(t *testing.T) {
+	requirements := []workflow.Requirement{makeReq("r1"), makeReq("r2")}
+	got := filterByM2NStoryReservations(requirements, nil)
+	if len(got) != 2 {
+		t.Errorf("empty stories should pass through, got %d", len(got))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // filterReadyRequirements — root requirements (no deps)
 // ---------------------------------------------------------------------------
 

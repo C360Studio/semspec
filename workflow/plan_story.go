@@ -17,6 +17,18 @@ var (
 	ErrInvalidStoryFileOwnership = errors.New("invalid story file ownership")
 	ErrInvalidTaskDAG            = errors.New("invalid task DAG")
 	ErrInvalidTaskStructure      = errors.New("invalid task structure")
+
+	// ErrSameComponentFileConflict is returned by DeriveStoryScheduling Pass 2
+	// when two Stories anchor the same component and share files — an invalid
+	// emission shape Sarah must fix by collapsing them into one Story.
+	// Maps to the plan-reviewer signal "story.same_component_file_conflict".
+	ErrSameComponentFileConflict = errors.New("story.same_component_file_conflict")
+
+	// ErrCoveragePartitionCyclic is returned by DeriveStoryScheduling Pass 3
+	// when cycle detection finds a cycle in the derived scheduler DAG — a
+	// Story covering non-contiguous layers of the Requirement DAG.
+	// Maps to the plan-reviewer signal "coverage_partition_cyclic".
+	ErrCoveragePartitionCyclic = errors.New("coverage_partition_cyclic")
 )
 
 // ValidateStoryDAG validates that DependsOn references within the provided
@@ -79,7 +91,10 @@ func ValidateStoryDAG(stories []Story) error {
 }
 
 // ValidateStory checks structural invariants for a single Story:
-//   - ID and RequirementID and Title non-empty
+//   - ID non-empty
+//   - ComponentName non-empty (ADR-044: 1:1 component anchor)
+//   - RequirementIDs non-empty (ADR-044: M:N coverage — at least one requirement)
+//   - Title non-empty
 //   - FilesOwned non-empty when Sarah has signed off (Status empty OR != pending)
 //   - FilesOwned has at least one source-code file when sign-off requires
 //     it (docs-only is rejected by Sarah's readiness gate)
@@ -95,13 +110,16 @@ func ValidateStoryDAG(stories []Story) error {
 // Plan-reviewer R3 rules (story.missing_files_owned, story.docs_only_files_owned,
 // task.missing_within_story) remain the defensive backstop layer. Now Sarah's
 // readiness gate actually fires first, matching the doc contract at
-// workflow/story_task.go:88. Closes go-reviewer Pass-3 S-C1 / Pass-4 P4-C4.
+// workflow/story_task.go. Closes go-reviewer Pass-3 S-C1 / Pass-4 P4-C4.
 func ValidateStory(s Story) error {
 	if s.ID == "" {
 		return fmt.Errorf("%w: story missing ID", ErrInvalidStoryStructure)
 	}
-	if s.RequirementID == "" {
-		return fmt.Errorf("%w: story %q missing requirement_id", ErrInvalidStoryStructure, s.ID)
+	if len(s.RequirementIDs) == 0 {
+		return fmt.Errorf("%w: story %q missing requirement_ids (ADR-044: at least one requirement must be covered)", ErrInvalidStoryStructure, s.ID)
+	}
+	if s.ComponentName == "" {
+		return fmt.Errorf("%w: story %q missing component_name (ADR-044: every story must anchor to one component)", ErrInvalidStoryStructure, s.ID)
 	}
 	if strings.TrimSpace(s.Title) == "" {
 		return fmt.Errorf("%w: story %q missing title", ErrInvalidStoryStructure, s.ID)

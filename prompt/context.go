@@ -320,6 +320,20 @@ type QAReviewContext struct {
 	// Requirements summarises each requirement's execution status.
 	Requirements []RequirementSummary
 
+	// Capabilities summarises every capability and which Stories cover it
+	// (ADR-044 M:N evidence rollup). QA-reviewer's release-readiness verdict
+	// shifts under ADR-044 from "all requirements complete" to "every
+	// capability has evidence from at least one shipped Story" — populated
+	// here so the persona can audit coverage explicitly.
+	Capabilities []QACapabilityEvidence
+
+	// Stories summarises each Story's execution status + its coverage joins
+	// (which Requirements + Capabilities it satisfies). Under ADR-044 the
+	// Story is the per-component execution unit; QA-reviewer reads this to
+	// answer "did the shipped work actually satisfy the stated capability
+	// surface?"
+	Stories []QAStorySummary
+
 	// TestSurface is the architect's declared test coverage matrix.
 	// Contains integration flows and e2e flows the developer was expected to implement.
 	// Nil when the plan has no architecture phase (synthesis-level review).

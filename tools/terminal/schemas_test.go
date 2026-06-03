@@ -84,6 +84,127 @@ func requireFieldsPresent(t *testing.T, location string, want, got []string) {
 	}
 }
 
+// TestQAReviewSchema_ADR044CapabilityEvidenceDimension pins the ADR-044
+// QA dimension addition: the qa-reviewer submit_work schema MUST require
+// a capability_evidence field on dimensions so the persona has a schema
+// slot for the M:N coverage gap diagnosis surfaced in the user prompt.
+// A regression that drops the field would silently force the persona to
+// shoehorn capability gaps into requirement_fulfillment or summary text.
+func TestQAReviewSchema_ADR044CapabilityEvidenceDimension(t *testing.T) {
+	schema := qaReviewSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing properties")
+	}
+	dims, ok := props["dimensions"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing dimensions")
+	}
+	dimProps, ok := dims["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("dimensions properties missing")
+	}
+	if _, ok := dimProps["capability_evidence"]; !ok {
+		t.Error("dimensions.capability_evidence missing — ADR-044 release-readiness gate has no schema slot")
+	}
+	required, ok := dims["required"].([]string)
+	if !ok {
+		t.Fatal("dimensions.required missing")
+	}
+	found := false
+	for _, r := range required {
+		if r == "capability_evidence" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("dimensions.required[] missing capability_evidence — strict mode rejects responses without it; persona will be schema-blocked from emitting the dimension")
+	}
+}
+
+// TestStoriesSchema_ADR044Shape pins the ADR-044 M:N wire shape on the
+// submit_work tool definition. Sarah's positional input struct in
+// processor/story-preparer/component.go expects component_name (singular
+// string), requirement_indices (plural ints), capability_indices (plural
+// ints), and NO story-level files_owned / depends_on_labels. The strict
+// JSON schema MUST match — pre-ADR-044 the schema was the old
+// requirement_index / components / files_owned / depends_on_labels shape,
+// which (with strict response_format) actively forced every Sarah
+// dispatch into the OLD wire shape and burned the full retry budget on
+// every paid run. Caught 2026-06-03 by go-reviewer on commit 9dee2057.
+func TestStoriesSchema_ADR044Shape(t *testing.T) {
+	schema := storiesSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("schema must have properties")
+	}
+	stories, ok := props["stories"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing stories")
+	}
+	items, ok := stories["items"].(map[string]any)
+	if !ok {
+		t.Fatal("stories items missing")
+	}
+	itemProps, ok := items["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("story item properties missing")
+	}
+
+	// Fields that MUST be present (ADR-044 wire shape).
+	mustHave := []string{"label", "component_name", "requirement_indices", "capability_indices", "title", "intent", "tasks"}
+	for _, f := range mustHave {
+		if _, ok := itemProps[f]; !ok {
+			t.Errorf("schema missing ADR-044 property %q", f)
+		}
+	}
+
+	// Fields that MUST be absent (retired by ADR-044).
+	mustNotHave := []string{"requirement_index", "components", "files_owned", "depends_on_labels"}
+	for _, f := range mustNotHave {
+		if _, ok := itemProps[f]; ok {
+			t.Errorf("schema still carries retired property %q — ADR-044 dropped it", f)
+		}
+	}
+
+	// `required` list must list every ADR-044 field exactly (strict mode
+	// rejects responses missing any required field).
+	required, ok := items["required"].([]string)
+	if !ok {
+		t.Fatal("story item required[] missing")
+	}
+	requireFieldsPresent(t, "story.required", mustHave, required)
+	reqSet := map[string]bool{}
+	for _, r := range required {
+		reqSet[r] = true
+	}
+	for _, f := range mustNotHave {
+		if reqSet[f] {
+			t.Errorf("required[] still lists retired %q — ADR-044 dropped it", f)
+		}
+	}
+
+	// `component_name` is a string (singular anchor), not an array.
+	cn, ok := itemProps["component_name"].(map[string]any)
+	if !ok || cn["type"] != "string" {
+		t.Errorf("component_name must be string (ADR-044 1:1 anchor), got %v", itemProps["component_name"])
+	}
+
+	// `requirement_indices` and `capability_indices` are integer arrays.
+	for _, name := range []string{"requirement_indices", "capability_indices"} {
+		field, ok := itemProps[name].(map[string]any)
+		if !ok || field["type"] != "array" {
+			t.Errorf("%s must be array, got %v", name, itemProps[name])
+			continue
+		}
+		it, _ := field["items"].(map[string]any)
+		if it == nil || it["type"] != "integer" {
+			t.Errorf("%s.items must be integer, got %v", name, field["items"])
+		}
+	}
+}
+
 func TestArchitectureSchema_UpstreamResolutionsShape(t *testing.T) {
 	schema := schemaForDeliverable("architecture")
 	props, ok := schema["properties"].(map[string]any)

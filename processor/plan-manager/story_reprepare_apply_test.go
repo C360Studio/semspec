@@ -16,9 +16,9 @@ import (
 func TestApplyRecoveryHint_StoryReprepare_NamedStoriesOnly(t *testing.T) {
 	plan := &workflow.Plan{
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "untouched"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1", Title: "targeted"},
-			{ID: "story.demo.1.3", RequirementID: "req.demo.1", Title: "untouched"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "untouched"},
+			{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "targeted"},
+			{ID: "story.demo.1.3", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "untouched"},
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -50,9 +50,9 @@ func TestApplyRecoveryHint_StoryReprepare_NamedStoriesOnly(t *testing.T) {
 func TestApplyRecoveryHint_StoryReprepare_FallbackToReqScope(t *testing.T) {
 	plan := &workflow.Plan{
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1"},
-			{ID: "story.demo.2.1", RequirementID: "req.demo.2"}, // different req
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
+			{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
+			{ID: "story.demo.2.1", RequirementIDs: []string{"req.demo.2"}, ComponentName: "placeholder-component"}, // different req
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -75,6 +75,35 @@ func TestApplyRecoveryHint_StoryReprepare_FallbackToReqScope(t *testing.T) {
 	}
 }
 
+// TestApplyRecoveryHint_StoryReprepare_FallbackHitsMultiCoverer pins the
+// ADR-044 M:N invariant: a Story whose RequirementIDs covers any affected
+// requirement (not just the first/primary one) must receive the hint on
+// the fallback path. Pre-fix the fallback compared only PrimaryRequirementID,
+// so a Story covering [R1, R2] when AffectedReqIDs=[R2] was silently skipped.
+// HIGH 1 from ADR-044 commit-2 review.
+func TestApplyRecoveryHint_StoryReprepare_FallbackHitsMultiCoverer(t *testing.T) {
+	plan := &workflow.Plan{
+		Stories: []workflow.Story{
+			{ID: "story.cohesive.a", RequirementIDs: []string{"req.demo.1", "req.demo.2"}, ComponentName: "driver"},
+			{ID: "story.other", RequirementIDs: []string{"req.demo.3"}, ComponentName: "other"},
+		},
+	}
+	proposal := &workflow.PlanDecision{
+		Kind:           workflow.PlanDecisionKindStoryReprepare,
+		Rationale:      "Re-shard req.demo.2 with X module in scope.",
+		AffectedReqIDs: []string{"req.demo.2"}, // matches story.cohesive.a's SECOND req
+	}
+
+	applyRecoveryHint(plan, proposal)
+
+	if got := plan.Stories[0].RecoveryHint; got != proposal.Rationale {
+		t.Errorf("Stories[0] (covers R1,R2) RecoveryHint = %q, want %q — M:N coverage missed", got, proposal.Rationale)
+	}
+	if got := plan.Stories[1].RecoveryHint; got != "" {
+		t.Errorf("Stories[1] (covers R3) RecoveryHint = %q, want empty", got)
+	}
+}
+
 // TestApplyRecoveryHint_RequirementChangePreservesBackCompat pins the
 // pre-Train-C behavior: Kind=requirement_change still writes onto
 // Requirement.RecoveryHint and does NOT touch Story.RecoveryHint.
@@ -84,7 +113,7 @@ func TestApplyRecoveryHint_RequirementChangePreservesBackCompat(t *testing.T) {
 			{ID: "req.demo.1"},
 		},
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -110,7 +139,7 @@ func TestApplyRecoveryHint_StoryUpdatedAtSet(t *testing.T) {
 	stale := time.Now().Add(-time.Hour)
 	plan := &workflow.Plan{
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", UpdatedAt: stale},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", UpdatedAt: stale},
 		},
 	}
 	proposal := &workflow.PlanDecision{

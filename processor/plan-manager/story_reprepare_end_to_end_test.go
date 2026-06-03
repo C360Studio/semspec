@@ -47,9 +47,9 @@ func TestStoryReprepare_EndToEnd_AcceptPathTransitionsPlanAndAppliesHints(t *tes
 		{ID: "req.demo.1", Title: "the requirement"},
 	}
 	plan.Stories = []workflow.Story{
-		{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "Sibling 1"},
-		{ID: "story.demo.1.2", RequirementID: "req.demo.1", Title: "Targeted"},
-		{ID: "story.demo.1.3", RequirementID: "req.demo.1", Title: "Sibling 3"},
+		{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Sibling 1"},
+		{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Targeted"},
+		{ID: "story.demo.1.3", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Sibling 3"},
 	}
 	plan.Scenarios = []workflow.Scenario{
 		{ID: "scen.demo.1.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},

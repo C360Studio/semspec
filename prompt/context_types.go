@@ -31,6 +31,33 @@ type RequirementSummary struct {
 	Status string
 }
 
+// QACapabilityEvidence is the per-capability rollup the QA-reviewer audits
+// under ADR-044 release-readiness contract: each capability must have
+// evidence from at least one shipped Story (the M:N coverage join's QA
+// implication). Empty CoveringStoryIDs is a gap — the capability is
+// declared but no Story claims to cover it.
+type QACapabilityEvidence struct {
+	Name        string
+	Description string
+	// CoveringStoryIDs lists every Story whose CapabilityNames contains
+	// this capability. Each entry includes the Story's terminal status so
+	// the reviewer can see whether the evidence actually shipped.
+	CoveringStoryIDs []string
+	// ShippedCount is the number of covering Stories whose Status reached
+	// the terminal complete state. Zero means no shipped evidence.
+	ShippedCount int
+}
+
+// QAStorySummary is the compact per-Story rollup for QA-reviewer.
+type QAStorySummary struct {
+	ID              string
+	Title           string
+	ComponentName   string
+	RequirementIDs  []string
+	CapabilityNames []string
+	Status          string
+}
+
 // ExistingRequirementSummary is the lightweight view of a requirement used
 // across multiple user prompts (requirement-generator partial regen,
 // architect requirement context, etc). Only the fields the user prompt
