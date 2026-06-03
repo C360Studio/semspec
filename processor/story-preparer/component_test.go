@@ -7,15 +7,32 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-func TestParseStoriesFromResult(t *testing.T) {
-	plan := &workflow.Plan{
+// twoCompPlan builds a plan with 2 capabilities, 2 requirements (1:1),
+// and 2 architecture components (1:1 with capabilities/files). Used as
+// the canonical "disjoint components" fixture for parser tests.
+func twoCompPlan() *workflow.Plan {
+	return &workflow.Plan{
 		Slug: "x",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{
+				{Name: "auth"},
+				{Name: "session"},
+			},
+		},
 		Requirements: []workflow.Requirement{
-			{ID: "requirement.x.1", Title: "First"},
-			{ID: "requirement.x.2", Title: "Second"},
+			{ID: "requirement.x.1", Title: "First", CapabilityName: "auth"},
+			{ID: "requirement.x.2", Title: "Second", CapabilityName: "session"},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "auth-service", ImplementationFiles: []string{"src/auth.go"}, Capabilities: []string{"auth"}},
+				{Name: "session-store", ImplementationFiles: []string{"src/session.go"}, Capabilities: []string{"session"}},
+			},
 		},
 	}
+}
 
+func TestParseStoriesFromResult(t *testing.T) {
 	cases := []struct {
 		name      string
 		input     string
@@ -43,50 +60,75 @@ func TestParseStoriesFromResult(t *testing.T) {
 			wantErr: "stories list is empty",
 		},
 		{
-			name:      "stories covering every requirement parse cleanly",
-			input:     `{"stories":[{"label":"l1","requirement_index":0,"title":"T1","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on_labels":[],"tasks":[{"label":"t1","description":"d","depends_on_labels":[]}]},{"label":"l2","requirement_index":1,"title":"T2","intent":"i","components":["c"],"files_owned":["src/y.go"],"depends_on_labels":[],"tasks":[{"label":"t2","description":"d","depends_on_labels":[]}]}]}`,
+			// ADR-044: one Story per component, covering its requirement +
+			// capability. Two components → two stories, full coverage.
+			name:      "two-component plan with full coverage parses cleanly",
+			input:     `{"stories":[{"label":"auth","component_name":"auth-service","requirement_indices":[0],"capability_indices":[0],"title":"Auth","tasks":[{"label":"t1","description":"d"}]},{"label":"sess","component_name":"session-store","requirement_indices":[1],"capability_indices":[1],"title":"Sess","tasks":[{"label":"t1","description":"d"}]}]}`,
 			wantCount: 2,
 		},
 		{
-			// Pass-3 S-C2 / Pass-2 C5: Sarah must emit at least one story
-			// per requirement. Pre-fix the parser passed on partial output,
-			// scenario-generator's legacy fallback engaged for the
-			// uncovered req, and execution-manager hard-failed later with
-			// "no Stories on plan for requirement %s". The error message
-			// names the uncovered requirement so Sarah's retry prompt
-			// pinpoints the gap.
-			name:    "partial coverage (2 reqs, 1 story) rejected — Pass-3 S-C2",
-			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"i","components":["c"],"files_owned":["src/x.go"],"depends_on_labels":[],"tasks":[{"label":"t1","description":"d","depends_on_labels":[]}]}]}`,
-			wantErr: "uncovered: [requirement.x.2]",
+			// Coverage closure: a Story set missing a Requirement is
+			// rejected so Sarah's retry pinpoints the gap.
+			name:    "partial requirement coverage rejected",
+			input:   `{"stories":[{"label":"auth","component_name":"auth-service","requirement_indices":[0],"capability_indices":[0,1],"title":"T","tasks":[{"label":"t1","description":"d"}]}]}`,
+			wantErr: "do not cover every requirement",
+		},
+		{
+			// Coverage closure: a Story set missing a Capability is
+			// rejected.
+			name:    "partial capability coverage rejected",
+			input:   `{"stories":[{"label":"both","component_name":"auth-service","requirement_indices":[0,1],"capability_indices":[0],"title":"T","tasks":[{"label":"t1","description":"d"}]}]}`,
+			wantErr: "do not cover every capability",
 		},
 		{
 			name:    "requirement_index out of range rejected",
-			input:   `{"stories":[{"label":"l1","requirement_index":5,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]}]}`,
+			input:   `{"stories":[{"label":"l1","component_name":"auth-service","requirement_indices":[5],"capability_indices":[0],"title":"T","tasks":[]}]}`,
 			wantErr: "requirement_index 5 out of range",
 		},
 		{
+			name:    "capability_index out of range rejected",
+			input:   `{"stories":[{"label":"l1","component_name":"auth-service","requirement_indices":[0],"capability_indices":[9],"title":"T","tasks":[]}]}`,
+			wantErr: "capability_index 9 out of range",
+		},
+		{
+			name:    "missing component_name rejected",
+			input:   `{"stories":[{"label":"l1","requirement_indices":[0],"capability_indices":[0],"title":"T","tasks":[]}]}`,
+			wantErr: "missing component_name",
+		},
+		{
+			name:    "unresolved component_name rejected",
+			input:   `{"stories":[{"label":"l1","component_name":"ghost","requirement_indices":[0],"capability_indices":[0],"title":"T","tasks":[]}]}`,
+			wantErr: `component_name "ghost" does not resolve`,
+		},
+		{
+			name:    "empty requirement_indices rejected",
+			input:   `{"stories":[{"label":"l1","component_name":"auth-service","requirement_indices":[],"capability_indices":[0],"title":"T","tasks":[]}]}`,
+			wantErr: "requirement_indices is empty",
+		},
+		{
+			name:    "duplicate requirement_index rejected",
+			input:   `{"stories":[{"label":"l1","component_name":"auth-service","requirement_indices":[0,0],"capability_indices":[0],"title":"T","tasks":[]}]}`,
+			wantErr: "requirement_index 0 listed more than once",
+		},
+		{
 			name:    "missing story label rejected",
-			input:   `{"stories":[{"label":"","requirement_index":0,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]}]}`,
+			input:   `{"stories":[{"label":"","component_name":"auth-service","requirement_indices":[0],"capability_indices":[0],"title":"T","tasks":[]}]}`,
 			wantErr: "missing label",
 		},
 		{
 			name:    "duplicate story label rejected",
-			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T1","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]},{"label":"l1","requirement_index":1,"title":"T2","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[]}]}`,
+			input:   `{"stories":[{"label":"l1","component_name":"auth-service","requirement_indices":[0],"capability_indices":[0],"title":"T1","tasks":[]},{"label":"l1","component_name":"session-store","requirement_indices":[1],"capability_indices":[1],"title":"T2","tasks":[]}]}`,
 			wantErr: `label "l1" appears more than once`,
 		},
 		{
-			name:    "unknown depends_on_labels rejected",
-			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":["ghost"],"tasks":[]}]}`,
-			wantErr: `references unknown label "ghost"`,
-		},
-		{
 			name:    "duplicate task label rejected",
-			input:   `{"stories":[{"label":"l1","requirement_index":0,"title":"T","intent":"","components":[],"files_owned":[],"depends_on_labels":[],"tasks":[{"label":"a","description":"d","depends_on_labels":[]},{"label":"a","description":"d","depends_on_labels":[]}]}]}`,
+			input:   `{"stories":[{"label":"auth","component_name":"auth-service","requirement_indices":[0],"capability_indices":[0],"title":"T","tasks":[{"label":"a","description":"d"},{"label":"a","description":"d"}]},{"label":"sess","component_name":"session-store","requirement_indices":[1],"capability_indices":[1],"title":"T","tasks":[{"label":"t1","description":"d"}]}]}`,
 			wantErr: `task label "a" appears more than once`,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			plan := twoCompPlan()
 			got, err := parseStoriesFromResult(tc.input, plan, plan.Slug)
 			if tc.wantErr != "" {
 				if err == nil {
@@ -107,57 +149,139 @@ func TestParseStoriesFromResult(t *testing.T) {
 	}
 }
 
-// TestResolveStoryLabels_LabelDepsRewriteToCanonicalIDs covers the core
-// transformation: Sarah's depends_on_labels become canonical Story.ID refs
-// in workflow.Story.DependsOn; intra-story task depends_on_labels become
-// canonical Task.ID refs.
-func TestResolveStoryLabels_LabelDepsRewriteToCanonicalIDs(t *testing.T) {
+// TestResolveStoryLabels_MNCoverage_CohesiveComponent is the
+// ADR-044 mavlink-hard case: one cohesive component covers N
+// capabilities + N requirements. Sarah emits ONE Story covering
+// all of them. FilesOwned is derived from the component (no union).
+func TestResolveStoryLabels_MNCoverage_CohesiveComponent(t *testing.T) {
 	plan := &workflow.Plan{
-		Slug: "x",
+		Slug: "mav",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{
+				{Name: "mavsdk-lifecycle"},
+				{Name: "mavsdk-cs-telemetry"},
+				{Name: "mavsdk-cs-control"},
+			},
+		},
 		Requirements: []workflow.Requirement{
-			{ID: "requirement.x.1", Title: "Auth"},
-			{ID: "requirement.x.2", Title: "Session"},
+			{ID: "requirement.mav.1", Title: "Lifecycle", CapabilityName: "mavsdk-lifecycle"},
+			{ID: "requirement.mav.2", Title: "Telemetry", CapabilityName: "mavsdk-cs-telemetry"},
+			{ID: "requirement.mav.3", Title: "Control", CapabilityName: "mavsdk-cs-control"},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "mavsdk-driver",
+					ImplementationFiles: []string{"src/Driver.java", "src/Lifecycle.java", "src/Telemetry.java"},
+					Capabilities:        []string{"mavsdk-lifecycle", "mavsdk-cs-telemetry", "mavsdk-cs-control"}},
+			},
 		},
 	}
 	input := []positionalStoryInput{
 		{
-			Label: "lifecycle", RequirementIndex: 0, Title: "Lifecycle",
-			Tasks: []positionalTaskInput{
-				{Label: "test", Description: "Write tests"},
-				{Label: "impl", Description: "Implement", DependsOnLabels: []string{"test"}},
+			Label:              "driver",
+			ComponentName:      "mavsdk-driver",
+			RequirementIndices: []int{0, 1, 2},
+			CapabilityIndices:  []int{0, 1, 2},
+			Title:              "Cohesive MAVSDK driver",
+			Tasks:              []positionalTaskInput{{Label: "t1", Description: "implement"}},
+		},
+	}
+	got, err := resolveStoryLabels(input, plan, "mav")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("want 1 cohesive Story, got %d", len(got))
+	}
+	s := got[0]
+	if s.ComponentName != "mavsdk-driver" {
+		t.Errorf("ComponentName = %q, want mavsdk-driver", s.ComponentName)
+	}
+	if len(s.RequirementIDs) != 3 {
+		t.Errorf("RequirementIDs = %v, want all 3", s.RequirementIDs)
+	}
+	if len(s.CapabilityNames) != 3 {
+		t.Errorf("CapabilityNames = %v, want all 3", s.CapabilityNames)
+	}
+	// FilesOwned must be derived from component.ImplementationFiles (no
+	// union, no Sarah authorship).
+	if len(s.FilesOwned) != 3 || s.FilesOwned[0] != "src/Driver.java" {
+		t.Errorf("FilesOwned = %v, want component.implementation_files exactly", s.FilesOwned)
+	}
+	// Single Story → no DependsOn edges from Pass 1 (no other coverers).
+	if len(s.DependsOn) != 0 {
+		t.Errorf("Single Story should have no DependsOn, got %v", s.DependsOn)
+	}
+}
+
+// TestResolveStoryLabels_DerivesSchedulingFromRequirementDAG covers the
+// canonical case where Story B's requirement depends on Story A's: the
+// system populates Story.DependsOn via DeriveStoryScheduling.
+func TestResolveStoryLabels_DerivesSchedulingFromRequirementDAG(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "x",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{{Name: "auth"}, {Name: "session"}},
+		},
+		Requirements: []workflow.Requirement{
+			{ID: "requirement.x.1", Title: "Auth", CapabilityName: "auth"},
+			{ID: "requirement.x.2", Title: "Session", CapabilityName: "session", DependsOn: []string{"requirement.x.1"}},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "auth-service", ImplementationFiles: []string{"src/auth.go"}, Capabilities: []string{"auth"}},
+				{Name: "session-store", ImplementationFiles: []string{"src/session.go"}, Capabilities: []string{"session"}},
 			},
 		},
-		{
-			Label: "wire-up", RequirementIndex: 1, Title: "Wire-up",
-			DependsOnLabels: []string{"lifecycle"},
-			Tasks: []positionalTaskInput{
-				{Label: "wire", Description: "Wire it"},
-			},
-		},
+	}
+	input := []positionalStoryInput{
+		{Label: "auth", ComponentName: "auth-service",
+			RequirementIndices: []int{0}, CapabilityIndices: []int{0},
+			Title: "Auth", Tasks: []positionalTaskInput{{Label: "t", Description: "d"}}},
+		{Label: "sess", ComponentName: "session-store",
+			RequirementIndices: []int{1}, CapabilityIndices: []int{1},
+			Title: "Sess", Tasks: []positionalTaskInput{{Label: "t", Description: "d"}}},
 	}
 	got, err := resolveStoryLabels(input, plan, "x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("want 2 stories, got %d", len(got))
+	// Session Story should depend on Auth Story via the derived semantic edge.
+	sess := got[1]
+	if len(sess.DependsOn) != 1 || sess.DependsOn[0] != got[0].ID {
+		t.Errorf("session.DependsOn = %v, want [%s] (derived from R DAG)", sess.DependsOn, got[0].ID)
 	}
-	// Canonical IDs: story.<slug>.<reqseq>.<storyseq>
+}
+
+// TestResolveStoryLabels_TaskLabelsResolveToCanonicalIDs pins the intra-Story
+// task DependsOn label resolution under ADR-044 (task labels still rewrite
+// to canonical Task.ID even though cross-Story DependsOn is now system-derived).
+func TestResolveStoryLabels_TaskLabelsResolveToCanonicalIDs(t *testing.T) {
+	plan := twoCompPlan()
+	input := []positionalStoryInput{
+		{Label: "auth", ComponentName: "auth-service",
+			RequirementIndices: []int{0}, CapabilityIndices: []int{0},
+			Title: "Auth",
+			Tasks: []positionalTaskInput{
+				{Label: "test", Description: "Write tests"},
+				{Label: "impl", Description: "Implement", DependsOnLabels: []string{"test"}},
+			}},
+		{Label: "sess", ComponentName: "session-store",
+			RequirementIndices: []int{1}, CapabilityIndices: []int{1},
+			Title: "Sess",
+			Tasks: []positionalTaskInput{{Label: "wire", Description: "Wire"}}},
+	}
+	got, err := resolveStoryLabels(input, plan, "x")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Canonical IDs: story.<slug>.<reqseq>.<storyseq> (primary req = first listed)
 	if got[0].ID != "story.x.1.1" {
 		t.Errorf("story[0].ID = %q, want story.x.1.1", got[0].ID)
 	}
 	if got[1].ID != "story.x.2.1" {
 		t.Errorf("story[1].ID = %q, want story.x.2.1", got[1].ID)
 	}
-	// RequirementIDs resolved from requirement_index (ADR-044: singleton-slice).
-	if len(got[0].RequirementIDs) == 0 || got[0].RequirementIDs[0] != "requirement.x.1" {
-		t.Errorf("story[0].RequirementIDs[0] = %q, want requirement.x.1 (got RequirementIDs=%v)", got[0].PrimaryRequirementID(), got[0].RequirementIDs)
-	}
-	// DependsOn label resolves to canonical story ID.
-	if len(got[1].DependsOn) != 1 || got[1].DependsOn[0] != "story.x.1.1" {
-		t.Errorf("story[1].DependsOn = %v, want [story.x.1.1]", got[1].DependsOn)
-	}
-	// Task canonical IDs + StoryID + intra-story DependsOn.
 	if len(got[0].Tasks) != 2 {
 		t.Fatalf("story[0] want 2 tasks, got %d", len(got[0].Tasks))
 	}
@@ -168,34 +292,44 @@ func TestResolveStoryLabels_LabelDepsRewriteToCanonicalIDs(t *testing.T) {
 		t.Errorf("task[0].StoryID = %q, want story.x.1.1", got[0].Tasks[0].StoryID)
 	}
 	if len(got[0].Tasks[1].DependsOn) != 1 || got[0].Tasks[1].DependsOn[0] != "task.x.1.1.1" {
-		t.Errorf("task[1].DependsOn = %v, want [task.x.1.1.1]", got[0].Tasks[1].DependsOn)
+		t.Errorf("task[1].DependsOn = %v, want [task.x.1.1.1] (intra-Story label resolution)", got[0].Tasks[1].DependsOn)
 	}
 }
 
-// TestResolveStoryLabels_StoryseqIncrementsPerRequirement covers Sarah
-// sharding ONE requirement into multiple stories — storyseq counter
-// increments so the two stories get distinct IDs.
-func TestResolveStoryLabels_StoryseqIncrementsPerRequirement(t *testing.T) {
+// TestResolveStoryLabels_StoryseqIncrementsPerPrimaryReq covers the edge case
+// where two stories anchor different components but happen to list the same
+// requirement first (same primary reqseq). The storyseq counter increments
+// so they get distinct canonical IDs.
+func TestResolveStoryLabels_StoryseqIncrementsPerPrimaryReq(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "x",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{{Name: "a"}, {Name: "b"}},
+		},
 		Requirements: []workflow.Requirement{
-			{ID: "requirement.x.1", Title: "Big req"},
+			{ID: "requirement.x.1", Title: "shared", CapabilityName: "a"},
+			{ID: "requirement.x.2", Title: "second", CapabilityName: "b"},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "compA", ImplementationFiles: []string{"src/a.go"}, Capabilities: []string{"a"}},
+				{Name: "compB", ImplementationFiles: []string{"src/b.go"}, Capabilities: []string{"b"}},
+			},
 		},
 	}
 	input := []positionalStoryInput{
-		{Label: "a", RequirementIndex: 0, Title: "A"},
-		{Label: "b", RequirementIndex: 0, Title: "B"},
-		{Label: "c", RequirementIndex: 0, Title: "C"},
+		{Label: "first", ComponentName: "compA", RequirementIndices: []int{0}, CapabilityIndices: []int{0},
+			Title: "A", Tasks: []positionalTaskInput{{Label: "t", Description: "d"}}},
+		{Label: "second", ComponentName: "compB", RequirementIndices: []int{0, 1}, CapabilityIndices: []int{1},
+			Title: "B", Tasks: []positionalTaskInput{{Label: "t", Description: "d"}}},
 	}
 	got, err := resolveStoryLabels(input, plan, "x")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	want := []string{"story.x.1.1", "story.x.1.2", "story.x.1.3"}
-	for i, w := range want {
-		if got[i].ID != w {
-			t.Errorf("story[%d].ID = %q, want %q", i, got[i].ID, w)
-		}
+	// Both stories have primary req = requirement.x.1 → storyseq increments.
+	if got[0].ID != "story.x.1.1" || got[1].ID != "story.x.1.2" {
+		t.Errorf("got IDs %q, %q — want story.x.1.1, story.x.1.2", got[0].ID, got[1].ID)
 	}
 }
 

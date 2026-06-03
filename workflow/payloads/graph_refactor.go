@@ -114,11 +114,11 @@ type ScenarioGeneratorRequest struct {
 	// mode (pre-Sarah plans / mock fixtures without Stories) — Bob still emits
 	// scenarios for the whole Requirement and the server falls back to the
 	// "first story owns the scenarios" lookup.
-	StoryID         string   `json:"story_id,omitempty"`
-	StoryTitle      string   `json:"story_title,omitempty"`
-	StoryIntent     string   `json:"story_intent,omitempty"`
-	StoryFilesOwned []string `json:"story_files_owned,omitempty"`
-	StoryComponents []string `json:"story_components,omitempty"`
+	StoryID            string   `json:"story_id,omitempty"`
+	StoryTitle         string   `json:"story_title,omitempty"`
+	StoryIntent        string   `json:"story_intent,omitempty"`
+	StoryFilesOwned    []string `json:"story_files_owned,omitempty"`
+	StoryComponentName string   `json:"story_component_name,omitempty"`
 }
 
 // RequiredTier is the wire shape carried in ScenarioGeneratorRequest for a

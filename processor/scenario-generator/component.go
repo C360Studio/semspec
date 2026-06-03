@@ -347,7 +347,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		StoryTitle:             req.StoryTitle,
 		StoryIntent:            req.StoryIntent,
 		StoryFilesOwned:        append([]string(nil), req.StoryFilesOwned...),
-		StoryComponents:        append([]string(nil), req.StoryComponents...),
+		StoryComponentName:     req.StoryComponentName,
 	}
 	if len(reviewFindings) > 0 {
 		scenCtx.ReviewFindings = reviewFindings[0]

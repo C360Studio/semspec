@@ -54,11 +54,6 @@ type Story struct {
 	// proves.
 	Intent string `json:"intent,omitempty"`
 
-	// Components carries the legacy multi-component selection for back-compat
-	// reads. Under ADR-044, use ComponentName (singular). This field is
-	// preserved so plans persisted before ADR-044 still deserialise cleanly.
-	Components []string `json:"components,omitempty"`
-
 	// FilesOwned is the component's ImplementationFiles (NOT a union —
 	// Sarah's component selection determines them exactly).
 	// Plan-reviewer rule story.missing_files_owned rejects empty lists;

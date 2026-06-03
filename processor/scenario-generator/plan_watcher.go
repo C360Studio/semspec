@@ -157,7 +157,7 @@ func buildStoryScopedRequest(plan *workflow.Plan, req workflow.Requirement, stor
 		StoryTitle:             story.Title,
 		StoryIntent:            story.Intent,
 		StoryFilesOwned:        append([]string(nil), story.FilesOwned...),
-		StoryComponents:        append([]string(nil), story.Components...),
+		StoryComponentName:     story.ComponentName,
 	}
 }
 

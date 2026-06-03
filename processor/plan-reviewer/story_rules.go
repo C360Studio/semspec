@@ -21,10 +21,10 @@ import (
 //     documentation files. The story-preparer-side mirror of
 //     architecture.component_implementation_files_doc_only and
 //     capability.orphan.docs_only.
-//   - story.unresolved_components: Story.Components entry that doesn't
-//     match any ComponentDef.Name in the architecture.
-//   - story.requirement_orphan: Story.RequirementID that doesn't match any
-//     Requirement.ID in the plan.
+//   - story.unresolved_component: Story.ComponentName doesn't match any
+//     ComponentDef.Name in the architecture (ADR-044 anchor).
+//   - story.requirement_orphan: Story.RequirementIDs entry that doesn't
+//     match any Requirement.ID in the plan (ADR-044 M:N coverage).
 //   - story.depends_on_orphan: Story.DependsOn entry that doesn't match
 //     any other Story.ID in the plan.
 //   - story.depends_on_cycle: DAG cycle in the cross-story DependsOn graph.
@@ -91,22 +91,22 @@ func storyStructuralFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
 			}
 		}
 
-		// Component resolution — always checked.
-		for _, comp := range s.Components {
-			if _, ok := componentNames[comp]; !ok {
+		// Component resolution — ADR-044: Story anchors to ONE component_name.
+		if s.ComponentName != "" {
+			if _, ok := componentNames[s.ComponentName]; !ok {
 				findings = append(findings, workflow.PlanReviewFinding{
-					SOPID:       "story.unresolved_components",
-					SOPTitle:    "Story references a component not declared in the architecture (ADR-043 Move 2)",
+					SOPID:       "story.unresolved_component",
+					SOPTitle:    "Story references a component not declared in the architecture (ADR-044 anchor)",
 					Severity:    "error",
 					Status:      "violation",
 					Category:    "structural",
 					Phase:       "stories",
 					TargetID:    s.ID,
 					Action:      "rename",
-					TargetField: fmt.Sprintf("story.%s.components", s.ID),
-					TargetValue: fmt.Sprintf("%s → <one of architecture.component_boundaries[].name>", comp),
-					Issue:       fmt.Sprintf("Story %s lists component %q but no ComponentDef with that name exists in the architecture.", s.ID, comp),
-					Suggestion:  "Either rename the Story's components entry to one of the declared component names, or flag a missing component back to the architect.",
+					TargetField: fmt.Sprintf("story.%s.component_name", s.ID),
+					TargetValue: fmt.Sprintf("%s → <one of architecture.component_boundaries[].name>", s.ComponentName),
+					Issue:       fmt.Sprintf("Story %s anchors to component_name=%q but no ComponentDef with that name exists in the architecture.", s.ID, s.ComponentName),
+					Suggestion:  "Either rename the Story's component_name to one of the declared component names, or flag a missing component back to the architect.",
 				})
 			}
 		}

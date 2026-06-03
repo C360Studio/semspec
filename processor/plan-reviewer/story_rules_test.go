@@ -41,7 +41,7 @@ func TestMergeStoryFindings_RequirementOrphan(t *testing.T) {
 	}
 }
 
-func TestMergeStoryFindings_UnresolvedComponents(t *testing.T) {
+func TestMergeStoryFindings_UnresolvedComponent(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:         "unresolved-comp",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
@@ -51,16 +51,15 @@ func TestMergeStoryFindings_UnresolvedComponents(t *testing.T) {
 			},
 		},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T",
-				Components: []string{"auth-service", "ghost-component"},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "ghost-component", Title: "T",
 				FilesOwned: []string{"src/x.go"},
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
 	mergeStoryFindings(plan, result)
-	if !hasFinding(result.Findings, "story.unresolved_components") {
-		t.Errorf("expected story.unresolved_components, got: %+v", result.Findings)
+	if !hasFinding(result.Findings, "story.unresolved_component") {
+		t.Errorf("expected story.unresolved_component, got: %+v", result.Findings)
 	}
 }
 
@@ -226,8 +225,7 @@ func TestMergeStoryFindings_HappyPath(t *testing.T) {
 			},
 		},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
-				Components: []string{"auth-service"},
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "auth-service", Title: "T", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"src/auth.go"},
 				Tasks: []workflow.Task{
 					{ID: "t1", StoryID: "s1", Description: "tests"},

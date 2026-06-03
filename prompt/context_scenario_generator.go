@@ -44,11 +44,11 @@ type ScenarioGeneratorPromptContext struct {
 	// (a slice of the parent Requirement) rather than the whole Requirement.
 	// StoryID empty means legacy per-Requirement mode — pre-Sarah plans or
 	// mock fixtures without Stories.
-	StoryID         string
-	StoryTitle      string
-	StoryIntent     string
-	StoryFilesOwned []string
-	StoryComponents []string
+	StoryID            string
+	StoryTitle         string
+	StoryIntent        string
+	StoryFilesOwned    []string
+	StoryComponentName string
 }
 
 // RequiredTier names one tier tag the scenario-generator MUST cover for the

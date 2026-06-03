@@ -33,7 +33,6 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 				ID: "story.p.1.1", RequirementIDs: []string{"req.p.1"}, ComponentName: "auth-service",
 				Title:      "Lifecycle",
 				Intent:     "Set up the auth lifecycle component.",
-				Components: []string{"auth-service"},
 				FilesOwned: []string{"src/auth.go", "src/auth_test.go"},
 				Tasks: []workflow.Task{
 					{ID: "task.p.1.1.1", Description: "write failing test"},

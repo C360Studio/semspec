@@ -405,15 +405,18 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 
 	if len(p.Capabilities) > 0 {
 		sb.WriteString("## Capabilities (from analyst)\n\n")
-		for _, c := range p.Capabilities {
-			fmt.Fprintf(&sb, "- **%s** — %s\n", c.Name, c.Description)
+		sb.WriteString("Reference these by zero-based `capability_index` in your output (index 0 = first entry below).\n\n")
+		for i, c := range p.Capabilities {
+			fmt.Fprintf(&sb, "### Capability #%d — %s\n", i, c.Name)
+			if c.Description != "" {
+				fmt.Fprintf(&sb, "%s\n\n", c.Description)
+			}
 		}
-		sb.WriteString("\n")
 	}
 
 	if len(p.ArchitectureComponents) > 0 {
 		sb.WriteString("## Architecture Components (Winston's tech-spec)\n\n")
-		sb.WriteString("Each component declares the files it owns and the capabilities it implements. Use these as the source of truth when populating story.components and story.files_owned.\n\n")
+		sb.WriteString("Each component declares the files it owns and the capabilities it implements. Pick ONE component per Story via `component_name`; FilesOwned is derived from that component's implementation_files by the system.\n\n")
 		for _, comp := range p.ArchitectureComponents {
 			fmt.Fprintf(&sb, "### %s\n", comp.Name)
 			if comp.Responsibility != "" {
@@ -433,8 +436,8 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 	}
 
 	if len(p.Requirements) > 0 {
-		sb.WriteString("## Requirements to Shard\n\n")
-		sb.WriteString("Reference these by zero-based `requirement_index` in your output (index 0 = first entry below, index 1 = second, etc.).\n\n")
+		sb.WriteString("## Requirements (John's PRD)\n\n")
+		sb.WriteString("Reference these by zero-based `requirement_index` in your output.\n\n")
 		for i, r := range p.Requirements {
 			fmt.Fprintf(&sb, "### Requirement #%d — %s\n", i, r.Title)
 			fmt.Fprintf(&sb, "*(canonical id: %s)*\n\n", r.ID)
@@ -448,15 +451,21 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 	}
 
 	sb.WriteString("\n## Your Task\n\n")
-	sb.WriteString("For each Requirement above, decide whether it shards into ONE Story or N Stories with depends_on_labels edges. Single-component requirements are usually one Story; multi-component or prereq-ordered work splits into multiple Stories.\n\n")
+	sb.WriteString("Produce Stories that satisfy ALL of these constraints (ADR-044 M:N coverage):\n\n")
+	sb.WriteString("1. **Coverage closure** — every Capability appears in at least one Story's `capability_indices`; every Requirement appears in at least one Story's `requirement_indices`.\n")
+	sb.WriteString("2. **One component per Story** — `component_name` is a single declared component from the Architecture Components list. FilesOwned is derived from that component's implementation_files by the system; you do NOT pick files.\n")
+	sb.WriteString("3. **Cross-Story DependsOn is NOT yours** — the system derives Story.DependsOn from (a) Requirement prerequisite closure and (b) file-ownership conflicts. Focus on coverage joins; the dispatch graph follows.\n\n")
+	sb.WriteString("Canonical shape: for each architectural component, emit ONE Story covering every requirement whose capabilities map into that component. For cohesive modules (one component implementing N capabilities), one Story covers all N capabilities + their requirements — no artificial fan-out. For naturally disjoint components, one Story per component.\n\n")
 	sb.WriteString("For each Story:\n")
-	sb.WriteString("- Assign a `label` (any short kebab-case local string you choose — used only to express cross-story DependsOn).\n")
-	sb.WriteString("- Set `requirement_index` to the 0-based index of the parent Requirement in the list above.\n")
-	sb.WriteString("- Pick the components it modifies (from the Architecture Components above).\n")
-	sb.WriteString("- Compute files_owned as the UNION of those components' implementation_files. Assemble the list explicitly — the dev needs to see the exact file set.\n")
-	sb.WriteString("- Author an ordered TDD checklist of 3-5 Tasks (write failing test, implement to pass, integration smoke, verify scenarios). Each task gets its own `label` for intra-story DependsOn.\n")
-	sb.WriteString("- Cross-story prereqs go in story.depends_on_labels (list other story labels). Intra-story task ordering goes in task.depends_on_labels. Cross-story task ordering does NOT belong on task.depends_on_labels.\n\n")
-	sb.WriteString("Apply your readiness gate before signing off each Story. Any Story that doesn't pass — empty files_owned, docs-only files_owned, empty tasks, unresolved component reference, requirement_index out of range — must be flagged back rather than emitted.\n\n")
+	sb.WriteString("- `label`: any short kebab-case local string (used only as a stable handle within this dispatch).\n")
+	sb.WriteString("- `component_name`: ONE declared component from the Architecture list.\n")
+	sb.WriteString("- `requirement_indices`: list of 0-based indices into the Requirements list this Story covers.\n")
+	sb.WriteString("- `capability_indices`: list of 0-based indices into the Capabilities list this Story covers.\n")
+	sb.WriteString("- `title`: human-readable sentence-cased heading.\n")
+	sb.WriteString("- `intent`: 1-2 sentences on what implementing the Story proves.\n")
+	sb.WriteString("- `tasks`: ordered TDD checklist of 3-5 tasks (write failing test, implement to pass, integration smoke, verify scenarios). Each task has its own `label` for intra-story task DependsOn.\n\n")
+	sb.WriteString("Apply your readiness gate before signing off each Story. Any Story that doesn't pass — empty requirement_indices, missing component_name, unresolved component reference, indices out of range — must be flagged back rather than emitted.\n\n")
+	sb.WriteString("If a requirement spans multiple components, that is a plan-shape bug: the requirement should be split into per-component requirements upstream. Flag it back rather than authoring a Story with multiple components.\n\n")
 
 	if p.PreviousError != "" {
 		fmt.Fprintf(&sb, "## Previous Attempt Failed\n\nYour previous output could not be processed: %s\n\nPlease fix the issue and ensure your response is valid JSON matching the required format.\n\n", p.PreviousError)
@@ -641,8 +650,8 @@ func renderScenarioStorySection(p *prompt.ScenarioGeneratorPromptContext) string
 	if p.StoryIntent != "" {
 		fmt.Fprintf(&sb, "**Intent:** %s\n", p.StoryIntent)
 	}
-	if len(p.StoryComponents) > 0 {
-		fmt.Fprintf(&sb, "**Components:** %s\n", strings.Join(p.StoryComponents, ", "))
+	if p.StoryComponentName != "" {
+		fmt.Fprintf(&sb, "**Component:** %s\n", p.StoryComponentName)
 	}
 	if len(p.StoryFilesOwned) > 0 {
 		fmt.Fprintf(&sb, "**Files owned by this story:** %s\n", strings.Join(p.StoryFilesOwned, ", "))

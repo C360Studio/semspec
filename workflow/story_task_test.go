@@ -122,7 +122,6 @@ func TestStoryJSONRoundTrip(t *testing.T) {
 		CapabilityNames: []string{"mavsdk-lifecycle", "mavsdk-telemetry"},
 		Title:           "MAVSDK Driver",
 		Intent:          "Boot mavsdk_server and observe HEARTBEAT.",
-		Components:      []string{"mavsdk-server-lifecycle"},
 		FilesOwned:      []string{"src/Lifecycle.java"},
 		DependsOn:       []string{},
 		Tasks: []Task{
