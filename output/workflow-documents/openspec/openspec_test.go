@@ -84,16 +84,18 @@ func samplePlan() *workflow.Plan {
 		// across the stories that link to this capability's requirements.
 		Stories: []workflow.Story{
 			{
-				ID:            "story.test.1.1",
-				RequirementID: "r1",
-				Title:         "Bootstrap MAVSDK driver",
-				FilesOwned:    []string{"src/main/java/Bootstrap.java", "src/test/java/BootstrapTest.java"},
+				ID:             "story.test.1.1",
+				RequirementIDs: []string{"r1"},
+				ComponentName:  "placeholder-component",
+				Title:          "Bootstrap MAVSDK driver",
+				FilesOwned:     []string{"src/main/java/Bootstrap.java", "src/test/java/BootstrapTest.java"},
 			},
 			{
-				ID:            "story.test.2.1",
-				RequirementID: "r2",
-				Title:         "Wire telemetry stream",
-				FilesOwned:    []string{"src/main/java/TelemetryStream.java"},
+				ID:             "story.test.2.1",
+				RequirementIDs: []string{"r2"},
+				ComponentName:  "placeholder-component",
+				Title:          "Wire telemetry stream",
+				FilesOwned:     []string{"src/main/java/TelemetryStream.java"},
 			},
 		},
 	}

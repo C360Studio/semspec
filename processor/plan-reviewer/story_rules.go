@@ -69,23 +69,26 @@ func storyStructuralFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
 
 	var findings []workflow.PlanReviewFinding
 	for _, s := range plan.Stories {
-		// RequirementID resolution — always checked, regardless of status.
-		if s.RequirementID != "" {
-			if _, ok := requirementIDs[s.RequirementID]; !ok {
+		// RequirementIDs resolution — ADR-044: check every entry in the M:N
+		// coverage join. Always checked regardless of story status.
+		// TODO ADR-044 commit 3+: iterate RequirementIDs properly.
+		for _, rid := range s.RequirementIDs {
+			if _, ok := requirementIDs[rid]; !ok {
 				findings = append(findings, workflow.PlanReviewFinding{
 					SOPID:       "story.requirement_orphan",
-					SOPTitle:    "Story references a requirement that doesn't exist (ADR-043 Move 2)",
+					SOPTitle:    "Story references a requirement that doesn't exist (ADR-044 M:N coverage)",
 					Severity:    "error",
 					Status:      "violation",
 					Category:    "structural",
 					Phase:       "stories",
 					TargetID:    s.ID,
 					Action:      "rename",
-					TargetField: fmt.Sprintf("story.%s.requirement_id", s.ID),
-					TargetValue: fmt.Sprintf("%s → <existing requirement.id>", s.RequirementID),
-					Issue:       fmt.Sprintf("Story %s has requirement_id=%q but no Requirement with that ID exists in the plan.", s.ID, s.RequirementID),
-					Suggestion:  "Either rename the Story's requirement_id to an existing Requirement.ID, or flag the missing requirement back to the planner step.",
+					TargetField: fmt.Sprintf("story.%s.requirement_ids", s.ID),
+					TargetValue: fmt.Sprintf("%s → <existing requirement.id>", rid),
+					Issue:       fmt.Sprintf("Story %s has requirement_id=%q in requirement_ids but no Requirement with that ID exists in the plan.", s.ID, rid),
+					Suggestion:  "Either remove the orphan entry from the Story's requirement_ids, or flag the missing requirement back to the planner step.",
 				})
+				break // report first orphan per story; re-run after fixing
 			}
 		}
 

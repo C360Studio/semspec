@@ -28,15 +28,19 @@ func RenderStories(plan *workflow.Plan) string {
 	b.WriteString(fmt.Sprintf("*Generated from the story-preparer role (Sarah). **%d stories** ready the per-Requirement work for the executor pipeline, each carrying its own Tasks checklist and FilesOwned scope.*\n\n",
 		len(plan.Stories)))
 
-	// Group stories by requirement ID, preserving requirement order.
+	// Group stories by primary requirement ID, preserving requirement order.
+	// ADR-044: Stories carry M:N RequirementIDs; use PrimaryRequirementID for
+	// the legacy per-requirement grouping in this renderer.
+	// TODO ADR-044 commit 3+: render M:N coverage joins properly.
 	byReq := make(map[string][]workflow.Story)
 	var orphans []workflow.Story
 	for _, s := range plan.Stories {
-		if s.RequirementID == "" {
+		rid := s.PrimaryRequirementID()
+		if rid == "" {
 			orphans = append(orphans, s)
 			continue
 		}
-		byReq[s.RequirementID] = append(byReq[s.RequirementID], s)
+		byReq[rid] = append(byReq[rid], s)
 	}
 
 	for _, req := range plan.Requirements {

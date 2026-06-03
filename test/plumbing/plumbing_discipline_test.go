@@ -91,7 +91,7 @@ func TestPlumbingDiscipline_FullChain(t *testing.T) {
 	// the smoke-9 shape (overlapping files_owned without DependsOn).
 	goodStories := []workflow.Story{
 		{
-			ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "Lifecycle",
+			ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Lifecycle",
 			Status:     workflow.StoryStatusReady,
 			FilesOwned: []string{"src/lifecycle.go"},
 			Tasks: []workflow.Task{
@@ -105,13 +105,13 @@ func TestPlumbingDiscipline_FullChain(t *testing.T) {
 
 	smoke9Stories := []workflow.Story{
 		{
-			ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "Lifecycle",
+			ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Lifecycle",
 			Status:     workflow.StoryStatusReady,
 			FilesOwned: []string{"src/shared.go", "src/lifecycle.go"},
 			Tasks:      []workflow.Task{{ID: "task.demo.1.1.1", StoryID: "story.demo.1.1", Description: "x"}},
 		},
 		{
-			ID: "story.demo.2.1", RequirementID: "req.demo.2", Title: "Telemetry",
+			ID: "story.demo.2.1", RequirementIDs: []string{"req.demo.2"}, ComponentName: "placeholder-component-2", Title: "Telemetry",
 			Status:     workflow.StoryStatusReady,
 			FilesOwned: []string{"src/shared.go", "src/telemetry.go"},
 			Tasks:      []workflow.Task{{ID: "task.demo.2.1.1", StoryID: "story.demo.2.1", Description: "y"}},
@@ -125,7 +125,7 @@ func TestPlumbingDiscipline_FullChain(t *testing.T) {
 	// Stage 3: the synthesizer surfaces the binding block in the dev
 	// prompt. Builds a minimal plan with the denormalized scenario.
 	story := workflow.Story{
-		ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "Lifecycle",
+		ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Lifecycle",
 		Status:     workflow.StoryStatusReady,
 		FilesOwned: []string{"src/lifecycle.go"},
 		Tasks: []workflow.Task{
@@ -179,7 +179,7 @@ func TestPlumbingDiscipline_UnitOnlyChain(t *testing.T) {
 	}
 
 	story := workflow.Story{
-		ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "Simple",
+		ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "Simple",
 		Status:     workflow.StoryStatusReady,
 		FilesOwned: []string{"src/x.go"},
 		Tasks: []workflow.Task{

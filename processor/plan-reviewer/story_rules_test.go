@@ -26,7 +26,7 @@ func TestMergeStoryFindings_RequirementOrphan(t *testing.T) {
 		Slug:         "orphan-req",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "ghost", Title: "T",
+			{ID: "s1", RequirementIDs: []string{"ghost"}, ComponentName: "placeholder-component", Title: "T",
 				FilesOwned: []string{"src/x.go"},
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
 		},
@@ -51,7 +51,7 @@ func TestMergeStoryFindings_UnresolvedComponents(t *testing.T) {
 			},
 		},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T",
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T",
 				Components: []string{"auth-service", "ghost-component"},
 				FilesOwned: []string{"src/x.go"},
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
@@ -69,7 +69,7 @@ func TestMergeStoryFindings_MissingFilesOwned(t *testing.T) {
 		Slug:         "missing-files",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				Tasks: []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
 		},
 	}
@@ -85,7 +85,7 @@ func TestMergeStoryFindings_DocsOnlyFiles(t *testing.T) {
 		Slug:         "docs-only",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"README.md", "docs/x.md"},
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
 		},
@@ -102,7 +102,7 @@ func TestMergeStoryFindings_MissingFilesAndDocsOnlyDontDoubleFire(t *testing.T) 
 		Slug:         "no-double",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				FilesOwned: nil,
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
 		},
@@ -121,7 +121,7 @@ func TestMergeStoryFindings_MissingTasks(t *testing.T) {
 		Slug:         "no-tasks",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"src/x.go"},
 				Tasks:      nil},
 		},
@@ -138,7 +138,7 @@ func TestMergeStoryFindings_StoryDependsOnOrphan(t *testing.T) {
 		Slug:         "story-orphan",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"src/x.go"},
 				DependsOn:  []string{"ghost-story"},
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
@@ -156,11 +156,11 @@ func TestMergeStoryFindings_StoryDependsOnCycle(t *testing.T) {
 		Slug:         "story-cycle",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T1", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T1", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"src/x.go"},
 				DependsOn:  []string{"s2"},
 				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
-			{ID: "s2", RequirementID: "r1", Title: "T2", Status: workflow.StoryStatusReady,
+			{ID: "s2", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component-2", Title: "T2", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"src/y.go"},
 				DependsOn:  []string{"s1"},
 				Tasks:      []workflow.Task{{ID: "t2", StoryID: "s2", Description: "y"}}},
@@ -178,7 +178,7 @@ func TestMergeStoryFindings_TaskDependsOnCycle(t *testing.T) {
 		Slug:         "task-cycle",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				FilesOwned: []string{"src/x.go"},
 				Tasks: []workflow.Task{
 					{ID: "t1", StoryID: "s1", Description: "x", DependsOn: []string{"t2"}},
@@ -202,7 +202,7 @@ func TestMergeStoryFindings_PendingStoryReadinessRulesSkipped(t *testing.T) {
 		Slug:         "pending",
 		Requirements: []workflow.Requirement{{ID: "r1"}},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusPending,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusPending,
 				FilesOwned: nil,
 				Tasks:      nil},
 		},
@@ -226,7 +226,7 @@ func TestMergeStoryFindings_HappyPath(t *testing.T) {
 			},
 		},
 		Stories: []workflow.Story{
-			{ID: "s1", RequirementID: "r1", Title: "T", Status: workflow.StoryStatusReady,
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component", Title: "T", Status: workflow.StoryStatusReady,
 				Components: []string{"auth-service"},
 				FilesOwned: []string{"src/auth.go"},
 				Tasks: []workflow.Task{

@@ -109,10 +109,13 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 //   - proposal.AffectedStoryIDs populated → use those directly (the
 //     recovery-agent threaded them through from the wedged exec's cursor).
 //   - proposal.AffectedStoryIDs empty AND AffectedReqIDs populated → walk
-//     plan.Stories and select every Story whose RequirementID is in scope.
-//     Whole-Requirement re-prep — coarser but still reaches Sarah.
+//     plan.Stories and select every Story that covers any affected requirement
+//     (checks RequirementIDs M:N slice). Whole-Requirement re-prep — coarser
+//     but still reaches Sarah.
 //   - Both empty → return nil. Caller's downstream behavior is "no-op
 //     cascade"; plan-manager treats that as human-review territory.
+//
+// TODO ADR-044 commit 3+: iterate RequirementIDs fully instead of singleton.
 func storiesForReprepare(proposal *workflow.PlanDecision, stories []workflow.Story, affectedReqs map[string]bool) []string {
 	if len(proposal.AffectedStoryIDs) > 0 {
 		out := make([]string, 0, len(proposal.AffectedStoryIDs))
@@ -124,8 +127,15 @@ func storiesForReprepare(proposal *workflow.PlanDecision, stories []workflow.Sto
 	}
 	out := make([]string, 0, len(stories))
 	for _, s := range stories {
-		if affectedReqs[s.RequirementID] {
-			out = append(out, s.ID)
+		// ADR-044: check M:N RequirementIDs slice.
+		// TODO ADR-044 commit 3+: use PrimaryRequirementID only as fallback.
+		if len(s.RequirementIDs) > 0 {
+			for _, rid := range s.RequirementIDs {
+				if affectedReqs[rid] {
+					out = append(out, s.ID)
+					break
+				}
+			}
 		}
 	}
 	return out

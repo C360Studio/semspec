@@ -17,9 +17,9 @@ func TestBuildPromptContext_PopulatesStoryRecoveryHints(t *testing.T) {
 		Slug:  "demo",
 		Title: "demo",
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "untouched"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1", Title: "flagged", RecoveryHint: "missed src/x.go"},
-			{ID: "story.demo.1.3", RequirementID: "req.demo.1", Title: "untouched"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "untouched"},
+			{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "flagged", RecoveryHint: "missed src/x.go"},
+			{ID: "story.demo.1.3", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "untouched"},
 		},
 	}
 

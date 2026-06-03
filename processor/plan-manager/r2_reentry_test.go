@@ -27,7 +27,7 @@ func TestDetermineR2ReentryPoint_StoriesPhaseRoutesToArchitectureGenerated(t *te
 		Requirements: []workflow.Requirement{{ID: "req.demo.1", Title: "R"}},
 		Architecture: &workflow.ArchitectureDocument{Decisions: []workflow.ArchDecision{{Title: "use Go"}}},
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "broken"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "broken"},
 		},
 		Scenarios: []workflow.Scenario{
 			{ID: "scen.demo.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},
@@ -72,7 +72,7 @@ func TestDetermineR2ReentryPoint_ScenariosCasePreservesStories(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "demo",
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "ok"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "ok"},
 		},
 		Scenarios: []workflow.Scenario{
 			{ID: "scen.demo.1", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},
@@ -118,7 +118,7 @@ func TestDetermineR2ReentryPoint_UpstreamPhasesNukeStoriesToo(t *testing.T) {
 				Slug:         "demo",
 				Requirements: []workflow.Requirement{{ID: "req.demo.1", Title: "R"}},
 				Architecture: &workflow.ArchitectureDocument{Decisions: []workflow.ArchDecision{{Title: "use Go"}}},
-				Stories:      []workflow.Story{{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "should be wiped"}},
+				Stories:      []workflow.Story{{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "should be wiped"}},
 				Scenarios:    []workflow.Scenario{{ID: "scen.demo.1", RequirementID: "req.demo.1"}},
 			}
 			findings, _ := json.Marshal([]workflow.PlanReviewFinding{

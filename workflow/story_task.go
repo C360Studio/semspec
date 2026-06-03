@@ -2,29 +2,50 @@ package workflow
 
 import "time"
 
-// Story is a Sarah-authored unit of dev-ready work (ADR-043 Move 2). A Story
-// shards a single Requirement into a unit that one developer agent can
-// execute end-to-end: explicit Components selection, explicit FilesOwned
-// (the union of selected components' implementation_files, Sarah-curated),
-// an ordered Task checklist, and DependsOn edges to other Stories that must
-// complete first.
+// Story is a Sarah-authored unit of dev-ready work anchored to a single
+// architectural component (ADR-044). Under M:N coverage, a Story covers
+// multiple Requirements and multiple Capabilities via join slices.
 //
-// Sarah's readiness gate ensures every Story she signs off has non-empty
-// FilesOwned (at least one source-code file), at least one Task, and
-// resolvable DependsOn IDs. The plan-reviewer R3 round (introduced in
-// ADR-043 PR 3) validates the same invariants as a defensive backstop.
+// Stories partition by execution-unit (ComponentName anchor): one Story per
+// cohesive component, carrying ALL requirements and capabilities that map
+// into that component. FilesOwned equals the component's
+// ImplementationFiles directly — Sarah does not choose files; the component
+// selection determines them.
 //
-// Execution-manager dispatches per-Story (ADR-043 Move 5; PR 4) instead of
-// the legacy per-Requirement + decomposer-LLM-at-execution-time path.
+// DependsOn is system-derived post-emission by DeriveStoryScheduling (NOT
+// Sarah-authored). The derivation runs two passes: (1) semantic edges from
+// transitive Requirement prereq closure with all-coverers wait semantics,
+// (2) resource edges from file-ownership conflict resolution. Sarah's
+// readiness gate ensures structural correctness before derivation runs.
+//
+// Execution-manager dispatches per-Story (ADR-043 Move 5; PR 4).
+// Plan-reviewer R3 round validates structural invariants as a defensive
+// backstop.
 type Story struct {
 	// ID is the stable story identifier.
-	// Format: story.<plan-slug>.<reqseq>.<storyseq>
+	// Format: story.<plan-slug>.<componentName> where componentName is
+	// kebab-case-clean (matching ComponentDef.Name). Generation rewire
+	// tracked in ADR-044 commit 6.
 	ID string `json:"id"`
 
-	// RequirementID is the parent requirement. Sarah's sharding decision —
-	// one requirement may become one Story (single-component) or N Stories
-	// with DependsOn edges (multi-component or prereq-ordered work).
-	RequirementID string `json:"requirement_id"`
+	// ComponentName is the 1:1 execution anchor — the single architectural
+	// component this Story implements. Sarah selects ONE component per Story;
+	// FilesOwned is derived directly from ComponentDef.ImplementationFiles.
+	// Plan-reviewer rule story.unresolved_components rejects values that
+	// don't match any declared component.
+	ComponentName string `json:"component_name,omitempty"`
+
+	// RequirementIDs is the M:N coverage join — every Requirement whose
+	// acceptance scope is covered by this Story. Under the ADR-044 model,
+	// Sarah ensures every plan Requirement appears in ≥1 Story's
+	// RequirementIDs. Plan-reviewer rule story.requirement_orphan checks
+	// that every entry resolves to a known Requirement.ID.
+	RequirementIDs []string `json:"requirement_ids,omitempty"`
+
+	// CapabilityNames is the M:N coverage join — every Capability whose
+	// acceptance spec is provided by this Story's shipped code. Sarah
+	// ensures every plan Capability appears in ≥1 Story's CapabilityNames.
+	CapabilityNames []string `json:"capability_names,omitempty"`
 
 	// Title is the human-readable story heading.
 	Title string `json:"title"`
@@ -33,22 +54,22 @@ type Story struct {
 	// proves.
 	Intent string `json:"intent,omitempty"`
 
-	// Components are kebab-case ComponentDef.Name entries Sarah selected
-	// from the architecture document. Plan-reviewer rule
-	// story.unresolved_components rejects entries that don't match any
-	// declared component.
+	// Components carries the legacy multi-component selection for back-compat
+	// reads. Under ADR-044, use ComponentName (singular). This field is
+	// preserved so plans persisted before ADR-044 still deserialise cleanly.
 	Components []string `json:"components,omitempty"`
 
-	// FilesOwned is the union of the selected Components' implementation_files
-	// (Sarah assembles it explicitly so the dev knows the exact file set).
+	// FilesOwned is the component's ImplementationFiles (NOT a union —
+	// Sarah's component selection determines them exactly).
 	// Plan-reviewer rule story.missing_files_owned rejects empty lists;
 	// story.docs_only_files_owned rejects lists with no source-code file.
 	FilesOwned []string `json:"files_owned,omitempty"`
 
 	// DependsOn are other Story.ID entries that must reach StoryStatusComplete
-	// before this Story can dispatch. Plan-reviewer rules
-	// story.depends_on_orphan and story.depends_on_cycle reject unresolved
-	// IDs and DAG cycles.
+	// before this Story can dispatch. This slice is system-derived by
+	// DeriveStoryScheduling — Sarah does NOT author it under ADR-044.
+	// Plan-reviewer rules story.depends_on_orphan and story.depends_on_cycle
+	// reject unresolved IDs and DAG cycles.
 	DependsOn []string `json:"depends_on,omitempty"`
 
 	// Tasks are Sarah's ordered TDD checklist for this Story. A typical
@@ -83,6 +104,21 @@ type Story struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PrimaryRequirementID returns the first entry in RequirementIDs, or empty
+// string if the slice is empty. This is a singleton-slice compatibility
+// accessor for code that still assumes a single primary requirement per Story
+// (ADR-044 commit 2 transition phase). Callers that need the full M:N set
+// must iterate RequirementIDs directly.
+//
+// TODO ADR-044 commit 3+: all callers should be updated to handle the full
+// RequirementIDs slice where the singleton assumption breaks down.
+func (s *Story) PrimaryRequirementID() string {
+	if len(s.RequirementIDs) > 0 {
+		return s.RequirementIDs[0]
+	}
+	return ""
 }
 
 // StoryStatus represents the lifecycle state of a Story.

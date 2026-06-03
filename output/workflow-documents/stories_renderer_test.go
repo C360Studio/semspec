@@ -30,7 +30,7 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 		},
 		Stories: []workflow.Story{
 			{
-				ID: "story.p.1.1", RequirementID: "req.p.1",
+				ID: "story.p.1.1", RequirementIDs: []string{"req.p.1"}, ComponentName: "auth-service",
 				Title:      "Lifecycle",
 				Intent:     "Set up the auth lifecycle component.",
 				Components: []string{"auth-service"},
@@ -41,7 +41,7 @@ func TestRenderStories_GroupsByRequirement(t *testing.T) {
 				},
 			},
 			{
-				ID: "story.p.2.1", RequirementID: "req.p.2",
+				ID: "story.p.2.1", RequirementIDs: []string{"req.p.2"}, ComponentName: "session-store",
 				Title:      "Wire-up",
 				DependsOn:  []string{"story.p.1.1"},
 				FilesOwned: []string{"src/session.go"},
@@ -105,7 +105,7 @@ func TestRenderStories_OverlongTitleFallsBackToSlug(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:    "compact-slug",
 		Title:   verbose,
-		Stories: []workflow.Story{{ID: "s1", RequirementID: "r1"}},
+		Stories: []workflow.Story{{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "placeholder-component"}},
 		Requirements: []workflow.Requirement{
 			{ID: "r1", Title: "R1"},
 		},

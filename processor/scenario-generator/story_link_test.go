@@ -39,8 +39,8 @@ func TestAttachStoryIDs_SingleStoryPerRequirement(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "x",
 		Stories: []workflow.Story{
-			{ID: "story.x.1.1", RequirementID: "req.x.1", Title: "T"},
-			{ID: "story.x.2.1", RequirementID: "req.x.2", Title: "T2"},
+			{ID: "story.x.1.1", RequirementIDs: []string{"req.x.1"}, ComponentName: "placeholder-component", Title: "T"},
+			{ID: "story.x.2.1", RequirementIDs: []string{"req.x.2"}, ComponentName: "placeholder-component", Title: "T2"},
 		},
 	}
 	scenarios := []workflow.Scenario{
@@ -64,8 +64,8 @@ func TestAttachStoryIDs_MultiStoryPicksFirst(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "x",
 		Stories: []workflow.Story{
-			{ID: "story.x.1.1", RequirementID: "req.x.1", Title: "A"},
-			{ID: "story.x.1.2", RequirementID: "req.x.1", Title: "B"},
+			{ID: "story.x.1.1", RequirementIDs: []string{"req.x.1"}, ComponentName: "placeholder-component", Title: "A"},
+			{ID: "story.x.1.2", RequirementIDs: []string{"req.x.1"}, ComponentName: "placeholder-component-2", Title: "B"},
 		},
 	}
 	scenarios := []workflow.Scenario{{ID: "s1", RequirementID: "req.x.1"}}
@@ -83,7 +83,7 @@ func TestAttachStoryIDs_UnresolvedRequirementSkipsAssignment(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "x",
 		Stories: []workflow.Story{
-			{ID: "story.x.1.1", RequirementID: "req.x.1", Title: "T"},
+			{ID: "story.x.1.1", RequirementIDs: []string{"req.x.1"}, ComponentName: "placeholder-component", Title: "T"},
 		},
 	}
 	scenarios := []workflow.Scenario{{ID: "s1", RequirementID: "req.x.2"}}

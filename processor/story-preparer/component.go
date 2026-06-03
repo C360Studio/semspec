@@ -908,15 +908,27 @@ func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug 
 			return nil, err
 		}
 
+		// ADR-044 commit 2: singleton-slice semantics — promote the single
+		// canonical requirement ID into RequirementIDs[]. ComponentName
+		// is derived from the first component Sarah selected (Sarah's new
+		// constraint-satisfying prompt sets one component per Story — see
+		// commit 3 for the full prompt rewrite and the component_name field).
+		// TODO ADR-044 commit 3: parse ComponentName directly from Sarah's
+		// output; populate CapabilityNames from the coverage join.
+		componentName := ""
+		if len(s.Components) > 0 {
+			componentName = s.Components[0]
+		}
 		out[i] = workflow.Story{
-			ID:            canonicalIDs[i],
-			RequirementID: canonicalReqIDs[i],
-			Title:         s.Title,
-			Intent:        s.Intent,
-			Components:    append([]string(nil), s.Components...),
-			FilesOwned:    append([]string(nil), s.FilesOwned...),
-			DependsOn:     dependsOn,
-			Tasks:         tasks,
+			ID:             canonicalIDs[i],
+			ComponentName:  componentName,
+			RequirementIDs: []string{canonicalReqIDs[i]},
+			Title:          s.Title,
+			Intent:         s.Intent,
+			Components:     append([]string(nil), s.Components...),
+			FilesOwned:     append([]string(nil), s.FilesOwned...),
+			DependsOn:      dependsOn,
+			Tasks:          tasks,
 		}
 	}
 

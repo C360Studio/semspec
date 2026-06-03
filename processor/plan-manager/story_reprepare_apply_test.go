@@ -16,9 +16,9 @@ import (
 func TestApplyRecoveryHint_StoryReprepare_NamedStoriesOnly(t *testing.T) {
 	plan := &workflow.Plan{
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", Title: "untouched"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1", Title: "targeted"},
-			{ID: "story.demo.1.3", RequirementID: "req.demo.1", Title: "untouched"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "untouched"},
+			{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "targeted"},
+			{ID: "story.demo.1.3", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", Title: "untouched"},
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -50,9 +50,9 @@ func TestApplyRecoveryHint_StoryReprepare_NamedStoriesOnly(t *testing.T) {
 func TestApplyRecoveryHint_StoryReprepare_FallbackToReqScope(t *testing.T) {
 	plan := &workflow.Plan{
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
-			{ID: "story.demo.1.2", RequirementID: "req.demo.1"},
-			{ID: "story.demo.2.1", RequirementID: "req.demo.2"}, // different req
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
+			{ID: "story.demo.1.2", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
+			{ID: "story.demo.2.1", RequirementIDs: []string{"req.demo.2"}, ComponentName: "placeholder-component"}, // different req
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -84,7 +84,7 @@ func TestApplyRecoveryHint_RequirementChangePreservesBackCompat(t *testing.T) {
 			{ID: "req.demo.1"},
 		},
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1"},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component"},
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -110,7 +110,7 @@ func TestApplyRecoveryHint_StoryUpdatedAtSet(t *testing.T) {
 	stale := time.Now().Add(-time.Hour)
 	plan := &workflow.Plan{
 		Stories: []workflow.Story{
-			{ID: "story.demo.1.1", RequirementID: "req.demo.1", UpdatedAt: stale},
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "placeholder-component", UpdatedAt: stale},
 		},
 	}
 	proposal := &workflow.PlanDecision{

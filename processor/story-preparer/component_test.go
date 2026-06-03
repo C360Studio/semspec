@@ -149,9 +149,9 @@ func TestResolveStoryLabels_LabelDepsRewriteToCanonicalIDs(t *testing.T) {
 	if got[1].ID != "story.x.2.1" {
 		t.Errorf("story[1].ID = %q, want story.x.2.1", got[1].ID)
 	}
-	// RequirementID resolved from requirement_index.
-	if got[0].RequirementID != "requirement.x.1" {
-		t.Errorf("story[0].RequirementID = %q, want requirement.x.1", got[0].RequirementID)
+	// RequirementIDs resolved from requirement_index (ADR-044: singleton-slice).
+	if len(got[0].RequirementIDs) == 0 || got[0].RequirementIDs[0] != "requirement.x.1" {
+		t.Errorf("story[0].RequirementIDs[0] = %q, want requirement.x.1 (got RequirementIDs=%v)", got[0].PrimaryRequirementID(), got[0].RequirementIDs)
 	}
 	// DependsOn label resolves to canonical story ID.
 	if len(got[1].DependsOn) != 1 || got[1].DependsOn[0] != "story.x.1.1" {

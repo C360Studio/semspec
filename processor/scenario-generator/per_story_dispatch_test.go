@@ -16,12 +16,13 @@ func TestBuildStoryScopedRequest(t *testing.T) {
 	plan := &workflow.Plan{Slug: "x", Goal: "G", Context: "C"}
 	req := workflow.Requirement{ID: "req.x.1", Title: "T", Description: "D"}
 	story := workflow.Story{
-		ID:            "story.x.1.1",
-		RequirementID: "req.x.1",
-		Title:         "Story title",
-		Intent:        "Story intent",
-		FilesOwned:    []string{"src/a.go", "src/a_test.go"},
-		Components:    []string{"comp-a"},
+		ID:             "story.x.1.1",
+		RequirementIDs: []string{"req.x.1"},
+		ComponentName:  "comp-a",
+		Title:          "Story title",
+		Intent:         "Story intent",
+		FilesOwned:     []string{"src/a.go", "src/a_test.go"},
+		Components:     []string{"comp-a"},
 	}
 	required := []payloads.RequiredTier{{Tag: "@unit"}}
 
