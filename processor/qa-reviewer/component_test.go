@@ -293,6 +293,42 @@ func TestBuildQAReviewContext_ADR044CapabilityEvidence(t *testing.T) {
 	}
 }
 
+// TestBuildUserPrompt_ADR044CapabilityRollupSurfacesGaps pins the ADR-044
+// QA prompt-surface contract: the rendered user prompt MUST include the
+// "Capability evidence rollup" section + ❌ gap marker when a Capability
+// has zero covering Stories. A regression that drops this render block
+// would silently shift release-readiness back to the pre-ADR-044
+// "all requirements complete" gate without operator notice.
+func TestBuildUserPrompt_ADR044CapabilityRollupSurfacesGaps(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "demo",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{
+				{Name: "covered-cap"},
+				{Name: "uncovered-cap"},
+				{Name: "claimed-unshipped-cap"},
+			},
+		},
+		Stories: []workflow.Story{
+			{ID: "s1", CapabilityNames: []string{"covered-cap"}, Status: workflow.StoryStatusComplete},
+			{ID: "s2", CapabilityNames: []string{"claimed-unshipped-cap"}, Status: workflow.StoryStatusExecuting},
+		},
+	}
+	got := buildUserPrompt(plan)
+	if !strings.Contains(got, "Capability evidence rollup") {
+		t.Errorf("user prompt missing 'Capability evidence rollup' section — render regression:\n%s", got)
+	}
+	if !strings.Contains(got, "uncovered-cap") {
+		t.Errorf("user prompt missing uncovered-cap name:\n%s", got)
+	}
+	if !strings.Contains(got, "❌") {
+		t.Errorf("user prompt missing ❌ marker for uncovered Capability:\n%s", got)
+	}
+	if !strings.Contains(got, "⚠") {
+		t.Errorf("user prompt missing ⚠ marker for claimed-but-unshipped Capability:\n%s", got)
+	}
+}
+
 // TestBuildQAReviewContext_EvidenceGap_ClaimedButUnshipped pins the
 // second blocking signal: Capability has covering Story but the Story
 // has not reached terminal complete.

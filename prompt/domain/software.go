@@ -2336,6 +2336,40 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 					sb.WriteString("\n")
 				}
 
+				if len(qc.Capabilities) > 0 {
+					sb.WriteString("## Capabilities (ADR-044 evidence rollup)\n\n")
+					sb.WriteString("Each Capability is an acceptance contract; under ADR-044 release-readiness requires every Capability to have evidence from at least one shipped Story (Story.Status == complete).\n\n")
+					for _, c := range qc.Capabilities {
+						fmt.Fprintf(&sb, "- **%s** — %d covering Stor(ies), %d shipped",
+							c.Name, len(c.CoveringStoryIDs), c.ShippedCount)
+						if c.Description != "" {
+							fmt.Fprintf(&sb, " — %s", c.Description)
+						}
+						sb.WriteString("\n")
+					}
+					sb.WriteString("\n")
+				}
+
+				if len(qc.Stories) > 0 {
+					sb.WriteString("## Stories (per-component execution units, M:N coverage)\n\n")
+					for _, s := range qc.Stories {
+						status := s.Status
+						if status == "" {
+							status = "(pending)"
+						}
+						fmt.Fprintf(&sb, "- **[%s]** `%s` — %s (component: %s)",
+							status, s.ID, s.Title, s.ComponentName)
+						if len(s.RequirementIDs) > 0 {
+							fmt.Fprintf(&sb, " | covers reqs: %s", strings.Join(s.RequirementIDs, ", "))
+						}
+						if len(s.CapabilityNames) > 0 {
+							fmt.Fprintf(&sb, " | covers caps: %s", strings.Join(s.CapabilityNames, ", "))
+						}
+						sb.WriteString("\n")
+					}
+					sb.WriteString("\n")
+				}
+
 				if qc.TestSurface != nil {
 					sb.WriteString("## Architect-Declared Test Surface\n\n")
 					sb.WriteString("These are the test flows the architect declared must be covered. Use them to judge coverage adequacy.\n\n")
@@ -2425,19 +2459,21 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 				sb.WriteString("## Assessment Dimensions (by QA Level)\n\n")
 				switch qc.QALevel {
 				case workflow.QALevelSynthesis:
-					sb.WriteString("At **synthesis** level, populate only:\n")
-					sb.WriteString("- `requirement_fulfillment`: Did the plan's requirements get implemented? Any gaps?\n\n")
+					sb.WriteString("At **synthesis** level, populate:\n")
+					sb.WriteString("- `requirement_fulfillment`: Did the plan's requirements get implemented? Any gaps?\n")
+					sb.WriteString("- `capability_evidence` (ADR-044): Does every declared Capability have evidence from ≥1 shipped Story? The user prompt's rollup flags ❌ for unclaimed Capabilities and ⚠ for claimed-but-unshipped. Both block release at synthesis level only when the plan declares Stories; if the plan has zero Stories (pre-Sarah / mock fixtures), emit \"\" and note in summary.\n\n")
 					sb.WriteString("Leave `coverage`, `assertion_quality`, `regression_surface`, `flake_judgment` as empty strings.\n\n")
 				case workflow.QALevelUnit:
 					sb.WriteString("At **unit** level, populate:\n")
 					sb.WriteString("- `requirement_fulfillment`: Did the plan's requirements get implemented?\n")
+					sb.WriteString("- `capability_evidence` (ADR-044): Does every declared Capability have evidence from ≥1 shipped Story? Cite the offending Capability name(s) and recommend a PlanDecision when evidence is missing.\n")
 					sb.WriteString("- `coverage`: Is the test suite's coverage adequate for the risk surface?\n")
 					sb.WriteString("- `assertion_quality`: Are assertions meaningful and specific?\n")
 					sb.WriteString("- `regression_surface`: What existing behavior is at risk? Is it covered?\n\n")
 					sb.WriteString("Leave `flake_judgment` as empty string (single run, not enough data).\n\n")
 				case workflow.QALevelIntegration, workflow.QALevelFull:
-					sb.WriteString("At **integration/full** level, populate all five dimensions:\n")
-					sb.WriteString("- `requirement_fulfillment`, `coverage`, `assertion_quality`, `regression_surface`\n")
+					sb.WriteString("At **integration/full** level, populate all six dimensions:\n")
+					sb.WriteString("- `requirement_fulfillment`, `capability_evidence`, `coverage`, `assertion_quality`, `regression_surface`\n")
 					sb.WriteString("- `flake_judgment`: Do failures look like genuine defects or likely flakiness?\n\n")
 				}
 

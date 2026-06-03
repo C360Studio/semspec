@@ -2233,6 +2233,121 @@ func TestScopeScenariosToCurrentStory_LegacyExecFallsBackToAll(t *testing.T) {
 	}
 }
 
+// TestDispatchCurrentStoryLocked_NonCompleteStatusesFallThroughToDispatch
+// pins the ADR-044 dedup's negative case: any Story.Status other than
+// Complete must fall through to synthesis. The test exercises Pending,
+// Ready, Executing, Failed, and the zero-value. A regression that flipped
+// the condition (`!= Complete`) or accidentally treated Executing/Failed
+// as Complete would skip dispatch for live work — the test surfaces that
+// by asserting markCompletedLocked is NOT called.
+//
+// We use empty FilesOwned to force a synthesis error (the simplest signal
+// that the dispatch path was reached). markFailedLocked → requirementsFailed,
+// not requirementsCompleted, distinguishes the dispatch attempt from a skip.
+func TestDispatchCurrentStoryLocked_NonCompleteStatusesFallThroughToDispatch(t *testing.T) {
+	for _, status := range []workflow.StoryStatus{
+		"",
+		workflow.StoryStatusPending,
+		workflow.StoryStatusReady,
+		workflow.StoryStatusExecuting,
+		workflow.StoryStatusFailed,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			c := newTestComponent(t)
+			plan := &workflow.Plan{
+				Slug: "demo",
+				Stories: []workflow.Story{
+					{
+						ID:             "story.demo.shared",
+						ComponentName:  "shared",
+						RequirementIDs: []string{"req.demo.1"},
+						Status:         status,
+						// Empty FilesOwned → synthesizer fails → markFailedLocked fires.
+						// This proves we reached the dispatch path rather than skipping.
+						FilesOwned: []string{},
+						Tasks:      []workflow.Task{{ID: "task.demo.shared.1", StoryID: "story.demo.shared", Description: "x"}},
+					},
+				},
+			}
+			exec := &requirementExecution{
+				EntityID:        "semspec.local.exec.req.fall-through-" + string(status),
+				Slug:            "demo",
+				RequirementID:   "req.demo.1",
+				SortedStoryIDs:  []string{"story.demo.shared"},
+				CurrentStoryIdx: 0,
+				VisitedNodes:    make(map[string]bool),
+			}
+			exec.mu.Lock()
+			c.dispatchCurrentStoryLocked(context.Background(), exec, plan)
+			exec.mu.Unlock()
+
+			// Dispatch path must have been reached → synthesis failure → failed counter.
+			// The skip branch would increment requirementsCompleted instead.
+			if c.requirementsCompleted.Load() != 0 {
+				t.Errorf("Status=%q: requirementsCompleted = %d, want 0 (must NOT skip)", status, c.requirementsCompleted.Load())
+			}
+			if c.requirementsFailed.Load() != 1 {
+				t.Errorf("Status=%q: requirementsFailed = %d, want 1 (synthesis error proves dispatch path reached)", status, c.requirementsFailed.Load())
+			}
+		})
+	}
+}
+
+// TestDispatchCurrentStoryLocked_RecursesAcrossCompleteToReachReadyStory
+// pins multi-Story recursion: when the first Story in SortedStoryIDs is
+// Complete (already shipped by another req's executor) and the second
+// is not, the recursive call advances the cursor and synthesizes the
+// second Story's DAG. A bug in cursor advancement or recursion would
+// either dispatch the wrong Story or skip both.
+func TestDispatchCurrentStoryLocked_RecursesAcrossCompleteToReachReadyStory(t *testing.T) {
+	c := newTestComponent(t)
+	plan := &workflow.Plan{
+		Slug: "demo",
+		Stories: []workflow.Story{
+			{
+				ID:             "story.demo.first",
+				ComponentName:  "shared",
+				RequirementIDs: []string{"req.demo.1", "req.demo.2"},
+				Status:         workflow.StoryStatusComplete,
+				FilesOwned:     []string{"src/shared.go"},
+				Tasks:          []workflow.Task{{ID: "task.demo.first.1", StoryID: "story.demo.first", Description: "x"}},
+			},
+			{
+				ID:             "story.demo.second",
+				ComponentName:  "second",
+				RequirementIDs: []string{"req.demo.2"},
+				// Force synthesis failure so we can prove dispatch reached this Story
+				// (markFailedLocked is the observable signal).
+				FilesOwned: []string{},
+				Tasks:      []workflow.Task{{ID: "task.demo.second.1", StoryID: "story.demo.second", Description: "x"}},
+			},
+		},
+	}
+	exec := &requirementExecution{
+		EntityID:        "semspec.local.exec.req.recursion",
+		Slug:            "demo",
+		RequirementID:   "req.demo.2",
+		SortedStoryIDs:  []string{"story.demo.first", "story.demo.second"},
+		CurrentStoryIdx: 0,
+		VisitedNodes:    make(map[string]bool),
+	}
+	exec.mu.Lock()
+	c.dispatchCurrentStoryLocked(context.Background(), exec, plan)
+	exec.mu.Unlock()
+
+	// Recursion path: skip first, dispatch second, synthesis fails → markFailedLocked.
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1 (recursion should reach story.demo.second and fail synthesis)", c.requirementsFailed.Load())
+	}
+	if c.requirementsCompleted.Load() != 0 {
+		t.Errorf("requirementsCompleted = %d, want 0 (recursion should NOT have terminated as complete)", c.requirementsCompleted.Load())
+	}
+	// Cursor must have advanced past the skipped first Story.
+	if exec.CurrentStoryIdx != 1 {
+		t.Errorf("CurrentStoryIdx = %d, want 1 (cursor must advance past the skipped first Story)", exec.CurrentStoryIdx)
+	}
+}
+
 // TestDispatchCurrentStoryLocked_SkipsAlreadyCompleteStory pins the ADR-044
 // M:N dedup: when a Story covers multiple Requirements (Story.RequirementIDs
 // plural), the SAME Story appears in StoriesForRequirement() for every

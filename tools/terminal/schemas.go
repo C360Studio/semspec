@@ -815,11 +815,15 @@ func qaReviewSchema() map[string]any {
 			},
 			"dimensions": map[string]any{
 				"type":        "object",
-				"description": "Per-axis quality assessment. Populate only the dimensions appropriate to the qa.level (synthesis: requirement_fulfillment only; unit adds coverage/assertion_quality/regression_surface; integration/full add flake_judgment). Emit empty strings (\"\") for dimensions that don't apply to the current level.",
+				"description": "Per-axis quality assessment. Populate only the dimensions appropriate to the qa.level (synthesis: requirement_fulfillment + capability_evidence; unit adds coverage/assertion_quality/regression_surface; integration/full add flake_judgment). Emit empty strings (\"\") for dimensions that don't apply to the current level.",
 				"properties": map[string]any{
 					"requirement_fulfillment": map[string]any{
 						"type":        "string",
 						"description": "Did the implementation satisfy each requirement's intent? Note any requirement with no test coverage or with a scenario that went unimplemented.",
+					},
+					"capability_evidence": map[string]any{
+						"type":        "string",
+						"description": "ADR-044 M:N release-readiness gate. Does every Capability declared by the plan have evidence from at least one shipped Story (Story.Status == complete)? The Capability evidence rollup in the user prompt flags ❌ (no Story claims coverage) and ⚠ (claimed but unshipped). Both are blocking unless the qa.level is synthesis-only. Cite the offending Capability name(s) and recommend a PlanDecision when evidence is missing.",
 					},
 					"coverage": map[string]any{
 						"type":        "string",
@@ -838,7 +842,7 @@ func qaReviewSchema() map[string]any {
 						"description": "Level ≥ integration. Do failures look like genuine defects or likely test flakiness (timing, environment, network)? What evidence supports your judgment? Emit \"\" at synthesis or unit level.",
 					},
 				},
-				"required":             []string{"requirement_fulfillment", "coverage", "assertion_quality", "regression_surface", "flake_judgment"},
+				"required":             []string{"requirement_fulfillment", "capability_evidence", "coverage", "assertion_quality", "regression_surface", "flake_judgment"},
 				"additionalProperties": false,
 			},
 			"plan_decisions": map[string]any{

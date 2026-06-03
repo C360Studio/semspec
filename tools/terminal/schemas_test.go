@@ -84,6 +84,45 @@ func requireFieldsPresent(t *testing.T, location string, want, got []string) {
 	}
 }
 
+// TestQAReviewSchema_ADR044CapabilityEvidenceDimension pins the ADR-044
+// QA dimension addition: the qa-reviewer submit_work schema MUST require
+// a capability_evidence field on dimensions so the persona has a schema
+// slot for the M:N coverage gap diagnosis surfaced in the user prompt.
+// A regression that drops the field would silently force the persona to
+// shoehorn capability gaps into requirement_fulfillment or summary text.
+func TestQAReviewSchema_ADR044CapabilityEvidenceDimension(t *testing.T) {
+	schema := qaReviewSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing properties")
+	}
+	dims, ok := props["dimensions"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing dimensions")
+	}
+	dimProps, ok := dims["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("dimensions properties missing")
+	}
+	if _, ok := dimProps["capability_evidence"]; !ok {
+		t.Error("dimensions.capability_evidence missing — ADR-044 release-readiness gate has no schema slot")
+	}
+	required, ok := dims["required"].([]string)
+	if !ok {
+		t.Fatal("dimensions.required missing")
+	}
+	found := false
+	for _, r := range required {
+		if r == "capability_evidence" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("dimensions.required[] missing capability_evidence — strict mode rejects responses without it; persona will be schema-blocked from emitting the dimension")
+	}
+}
+
 // TestStoriesSchema_ADR044Shape pins the ADR-044 M:N wire shape on the
 // submit_work tool definition. Sarah's positional input struct in
 // processor/story-preparer/component.go expects component_name (singular

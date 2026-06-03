@@ -680,6 +680,7 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 		Summary: result.Summary,
 		Dimensions: workflow.QAVerdictDimensions{
 			RequirementFulfillment: result.Dimensions.RequirementFulfillment,
+			CapabilityEvidence:     result.Dimensions.CapabilityEvidence,
 			Coverage:               result.Dimensions.Coverage,
 			AssertionQuality:       result.Dimensions.AssertionQuality,
 			RegressionSurface:      result.Dimensions.RegressionSurface,
@@ -1020,6 +1021,7 @@ type qaReviewOutput struct {
 
 	Dimensions struct {
 		RequirementFulfillment string `json:"requirement_fulfillment"`
+		CapabilityEvidence     string `json:"capability_evidence"`
 		Coverage               string `json:"coverage"`
 		AssertionQuality       string `json:"assertion_quality"`
 		RegressionSurface      string `json:"regression_surface"`

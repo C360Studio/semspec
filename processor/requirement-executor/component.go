@@ -988,17 +988,23 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 // dispatchCurrentStoryLocked synthesizes the DAG for the Story at
 // SortedStoryIDs[CurrentStoryIdx] and hands off to applyParsedDAGLocked.
 //
-// ADR-044 M:N dedup: a Story may cover multiple Requirements
-// (Story.RequirementIDs is plural under ADR-044), so the SAME Story
-// appears in StoriesForRequirement() for every requirement it covers.
-// When the executor for R2 advances to a Story that R1's executor
-// already completed, we skip without re-dispatching — re-running the
-// dev loop would burn tokens duplicating committed work and could
-// regress the previous outcome. Status is observed from the freshly-
-// loaded plan KV; if the Story is StoryStatusComplete OR
-// StoryStatusExecuting (another requirement-executor is mid-flight),
-// advance the cursor and re-enter. Failed stories ARE retried so
-// requirement-level recovery still works.
+// ADR-044 M:N dedup (best-effort, post-completion only): a Story may
+// cover multiple Requirements (Story.RequirementIDs plural), so the
+// SAME Story appears in StoriesForRequirement() for every requirement
+// it covers. When the executor for R2 advances to a Story that R1's
+// executor already shipped, we skip without re-dispatching — re-running
+// the dev loop would burn tokens duplicating committed work and could
+// regress the previous outcome.
+//
+// SCOPE: today's check observes Story.Status == StoryStatusComplete
+// only. It catches late-arriving executors that load plan KV AFTER the
+// first writer ships, NOT executors that race-load BEFORE any writer
+// completes. The parallel-executor race (N executors of N requirements
+// all dispatching the same Story simultaneously) requires a Story-level
+// reservation pattern (claim Executing in PLAN_STATES with compare-and-
+// swap) that depends on plan-manager Story persistence — tracked for
+// commit 6. Failed / Pending / Ready / zero-value stories all fall
+// through to dispatch so requirement-level recovery still works.
 //
 // Caller must hold exec.mu.
 func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
