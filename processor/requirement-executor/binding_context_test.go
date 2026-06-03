@@ -65,7 +65,7 @@ func TestBuildBindingContextBlock_IntegrationScenario(t *testing.T) {
 		t.Fatal("expected non-empty block, got empty")
 	}
 
-	mustContain(t, got, "## Integration Test Requirements")
+	mustContain(t, got, "## Integration Test Context")
 	mustContain(t, got, "scenario.ebe27a10f9e4.1.1.3")
 	mustContain(t, got, "@integration")
 	mustContain(t, got, `"integration"`) // JUnit5 tag literal
@@ -212,7 +212,7 @@ func TestSynthesizeTaskDAGForStory_BindingBlockAppendedToPrompts(t *testing.T) {
 		descByID[t.ID] = t.Description
 	}
 	for _, n := range dag.Nodes {
-		if !strings.Contains(n.Prompt, "Integration Test Requirements") {
+		if !strings.Contains(n.Prompt, "Integration Test Context") {
 			t.Errorf("node %s prompt missing binding block:\n%s", n.ID, n.Prompt)
 		}
 		if !strings.Contains(n.Prompt, "mavlink.px4-sitl.mavsdk-smoke") {

@@ -49,9 +49,12 @@ func buildBindingContextBlock(scenarios []workflow.Scenario) string {
 	}
 
 	var b strings.Builder
-	b.WriteString("## Integration Test Requirements\n\n")
-	b.WriteString("The scenarios below require integration-tier test authoring. ")
-	b.WriteString("Satisfy each bullet to avoid mechanical rejections on the first review cycle.\n\n")
+	b.WriteString("## Integration Test Context\n\n")
+	b.WriteString("The scenarios below run under a system-owned test harness (qa-runner). ")
+	b.WriteString("The information below describes how qa-runner orchestrates the harness ")
+	b.WriteString("and routes tests — your test code needs to participate in that protocol, ")
+	b.WriteString("not just reference the literals. The reviewer judges whether your code ")
+	b.WriteString("actually exercises the harness; qa-runner runtime verifies it at execution.\n\n")
 
 	for _, sc := range relevant {
 		b.WriteString(formatScenarioBinding(sc))
@@ -116,34 +119,40 @@ func formatScenarioBinding(sc workflow.Scenario) string {
 			tag, bare, bare)
 	}
 
-	// Harness profile string literals — structural-validator checks the
-	// test contents for these literal strings (ADR-041 Move 5 binding
-	// check). Quoting them in the prompt makes the literal explicit.
+	// Harness profile routing keys. qa-runner uses these IDs as the tag
+	// selector to bring up the right service stack and route tagged tests
+	// against it. The dev's test code typically declares the binding via
+	// framework annotation (e.g. JUnit5 `@Tag` with a routing key) or by
+	// configuration. The literal need only appear where the framework
+	// actually consumes it — a dead reference does not bind anything.
+	// Reframed post-#113 (2026-06-03) — structural-validator no longer
+	// greps for these literals.
 	if len(sc.HarnessProfileIDs) > 0 {
-		fmt.Fprintf(&b, "  - Reference at least one of the bound harness profile ID(s) as a string literal in test source: %s.\n",
+		fmt.Fprintf(&b, "  - Harness profile routing key(s) qa-runner uses to bring up the stack: %s.\n",
 			quotedJoined(sc.HarnessProfileIDs))
 	}
 
-	// Env var consumption — the catalog declares which env vars the
-	// qa-runner injects at test time. Tests must read from these rather
-	// than hardcoding values (catalog-grounded env keys per the memory
-	// note feedback_catalog_grounded_env_keys).
+	// Env vars injected by qa-runner. The endpoint/config bindings come
+	// from these env vars at test runtime; hardcoding values would
+	// bypass the injection and ignore harness-specific configuration.
+	// The dev's test code reads them via the language's idiomatic env
+	// accessor (System.getenv / os.environ / std::env::var / etc.).
 	if len(sc.Env) > 0 {
 		keys := make([]string, 0, len(sc.Env))
 		for k := range sc.Env {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		fmt.Fprintf(&b, "  - Read these env var(s) at test runtime (qa-runner injects values): %s.\n",
+		fmt.Fprintf(&b, "  - Env vars qa-runner injects (read at test runtime, do not hardcode): %s.\n",
 			quotedJoined(keys))
 	}
 
-	// Required assertions — copy verbatim from catalog so the dev knows
-	// what the reviewer will demand. Capped at maxAssertionsPerScenario
-	// to guard prompt token budget against future bloated catalogs;
-	// truncation marker tells the dev to dig deeper if needed.
+	// Required assertions — copy verbatim from catalog. These describe
+	// the BEHAVIOR the test must demonstrate, not text the test must
+	// contain. The reviewer judges semantic satisfaction. Capped at
+	// maxAssertionsPerScenario to guard prompt token budget.
 	if len(sc.RequiredAssertions) > 0 {
-		b.WriteString("  - Required assertions:\n")
+		b.WriteString("  - Behavior the test must demonstrate (reviewer judges actual coverage, not text match):\n")
 		limit := len(sc.RequiredAssertions)
 		if limit > maxAssertionsPerScenario {
 			limit = maxAssertionsPerScenario

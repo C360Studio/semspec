@@ -144,7 +144,7 @@ func TestPlumbingDiscipline_FullChain(t *testing.T) {
 	// In practice the synthesizer is called by the executor on
 	// requirement dispatch.
 	prompt := requirementexecutor.BuildDevPromptForTesting(plan, story)
-	if !strings.Contains(prompt, "## Integration Test Requirements") {
+	if !strings.Contains(prompt, "## Integration Test Context") {
 		t.Errorf("dev prompt should include the binding block:\n%s", prompt)
 	}
 	if !strings.Contains(prompt, "plumbing.test-profile") {
@@ -192,7 +192,7 @@ func TestPlumbingDiscipline_UnitOnlyChain(t *testing.T) {
 	}
 
 	prompt := requirementexecutor.BuildDevPromptForTesting(plan, story)
-	if strings.Contains(prompt, "Integration Test Requirements") {
+	if strings.Contains(prompt, "Integration Test Context") {
 		t.Errorf("unit-only story prompt should NOT include binding block:\n%s", prompt)
 	}
 	if prompt != "Write a unit test." {

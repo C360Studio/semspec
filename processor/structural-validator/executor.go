@@ -135,15 +135,15 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		results = append(results, antiMockResult)
 	}
 
-	// Catalog-backed harness profile discipline check — fires whenever modified
-	// files include test files in ANY supported language (not just Go).
-	// Verifies that selected required catalog profiles are evidenced by the
-	// dev's tests. The catalog owns images, ports, readiness, and assertions.
-	// Per ADR-039, services-class profiles render as qa.yml services: blocks
-	// from the catalog (qa-runner brings the stack up; tests are consumers).
-	// testcontainers-class and pure-fixture profiles stay in project test code.
-	// This check is orchestration-agnostic: it verifies the dev's tests carry
-	// the required test assertions regardless of who starts the services.
+	// Catalog-backed harness profile discipline check — fires whenever
+	// modified files include test files in any supported language (the
+	// filterTestFiles gate stays as a no-op-cheap signal that a test
+	// dispatch is in flight). Post-issue #113 (2026-06-03) the check
+	// verifies only that the architect's harness_profile_selections
+	// resolve in the catalog. Binding correctness (the test actually
+	// exercises the bound harness) is enforced by the LLM reviewer +
+	// qa-runner runtime — see ADR-041 Move 5 amendment for why the
+	// literal-substring sub-checks were retired.
 	// Loads selections from .semspec/plans/<slug>/plan.json on disk;
 	// greenfield projects (no architecture) trivially pass.
 	if len(filterTestFiles(trigger.FilesModified)) > 0 {
@@ -158,8 +158,13 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 				Stdout:   fmt.Sprintf("load harness catalog: %v", err),
 			})
 		} else {
-			scenarios := loadScenarios(e.repoPath, trigger.Slug)
-			results = append(results, CheckHarnessProfileDiscipline(workDir, trigger.FilesModified, selections, scenarios, catalog))
+			// Issue #113 (2026-06-03): the discipline check no longer needs
+			// workDir/filesModified/scenarios. The literal-substring sub-
+			// checks were retired (goodhart-able); the simplified check
+			// just verifies the architect's selections resolve in the
+			// catalog. Binding correctness is enforced by LLM reviewer +
+			// qa-runner runtime.
+			results = append(results, CheckHarnessProfileDiscipline(selections, catalog))
 		}
 	}
 

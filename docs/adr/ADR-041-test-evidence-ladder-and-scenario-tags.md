@@ -147,6 +147,19 @@ For every `@integration` scenario, the dev's tagged test file (matching the scen
 
 This extends the existing `CheckHarnessProfileDiscipline` (in `processor/structural-validator/testcontainers_discipline.go`) — the assertions check is already there. The additions are (1) the harness-binding string presence and (2) the env-var consumption pattern. The check name (`harness-profile-discipline`) stays as the stable operator identifier; the messaging and behavior expand.
 
+#### Amendment (2026-06-03, issue #113): Move 5 retired
+
+The three literal-substring sub-checks above were retired. They were goodhart-able: any check that grades on "did you write this exact string" can be passed with a dead string literal. PR #109 (#90) made the attack surface visible by surfacing the expected literals to the dev's first-cycle prompt — turning a latent footgun into an active invitation.
+
+**What replaced them.** `CheckHarnessProfileDiscipline` now does one thing: verify the architect's `harness_profile_selections` resolve in the catalog (a plan-time validity check, not a behavioral one). Binding correctness is enforced by:
+
+- **LLM reviewer** — judges whether the test actually exercises the bound harness. Smoke 9 (2026-06-02) demonstrated this works in practice: the reviewer caught "UDP heartbeat probe facade is not real `mavsdk_server` lifecycle management" — the exact stub shape a literal check cannot distinguish.
+- **qa-runner runtime** — actually starts the bound service stack and runs the `@integration` test against it. A test that references the literal but doesn't open the service fails at runtime.
+
+**Prompt language reframed.** The dev-prompt binding context (`processor/requirement-executor/binding_context.go`) shifted from "satisfy this check" framing to "this is the routing key / env binding qa-runner uses" framing. The dev still sees the literals because they're useful information; the framing no longer invites mechanical-pass-by-pasting.
+
+**Future direction.** Issue #113 lists Option B (AST-aware checks via per-language test-source inspection) and Option C (behavioral-evidence verification via qa-runner runtime tracing) as the architecturally right destinations. This amendment ships Option A (delete the literal checks) as the immediate fix; B/C are open for future work.
+
 ### Move 6: Req-reviewer tier-aware contract
 
 The requirement-level reviewer's contract changes from "do all tests satisfy all scenarios?" (ill-defined when scenarios cross tiers the dev can't observe) to "do the dev's tests satisfy the obligations at the dev tier?":
