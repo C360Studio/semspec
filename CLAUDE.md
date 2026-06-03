@@ -62,6 +62,22 @@ execution time (reactive mode) and are never stored in plan files.
 rule evaluation. Managers write to both on every mutation and reconcile from `PLAN_STATES` on
 startup.
 
+**M:N Story coverage (ADR-044)**: Story is the per-component execution unit. One Story anchors
+to ONE component (`ComponentName`) and may cover N Requirements and N Capabilities via M:N
+join slices (`RequirementIDs []string`, `CapabilityNames []string`). `FilesOwned` is derived
+from `component.ImplementationFiles` (no Sarah authorship, no union). `Story.DependsOn` is
+SYSTEM-derived by `workflow.DeriveStoryScheduling` from two sources:
+(1) Requirement prereq closure (wait for ALL coverers, not "any") and
+(2) file-ownership conflicts (same-component → reject, cross-component → serialize, ill-shaped → reject).
+Cycle in derived DAG = invalid coverage partition; Sarah retries with remediation hint.
+
+**M:N reservation pattern**: Under the cohesive shape (1 Story covers N Requirements), the
+scenario-orchestrator's `filterByM2NStoryReservations` ensures ONLY the deterministic owner
+(lexicographically smallest req ID in `Story.RequirementIDs`) dispatches the dev loop. Non-owners
+are gated behind `Story.Status == complete`. On owner completion, plan-manager re-fires the
+orchestrator; non-owners dispatch and hit the executor's Tier-1 dedup which fast-completes them
+without re-running the dev loop. Cost: 1 dev loop per Story instead of N.
+
 **workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a
 state management layer. Components own their entity lifecycle.
 
