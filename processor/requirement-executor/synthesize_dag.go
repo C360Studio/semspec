@@ -33,18 +33,34 @@ func synthesizeTaskDAGForStory(plan *workflow.Plan, story workflow.Story) (*Task
 	}
 
 	var scenarioIDs []string
+	var storyScenarios []workflow.Scenario
 	if plan != nil {
-		for _, sc := range plan.ScenariosForStory(story.ID) {
+		storyScenarios = plan.ScenariosForStory(story.ID)
+		for _, sc := range storyScenarios {
 			scenarioIDs = append(scenarioIDs, sc.ID)
 		}
 	}
 
+	// Issue #90: front-load ADR-041 mechanical binding requirements
+	// (tier tag, harness profile string literal, env var consumption,
+	// required assertions) into the dev's task prompt. Sarah's authored
+	// task description is intentionally short; smoke 9 showed the dev
+	// burned multiple TDD cycles re-discovering the bindings via reviewer
+	// feedback even though the data is already on the scenarios (after
+	// issue #89 denormalized it from the catalog). The binding block
+	// returns "" for @unit-only stories so this is purely additive.
+	bindingBlock := buildBindingContextBlock(storyScenarios)
+
 	files := append([]string(nil), story.FilesOwned...)
 	nodes := make([]TaskNode, 0, len(story.Tasks))
 	for _, t := range story.Tasks {
+		prompt := t.Description
+		if bindingBlock != "" {
+			prompt = prompt + "\n\n---\n\n" + bindingBlock
+		}
 		nodes = append(nodes, TaskNode{
 			ID:          t.ID,
-			Prompt:      t.Description,
+			Prompt:      prompt,
 			Role:        "developer",
 			DependsOn:   append([]string(nil), t.DependsOn...),
 			FileScope:   files,
