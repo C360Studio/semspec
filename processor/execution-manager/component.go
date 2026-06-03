@@ -449,6 +449,26 @@ func (c *Component) readPlanTestSurface(ctx context.Context, slug string) *workf
 	return plan.Architecture.TestSurface
 }
 
+// scenariosToSpecs converts a slice of workflow.Scenario into the prompt-
+// facing prompt.ScenarioSpec shape rendered by the developer and per-task
+// code-reviewer fragments. Returns nil for empty input so the
+// "Scenarios is non-empty" condition gates fragment rendering cleanly.
+func scenariosToSpecs(scenarios []workflow.Scenario) []prompt.ScenarioSpec {
+	if len(scenarios) == 0 {
+		return nil
+	}
+	out := make([]prompt.ScenarioSpec, 0, len(scenarios))
+	for _, s := range scenarios {
+		out = append(out, prompt.ScenarioSpec{
+			ID:    s.ID,
+			Given: s.Given,
+			When:  s.When,
+			Then:  append([]string(nil), s.Then...),
+		})
+	}
+	return out
+}
+
 func (c *Component) readPlanHarnessProfiles(ctx context.Context, slug string) []prompt.ResolvedHarnessProfileContext {
 	if c.planBucket == nil || slug == "" {
 		return nil
@@ -1585,6 +1605,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			TestSurface:     c.readPlanTestSurface(ctx, exec.Slug),
 			HarnessProfiles: c.readPlanHarnessProfiles(ctx, exec.Slug),
 			WorktreePath:    exec.WorktreePath,
+			Scenarios:       scenariosToSpecs(exec.Scenarios),
 		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0

@@ -47,6 +47,14 @@ type TaskCreateRequest struct {
 	WorktreeBranch string            `json:"worktree_branch,omitempty"`
 	ScenarioBranch string            `json:"scenario_branch,omitempty"`
 	FileScope      []string          `json:"file_scope,omitempty"`
+
+	// Scenarios are the BDD scenarios this DAG node is responsible for
+	// satisfying. Filtered from the parent requirement's full scenario set
+	// by node.ScenarioIDs at requirement-executor dispatch time. Persisted
+	// to TaskExecution.Scenarios so developer + reviewer + validator prompts
+	// can ground their work in the actual given/when/then contract — closes
+	// the Cline-blind-to-contract disconnect surfaced 2026-06-03.
+	Scenarios []workflow.Scenario `json:"scenarios,omitempty"`
 }
 
 // TaskPhaseRequest transitions a task execution to a new phase.
@@ -254,6 +262,7 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		WorktreeBranch: req.WorktreeBranch,
 		ScenarioBranch: req.ScenarioBranch,
 		FileScope:      req.FileScope,
+		Scenarios:      req.Scenarios,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
