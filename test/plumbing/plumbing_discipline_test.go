@@ -25,8 +25,8 @@ import (
 	"strings"
 	"testing"
 
-	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
+	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/harnesscatalog"
 )
