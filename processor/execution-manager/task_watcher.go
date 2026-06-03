@@ -116,6 +116,19 @@ func (c *Component) handleTaskPending(ctx context.Context, entry jetstream.KeyVa
 			WorktreeBranch: taskExec.WorktreeBranch,
 			ScenarioBranch: taskExec.ScenarioBranch,
 			FileScope:      taskExec.FileScope,
+			// Scenarios threading (2026-06-03): without this line, the
+			// watcher rebuilds TaskExecution from KV without scenarios,
+			// then syncToStore at initTaskExecution overwrites the KV
+			// with the in-memory copy — silently stripping scenarios
+			// from the persisted entity. Mirrors the 2026-05-11
+			// RequirementID bug above: ANY new TaskExecution field
+			// MUST be added here or syncToStore strips it on first
+			// watcher pass. Production paid mavlink-hard 2026-06-03
+			// reproduced this: TaskCreateRequest had scenarios=3,
+			// pre-save marshal had scenarios=true, then 5ms later a
+			// syncToStore save wrote scenarios_on_struct=0 because
+			// this struct literal dropped the field on rebuild.
+			Scenarios: taskExec.Scenarios,
 		},
 	}
 
