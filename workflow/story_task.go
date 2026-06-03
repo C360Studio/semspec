@@ -31,7 +31,7 @@ type Story struct {
 	// ComponentName is the 1:1 execution anchor — the single architectural
 	// component this Story implements. Sarah selects ONE component per Story;
 	// FilesOwned is derived directly from ComponentDef.ImplementationFiles.
-	// Plan-reviewer rule story.unresolved_components rejects values that
+	// Plan-reviewer rule story.unresolved_component rejects values that
 	// don't match any declared component.
 	ComponentName string `json:"component_name,omitempty"`
 

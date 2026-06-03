@@ -1462,13 +1462,12 @@ The upstream_resolutions[] and harness_profiles[] fields are the load-bearing pi
 {
   "stories": [
     {
-      "label": "lifecycle",
-      "requirement_index": 0,
-      "title": "Human-readable story heading",
+      "label": "driver",
+      "component_name": "mavsdk-driver",
+      "requirement_indices": [0, 1, 2],
+      "capability_indices": [0, 1, 2],
+      "title": "Cohesive MAVSDK driver",
       "intent": "1-2 sentences on what implementing this story proves.",
-      "components": ["component-name-1"],
-      "files_owned": ["src/path/one.go", "src/path/two.go"],
-      "depends_on_labels": [],
       "tasks": [
         {
           "label": "test-first",
@@ -1485,20 +1484,24 @@ The upstream_resolutions[] and harness_profiles[] fields are the load-bearing pi
   ]
 }
 
-Required per story: label, requirement_index, title, intent, components, files_owned, depends_on_labels, tasks. Required per task: label, description, depends_on_labels.
+Required per story: label, component_name, requirement_indices, capability_indices, title, intent, tasks. Required per task: label, description, depends_on_labels.
 
-Label semantics (ADR-043 PR 4e positional shape):
-  - label is your local string identifier for a story/task. Use any short kebab-case form ("lifecycle", "telemetry", "test-first"). The system resolves your labels into canonical Story.ID / Task.ID values server-side, so you don't fabricate the slug-dependent entity-ID format.
-  - requirement_index is 0-based — requirement_index=0 binds this story to the first Requirement in your prompt's Requirements list, requirement_index=1 to the second, etc.
-  - depends_on_labels (on a story) must match labels of OTHER stories you emit in this same call.
-  - depends_on_labels (on a task) must match labels of OTHER tasks within the SAME story (cross-story task ordering lives on story.depends_on_labels, not task.depends_on_labels).
+Label and index semantics (ADR-044 M:N coverage):
+  - label is your local string identifier for a story/task. Use any short kebab-case form ("driver", "test-first"). The system resolves your labels into canonical Story.ID / Task.ID values server-side, so you don't fabricate the slug-dependent entity-ID format.
+  - component_name is ONE architectural component name. FilesOwned is derived from that component's implementation_files by the system — you do NOT pick files.
+  - requirement_indices is the LIST of 0-based indices into your prompt's Requirements list — every Requirement this Story covers. One Story may cover many Requirements when they map to the same component (the cohesive-component case).
+  - capability_indices is the LIST of 0-based indices into your prompt's Capabilities list — every Capability this Story provides acceptance evidence for.
+  - Cross-story DependsOn is SYSTEM-DERIVED from (a) Requirement prereq closure and (b) file-ownership conflicts. Do NOT author cross-story edges; focus on coverage joins.
+  - task depends_on_labels must match labels of OTHER tasks WITHIN the SAME story (intra-story task ordering only).
 
 Readiness gate before signing off a Story (rejection means regen):
-  - files_owned non-empty AND at least one source-code file (.go/.java/.ts/.py/.rs/...).
+  - component_name resolves to a declared component_boundaries[].name from the architecture.
+  - requirement_indices is non-empty and every entry is in range.
+  - capability_indices entries are all in range.
+  - Every plan Requirement appears in ≥1 Story's requirement_indices; every plan Capability appears in ≥1 Story's capability_indices.
   - tasks non-empty (3-5 entries is typical).
-  - components entries match declared component_boundaries[].name from the architecture.
-  - depends_on_labels entries resolve to other story/task labels you emit in this same call.
-  - requirement_index points at a real entry in the Requirements list shown in your prompt.
+
+If the system rejects with story.same_component_file_conflict, collapse the two Stories into one covering the union of their indices. If you get coverage_partition_cyclic, split or merge Stories per the error message so coverage spans a contiguous Requirement DAG layer.
 
 Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},

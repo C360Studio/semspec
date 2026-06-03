@@ -798,10 +798,12 @@ const (
 	// One triple per story.
 	StoryRequirement = "semspec.story.requirement"
 
-	// StoryComponent records a ComponentDef.Name this story implements.
-	// Multi-valued — one triple per component. Plan-reviewer R3 rule
-	// story.unresolved_components rejects entries that don't match any
-	// declared component.
+	// StoryComponent records the ComponentDef.Name this story anchors to
+	// (ADR-044: 1:1). Plan-reviewer R3 rule story.unresolved_component
+	// rejects values that don't match any declared component. Predicate
+	// remains "semspec.story.component" (singular) — under ADR-044 it
+	// holds at most one triple per story; the multi-value semantics
+	// from ADR-043 are retired and migration is tracked for commit 6.
 	StoryComponent = "semspec.story.component"
 
 	// StoryFilesOwned is a workspace-relative path this story is allowed
