@@ -3,6 +3,7 @@ package workflow
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -11,10 +12,11 @@ import (
 // the ErrInvalidRequirementDAG / ErrInvalidFileOwnership pattern from
 // plan_requirement.go.
 var (
-	ErrInvalidStoryDAG       = errors.New("invalid story DAG")
-	ErrInvalidStoryStructure = errors.New("invalid story structure")
-	ErrInvalidTaskDAG        = errors.New("invalid task DAG")
-	ErrInvalidTaskStructure  = errors.New("invalid task structure")
+	ErrInvalidStoryDAG           = errors.New("invalid story DAG")
+	ErrInvalidStoryStructure     = errors.New("invalid story structure")
+	ErrInvalidStoryFileOwnership = errors.New("invalid story file ownership")
+	ErrInvalidTaskDAG            = errors.New("invalid task DAG")
+	ErrInvalidTaskStructure      = errors.New("invalid task structure")
 )
 
 // ValidateStoryDAG validates that DependsOn references within the provided
@@ -141,9 +143,11 @@ func hasSourceFile(paths []string) bool {
 }
 
 // ValidateStories runs ValidateStory on each entry, ValidateStoryDAG across
-// the set, and additionally validates intra-Story task DAGs. Mode 1 (per-Story
-// structural invariants) runs first so callers see the most specific failure;
-// Mode 2 (cross-Story DAG) runs second; Mode 3 (per-Story task DAG) runs last.
+// the set, ValidateStoryFileOwnership across the set, and additionally
+// validates intra-Story task DAGs. Mode 1 (per-Story structural invariants)
+// runs first so callers see the most specific failure; Mode 2 (cross-Story
+// DAG) runs second; Mode 3 (cross-Story file-ownership / race prevention)
+// runs third; Mode 4 (per-Story task DAG) runs last.
 //
 // Plan-reviewer R3 invokes this on the preparing_stories → ready_for_execution
 // boundary; story-preparer (Sarah) invokes it inside her readiness gate.
@@ -154,6 +158,9 @@ func ValidateStories(stories []Story) error {
 		}
 	}
 	if err := ValidateStoryDAG(stories); err != nil {
+		return err
+	}
+	if err := ValidateStoryFileOwnership(stories); err != nil {
 		return err
 	}
 	for _, s := range stories {
@@ -167,6 +174,113 @@ func ValidateStories(stories []Story) error {
 		}
 	}
 	return nil
+}
+
+// ValidateStoryFileOwnership ensures that when two Stories share at least one
+// file in FilesOwned, the DependsOn DAG sequences one before the other so the
+// scenario-orchestrator's parallel dispatch (config max_concurrent=5) does NOT
+// race-write the shared files.
+//
+// ADR-043 Move 4 retired the requirement-level partition validator on the
+// premise that file-collision sequencing would move to Story.DependsOn after
+// Sarah shards. Smoke 9 (2026-06-02 hybrid-gpt5 mavlink-hard) showed Sarah
+// declaring overlapping files_owned across sibling Stories under different
+// Requirements without the corresponding DependsOn edges — a latent
+// write-race that today is hidden by serial Requirement DAG execution but
+// would activate the moment parallel Requirement dispatch lands. This
+// validator fills in the explicitly-deferred TODO from plan_requirement.go
+// (ValidateFileOwnershipPartition no-op).
+//
+// The check is symmetric: for any pair (A, B) of distinct Stories sharing at
+// least one normalized FilesOwned path, A must be in B's transitive
+// DependsOn closure OR vice versa. Self-comparisons skipped. Empty FilesOwned
+// short-circuits. Files normalized via NormalizeFilePath so `src/x.go` and
+// `./src/x.go` compare equal.
+//
+// Returns ErrInvalidStoryFileOwnership wrapped with the offending Story IDs
+// and the shared file(s). plan-reviewer R3 and Sarah's readiness gate route
+// on errors.Is.
+func ValidateStoryFileOwnership(stories []Story) error {
+	if len(stories) < 2 {
+		return nil
+	}
+
+	// Build the transitive DependsOn closure for each Story. BFS from each
+	// Story over its direct DependsOn edges. O(n²) memory, O(n³) worst-case
+	// time — acceptable for plan-level Story counts (typically <20).
+	adj := make(map[string][]string, len(stories))
+	for _, s := range stories {
+		adj[s.ID] = s.DependsOn
+	}
+	closure := make(map[string]map[string]struct{}, len(stories))
+	for _, s := range stories {
+		seen := make(map[string]struct{})
+		queue := append([]string(nil), s.DependsOn...)
+		for len(queue) > 0 {
+			head := queue[0]
+			queue = queue[1:]
+			if _, ok := seen[head]; ok {
+				continue
+			}
+			seen[head] = struct{}{}
+			queue = append(queue, adj[head]...)
+		}
+		closure[s.ID] = seen
+	}
+
+	// Pre-normalize each Story's FilesOwned into a set so pair-wise checks
+	// don't re-normalize. Empty paths (NormalizeFilePath returns "" for
+	// escapes / "..") are dropped.
+	normalized := make(map[string]map[string]struct{}, len(stories))
+	for _, s := range stories {
+		set := make(map[string]struct{}, len(s.FilesOwned))
+		for _, f := range s.FilesOwned {
+			if n := NormalizeFilePath(f); n != "" {
+				set[n] = struct{}{}
+			}
+		}
+		normalized[s.ID] = set
+	}
+
+	for i := 0; i < len(stories); i++ {
+		a := stories[i]
+		for j := i + 1; j < len(stories); j++ {
+			b := stories[j]
+			shared := sharedFiles(normalized[a.ID], normalized[b.ID])
+			if len(shared) == 0 {
+				continue
+			}
+			_, aDependsOnB := closure[a.ID][b.ID]
+			_, bDependsOnA := closure[b.ID][a.ID]
+			if !aDependsOnB && !bDependsOnA {
+				return fmt.Errorf("%w: stories %q and %q share file(s) %v but neither depends on the other (transitively) — would race-write at parallel dispatch; add a depends_on edge from the later Story to the earlier one",
+					ErrInvalidStoryFileOwnership, a.ID, b.ID, shared)
+			}
+		}
+	}
+	return nil
+}
+
+// sharedFiles returns the sorted intersection of two normalized file sets.
+// Returns nil when there is no overlap. Sorted output makes test assertions
+// deterministic and the error message reproducible.
+func sharedFiles(a, b map[string]struct{}) []string {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	// Iterate the smaller set for the membership test.
+	small, large := a, b
+	if len(b) < len(a) {
+		small, large = b, a
+	}
+	var out []string
+	for f := range small {
+		if _, ok := large[f]; ok {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ValidateTask checks structural invariants for a single Task:

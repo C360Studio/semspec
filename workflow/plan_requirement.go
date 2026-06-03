@@ -105,12 +105,14 @@ func ValidateRequirementDAG(requirements []Requirement) error {
 // file ownership now lives on Story (Sarah computes the union of selected
 // Components' implementation_files). The equivalent invariants for the
 // Story DAG live on workflow.ValidateStories + plan-reviewer R3 rules
-// (story.missing_files_owned, story.docs_only_files_owned).
+// (story.missing_files_owned, story.docs_only_files_owned), and the
+// overlap-without-depends_on check itself lives at
+// workflow.ValidateStoryFileOwnership (Mode 3 of ValidateStories) as of
+// issue #88 (2026-06-03), which fills in this function's explicit "moves
+// to ValidateStories in PR 4b" TODO.
 //
 // This function survives as a no-op so SaveRequirements still compiles
-// and existing callers don't fan out into the rest of the codebase. The
-// real partition validation moves to ValidateStories in PR 4b once
-// per-Story execution lands.
+// and existing callers don't fan out into the rest of the codebase.
 func ValidateFileOwnershipPartition(requirements []Requirement) error {
 	_ = requirements
 	return nil
