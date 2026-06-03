@@ -487,7 +487,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 		MaxTokens:         maxTokens,
 		Standards:         stdCtx,
 		QAReviewContext:   qrc,
-		QAReviewerPrompt:  &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError},
+		QAReviewerPrompt:  &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError, QAReviewContext: qrc},
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
 	}
@@ -917,6 +917,13 @@ func buildQAReviewContext(plan *workflow.Plan) *prompt.QAReviewContext {
 		})
 	}
 
+	// ADR-044 M:N evidence rollup: per-Story summary + per-Capability
+	// covering-Story index. QA-reviewer's release-readiness verdict shifts
+	// from "all requirements complete" to "every capability has evidence
+	// from at least one shipped Story."
+	qrc.Stories = buildQAStorySummaries(plan)
+	qrc.Capabilities = buildQACapabilityEvidence(plan)
+
 	// Pull test surface from architecture if available.
 	if plan.Architecture != nil {
 		qrc.TestSurface = plan.Architecture.TestSurface
@@ -933,6 +940,59 @@ func buildQAReviewContext(plan *workflow.Plan) *prompt.QAReviewContext {
 	return qrc
 }
 
+// buildQAStorySummaries projects plan.Stories into the per-Story rollup
+// the QA-reviewer prompt surfaces under ADR-044.
+func buildQAStorySummaries(plan *workflow.Plan) []prompt.QAStorySummary {
+	if plan == nil || len(plan.Stories) == 0 {
+		return nil
+	}
+	out := make([]prompt.QAStorySummary, 0, len(plan.Stories))
+	for _, s := range plan.Stories {
+		out = append(out, prompt.QAStorySummary{
+			ID:              s.ID,
+			Title:           s.Title,
+			ComponentName:   s.ComponentName,
+			RequirementIDs:  append([]string(nil), s.RequirementIDs...),
+			CapabilityNames: append([]string(nil), s.CapabilityNames...),
+			Status:          string(s.Status),
+		})
+	}
+	return out
+}
+
+// buildQACapabilityEvidence walks plan.Exploration.Capabilities and joins
+// against plan.Stories[*].CapabilityNames to surface, per Capability, the
+// list of Stories that claim coverage + how many of those Stories actually
+// reached terminal-complete. Empty CoveringStoryIDs is a coverage gap —
+// the capability is declared but no Story claims it. Zero ShippedCount
+// is an evidence gap — Stories claim coverage but none has shipped.
+func buildQACapabilityEvidence(plan *workflow.Plan) []prompt.QACapabilityEvidence {
+	if plan == nil || plan.Exploration == nil || len(plan.Exploration.Capabilities) == 0 {
+		return nil
+	}
+	out := make([]prompt.QACapabilityEvidence, 0, len(plan.Exploration.Capabilities))
+	for _, cap := range plan.Exploration.Capabilities {
+		entry := prompt.QACapabilityEvidence{
+			Name:        cap.Name,
+			Description: cap.Description,
+		}
+		for _, s := range plan.Stories {
+			for _, cn := range s.CapabilityNames {
+				if cn != cap.Name {
+					continue
+				}
+				entry.CoveringStoryIDs = append(entry.CoveringStoryIDs, s.ID)
+				if s.Status == workflow.StoryStatusComplete {
+					entry.ShippedCount++
+				}
+				break
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // buildUserPrompt is a thin wrapper around the registry path so the existing
 // component tests can stay focused on prompt content without going through
 // the full assembler. The actual prompt body lives in
@@ -943,10 +1003,12 @@ func buildUserPrompt(plan *workflow.Plan) string {
 	r := prompt.NewRegistry()
 	r.RegisterAll(promptdomain.Software()...)
 	a := prompt.NewAssembler(r)
+	qrc := buildQAReviewContext(plan)
 	out := a.Assemble(&prompt.AssemblyContext{
 		Role:             prompt.RolePlanQAReviewer,
 		Provider:         prompt.ProviderOpenAI,
-		QAReviewerPrompt: &prompt.QAReviewerPromptContext{Plan: plan},
+		QAReviewContext:  qrc,
+		QAReviewerPrompt: &prompt.QAReviewerPromptContext{Plan: plan, QAReviewContext: qrc},
 	})
 	return out.UserMessage
 }

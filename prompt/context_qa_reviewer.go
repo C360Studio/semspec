@@ -13,4 +13,9 @@ type QAReviewerPromptContext struct {
 	// on parse-error retries so the reviewer is not asked to re-emit a bad
 	// shape blindly.
 	PreviousError string
+	// QAReviewContext carries the pre-computed rollup the user prompt
+	// surfaces (ADR-044 capability evidence join, story summaries, etc.).
+	// Populated by qa-reviewer when dispatching; renderer reads it without
+	// re-walking the plan.
+	QAReviewContext *QAReviewContext
 }

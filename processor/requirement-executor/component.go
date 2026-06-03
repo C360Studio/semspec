@@ -987,6 +987,19 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 
 // dispatchCurrentStoryLocked synthesizes the DAG for the Story at
 // SortedStoryIDs[CurrentStoryIdx] and hands off to applyParsedDAGLocked.
+//
+// ADR-044 M:N dedup: a Story may cover multiple Requirements
+// (Story.RequirementIDs is plural under ADR-044), so the SAME Story
+// appears in StoriesForRequirement() for every requirement it covers.
+// When the executor for R2 advances to a Story that R1's executor
+// already completed, we skip without re-dispatching — re-running the
+// dev loop would burn tokens duplicating committed work and could
+// regress the previous outcome. Status is observed from the freshly-
+// loaded plan KV; if the Story is StoryStatusComplete OR
+// StoryStatusExecuting (another requirement-executor is mid-flight),
+// advance the cursor and re-enter. Failed stories ARE retried so
+// requirement-level recovery still works.
+//
 // Caller must hold exec.mu.
 func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
 	if exec.CurrentStoryIdx < 0 || exec.CurrentStoryIdx >= len(exec.SortedStoryIDs) {
@@ -998,6 +1011,21 @@ func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requir
 	story, ok := findStoryByID(plan, currentStoryID)
 	if !ok {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("story %q not found on plan (planning regression — Sarah output drifted from SortedStoryIDs)", currentStoryID))
+		return
+	}
+
+	if story.Status == workflow.StoryStatusComplete {
+		c.logger.Info("Story already complete (M:N coverage by prior requirement); skipping",
+			"entity_id", exec.EntityID,
+			"requirement_id", exec.RequirementID,
+			"story_id", currentStoryID,
+			"covered_requirements", story.RequirementIDs)
+		if exec.CurrentStoryIdx+1 < len(exec.SortedStoryIDs) {
+			exec.CurrentStoryIdx++
+			c.dispatchCurrentStoryLocked(ctx, exec, plan)
+			return
+		}
+		c.markCompletedLocked(ctx, exec)
 		return
 	}
 

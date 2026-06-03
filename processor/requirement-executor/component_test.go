@@ -2232,3 +2232,55 @@ func TestScopeScenariosToCurrentStory_LegacyExecFallsBackToAll(t *testing.T) {
 		t.Errorf("legacy exec should return all scenarios; got len=%d", len(got))
 	}
 }
+
+// TestDispatchCurrentStoryLocked_SkipsAlreadyCompleteStory pins the ADR-044
+// M:N dedup: when a Story covers multiple Requirements (Story.RequirementIDs
+// plural), the SAME Story appears in StoriesForRequirement() for every
+// requirement it covers. The executor that runs SECOND would re-dispatch
+// the dev loop on the already-shipped Story without this guard. Smoke 9
+// (2026-06-02 mavlink-hard) shape: 1 component / 4 capabilities / 4
+// requirements collapses to 1 Story under ADR-044; the second requirement's
+// executor must observe Status=Complete and advance without dispatching.
+func TestDispatchCurrentStoryLocked_SkipsAlreadyCompleteStory(t *testing.T) {
+	c := newTestComponent(t)
+
+	plan := &workflow.Plan{
+		Slug: "demo",
+		Stories: []workflow.Story{
+			{
+				ID:              "story.demo.shared",
+				ComponentName:   "shared-driver",
+				RequirementIDs:  []string{"req.demo.1", "req.demo.2"},
+				CapabilityNames: []string{"cap-a", "cap-b"},
+				Status:          workflow.StoryStatusComplete,
+				FilesOwned:      []string{"src/driver.go"},
+				Tasks:           []workflow.Task{{ID: "task.demo.shared.1", StoryID: "story.demo.shared", Description: "impl"}},
+			},
+		},
+	}
+
+	exec := &requirementExecution{
+		EntityID:        "semspec.local.exec.req.run.test-skip-dedup",
+		Slug:            "demo",
+		RequirementID:   "req.demo.2",
+		SortedStoryIDs:  []string{"story.demo.shared"},
+		CurrentStoryIdx: 0,
+		VisitedNodes:    make(map[string]bool),
+	}
+
+	exec.mu.Lock()
+	c.dispatchCurrentStoryLocked(context.Background(), exec, plan)
+	exec.mu.Unlock()
+
+	// The Story was already complete (shipped by req.demo.1's executor).
+	// Expected: no DAG dispatched, exec.terminated true, requirementsCompleted++.
+	if !exec.terminated {
+		t.Error("exec.terminated should be true after skipping a complete Story")
+	}
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1 (M:N dedup must mark exec complete when all stories already shipped)", c.requirementsCompleted.Load())
+	}
+	if exec.DAG != nil {
+		t.Error("exec.DAG should be nil (no dispatch on already-complete Story)")
+	}
+}

@@ -1009,6 +1009,27 @@ func renderQAReviewerPrompt(p *prompt.QAReviewerPromptContext) string {
 		sb.WriteString("Warning: QA executor result unavailable — assess based on plan artifacts only.\n")
 	}
 
+	// ADR-044 release-readiness contract shift: surface the M:N capability
+	// evidence rollup. Empty CoveringStoryIDs = declared-but-uncovered
+	// capability (release-blocking). Zero ShippedCount = covered but no
+	// Story shipped (release-blocking unless QA-level synthesis).
+	if ctx := p.QAReviewContext; ctx != nil && len(ctx.Capabilities) > 0 {
+		sb.WriteString("\n## Capability evidence rollup (ADR-044)\n\n")
+		sb.WriteString("Release-readiness under ADR-044 requires every Capability to have evidence from ≥1 shipped Story (Story.Status == complete). Gaps below are blocking unless the QA level is synthesis-only.\n\n")
+		for _, c := range ctx.Capabilities {
+			fmt.Fprintf(&sb, "- **%s** — %d covering Stor(ies), %d shipped",
+				c.Name, len(c.CoveringStoryIDs), c.ShippedCount)
+			switch {
+			case len(c.CoveringStoryIDs) == 0:
+				sb.WriteString(" ❌ no Story claims coverage")
+			case c.ShippedCount == 0:
+				sb.WriteString(" ⚠ claimed but unshipped")
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
 	sb.WriteString("\nUse the system context for detailed plan and test information. Call submit_work with your verdict.")
 	return sb.String()
 }

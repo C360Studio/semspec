@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c360studio/semspec/prompt"
 	"github.com/c360studio/semspec/workflow"
 )
 
@@ -223,6 +224,98 @@ func TestBuildQAReviewContext(t *testing.T) {
 			t.Errorf("RunnerError = %q, want %q", got.RunnerError, "act not in PATH")
 		}
 	})
+}
+
+// TestBuildQAReviewContext_ADR044CapabilityEvidence pins the ADR-044
+// release-readiness contract shift: QAReviewContext.Capabilities surfaces
+// per-Capability covering Story join + shipped count. A Capability with
+// zero CoveringStoryIDs is a coverage gap; a Capability with covering
+// Stories but zero ShippedCount is an evidence gap. Both are blocking
+// signals for the QA verdict.
+func TestBuildQAReviewContext_ADR044CapabilityEvidence(t *testing.T) {
+	plan := &workflow.Plan{
+		Title: "Mavlink driver",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{
+				{Name: "mavsdk-lifecycle", Description: "Server boot"},
+				{Name: "mavsdk-telemetry", Description: "Telemetry stream"},
+				{Name: "uncovered-cap", Description: "No Story covers this"},
+			},
+		},
+		Stories: []workflow.Story{
+			{
+				ID:              "story.mav.cohesive",
+				ComponentName:   "mavsdk-driver",
+				RequirementIDs:  []string{"r1", "r2"},
+				CapabilityNames: []string{"mavsdk-lifecycle", "mavsdk-telemetry"},
+				Title:           "Cohesive driver",
+				Status:          workflow.StoryStatusComplete,
+			},
+		},
+	}
+
+	got := buildQAReviewContext(plan)
+	if len(got.Capabilities) != 3 {
+		t.Fatalf("Capabilities count = %d, want 3", len(got.Capabilities))
+	}
+
+	byName := make(map[string]prompt.QACapabilityEvidence)
+	for _, c := range got.Capabilities {
+		byName[c.Name] = c
+	}
+
+	life := byName["mavsdk-lifecycle"]
+	if len(life.CoveringStoryIDs) != 1 || life.CoveringStoryIDs[0] != "story.mav.cohesive" {
+		t.Errorf("mavsdk-lifecycle covering Stories = %v, want [story.mav.cohesive]", life.CoveringStoryIDs)
+	}
+	if life.ShippedCount != 1 {
+		t.Errorf("mavsdk-lifecycle ShippedCount = %d, want 1 (Story is complete)", life.ShippedCount)
+	}
+
+	uncovered := byName["uncovered-cap"]
+	if len(uncovered.CoveringStoryIDs) != 0 {
+		t.Errorf("uncovered-cap should have 0 covering Stories, got %v", uncovered.CoveringStoryIDs)
+	}
+	if uncovered.ShippedCount != 0 {
+		t.Errorf("uncovered-cap ShippedCount = %d, want 0", uncovered.ShippedCount)
+	}
+
+	// Story summary surfaces the M:N coverage join.
+	if len(got.Stories) != 1 {
+		t.Fatalf("Stories count = %d, want 1", len(got.Stories))
+	}
+	s := got.Stories[0]
+	if len(s.RequirementIDs) != 2 || len(s.CapabilityNames) != 2 {
+		t.Errorf("Story summary lost coverage joins: req=%v cap=%v", s.RequirementIDs, s.CapabilityNames)
+	}
+	if s.ComponentName != "mavsdk-driver" {
+		t.Errorf("Story.ComponentName = %q, want mavsdk-driver", s.ComponentName)
+	}
+}
+
+// TestBuildQAReviewContext_EvidenceGap_ClaimedButUnshipped pins the
+// second blocking signal: Capability has covering Story but the Story
+// has not reached terminal complete.
+func TestBuildQAReviewContext_EvidenceGap_ClaimedButUnshipped(t *testing.T) {
+	plan := &workflow.Plan{
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{{Name: "auth"}},
+		},
+		Stories: []workflow.Story{
+			{ID: "s1", CapabilityNames: []string{"auth"}, Status: workflow.StoryStatusExecuting},
+		},
+	}
+	got := buildQAReviewContext(plan)
+	if len(got.Capabilities) != 1 {
+		t.Fatalf("want 1 capability, got %d", len(got.Capabilities))
+	}
+	c := got.Capabilities[0]
+	if len(c.CoveringStoryIDs) != 1 {
+		t.Errorf("CoveringStoryIDs = %v, want [s1]", c.CoveringStoryIDs)
+	}
+	if c.ShippedCount != 0 {
+		t.Errorf("ShippedCount = %d, want 0 (Story executing, not complete)", c.ShippedCount)
+	}
 }
 
 func TestBuildUserPrompt(t *testing.T) {
