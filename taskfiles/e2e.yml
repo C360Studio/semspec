@@ -651,6 +651,29 @@ tasks:
       - defer: { task: ui:cleanup:llm }
       - echo "[UI:TEST:LLM] Complete"
 
+  poll:llm:
+    desc: "Attach active-polling sidecar to an already-running UI E2E stack — usage: task e2e:poll:llm [-- out_dir]"
+    vars:
+      RUN_TS:
+        sh: date +%Y%m%d-%H%M%S
+      OUT_DIR:
+        sh: |
+          ARG="$(echo '{{.CLI_ARGS}}' | awk '{print $1}')"
+          if [ -n "$ARG" ]; then
+            echo "$ARG"
+          else
+            echo "/tmp/semspec-poll-{{.RUN_TS}}"
+          fi
+    cmds:
+      - mkdir -p {{.OUT_DIR}}
+      - |
+        echo "[POLL:LLM] Output -> {{.OUT_DIR}}/poll.log"
+        echo "[POLL:LLM] Tail it: tail -F {{.OUT_DIR}}/poll.log"
+        echo "[POLL:LLM] Stop with Ctrl+C"
+        # Foreground run so Ctrl+C cleanly stops the loop. The background
+        # wiring belongs in watch:llm — this task is for ad-hoc attach.
+        exec bash taskfiles/scripts/active-poll.sh {{.OUT_DIR}} http://localhost:3000 ui-semspec-1
+
   watch:llm:
     desc: "Real-LLM run with semspec watch sidecar (live alerts + final bundle) — usage: task e2e:watch:llm -- <provider> [tier]"
     deps: [check-ports:ui]
@@ -797,6 +820,20 @@ tasks:
         docker logs -f ui-semspec-1 > {{.OUT_DIR}}/semspec.log 2>&1 &
         echo $! > {{.OUT_DIR}}/semspec-log.pid
         echo "[WATCH:LLM] semspec log tail PID $(cat {{.OUT_DIR}}/semspec-log.pid) → {{.OUT_DIR}}/semspec.log"
+        # Active-polling sidecar — emits one-line wedge-shape events every
+        # POLL_INTERVAL (default 30s) by curl'ing /plan-manager/plans and
+        # scanning recent docker logs. Pairs with watch.log (crash-shaped
+        # signal) by surfacing INFO-shaped state changes the passive grep
+        # misses: stage progression, req-reviewer rejections, recovery
+        # dispatches, plan-decision lifecycle, and wedge-detect when a
+        # stage stalls past WEDGE_WARN_SECONDS. Designed for `tail -F
+        # {{.OUT_DIR}}/poll.log` as a primary monitor during the run.
+        # See memory: feedback_monitors_are_backstops_active_polling_primary.
+        bash taskfiles/scripts/active-poll.sh {{.OUT_DIR}} http://localhost:3000 ui-semspec-1 \
+          > {{.OUT_DIR}}/active-poll.stdout 2>&1 &
+        echo $! > {{.OUT_DIR}}/active-poll.pid
+        echo "[WATCH:LLM] active-poll PID $(cat {{.OUT_DIR}}/active-poll.pid) → {{.OUT_DIR}}/poll.log"
+        echo "[WATCH:LLM]   Tail it:  tail -F {{.OUT_DIR}}/poll.log"
       - defer: |
           if [ -f {{.OUT_DIR}}/watch.pid ]; then
             PID=$(cat {{.OUT_DIR}}/watch.pid)
@@ -822,6 +859,16 @@ tasks:
             PID=$(cat {{.OUT_DIR}}/semspec-log.pid)
             kill "$PID" 2>/dev/null || true
             rm -f {{.OUT_DIR}}/semspec-log.pid
+          fi
+          # Stop the active-polling sidecar. SIGTERM lets it flush the
+          # POLL_EXIT line via its EXIT trap; SIGKILL after a beat in
+          # case the curl is mid-flight against a torn-down stack.
+          if [ -f {{.OUT_DIR}}/active-poll.pid ]; then
+            PID=$(cat {{.OUT_DIR}}/active-poll.pid)
+            kill "$PID" 2>/dev/null || true
+            sleep 1
+            kill -9 "$PID" 2>/dev/null || true
+            rm -f {{.OUT_DIR}}/active-poll.pid
           fi
       - echo "[WATCH:LLM] Running @{{.TIER}} Playwright tests..."
       - cmd: |
