@@ -36,3 +36,14 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - OPENROUTER_SITE_URL=${OPENROUTER_SITE_URL:-https://semspec.dev}
       - OPENROUTER_SITE_NAME=${OPENROUTER_SITE_NAME:-semspec}
+      # Per-tier timeout overlay (option B). Defaults baked into the config
+      # files (3600s req-executor / 60s recovery / 3600s exec-manager / 3600s
+      # scenario-orchestrator) suit easy/medium tiers; the watch:llm task
+      # exports larger values for hard/mavlink-hard before invoking compose.
+      # Avoids editing the shared config for one tier and silently bloating
+      # the easy CI signal. See memory feedback_recovery_budget_match_playwright_cycles
+      # — these MUST stay aligned with Playwright EXECUTION_TIMEOUT.
+      - SEMSPEC_REQ_EXECUTOR_TIMEOUT_SECONDS=${SEMSPEC_REQ_EXECUTOR_TIMEOUT_SECONDS:-}
+      - SEMSPEC_RECOVERY_TIMEOUT_SECONDS=${SEMSPEC_RECOVERY_TIMEOUT_SECONDS:-}
+      - SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS=${SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS:-}
+      - SEMSPEC_SCENARIO_ORCH_TIMEOUT=${SEMSPEC_SCENARIO_ORCH_TIMEOUT:-}
