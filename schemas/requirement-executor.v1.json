@@ -5,25 +5,6 @@
   "title": "requirement-executor Configuration",
   "description": "Requirement-level execution: DAG decomposition, serial node dispatch, requirement review",
   "properties": {
-    "decomposer_model": {
-      "type": "string",
-      "description": "Model endpoint for decomposer agent",
-      "category": "advanced"
-    },
-    "enforce_scenario_coverage": {
-      "type": "boolean",
-      "description": "Reject decomposer output that leaves input scenarios uncovered",
-      "default": true,
-      "category": "advanced"
-    },
-    "max_decomposer_retries": {
-      "type": "number",
-      "description": "Max retries when decomposer output fails to parse or produces an invalid DAG",
-      "default": 2,
-      "minimum": 0,
-      "maximum": 5,
-      "category": "advanced"
-    },
     "max_recovery_restarts": {
       "type": "number",
       "description": "Max times an exec can be resumed from awaiting-recovery",

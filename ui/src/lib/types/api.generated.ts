@@ -2453,6 +2453,14 @@ export interface components {
                 primary?: boolean;
                 version?: string | null;
             }[];
+            openspec_changes?: {
+                has_design?: boolean;
+                has_proposal: boolean;
+                has_tasks?: boolean;
+                name: string;
+                path: string;
+                spec_capabilities?: string[];
+            }[];
             proposed_checklist: {
                 category: string;
                 command: string;
@@ -2535,6 +2543,14 @@ export interface components {
                     name: string;
                     primary?: boolean;
                     version?: string | null;
+                }[];
+                openspec_changes?: {
+                    has_design?: boolean;
+                    has_proposal: boolean;
+                    has_tasks?: boolean;
+                    name: string;
+                    path: string;
+                    spec_capabilities?: string[];
                 }[];
                 proposed_checklist: {
                     category: string;
@@ -2715,9 +2731,12 @@ export interface components {
                     type: string;
                 }[];
                 component_boundaries: {
+                    capabilities?: string[];
                     dependencies: string[];
+                    implementation_files?: string[];
                     name: string;
                     responsibility: string;
+                    upstream_refs?: string[];
                 }[];
                 data_flow: string;
                 decisions: {
@@ -2725,6 +2744,12 @@ export interface components {
                     id: string;
                     rationale: string;
                     title: string;
+                }[];
+                harness_profiles?: {
+                    covers?: string[];
+                    profile_id: string;
+                    purpose: string;
+                    used_by?: string[];
                 }[];
                 integrations: {
                     contract?: string;
@@ -2751,6 +2776,21 @@ export interface components {
                         scenario_refs?: string[];
                     }[];
                 } | null;
+                upstream_resolutions?: {
+                    apis?: {
+                        citation: string;
+                        kind: string;
+                        lifecycle?: string;
+                        notes?: string;
+                        signature: string;
+                        symbol: string;
+                    }[];
+                    coordinate: string;
+                    name: string;
+                    role?: string;
+                    source_ref: string;
+                    used_by?: string[];
+                }[];
             } | null;
             assembled_branch?: string;
             assembled_merge_commit?: string;
@@ -2759,6 +2799,16 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             execution_trace_ids?: string[];
+            exploration?: {
+                capabilities: {
+                    depends_on?: string[];
+                    description: string;
+                    lifecycle: string;
+                    name: string;
+                    surfaces?: string[];
+                }[];
+                open_questions?: string[];
+            } | null;
             github?: {
                 issue_number?: number;
                 issue_url?: string;
@@ -2788,6 +2838,7 @@ export interface components {
             } | null;
             plan_decisions?: {
                 affected_requirement_ids: string[];
+                affected_story_ids?: string[];
                 artifact_references?: {
                     path: string;
                     purpose?: string;
@@ -2833,14 +2884,29 @@ export interface components {
                 runner_error?: string;
                 trace_id?: string;
             } | null;
+            qa_verdict_summary?: {
+                dimensions?: {
+                    assertion_quality?: string;
+                    coverage?: string;
+                    flake_judgment?: string;
+                    regression_surface?: string;
+                    requirement_fulfillment?: string;
+                };
+                level: string;
+                /** Format: date-time */
+                recorded_at: string;
+                summary?: string;
+                verdict: string;
+            } | null;
             requirements?: {
+                capability_name?: string;
                 /** Format: date-time */
                 created_at: string;
                 depends_on?: string[];
                 description: string;
-                files_owned?: string[];
                 id: string;
                 plan_id: string;
+                recovery_hint?: string;
                 status?: string;
                 title: string;
                 /** Format: date-time */
@@ -2857,11 +2923,19 @@ export interface components {
             scenarios?: {
                 /** Format: date-time */
                 created_at: string;
+                env?: {
+                    [key: string]: string;
+                };
                 given: string;
+                harness_profile_ids?: string[];
                 id: string;
+                required_assertions?: string[];
                 requirement_id: string;
                 status?: string;
+                story_id?: string;
+                tags?: string[];
                 then: string[];
+                title?: string;
                 /** Format: date-time */
                 updated_at: string;
                 when: string;
@@ -2875,6 +2949,35 @@ export interface components {
             skip_architecture?: boolean;
             slug: string;
             status?: string;
+            stories?: {
+                components?: string[];
+                /** Format: date-time */
+                created_at: string;
+                depends_on?: string[];
+                files_owned?: string[];
+                id: string;
+                intent?: string;
+                /** Format: date-time */
+                prepared_at?: string | null;
+                prepared_by?: string;
+                recovery_hint?: string;
+                requirement_id: string;
+                status?: string;
+                tasks?: {
+                    /** Format: date-time */
+                    created_at: string;
+                    depends_on?: string[];
+                    description: string;
+                    id: string;
+                    status?: string;
+                    story_id: string;
+                    /** Format: date-time */
+                    updated_at: string;
+                }[];
+                title: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
             title: string;
         };
         PlanWithStatus: {
@@ -2894,9 +2997,12 @@ export interface components {
                     type: string;
                 }[];
                 component_boundaries: {
+                    capabilities?: string[];
                     dependencies: string[];
+                    implementation_files?: string[];
                     name: string;
                     responsibility: string;
+                    upstream_refs?: string[];
                 }[];
                 data_flow: string;
                 decisions: {
@@ -2904,6 +3010,12 @@ export interface components {
                     id: string;
                     rationale: string;
                     title: string;
+                }[];
+                harness_profiles?: {
+                    covers?: string[];
+                    profile_id: string;
+                    purpose: string;
+                    used_by?: string[];
                 }[];
                 integrations: {
                     contract?: string;
@@ -2930,6 +3042,21 @@ export interface components {
                         scenario_refs?: string[];
                     }[];
                 } | null;
+                upstream_resolutions?: {
+                    apis?: {
+                        citation: string;
+                        kind: string;
+                        lifecycle?: string;
+                        notes?: string;
+                        signature: string;
+                        symbol: string;
+                    }[];
+                    coordinate: string;
+                    name: string;
+                    role?: string;
+                    source_ref: string;
+                    used_by?: string[];
+                }[];
             } | null;
             assembled_branch?: string;
             assembled_merge_commit?: string;
@@ -2944,6 +3071,16 @@ export interface components {
                 total: number;
             } | null;
             execution_trace_ids?: string[];
+            exploration?: {
+                capabilities: {
+                    depends_on?: string[];
+                    description: string;
+                    lifecycle: string;
+                    name: string;
+                    surfaces?: string[];
+                }[];
+                open_questions?: string[];
+            } | null;
             github?: {
                 issue_number?: number;
                 issue_url?: string;
@@ -2973,6 +3110,7 @@ export interface components {
             } | null;
             plan_decisions?: {
                 affected_requirement_ids: string[];
+                affected_story_ids?: string[];
                 artifact_references?: {
                     path: string;
                     purpose?: string;
@@ -3018,14 +3156,29 @@ export interface components {
                 runner_error?: string;
                 trace_id?: string;
             } | null;
+            qa_verdict_summary?: {
+                dimensions?: {
+                    assertion_quality?: string;
+                    coverage?: string;
+                    flake_judgment?: string;
+                    regression_surface?: string;
+                    requirement_fulfillment?: string;
+                };
+                level: string;
+                /** Format: date-time */
+                recorded_at: string;
+                summary?: string;
+                verdict: string;
+            } | null;
             requirements?: {
+                capability_name?: string;
                 /** Format: date-time */
                 created_at: string;
                 depends_on?: string[];
                 description: string;
-                files_owned?: string[];
                 id: string;
                 plan_id: string;
+                recovery_hint?: string;
                 status?: string;
                 title: string;
                 /** Format: date-time */
@@ -3042,11 +3195,19 @@ export interface components {
             scenarios?: {
                 /** Format: date-time */
                 created_at: string;
+                env?: {
+                    [key: string]: string;
+                };
                 given: string;
+                harness_profile_ids?: string[];
                 id: string;
+                required_assertions?: string[];
                 requirement_id: string;
                 status?: string;
+                story_id?: string;
+                tags?: string[];
                 then: string[];
+                title?: string;
                 /** Format: date-time */
                 updated_at: string;
                 when: string;
@@ -3061,6 +3222,35 @@ export interface components {
             slug: string;
             stage: string;
             status?: string;
+            stories?: {
+                components?: string[];
+                /** Format: date-time */
+                created_at: string;
+                depends_on?: string[];
+                files_owned?: string[];
+                id: string;
+                intent?: string;
+                /** Format: date-time */
+                prepared_at?: string | null;
+                prepared_by?: string;
+                recovery_hint?: string;
+                requirement_id: string;
+                status?: string;
+                tasks?: {
+                    /** Format: date-time */
+                    created_at: string;
+                    depends_on?: string[];
+                    description: string;
+                    id: string;
+                    status?: string;
+                    story_id: string;
+                    /** Format: date-time */
+                    updated_at: string;
+                }[];
+                title: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
             title: string;
         };
         ProjectConfig: {
@@ -3082,6 +3272,7 @@ export interface components {
             org?: string;
             platform?: string;
             qa_level?: string;
+            qa_skip_service_injection?: boolean;
             qa_test_command?: string;
             repository?: {
                 default_branch?: string;

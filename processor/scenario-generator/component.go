@@ -28,6 +28,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/dispatchretry"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/harnesscatalog"
 	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
@@ -72,6 +73,14 @@ type Component struct {
 	toolRegistry  component.ToolRegistryReader
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+
+	// catalog holds the harness profile catalog loaded once at Initialize().
+	// Used by parseScenariosFromResult to denormalize Profile.Env and
+	// Profile.RequiredAssertions into per-scenario fields (issue #89).
+	// nil when load failed at startup — denormalization becomes a no-op
+	// and downstream consumers fall back to re-resolving via catalog.Load
+	// themselves if needed.
+	catalog *harnesscatalog.Catalog
 
 	// Lifecycle
 	running   bool
@@ -216,9 +225,32 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
+	// Load the harness profile catalog once. Used by parseScenariosFromResult
+	// to denormalize Profile.Env + Profile.RequiredAssertions into scenarios
+	// (issue #89). Load errors are non-fatal: the denormalizer becomes a
+	// no-op and downstream consumers fall back to their own catalog resolution
+	// if needed. Pattern matches plan_watcher.go:87 — both consumers of the
+	// catalog tolerate a nil/empty catalog rather than crash the component.
+	catalog, err := harnesscatalog.Load("")
+	if err != nil {
+		c.logger.Warn("Failed to load harness catalog; scenario.env and scenario.required_assertions will not be populated",
+			"error", err.Error())
+	} else {
+		c.catalog = catalog
+	}
+
 	c.logger.Debug("Initialized scenario-generator",
-		"plan_state_bucket", c.config.PlanStateBucket)
+		"plan_state_bucket", c.config.PlanStateBucket,
+		"catalog_profiles_loaded", catalogProfileCount(c.catalog))
 	return nil
+}
+
+// catalogProfileCount returns the profile count for logging; nil-safe.
+func catalogProfileCount(c *harnesscatalog.Catalog) int {
+	if c == nil {
+		return 0
+	}
+	return len(c.Profiles)
 }
 
 // Start begins processing scenario generation triggers.
@@ -832,6 +864,17 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID, storyI
 			CreatedAt:         now,
 			UpdatedAt:         now,
 		}
+
+		// Denormalize harness profile data (Env + RequiredAssertions) into
+		// the scenario when it binds at least one profile. Downstream
+		// consumers (Sarah, dev prompts, qa.yml rendering) then read this
+		// directly without re-resolving the catalog. Catalog nil = startup
+		// load failed; denormalization is a silent no-op so scenarios still
+		// materialize. Issue #89.
+		if err := denormalizeHarnessProfileData(&scenarios[i], c.catalog); err != nil {
+			return nil, fmt.Errorf("scenario %d: %w", i+1, err)
+		}
+
 		if err := workflow.ValidateScenarioTags(scenarios[i]); err != nil {
 			return nil, fmt.Errorf("scenario %d: %w", i+1, err)
 		}
