@@ -30,6 +30,17 @@ tasks:
     cmds:
       - go test -race -tags integration -count=1 ./...
 
+  test:plumbing:
+    # Cross-package plumbing-discipline integration tests (issue #92,
+    # post smoke-9 meta-rule). Exercises scenario-generator denormalizer
+    # → workflow.ValidateStories → requirement-executor synthesis chain
+    # using production code paths and an in-memory canned plan. Runs
+    # in under a second; CI runs it as part of `task test` too. The
+    # alias exists so smoke-N post-mortems can point at a single command.
+    desc: Run cross-package plumbing-discipline tests (no docker, no mock LLM)
+    cmds:
+      - go test -race -count=1 ./test/plumbing/...
+
   test:all:
     desc: Run unit + integration tests
     cmds:
