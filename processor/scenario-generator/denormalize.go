@@ -41,6 +41,15 @@ import (
 // transient parse failures.
 var ErrHarnessEnvConflict = errors.New("harness profile env conflict")
 
+// DenormalizeHarnessProfileData is the exported alias for
+// denormalizeHarnessProfileData. Exported so cross-package integration
+// tests (test/plumbing/) can exercise the production code path without
+// duplicating logic. The package-internal call sites continue to use
+// the lowercase form.
+func DenormalizeHarnessProfileData(s *workflow.Scenario, catalog *harnesscatalog.Catalog) error {
+	return denormalizeHarnessProfileData(s, catalog)
+}
+
 // denormalizeHarnessProfileData populates scenario.Env and
 // scenario.RequiredAssertions from the catalog for every profile in
 // scenario.HarnessProfileIDs. Returns an error only on env-key conflict

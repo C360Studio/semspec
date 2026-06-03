@@ -6,6 +6,23 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
+// BuildDevPromptForTesting synthesizes the DAG for `story` against
+// `plan` and returns the dev prompt of the first node. Cross-package
+// integration tests (test/plumbing/) use this to assert the dev prompt
+// surfaces the binding block end-to-end without duplicating synthesis
+// logic. Production code paths continue to use synthesizeTaskDAGForStory
+// directly.
+//
+// Returns "" if synthesis fails or the DAG is empty — callers should
+// treat empty as a test-setup error rather than a no-op success.
+func BuildDevPromptForTesting(plan *workflow.Plan, story workflow.Story) string {
+	dag, err := synthesizeTaskDAGForStory(plan, story)
+	if err != nil || dag == nil || len(dag.Nodes) == 0 {
+		return ""
+	}
+	return dag.Nodes[0].Prompt
+}
+
 // synthesizeTaskDAGForStory converts a single Sarah-prepared Story into a
 // TaskDAG. ADR-043 PR 4h: per-Story dispatch synthesizes one DAG per Story
 // (instead of combining every Story on a requirement into one flat DAG).
