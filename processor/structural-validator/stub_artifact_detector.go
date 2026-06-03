@@ -40,9 +40,11 @@ const stubJarSizeThreshold = 2048
 // reviewer/QA had no anchor to reject them. This is the deterministic
 // backstop that doesn't depend on persona compliance.
 //
-// Closes deferred item (c) from take-19 forensics. Pairs with
-// CheckHarnessProfileDiscipline (item d-equivalent: reviewer test-body
-// mismatch) for two-layer defense.
+// Closes deferred item (c) from take-19 forensics. Item d-equivalent
+// (test-body mismatch / faked implementations) is now owned by the
+// LLM reviewer + qa-runner runtime after issue #113 retired the
+// literal-substring harness-discipline checks; see ADR-041 Move 5
+// amendment.
 func CheckStubArtifacts(workDir string, filesModified []string) payloads.CheckResult {
 	jars := filterJarFiles(filesModified)
 	if len(jars) == 0 {
