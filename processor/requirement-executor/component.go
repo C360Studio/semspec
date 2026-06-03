@@ -988,23 +988,32 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 // dispatchCurrentStoryLocked synthesizes the DAG for the Story at
 // SortedStoryIDs[CurrentStoryIdx] and hands off to applyParsedDAGLocked.
 //
-// ADR-044 M:N dedup (best-effort, post-completion only): a Story may
-// cover multiple Requirements (Story.RequirementIDs plural), so the
-// SAME Story appears in StoriesForRequirement() for every requirement
-// it covers. When the executor for R2 advances to a Story that R1's
-// executor already shipped, we skip without re-dispatching — re-running
-// the dev loop would burn tokens duplicating committed work and could
-// regress the previous outcome.
+// ADR-044 M:N dedup + reservation: a Story may cover multiple Requirements
+// (Story.RequirementIDs plural), so the SAME Story appears in
+// StoriesForRequirement() for every requirement it covers. Without a
+// reservation, N parallel requirement-executors all dispatch the dev loop
+// on the same Story, burning tokens N times.
 //
-// SCOPE: today's check observes Story.Status == StoryStatusComplete
-// only. It catches late-arriving executors that load plan KV AFTER the
-// first writer ships, NOT executors that race-load BEFORE any writer
-// completes. The parallel-executor race (N executors of N requirements
-// all dispatching the same Story simultaneously) requires a Story-level
-// reservation pattern (claim Executing in PLAN_STATES with compare-and-
-// swap) that depends on plan-manager Story persistence — tracked for
-// commit 6. Failed / Pending / Ready / zero-value stories all fall
-// through to dispatch so requirement-level recovery still works.
+// Two-tier guard:
+//
+//  1. Post-completion skip (cheap, in-process): if the freshly-loaded plan
+//     KV shows Status==Complete, another executor already shipped — advance
+//     cursor and re-enter. Catches the late-arriving case.
+//
+//  2. Compare-and-swap reservation (load-bearing, NATS round-trip):
+//     attempt ready→executing via workflow.ClaimStoryStatus. Plan-manager
+//     enforces Story.Status.CanTransitionTo. First executor wins; others
+//     observe the rejection and treat it as "another executor owns this
+//     Story" — skip with the same cursor-advance logic. Closes the
+//     race-load window where N executors all see Status as not-yet-set
+//     and would otherwise all dispatch.
+//
+// Failed / Pending stories fall through to dispatch so requirement-level
+// recovery still works. When the claim NATS call has no client wired
+// (test components), the reservation is silently skipped — back-compat
+// with unit tests that drive dispatchCurrentStoryLocked directly without
+// a NATS substrate. Failed claim against a real client is treated as
+// "someone else owns it" and the executor skips dispatch.
 //
 // Caller must hold exec.mu.
 func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
@@ -1026,13 +1035,21 @@ func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requir
 			"requirement_id", exec.RequirementID,
 			"story_id", currentStoryID,
 			"covered_requirements", story.RequirementIDs)
-		if exec.CurrentStoryIdx+1 < len(exec.SortedStoryIDs) {
-			exec.CurrentStoryIdx++
-			c.dispatchCurrentStoryLocked(ctx, exec, plan)
+		c.advancePastSkippedStoryLocked(ctx, exec, plan)
+		return
+	}
+
+	// Tier 2: claim the executing reservation. Skipped silently when the
+	// NATS client is nil (unit-test components without dispatch substrate).
+	if c.natsClient != nil {
+		if !workflow.ClaimStoryStatus(ctx, c.natsClient, plan.Slug, currentStoryID, workflow.StoryStatusExecuting, c.logger) {
+			c.logger.Info("Story executing-claim rejected (M:N reservation held by another executor); skipping",
+				"entity_id", exec.EntityID,
+				"requirement_id", exec.RequirementID,
+				"story_id", currentStoryID)
+			c.advancePastSkippedStoryLocked(ctx, exec, plan)
 			return
 		}
-		c.markCompletedLocked(ctx, exec)
-		return
 	}
 
 	dag, synthErr := synthesizeTaskDAGForStory(plan, story)
@@ -1050,6 +1067,22 @@ func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requir
 		"node_count", len(dag.Nodes))
 
 	c.applyParsedDAGLocked(ctx, exec, dag, "stories-synthesis")
+}
+
+// advancePastSkippedStoryLocked handles the common case where a Story was
+// skipped (either Status==Complete or the executing-claim was rejected by
+// the reservation pattern). Increments CurrentStoryIdx and re-enters
+// dispatchCurrentStoryLocked for the next Story; if the cursor would
+// overrun, marks the requirement complete.
+//
+// Caller must hold exec.mu.
+func (c *Component) advancePastSkippedStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
+	if exec.CurrentStoryIdx+1 < len(exec.SortedStoryIDs) {
+		exec.CurrentStoryIdx++
+		c.dispatchCurrentStoryLocked(ctx, exec, plan)
+		return
+	}
+	c.markCompletedLocked(ctx, exec)
 }
 
 // findStoryByID returns the Story with the given ID from plan.Stories.
@@ -1921,6 +1954,12 @@ func (c *Component) handleApprovedVerdictLocked(ctx context.Context, exec *requi
 	if c.handleApprovedClaimMismatchLocked(ctx, exec) {
 		return
 	}
+	// ADR-044: record the per-Story terminal Status. Best-effort — claim
+	// rejection here is non-fatal because the requirement-level advancement
+	// is what gates downstream processing. Skipped when natsClient is nil
+	// (unit-test components without dispatch substrate).
+	c.publishStoryCompleteLocked(ctx, exec)
+
 	// Per-Story reviewer: if more Stories remain, advance the cursor and
 	// dispatch the next Story's DAG; otherwise mark the whole requirement
 	// complete.
@@ -1929,6 +1968,22 @@ func (c *Component) handleApprovedVerdictLocked(ctx context.Context, exec *requi
 		return
 	}
 	c.markCompletedLocked(ctx, exec)
+}
+
+// publishStoryCompleteLocked tries to transition the current Story's
+// Status to complete via the plan-manager mutation. Best-effort: a
+// rejection is logged at Debug and does not block requirement-level
+// advancement. Used by both approved-verdict path (reservation cleanup
+// + state surface for QA-reviewer's capability evidence rollup) and the
+// recovery path when a Story-level reservation is being released.
+//
+// Caller must hold exec.mu.
+func (c *Component) publishStoryCompleteLocked(ctx context.Context, exec *requirementExecution) {
+	if c.natsClient == nil || exec.CurrentStoryIdx >= len(exec.SortedStoryIDs) {
+		return
+	}
+	storyID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
+	workflow.ClaimStoryStatus(ctx, c.natsClient, exec.Slug, storyID, workflow.StoryStatusComplete, c.logger)
 }
 
 // advanceToNextStoryLocked increments CurrentStoryIdx, clears per-Story
@@ -2240,6 +2295,15 @@ func (c *Component) markFailedLocked(ctx context.Context, exec *requirementExecu
 		"error_reason": reason,
 	}); err != nil {
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseFailed, "error", err)
+	}
+
+	// ADR-044: release the current Story's reservation by writing Failed.
+	// Best-effort; non-fatal if the claim is rejected (e.g., transition
+	// from Executing → Failed is valid but from Pending → Failed too;
+	// CanTransitionTo permits both per workflow/story_task.go state machine).
+	if c.natsClient != nil && exec.CurrentStoryIdx >= 0 && exec.CurrentStoryIdx < len(exec.SortedStoryIDs) {
+		storyID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
+		workflow.ClaimStoryStatus(ctx, c.natsClient, exec.Slug, storyID, workflow.StoryStatusFailed, c.logger)
 	}
 
 	c.requirementsFailed.Add(1)

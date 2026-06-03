@@ -78,3 +78,40 @@ func ClaimPlanStatus(ctx context.Context, nc *natsclient.Client, slug string, ta
 	logger.Info("Claimed plan for processing", "slug", slug, "status", target)
 	return true
 }
+
+// ClaimStoryStatus sends a plan.mutation.story.status request to plan-manager
+// to atomically transition a Story's lifecycle state. Returns true if the
+// transition succeeded — used by requirement-executor for the ADR-044
+// reservation pattern: claim Executing before dispatching the dev loop so
+// N parallel executors covering the same M:N Story can't all dispatch
+// simultaneously. Returns false on contention, invalid transition, or
+// network error; callers should treat false as "another executor owns
+// this Story; skip dispatch."
+func ClaimStoryStatus(ctx context.Context, nc *natsclient.Client, slug, storyID string, target StoryStatus, logger *slog.Logger) bool {
+	req, _ := json.Marshal(struct {
+		Slug    string      `json:"slug"`
+		StoryID string      `json:"story_id"`
+		Target  StoryStatus `json:"target"`
+	}{Slug: slug, StoryID: storyID, Target: target})
+
+	resp, err := nc.RequestWithRetry(ctx, "plan.mutation.story.status", req, 5*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		logger.Debug("Story status claim request failed",
+			"slug", slug, "story_id", storyID, "target", target, "error", err)
+		return false
+	}
+
+	var result struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil || !result.Success {
+		logger.Debug("Story status claim rejected",
+			"slug", slug, "story_id", storyID, "target", target, "error", result.Error)
+		return false
+	}
+
+	logger.Info("Story status transitioned",
+		"slug", slug, "story_id", storyID, "target", target)
+	return true
+}
