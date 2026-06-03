@@ -827,7 +827,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
-        "execution_timeout": "3600s"
+        "execution_timeout": "${SEMSPEC_SCENARIO_ORCH_TIMEOUT:-3600s}"
       }
     },
     "question-manager": {
@@ -847,12 +847,12 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout_seconds": 3600,
+        "timeout_seconds": ${SEMSPEC_REQ_EXECUTOR_TIMEOUT_SECONDS:-3600},
         "sandbox_url": "http://sandbox:8090",
-        "max_requirement_retries": 2,
+        "max_requirement_retries": ${SEMSPEC_MAX_REQUIREMENT_RETRIES:-2},
         "max_decomposer_retries": 2,
         "defer_terminal_on_recovery": true,
-        "recovery_timeout_seconds": 60,
+        "recovery_timeout_seconds": ${SEMSPEC_RECOVERY_TIMEOUT_SECONDS:-60},
         "max_recovery_restarts": 1
       }
     },
@@ -875,7 +875,7 @@
       "enabled": true,
       "config": {
         "max_tdd_cycles": 5,
-        "timeout_seconds": 3600,
+        "timeout_seconds": ${SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS:-3600},
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "60s",

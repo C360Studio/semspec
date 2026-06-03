@@ -551,6 +551,7 @@ tasks:
       SEMSPEC_RECOVERY_TIMEOUT_SECONDS: "{{.RECOVERY_TIMEOUT_SECONDS}}"
       SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS: "{{.REQ_EXECUTOR_TIMEOUT_SECONDS}}"
       SEMSPEC_SCENARIO_ORCH_TIMEOUT: "{{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s"
+      SEMSPEC_MAX_REQUIREMENT_RETRIES: "{{.MAX_REQUIREMENT_RETRIES}}"
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
@@ -559,7 +560,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Backend-req-timeout={{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s Debug=${DEBUG:-off}"
+      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Fixture={{.FIXTURE_DIR}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Backend-req-timeout={{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s Req-retries={{.MAX_REQUIREMENT_RETRIES}} Debug=${DEBUG:-off}"
       - echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
       - task: reset-fixtures
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
@@ -738,6 +739,17 @@ tasks:
             mavlink-decode)     echo '300' ;;
             *)                  echo '60' ;;
           esac
+      # Per smoke 9 (2026-06-02) post-mortem (issue #91): the LLM reviewer
+      # holds a real architectural-correctness bar on hard fixtures
+      # (mavlink-hard rejected "UDP probe facade" — a substantive call). Dev
+      # was responsive to feedback across cycles but the 2 restructure retries
+      # weren't enough to converge req-1. Bumping to 3 for hard tiers.
+      MAX_REQUIREMENT_RETRIES:
+        sh: |
+          case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
+            hard|mavlink-hard)  echo '3' ;;
+            *)                  echo '2' ;;
+          esac
     # Export E2E_FIXTURE to docker-compose env so semspec's /workspace mount
     # ($E2E_FIXTURE:-go-project in ui/docker-compose.e2e.yml) matches what the
     # epic overlay hardcodes for sandbox + workspace semsource. Without this
@@ -758,6 +770,7 @@ tasks:
       SEMSPEC_RECOVERY_TIMEOUT_SECONDS: "{{.RECOVERY_TIMEOUT_SECONDS}}"
       SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS: "{{.REQ_EXECUTOR_TIMEOUT_SECONDS}}"
       SEMSPEC_SCENARIO_ORCH_TIMEOUT: "{{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s"
+      SEMSPEC_MAX_REQUIREMENT_RETRIES: "{{.MAX_REQUIREMENT_RETRIES}}"
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
@@ -766,7 +779,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Backend-req-timeout={{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s Recovery-timeout={{.RECOVERY_TIMEOUT_SECONDS}}s"
+      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Backend-req-timeout={{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s Recovery-timeout={{.RECOVERY_TIMEOUT_SECONDS}}s Req-retries={{.MAX_REQUIREMENT_RETRIES}}"
       - mkdir -p {{.OUT_DIR}}
       - echo "[WATCH:LLM] Artifacts will land in {{.OUT_DIR}}"
       # Build the host-side semspec binary that runs the watch sidecar.

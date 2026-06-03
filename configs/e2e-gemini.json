@@ -653,7 +653,7 @@
       "config": {
         "timeout_seconds": ${SEMSPEC_REQ_EXECUTOR_TIMEOUT_SECONDS:-3600},
         "sandbox_url": "http://sandbox:8090",
-        "max_requirement_retries": 2,
+        "max_requirement_retries": ${SEMSPEC_MAX_REQUIREMENT_RETRIES:-2},
         "max_decomposer_retries": 2,
         "defer_terminal_on_recovery": true,
         "recovery_timeout_seconds": ${SEMSPEC_RECOVERY_TIMEOUT_SECONDS:-60},
