@@ -851,6 +851,22 @@ func (c *Component) handleStoryStatusMutation(ctx context.Context, data []byte) 
 	c.logger.Info("Story status transitioned via mutation",
 		"slug", req.Slug, "story_id", req.StoryID,
 		"from", current, "to", req.Target)
+
+	// ADR-044: when a Story reaches Complete or Failed, re-fire the
+	// scenario orchestrator so non-owner requirements gated by
+	// filterByM2NStoryReservations are released. Without this, deferred
+	// non-owners would never wake up — execution_events.go re-fires only
+	// on requirement-level completion, not Story-level. Only fire while
+	// the plan is still implementing; post-convergence re-fires would
+	// race with terminal-state transitions.
+	if req.Target == workflow.StoryStatusComplete || req.Target == workflow.StoryStatusFailed {
+		if plan.EffectiveStatus() == workflow.StatusImplementing {
+			if err := c.triggerScenarioOrchestrator(ctx, plan); err != nil {
+				c.logger.Warn("Failed to re-fire scenario orchestrator after story status change",
+					"slug", req.Slug, "story_id", req.StoryID, "target", req.Target, "error", err)
+			}
+		}
+	}
 	return MutationResponse{Success: true}
 }
 

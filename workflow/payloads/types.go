@@ -787,8 +787,18 @@ type ScenarioOrchestrationTrigger struct {
 	PlanSlug     string                 `json:"plan_slug"`
 	Requirements []workflow.Requirement `json:"requirements,omitempty"`
 	Scenarios    []workflow.Scenario    `json:"scenarios,omitempty"`
-	TraceID      string                 `json:"trace_id,omitempty"`
-	PlanBranch   string                 `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)
+	// Stories carries the current Story set with their per-Story Status
+	// (ADR-044 M:N reservation gating). The orchestrator uses this to gate
+	// non-owner requirements behind their covering Story's terminal state
+	// so a Story covered by N requirements is only ever dispatched ONCE
+	// by the owning requirement (deterministic = lexicographically
+	// smallest req ID in Story.RequirementIDs). Non-owners wait for the
+	// Story to reach Complete before their executors are spawned, at
+	// which point the executor's Tier-1 dedup completes them immediately
+	// without re-dispatching the dev loop.
+	Stories    []workflow.Story `json:"stories,omitempty"`
+	TraceID    string           `json:"trace_id,omitempty"`
+	PlanBranch string           `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)
 }
 
 // Schema implements message.Payload.
