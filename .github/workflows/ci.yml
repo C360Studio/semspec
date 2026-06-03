@@ -26,11 +26,13 @@ jobs:
       - name: gofmt check
         # Auto-formatting would modify the workspace in CI without committing,
         # masking real formatting drift. Fail if any file would change.
-        # docs/sponsor-packages/ is excluded — those are fossilized
-        # agent-generated artifacts preserved verbatim (same exclusion logic
-        # revive.toml applies for the exported/package-comments rules).
+        # docs/sponsor-packages/ and docs/runs/ are excluded — both contain
+        # fossilized agent-generated artifacts preserved verbatim from real
+        # paid runs (smoke 7, etc.). Reformatting them would lose the
+        # evidence of what the agent actually produced. Same exclusion
+        # logic revive.toml applies for the exported/package-comments rules.
         run: |
-          unformatted=$(gofmt -l . | grep -v '^docs/sponsor-packages/' || true)
+          unformatted=$(gofmt -l . | grep -vE '^docs/(sponsor-packages|runs)/' || true)
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-clean:"
             echo "$unformatted"

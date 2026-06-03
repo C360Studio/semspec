@@ -2402,6 +2402,10 @@ components:
                                 items:
                                     type: string
                                 type: array
+                            affected_story_ids:
+                                items:
+                                    type: string
+                                type: array
                             artifact_references:
                                 items:
                                     properties:
@@ -2600,6 +2604,10 @@ components:
                             created_at:
                                 format: date-time
                                 type: string
+                            env:
+                                additionalProperties:
+                                    type: string
+                                type: object
                             given:
                                 type: string
                             harness_profile_ids:
@@ -2608,6 +2616,10 @@ components:
                                 type: array
                             id:
                                 type: string
+                            required_assertions:
+                                items:
+                                    type: string
+                                type: array
                             requirement_id:
                                 type: string
                             status:
@@ -3127,6 +3139,10 @@ components:
                                 items:
                                     type: string
                                 type: array
+                            affected_story_ids:
+                                items:
+                                    type: string
+                                type: array
                             artifact_references:
                                 items:
                                     properties:
@@ -3325,6 +3341,10 @@ components:
                             created_at:
                                 format: date-time
                                 type: string
+                            env:
+                                additionalProperties:
+                                    type: string
+                                type: object
                             given:
                                 type: string
                             harness_profile_ids:
@@ -3333,6 +3353,10 @@ components:
                                 type: array
                             id:
                                 type: string
+                            required_assertions:
+                                items:
+                                    type: string
+                                type: array
                             requirement_id:
                                 type: string
                             status:

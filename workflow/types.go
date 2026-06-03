@@ -1566,6 +1566,23 @@ type Scenario struct {
 	// scenario covering two profiles) is allowed.
 	HarnessProfileIDs []string `json:"harness_profile_ids,omitempty"`
 
+	// Env carries the env-var key→value bindings denormalized from the
+	// bound harness profile(s) at scenario-generation time. Populated by
+	// scenario-generator (Bob) from catalog Profile.Env when
+	// HarnessProfileIDs is non-empty. Downstream consumers (story-preparer,
+	// dev prompt synthesis, qa.yml rendering) read this directly without
+	// re-resolving the catalog. Empty for @unit / @e2e scenarios with no
+	// harness binding. Issue #89 (2026-06-03).
+	Env map[string]string `json:"env,omitempty"`
+
+	// RequiredAssertions denormalizes catalog Profile.RequiredAssertions
+	// for the bound profile(s). Carries the prose of what the integration
+	// test MUST prove (e.g., "Observe a MAVLink heartbeat from the SITL
+	// target"). Sarah surfaces this in the dev prompt; reviewer can quote
+	// it back when rejecting. Empty for scenarios without HarnessProfileIDs.
+	// Issue #89 (2026-06-03).
+	RequiredAssertions []string `json:"required_assertions,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
