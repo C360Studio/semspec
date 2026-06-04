@@ -50,11 +50,12 @@ func buildBindingContextBlock(scenarios []workflow.Scenario) string {
 
 	var b strings.Builder
 	b.WriteString("## Integration Test Context\n\n")
-	b.WriteString("The scenarios below run under a system-owned test harness (qa-runner). ")
-	b.WriteString("The information below describes how qa-runner orchestrates the harness ")
-	b.WriteString("and routes tests — your test code needs to participate in that protocol, ")
-	b.WriteString("not just reference the literals. The reviewer judges whether your code ")
-	b.WriteString("actually exercises the harness; qa-runner runtime verifies it at execution.\n\n")
+	b.WriteString("The scenarios below target integration-tier evidence beyond pure unit scope. ")
+	b.WriteString("For MVP, this block is authoring and review context: write tests so they can ")
+	b.WriteString("participate in the project's own integration-test protocol, usually by ")
+	b.WriteString("declaring the tier, reading environment-provided endpoints, and asserting ")
+	b.WriteString("the catalog's required behavior. Murat records whether runtime proof is ")
+	b.WriteString("present, missing, or deferred; full semspec-managed harness routing is post-MVP.\n\n")
 
 	for _, sc := range relevant {
 		b.WriteString(formatScenarioBinding(sc))
@@ -119,21 +120,21 @@ func formatScenarioBinding(sc workflow.Scenario) string {
 			tag, bare, bare)
 	}
 
-	// Harness profile routing keys. qa-runner uses these IDs as the tag
-	// selector to bring up the right service stack and route tagged tests
-	// against it. The dev's test code typically declares the binding via
-	// framework annotation (e.g. JUnit5 `@Tag` with a routing key) or by
-	// configuration. The literal need only appear where the framework
-	// actually consumes it — a dead reference does not bind anything.
+	// Harness profile identifiers. In MVP they are traceability metadata for
+	// authoring/review and for project-owned integration test configuration.
+	// A future harness runner may consume them as routing keys; until then the
+	// literal need only appear where the project framework actually consumes it
+	// — a dead reference does not bind anything.
 	// Reframed post-#113 (2026-06-03) — structural-validator no longer
 	// greps for these literals.
 	if len(sc.HarnessProfileIDs) > 0 {
-		fmt.Fprintf(&b, "  - Harness profile routing key(s) qa-runner uses to bring up the stack: %s.\n",
+		fmt.Fprintf(&b, "  - Harness profile ID(s) for integration evidence traceability: %s.\n",
 			quotedJoined(sc.HarnessProfileIDs))
 	}
 
-	// Env vars injected by qa-runner. The endpoint/config bindings come
-	// from these env vars at test runtime; hardcoding values would
+	// Env vars injected by project-owned integration setup now, and by a
+	// semspec-managed harness runner post-MVP. The endpoint/config bindings
+	// come from these env vars at test runtime; hardcoding values would
 	// bypass the injection and ignore harness-specific configuration.
 	// The dev's test code reads them via the language's idiomatic env
 	// accessor (System.getenv / os.environ / std::env::var / etc.).
@@ -143,7 +144,7 @@ func formatScenarioBinding(sc workflow.Scenario) string {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		fmt.Fprintf(&b, "  - Env vars qa-runner injects (read at test runtime, do not hardcode): %s.\n",
+		fmt.Fprintf(&b, "  - Env vars provided by the integration test environment (read at test runtime, do not hardcode): %s.\n",
 			quotedJoined(keys))
 	}
 

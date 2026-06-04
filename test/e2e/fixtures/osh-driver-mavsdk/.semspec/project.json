@@ -13,6 +13,6 @@
   ],
   "tooling": {},
   "repository": {},
-  "qa_level": "integration",
+  "qa_level": "synthesis",
   "qa_test_command": "./gradlew test"
 }

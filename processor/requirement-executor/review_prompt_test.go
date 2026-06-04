@@ -100,11 +100,10 @@ func TestBuildReviewPrompt_TierAwareContract(t *testing.T) {
 		// The crucial sentence: @integration tests don't need to PASS at
 		// dev-completion. This is the structural fix for #37.
 		"does NOT need to PASS",
-		// qa-runner downstream is named so the LLM knows where the
-		// integration-passing gate actually lives.
-		"qa-runner gates",
-		// String-literal contract for the structural-validator's PR 4 check.
-		"STRING LITERAL",
+		// MVP scope: Murat records integration runtime proof readiness; full
+		// semspec-managed harness routing is post-MVP unless the project owns it.
+		"Murat records",
+		"post-MVP",
 		// Env-var contract.
 		"environment variables",
 		// Required-assertion contract.

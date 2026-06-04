@@ -94,11 +94,11 @@ func scenarioMissingTierTagFindings(plan *workflow.Plan) []workflow.PlanReviewFi
 			Category:    "structural",
 			Phase:       "scenarios",
 			TargetID:    s.ID,
-			Action:      "set",
+			Action:      "replace",
 			TargetField: fmt.Sprintf("scenario.%s.tags", s.ID),
 			TargetValue: "[exactly one of @unit / @integration / @smoke / @e2e]",
 			Issue:       fmt.Sprintf("Scenario %s has %d tier tags; exactly one is required.", s.ID, tierCount),
-			Suggestion:  "Add (or de-duplicate to) exactly one tier tag. Use @unit for in-process behavior with fakes, @integration when a services-class or testcontainers-class harness is running, @e2e for full-system UI flows, @smoke only when explicitly directed.",
+			Suggestion:  "Replace the tags with exactly one tier tag. Use @unit for in-process behavior with fakes, @integration when an integration test environment is required, @e2e for full-system UI flows, @smoke only when explicitly directed.",
 		})
 	}
 	return findings
@@ -169,8 +169,8 @@ func scenarioMissingIntegrationForServicesFindings(plan *workflow.Plan, catalog 
 				Action:      "add",
 				TargetField: fmt.Sprintf("requirement.%s.scenarios", req.ID),
 				TargetValue: fmt.Sprintf("@integration scenario with harness_profile_ids containing %q", profileID),
-				Issue:       fmt.Sprintf("Requirement %s has no @integration scenario tagging harness profile %q. The architect selected this services-class or testcontainers-class profile; without an @integration scenario the structural-validator can't verify the dev's tests scaffold correctly against the harness.", req.ID, profileID),
-				Suggestion:  fmt.Sprintf("Add at least one scenario tagged @integration with harness_profile_ids containing %q. The scenario's Given assumes the harness is running and its endpoint is read from environment variables; the scenario does NOT instruct test code to start the harness — qa-runner does that per ADR-039.", profileID),
+				Issue:       fmt.Sprintf("Requirement %s has no @integration scenario tagging harness profile %q. The architect selected this integration evidence target; without an @integration scenario Murat cannot trace whether runtime proof is present, missing, or deferred.", req.ID, profileID),
+				Suggestion:  fmt.Sprintf("Add at least one scenario tagged @integration with harness_profile_ids containing %q. The scenario's Given assumes the integration environment is available and its endpoint is read from environment variables; the scenario does NOT instruct test code to start external services.", profileID),
 			})
 		}
 	}
@@ -201,7 +201,7 @@ func scenarioHarnessIDUnresolvedFindings(plan *workflow.Plan, catalog *harnessca
 				Action:      "fix",
 				TargetField: fmt.Sprintf("scenario.%s.harness_profile_ids", s.ID),
 				TargetValue: id,
-				Issue:       fmt.Sprintf("Scenario %s lists harness_profile_id %q, which is not present in the harness catalog. qa-runner can't bind a scenario to a profile that doesn't exist.", s.ID, id),
+				Issue:       fmt.Sprintf("Scenario %s lists harness_profile_id %q, which is not present in the harness catalog. QA cannot trace runtime evidence to a profile that doesn't exist.", s.ID, id),
 				Suggestion:  fmt.Sprintf("Replace %q with a valid profile_id from the architecture's selected harness_profiles[], or remove the entry. Profile IDs are catalog cross-references (e.g. \"mavlink.px4-sitl.mavsdk-smoke\"), not free text.", id),
 			})
 		}

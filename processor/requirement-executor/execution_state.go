@@ -154,8 +154,9 @@ type requirementExecution struct {
 	// MaxRetries is the retry budget from config (copied at creation time).
 	MaxRetries int
 
-	// DirtyNodeIDs lists node IDs that need re-execution on a fixable retry.
-	// Empty means all nodes are clean (first attempt or restructure).
+	// DirtyNodeIDs lists node IDs that need re-execution on a targeted fixable retry.
+	// Empty means no targeted retry is active; first attempts and restructure retries
+	// run by phase/DAG state.
 	DirtyNodeIDs []string
 
 	// LastReviewFeedback carries the reviewer's feedback from the last rejection.
