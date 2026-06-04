@@ -1613,80 +1613,9 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		return
 	}
 
-	// Parse verdict from reviewer result.
-	var result requirementReviewResult
-	invalidReason := ""
-	parseOK := true
-	if event.Result != "" {
-		if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &result); err != nil {
-			c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
-			invalidReason = fmt.Sprintf("parse review JSON: %v", err)
-			parseOK = false
-		}
-	} else {
-		invalidReason = "empty review result"
-		parseOK = false
-	}
-
-	// Validate verdict even when JSON parsed OK — small models can return
-	// empty or unrecognized verdict strings.
-	if parseOK {
-		if err := phases.ValidateVerdict(result.Verdict); err != nil {
-			c.logger.Warn("Invalid requirement reviewer verdict",
-				"entity_id", exec.EntityID,
-				"verdict", result.Verdict,
-				"error", err,
-			)
-			invalidReason = fmt.Sprintf("invalid verdict: %s", result.Verdict)
-			parseOK = false
-		}
-	}
-	if parseOK && result.Verdict != "approved" {
-		if result.RejectionType == "" {
-			result.RejectionType = "fixable"
-		}
-		switch result.RejectionType {
-		case "fixable":
-			if err := validateFixableReviewTargeting(exec, result.ScenarioVerdicts); err != nil {
-				c.logger.Warn("Invalid fixable requirement reviewer targeting",
-					"entity_id", exec.EntityID,
-					"error", err,
-				)
-				invalidReason = err.Error()
-				parseOK = false
-			}
-		case "restructure":
-			// Restructure explicitly discards the DAG, so scenario-level dirty
-			// targeting is not required.
-		default:
-			invalidReason = fmt.Sprintf("invalid rejection_type: %s", result.RejectionType)
-			parseOK = false
-		}
-	}
-
-	// On parse/validation failure, retry the reviewer if budget allows.
-	if !parseOK {
-		maxRetries := c.config.MaxReviewRetries
-		if maxRetries == 0 {
-			maxRetries = 3
-		}
-		if exec.ReviewRetryCount < maxRetries {
-			exec.ReviewRetryCount++
-			c.logger.Info("Retrying requirement reviewer after invalid result",
-				"entity_id", exec.EntityID,
-				"attempt", exec.ReviewRetryCount,
-				"max", maxRetries,
-				"reason", invalidReason,
-			)
-			c.dispatchRequirementReviewerLocked(ctx, exec)
-			return
-		}
-		c.logger.Error("Requirement reviewer failed after max retries",
-			"entity_id", exec.EntityID,
-			"attempts", exec.ReviewRetryCount,
-			"reason", invalidReason,
-		)
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer returned invalid result after max retries: %s", invalidReason))
+	result, err := c.parseRequirementReviewResultLocked(exec, event.Result)
+	if err != nil {
+		c.handleInvalidRequirementReviewResultLocked(ctx, exec, err.Error())
 		return
 	}
 
@@ -1743,6 +1672,71 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		}
 		c.startFixableRetryLocked(ctx, exec, result.Feedback, scenarioVerdicts)
 	}
+}
+
+func (c *Component) parseRequirementReviewResultLocked(exec *requirementExecution, raw string) (requirementReviewResult, error) {
+	var result requirementReviewResult
+	if raw == "" {
+		return result, fmt.Errorf("empty review result")
+	}
+	if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(raw)), &result); err != nil {
+		c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
+		return result, fmt.Errorf("parse review JSON: %w", err)
+	}
+	if err := phases.ValidateVerdict(result.Verdict); err != nil {
+		c.logger.Warn("Invalid requirement reviewer verdict",
+			"entity_id", exec.EntityID,
+			"verdict", result.Verdict,
+			"error", err,
+		)
+		return result, fmt.Errorf("invalid verdict: %s", result.Verdict)
+	}
+	if result.Verdict == "approved" {
+		return result, nil
+	}
+	if result.RejectionType == "" {
+		result.RejectionType = "fixable"
+	}
+	switch result.RejectionType {
+	case "fixable":
+		if err := validateFixableReviewTargeting(exec, result.ScenarioVerdicts); err != nil {
+			c.logger.Warn("Invalid fixable requirement reviewer targeting",
+				"entity_id", exec.EntityID,
+				"error", err,
+			)
+			return result, err
+		}
+	case "restructure":
+		// Restructure explicitly discards the DAG, so scenario-level dirty
+		// targeting is not required.
+	default:
+		return result, fmt.Errorf("invalid rejection_type: %s", result.RejectionType)
+	}
+	return result, nil
+}
+
+func (c *Component) handleInvalidRequirementReviewResultLocked(ctx context.Context, exec *requirementExecution, reason string) {
+	maxRetries := c.config.MaxReviewRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
+	if exec.ReviewRetryCount < maxRetries {
+		exec.ReviewRetryCount++
+		c.logger.Info("Retrying requirement reviewer after invalid result",
+			"entity_id", exec.EntityID,
+			"attempt", exec.ReviewRetryCount,
+			"max", maxRetries,
+			"reason", reason,
+		)
+		c.dispatchRequirementReviewerLocked(ctx, exec)
+		return
+	}
+	c.logger.Error("Requirement reviewer failed after max retries",
+		"entity_id", exec.EntityID,
+		"attempts", exec.ReviewRetryCount,
+		"reason", reason,
+	)
+	c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer returned invalid result after max retries: %s", reason))
 }
 
 func validateFixableReviewTargeting(exec *requirementExecution, verdicts []requirementReviewScenarioItem) error {
