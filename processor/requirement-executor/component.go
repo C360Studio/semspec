@@ -86,6 +86,35 @@ type sandboxClient interface {
 	DeleteBranch(ctx context.Context, branch string) error
 }
 
+type requirementReviewResult struct {
+	Verdict          string                          `json:"verdict"`
+	RejectionType    string                          `json:"rejection_type"` // "fixable" or "restructure"
+	Feedback         string                          `json:"feedback"`
+	ScenarioVerdicts []requirementReviewScenarioItem `json:"scenario_verdicts"`
+}
+
+type requirementReviewScenarioItem struct {
+	ScenarioID string `json:"scenario_id"`
+	Passed     *bool  `json:"passed"`
+	Feedback   string `json:"feedback,omitempty"`
+}
+
+func (r requirementReviewResult) toScenarioVerdicts() []ScenarioVerdict {
+	out := make([]ScenarioVerdict, 0, len(r.ScenarioVerdicts))
+	for _, sv := range r.ScenarioVerdicts {
+		passed := false
+		if sv.Passed != nil {
+			passed = *sv.Passed
+		}
+		out = append(out, ScenarioVerdict{
+			ScenarioID: sv.ScenarioID,
+			Passed:     passed,
+			Feedback:   sv.Feedback,
+		})
+	}
+	return out
+}
+
 // newSandboxClient returns a sandboxClient backed by the real sandbox HTTP
 // client, or an untyped nil interface when url is empty. Using a constructor
 // avoids the Go nil-interface gotcha where a typed nil (*sandbox.Client)(nil)
@@ -1163,8 +1192,9 @@ func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.
 // @e2e). Each tier group carries instructions that tell the reviewer
 // WHAT to look for at that tier — crucially, @integration scenarios do
 // NOT need to pass at dev-completion (the harness isn't running in the
-// dev sandbox); they need to be authored correctly. qa-runner gates
-// passing later per ADR-039.
+// dev sandbox); they need to be authored correctly. Murat records runtime
+// proof readiness at QA, and full semspec-managed harness execution is
+// post-MVP unless the project test command already owns it.
 //
 // Legacy scenarios without tier tags (PR 1's tags field absent) fall into
 // an "untagged" group with the legacy "verify all aspects" instruction —
@@ -1196,7 +1226,7 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution, scenarios []wo
 		groups := groupScenariosByTier(scenarios)
 
 		sb.WriteString("\n## Scenarios to verify (grouped by test pyramid tier)\n")
-		sb.WriteString("\nApply tier-appropriate verification per ADR-041. The harness is NOT running in the dev sandbox — @integration scenarios are verified for AUTHORING CORRECTNESS, not runtime behavior. qa-runner gates @integration passing downstream.\n")
+		sb.WriteString("\nApply tier-appropriate verification per ADR-041. The harness is NOT running in the dev sandbox — @integration scenarios are verified for AUTHORING CORRECTNESS, not runtime behavior. For MVP, Murat records whether runtime proof is present, missing, or deferred; full harness orchestration is post-MVP unless the project test command already owns it.\n")
 
 		if len(groups.unit) > 0 {
 			sb.WriteString("\n### @unit scenarios\n")
@@ -1206,7 +1236,7 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution, scenarios []wo
 
 		if len(groups.integration) > 0 {
 			sb.WriteString("\n### @integration scenarios\n")
-			sb.WriteString("Verify each has a tagged test file that (a) contains at least one of the scenario's harness_profile_ids as a STRING LITERAL, (b) reads the harness endpoint from environment variables declared by the bound catalog profile (NOT a hardcoded host/port), and (c) asserts on each required_assertion of every bound profile. The test does NOT need to PASS here — the harness isn't up in the dev sandbox. Approve when the AUTHORING is correct; qa-runner gates the runtime behavior downstream per ADR-039.\n\n")
+			sb.WriteString("Verify each has an integration test or documented integration-test plan that (a) declares the tier using the project's test framework idiom, (b) binds to the scenario's harness_profile_ids where project tooling consumes such bindings, (c) reads harness endpoints from environment variables declared by the bound catalog profile (NOT a hardcoded host/port), and (d) asserts on each required_assertion of every bound profile. The test does NOT need to PASS here — the harness isn't up in the dev sandbox. Approve when AUTHORING is correct; Murat records runtime proof readiness at QA, and full harness orchestration remains post-MVP unless the project test command already owns it.\n\n")
 			writeScenarioList(&sb, groups.integration)
 		}
 
@@ -1583,64 +1613,15 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		return
 	}
 
-	// Parse verdict from reviewer result.
-	var result struct {
-		Verdict          string            `json:"verdict"`
-		RejectionType    string            `json:"rejection_type"` // "fixable" or "restructure"
-		Feedback         string            `json:"feedback"`
-		ScenarioVerdicts []ScenarioVerdict `json:"scenario_verdicts"`
-	}
-	parseOK := true
-	if event.Result != "" {
-		if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(event.Result)), &result); err != nil {
-			c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
-			parseOK = false
-		}
-	} else {
-		parseOK = false
-	}
-
-	// Validate verdict even when JSON parsed OK — small models can return
-	// empty or unrecognized verdict strings.
-	if parseOK {
-		if err := phases.ValidateVerdict(result.Verdict); err != nil {
-			c.logger.Warn("Invalid requirement reviewer verdict",
-				"entity_id", exec.EntityID,
-				"verdict", result.Verdict,
-				"error", err,
-			)
-			parseOK = false
-		}
-	}
-
-	// On parse/validation failure, retry the reviewer if budget allows.
-	if !parseOK {
-		maxRetries := c.config.MaxReviewRetries
-		if maxRetries == 0 {
-			maxRetries = 3
-		}
-		if exec.ReviewRetryCount < maxRetries {
-			exec.ReviewRetryCount++
-			c.logger.Info("Retrying requirement reviewer after invalid result",
-				"entity_id", exec.EntityID,
-				"attempt", exec.ReviewRetryCount,
-				"max", maxRetries,
-			)
-			c.dispatchRequirementReviewerLocked(ctx, exec)
-			return
-		}
-		c.logger.Error("Requirement reviewer failed after max retries, defaulting to rejected",
-			"entity_id", exec.EntityID,
-			"attempts", exec.ReviewRetryCount,
-		)
-		result.Verdict = "rejected"
-		result.RejectionType = "fixable"
-		result.Feedback = "reviewer returned invalid verdict — treating as rejection"
+	result, err := c.parseRequirementReviewResultLocked(exec, event.Result)
+	if err != nil {
+		c.handleInvalidRequirementReviewResultLocked(ctx, exec, err.Error())
+		return
 	}
 
 	exec.ReviewVerdict = result.Verdict
 	exec.ReviewFeedback = result.Feedback
-	exec.ScenarioVerdicts = result.ScenarioVerdicts
+	exec.ScenarioVerdicts = result.toScenarioVerdicts()
 
 	if result.Verdict == "approved" {
 		c.handleApprovedVerdictLocked(ctx, exec)
@@ -1677,7 +1658,8 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		// hand the uncovered IDs back as actionable feedback. This replaces an
 		// earlier silent "mark all nodes dirty" fallback that masked decomposer
 		// bugs and lit up the whole DAG every retry.
-		if uncovered := c.uncoveredFailedScenarios(exec, result.ScenarioVerdicts); len(uncovered) > 0 {
+		scenarioVerdicts := result.toScenarioVerdicts()
+		if uncovered := c.uncoveredFailedScenarios(exec, scenarioVerdicts); len(uncovered) > 0 {
 			c.logger.Error("Coverage gap — failed scenarios have no DAG node mapping; forcing restructure",
 				"entity_id", exec.EntityID,
 				"uncovered_scenario_ids", uncovered,
@@ -1688,8 +1670,121 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 			))
 			return
 		}
-		c.startFixableRetryLocked(ctx, exec, result.Feedback, result.ScenarioVerdicts)
+		c.startFixableRetryLocked(ctx, exec, result.Feedback, scenarioVerdicts)
 	}
+}
+
+func (c *Component) parseRequirementReviewResultLocked(exec *requirementExecution, raw string) (requirementReviewResult, error) {
+	var result requirementReviewResult
+	if raw == "" {
+		return result, fmt.Errorf("empty review result")
+	}
+	if err := json.Unmarshal([]byte(jsonutil.ExtractJSON(raw)), &result); err != nil {
+		c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
+		return result, fmt.Errorf("parse review JSON: %w", err)
+	}
+	if err := phases.ValidateVerdict(result.Verdict); err != nil {
+		c.logger.Warn("Invalid requirement reviewer verdict",
+			"entity_id", exec.EntityID,
+			"verdict", result.Verdict,
+			"error", err,
+		)
+		return result, fmt.Errorf("invalid verdict: %s", result.Verdict)
+	}
+	if result.Verdict == "approved" {
+		return result, nil
+	}
+	if result.RejectionType == "" {
+		result.RejectionType = "fixable"
+	}
+	switch result.RejectionType {
+	case "fixable":
+		if err := validateFixableReviewTargeting(exec, result.ScenarioVerdicts); err != nil {
+			c.logger.Warn("Invalid fixable requirement reviewer targeting",
+				"entity_id", exec.EntityID,
+				"error", err,
+			)
+			return result, err
+		}
+	case "restructure":
+		// Restructure explicitly discards the DAG, so scenario-level dirty
+		// targeting is not required.
+	default:
+		return result, fmt.Errorf("invalid rejection_type: %s", result.RejectionType)
+	}
+	return result, nil
+}
+
+func (c *Component) handleInvalidRequirementReviewResultLocked(ctx context.Context, exec *requirementExecution, reason string) {
+	maxRetries := c.config.MaxReviewRetries
+	if maxRetries == 0 {
+		maxRetries = 3
+	}
+	if exec.ReviewRetryCount < maxRetries {
+		exec.ReviewRetryCount++
+		c.logger.Info("Retrying requirement reviewer after invalid result",
+			"entity_id", exec.EntityID,
+			"attempt", exec.ReviewRetryCount,
+			"max", maxRetries,
+			"reason", reason,
+		)
+		c.dispatchRequirementReviewerLocked(ctx, exec)
+		return
+	}
+	c.logger.Error("Requirement reviewer failed after max retries",
+		"entity_id", exec.EntityID,
+		"attempts", exec.ReviewRetryCount,
+		"reason", reason,
+	)
+	c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer returned invalid result after max retries: %s", reason))
+}
+
+func validateFixableReviewTargeting(exec *requirementExecution, verdicts []requirementReviewScenarioItem) error {
+	scoped := scopeScenariosToCurrentStory(exec)
+	if len(scoped) == 0 {
+		return fmt.Errorf("fixable rejection requires scoped scenarios, but reviewer had no scenario surface")
+	}
+	if len(verdicts) == 0 {
+		return fmt.Errorf("fixable rejection requires scenario_verdicts for every scoped scenario")
+	}
+
+	expected := make(map[string]struct{}, len(scoped))
+	for _, s := range scoped {
+		expected[s.ID] = struct{}{}
+	}
+
+	seen := make(map[string]struct{}, len(verdicts))
+	failedCount := 0
+	for i, sv := range verdicts {
+		if sv.ScenarioID == "" {
+			return fmt.Errorf("scenario_verdicts[%d].scenario_id is required", i)
+		}
+		if _, ok := expected[sv.ScenarioID]; !ok {
+			return fmt.Errorf("scenario_verdicts[%d].scenario_id %q is outside the scoped review surface", i, sv.ScenarioID)
+		}
+		if sv.Passed == nil {
+			return fmt.Errorf("scenario_verdicts[%d].passed is required for fixable rejection targeting", i)
+		}
+		seen[sv.ScenarioID] = struct{}{}
+		if !*sv.Passed {
+			failedCount++
+		}
+	}
+
+	if len(seen) < len(expected) {
+		var missing []string
+		for id := range expected {
+			if _, ok := seen[id]; !ok {
+				missing = append(missing, id)
+			}
+		}
+		sort.Strings(missing)
+		return fmt.Errorf("scenario_verdicts missing scoped scenario ids: %s", strings.Join(missing, ", "))
+	}
+	if failedCount == 0 {
+		return fmt.Errorf("fixable rejection requires at least one failed scenario verdict")
+	}
+	return nil
 }
 
 // uncoveredFailedScenarios returns the sorted IDs of failed scenarios that
@@ -1880,8 +1975,10 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 }
 
 // isNodeDirty returns true if a node should be re-executed on retry.
-// On first attempt (RetryCount==0) or when DirtyNodeIDs is empty, all nodes run.
-// On retry with dirty nodes, only nodes in DirtyNodeIDs run.
+// First attempts and restructure retries run all nodes by phase/DAG state.
+// Targeted fixable retries run only nodes listed in DirtyNodeIDs; invalid
+// reviewer targeting fails closed before dispatch instead of treating an empty
+// dirty set as a full-DAG retry.
 func (c *Component) isNodeDirty(exec *requirementExecution, nodeID string) bool {
 	if exec.RetryCount == 0 || len(exec.DirtyNodeIDs) == 0 {
 		return true // first attempt or no dirty list — all nodes are "dirty"

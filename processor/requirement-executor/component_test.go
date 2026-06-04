@@ -2014,6 +2014,137 @@ func TestUncoveredFailedScenarios(t *testing.T) {
 	}
 }
 
+func boolPtr(v bool) *bool {
+	return &v
+}
+
+func TestValidateFixableReviewTargeting(t *testing.T) {
+	exec := &requirementExecution{
+		Scenarios: []workflow.Scenario{
+			{ID: "s1", StoryID: "story.1"},
+			{ID: "s2", StoryID: "story.1"},
+		},
+		SortedStoryIDs:  []string{"story.1"},
+		CurrentStoryIdx: 0,
+	}
+
+	cases := []struct {
+		name     string
+		verdicts []requirementReviewScenarioItem
+		wantErr  string
+	}{
+		{
+			name: "complete targeted rejection",
+			verdicts: []requirementReviewScenarioItem{
+				{ScenarioID: "s1", Passed: boolPtr(false), Feedback: "missing coverage"},
+				{ScenarioID: "s2", Passed: boolPtr(true)},
+			},
+		},
+		{
+			name:     "empty verdicts rejected",
+			verdicts: nil,
+			wantErr:  "requires scenario_verdicts",
+		},
+		{
+			name: "missing passed rejected",
+			verdicts: []requirementReviewScenarioItem{
+				{ScenarioID: "s1", Feedback: "missing coverage"},
+				{ScenarioID: "s2", Passed: boolPtr(true)},
+			},
+			wantErr: "passed is required",
+		},
+		{
+			name: "missing scoped scenario rejected",
+			verdicts: []requirementReviewScenarioItem{
+				{ScenarioID: "s1", Passed: boolPtr(false)},
+			},
+			wantErr: "missing scoped scenario ids",
+		},
+		{
+			name: "all pass cannot drive fixable retry",
+			verdicts: []requirementReviewScenarioItem{
+				{ScenarioID: "s1", Passed: boolPtr(true)},
+				{ScenarioID: "s2", Passed: boolPtr(true)},
+			},
+			wantErr: "at least one failed",
+		},
+		{
+			name: "outside scoped surface rejected",
+			verdicts: []requirementReviewScenarioItem{
+				{ScenarioID: "s1", Passed: boolPtr(false)},
+				{ScenarioID: "s3", Passed: boolPtr(true)},
+			},
+			wantErr: "outside the scoped review surface",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateFixableReviewTargeting(exec, tc.verdicts)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateFixableReviewTargeting() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("validateFixableReviewTargeting() error = %v, want containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestRequirementReviewerRejectedFixableWithoutScenarioVerdictsFailsClosed(t *testing.T) {
+	c := newTestComponent(t)
+	c.config.MaxReviewRetries = 3
+
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
+			{ID: "node-a", ScenarioIDs: []string{"s1"}},
+			{ID: "node-b", ScenarioIDs: []string{"s2"}},
+		},
+	}
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.targeting",
+		Slug:              "targeting",
+		RequirementID:     "requirement.targeting.1",
+		DAG:               dag,
+		SortedNodeIDs:     []string{"node-a", "node-b"},
+		NodeIndex:         map[string]*TaskNode{"node-a": &dag.Nodes[0], "node-b": &dag.Nodes[1]},
+		VisitedNodes:      map[string]bool{"node-a": true, "node-b": true},
+		NodeResults:       []NodeResult{{NodeID: "node-a"}, {NodeID: "node-b"}},
+		MaxRetries:        2,
+		RetryCount:        0,
+		ReviewRetryCount:  3,
+		CurrentStoryIdx:   0,
+		SortedStoryIDs:    []string{"story.targeting.1"},
+		Scenarios:         []workflow.Scenario{{ID: "s1", StoryID: "story.targeting.1"}, {ID: "s2", StoryID: "story.targeting.1"}},
+		CurrentNodeTaskID: "reviewer",
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		Outcome: agentic.OutcomeSuccess,
+		Result:  `{"verdict":"rejected","rejection_type":"fixable","feedback":"Scenario 1 needs a test, but I forgot the structured verdicts."}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	if exec.RetryCount != 0 {
+		t.Errorf("RetryCount = %d, want 0; invalid reviewer targeting must not start a requirement retry", exec.RetryCount)
+	}
+	if len(exec.DirtyNodeIDs) != 0 {
+		t.Errorf("DirtyNodeIDs = %v, want empty; invalid reviewer targeting must not dirty the DAG", exec.DirtyNodeIDs)
+	}
+	if len(exec.NodeResults) != 2 {
+		t.Errorf("NodeResults length = %d, want 2; invalid reviewer targeting must not trim completed work", len(exec.NodeResults))
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1; exhausted invalid reviewer output should fail closed", c.requirementsFailed.Load())
+	}
+}
+
 // TestRequirementCompletion_RejectsApprovalWithoutCommitObservation pins the
 // claim/observation contract for requirement-level completion. Sibling of
 // bug #9: even when individual node merges silently no-op, the reviewer can

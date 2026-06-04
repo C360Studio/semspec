@@ -140,6 +140,10 @@ plan at creation so policy changes don't retroactively affect in-flight work.
 | `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — tagged integration tests against real service dependencies. Per ADR-039 the catalog `services`-class profiles render as qa.yml `services:` blocks brought up by qa-runner; `testcontainers` and `pure-fixture` profiles are started by the test code itself. | Projects with integration suites |
 | `full` | qa-runner + `act` | Both `integration` + `e2e` jobs — adds Playwright browser flows | Projects with UI + browser tests |
 
+**MVP scope:** use `synthesis` for hard-scenario demos unless the project already owns a reliable integration command.
+Scenario tags and harness profile IDs remain planning/review metadata, but semspec-managed harness routing and full/e2e
+orchestration are post-MVP.
+
 Configure via `.semspec/project.json`:
 
 ```json
