@@ -51,6 +51,17 @@ type TaskExecution struct {
 	ScenarioBranch string   `json:"scenario_branch,omitempty"`
 	FileScope      []string `json:"file_scope,omitempty"`
 
+	// Scenarios are the BDD scenarios this task is responsible for satisfying.
+	// Populated by requirement-executor at dispatch time, filtered from the
+	// parent requirement's full scenario set by node.ScenarioIDs. Threaded
+	// through TaskContext so the developer writes tests against the actual
+	// given/when/then and the per-task code-reviewer can enforce contract
+	// conformance per scenario instead of trusting the dev's self-assessment.
+	// Closes the disconnect surfaced by paid mavlink-hard 2026-06-03 where
+	// Cline approved code that the req-level reviewer then rejected on every
+	// scenario.
+	Scenarios []Scenario `json:"scenarios,omitempty"`
+
 	// Pipeline outputs
 	FilesModified    []string `json:"files_modified,omitempty"`
 	TestsPassed      bool     `json:"tests_passed,omitempty"`

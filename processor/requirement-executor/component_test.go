@@ -2233,6 +2233,63 @@ func TestScopeScenariosToCurrentStory_LegacyExecFallsBackToAll(t *testing.T) {
 	}
 }
 
+// TestFilterScenariosByIDs pins the per-DAG-node scenario scoping. Each
+// task node carries node.ScenarioIDs (the IDs of the scenarios the node
+// is responsible for satisfying); dispatchNextNodeLocked threads the
+// matching scenarios from exec.Scenarios into TaskCreateRequest.Scenarios
+// so the developer + per-task code-reviewer prompts ground in the
+// contract this specific node must hit. Closes the Cline-blind-to-
+// scenarios disconnect surfaced 2026-06-03 on paid mavlink-hard.
+func TestFilterScenariosByIDs(t *testing.T) {
+	scenarios := []workflow.Scenario{
+		{ID: "scenario.x.1.1.1", Given: "g1", When: "w1", Then: []string{"t1"}},
+		{ID: "scenario.x.1.1.2", Given: "g2"},
+		{ID: "scenario.x.1.1.3", Given: "g3"},
+	}
+
+	t.Run("matching subset returned in scenario order", func(t *testing.T) {
+		got := filterScenariosByIDs(scenarios, []string{"scenario.x.1.1.3", "scenario.x.1.1.1"})
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
+		}
+		// Order follows scenarios slice, not ids slice.
+		if got[0].ID != "scenario.x.1.1.1" || got[1].ID != "scenario.x.1.1.3" {
+			t.Errorf("order = [%s, %s], want [scenario.x.1.1.1, scenario.x.1.1.3]", got[0].ID, got[1].ID)
+		}
+		if got[0].Given != "g1" || got[0].Then[0] != "t1" {
+			t.Errorf("filter dropped content from the matched scenario; given=%q then[0]=%q", got[0].Given, got[0].Then[0])
+		}
+	})
+
+	t.Run("empty ids returns nil for clean field-omit", func(t *testing.T) {
+		got := filterScenariosByIDs(scenarios, nil)
+		if got != nil {
+			t.Errorf("got = %v, want nil so TaskCreateRequest.Scenarios stays unpopulated and the fragment elides", got)
+		}
+	})
+
+	t.Run("empty scenarios returns nil", func(t *testing.T) {
+		got := filterScenariosByIDs(nil, []string{"scenario.x.1.1.1"})
+		if got != nil {
+			t.Errorf("got = %v, want nil when there are no scenarios to filter from", got)
+		}
+	})
+
+	t.Run("ids referencing unknown scenarios return empty slice", func(t *testing.T) {
+		got := filterScenariosByIDs(scenarios, []string{"scenario.does-not-exist"})
+		if len(got) != 0 {
+			t.Errorf("got = %v, want empty when ID references a scenario not present", got)
+		}
+	})
+
+	t.Run("duplicate ids do not duplicate scenarios", func(t *testing.T) {
+		got := filterScenariosByIDs(scenarios, []string{"scenario.x.1.1.1", "scenario.x.1.1.1"})
+		if len(got) != 1 {
+			t.Errorf("len = %d, want 1 (deduplicated by set semantics)", len(got))
+		}
+	})
+}
+
 // TestDispatchCurrentStoryLocked_NonCompleteStatusesFallThroughToDispatch
 // pins the ADR-044 dedup's negative case: any Story.Status other than
 // Complete must fall through to synthesis. The test exercises Pending,

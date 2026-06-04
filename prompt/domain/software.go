@@ -118,14 +118,14 @@ What to read before writing, and what each piece prevents:
 - Project config (go.mod, package.json, setup.py, etc.) — gives the real module/package path. Guessing produces import errors that fail the first compile and waste an iteration.
 - Existing test files — match the framework, naming conventions, and assertion style already in use. Mismatched style is a near-certain review rejection.
 - Existing implementation in nearby files — match the patterns. Introducing a foreign style alongside conforming code is the most common rejection reason.
-- The acceptance criteria — confirm what behavior to implement. Building the wrong thing means the work is lost.
+- Any ACCEPTANCE SCENARIOS section rendered in your prompt — those define the test-writing contract. Building tests against your interpretation of "what feels reasonable" rather than the scenario's actual Then assertions wastes a full TDD cycle plus the reviewer round-trip.
 
 TEST WRITING:
-- One test per acceptance criterion, plus edge cases (nil, empty, boundary, error)
-- Use descriptive names referencing the scenario (e.g. TestHealthCheck_Returns200)
+- One test per acceptance criterion (or scenario, when scenarios are listed in the prompt), plus edge cases (nil, empty, boundary, error)
+- Use descriptive names referencing the behavior under test (e.g. TestHealthCheck_Returns200; when scenarios are listed, prefer scenario_id in the test name)
 - Put test files in the SAME DIRECTORY as implementation files
 - Use the REAL module/package path from the project config — never use placeholder imports
-- Only test behavior described in the acceptance criteria — nothing unrelated
+- When scenarios are listed in your prompt, each test's assertions MUST match the scenario's Then list. Do not substitute "the function returned without error" for "the response body contains the message 'goodbye'" — they are not the same contract.
 
 IMPLEMENTATION — verify as you go, not at the end:
 - Work in tight cycles: write test → run it (expect fail) → implement → run it (expect pass)
@@ -133,7 +133,7 @@ IMPLEMENTATION — verify as you go, not at the end:
 - Run the RELEVANT test after each implementation change — do not batch all testing to the end
 - Fix failures immediately — do not write more code on top of broken code
 - Match existing code patterns from nearby files
-- Follow ALL requirements from SOPs in the task context
+- Implement against the acceptance criteria, not against your interpretation of the task title
 
 COMMON MISTAKE: Writing all files then running tests once. This wastes iterations when a failure in file 1 cascades through files 2-4. Catch failures early.
 
@@ -328,6 +328,30 @@ qa-reviewer judges coverage against this declared surface.`)
 			},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				return renderResolvedHarnessProfiles("TEST ENVIRONMENTS — selected test environment details from the catalog for this task.", ctx.TaskContext.HarnessProfiles)
+			},
+		},
+		{
+			// software.task-scenarios renders the BDD scenarios this DAG node
+			// is responsible for satisfying. Fires for Developer, Validator,
+			// and per-task code-Reviewer roles when TaskContext.Scenarios is
+			// populated (always populated for ADR-044 M:N executions; empty
+			// for mock fixtures + legacy plans where the fragment elides).
+			//
+			// Closes the 2026-06-03 mavlink-hard disconnect: pre-fix Cline
+			// approved internally-consistent code that the req-level
+			// scenario-reviewer then rejected on every scenario because Cline
+			// never saw the contract. Threading the same scenarios into the
+			// dev + per-task reviewer prompts shifts the contract check
+			// earlier (TDD-cycle granular) instead of req-level (full DAG
+			// restart).
+			ID:       "software.task-scenarios",
+			Category: prompt.CategoryDomainContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && len(ctx.TaskContext.Scenarios) > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				return renderTaskScenarios(ctx.Role, ctx.TaskContext.Scenarios)
 			},
 		},
 		{
@@ -954,34 +978,32 @@ You optimize for TRUSTWORTHINESS, not completion.`,
 			Roles:    []prompt.Role{prompt.RoleReviewer},
 			Content: `Review Process
 
-1. Read the specification and acceptance criteria in the task context
-2. Read the SOPs provided in the task context
-3. Use bash cat to examine all modified implementation files
-4. Use bash cat to examine all test files (unit tests + integration tests from validator)
-5. Use bash git diff to see the full changeset
-6. Validate against spec + SOPs + structural checklist
+1. Read the project standards and any ACCEPTANCE SCENARIOS section rendered above — those drive the verdict.
+2. Use bash cat to examine all modified implementation files
+3. Use bash cat to examine all test files (unit tests + integration tests from validator)
+4. Use bash git diff to see the full changeset
+5. Validate against standards + structural checklist + scenarios (when present)
 
-Review Checklist — For EACH applicable SOP:
+Review Checklist — For EACH applicable check:
 - [ ] Requirement met?
-- [ ] Evidence (specific line reference)?
+- [ ] Evidence (specific line reference or scenario_id)?
 - [ ] Severity if violated?
 
 Rejection Types — your rejection routes feedback for the next iteration:
-- fixable: Specific issues the developer can address (wrong pattern, missing tests, SOP violation)
+- fixable: Specific issues the developer can address (wrong pattern, missing tests, scenario assertion missing or wrong)
 - restructure: Approach is fundamentally wrong (wrong abstraction, wrong boundaries, should be decomposed differently)
 
 TEST COVERAGE VERIFICATION — For every function, endpoint, or behavior added or modified:
-1. Name the function/endpoint/behavior
-2. Name the specific test that covers it
-3. If you cannot name a covering test, verdict is rejected/fixable
+1. Name the function/endpoint/behavior.
+2. Name the specific test that covers it.
+3. If you cannot name a covering test, verdict is rejected/fixable.
 Do not assess coverage holistically. Do this per item. Every changed item must have a named test.
 
 Integrity Rules:
-- You CANNOT approve if any SOP has status "violated"
-- You CANNOT approve if any changed function/endpoint lacks a named covering test
-- You MUST provide evidence for every SOP evaluation
-- You MUST check ALL applicable SOPs, not just some
-- If confidence < 0.7, recommend human review
+- You CANNOT approve if any changed function/endpoint lacks a named covering test.
+- You MUST provide evidence for every evaluation.
+- You MUST check ALL applicable items, not just some.
+- If confidence < 0.7, recommend human review.
 
 Scope-Aware Feedback (mandatory when rejecting):
 When files_modified doesn't intersect scope.include, or contains anything in

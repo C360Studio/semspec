@@ -833,6 +833,69 @@ func writeCoversLine(sb *strings.Builder, covers map[string][]string) {
 
 const harnessProfilesIntro = "Use these details when your node touches the selected integration. For `services`-orchestrated profiles, qa-runner brings the stack up as qa.yml services from this catalog metadata — read the endpoint from the host/env qa-runner injects rather than starting your own container. For `testcontainers` or `pure-fixture` profiles, the test fixture owns the integration peer.\n\n"
 
+// renderTaskScenarios renders the BDD scenarios this task is responsible
+// for satisfying. The role-specific intro changes the framing — the
+// developer reads the scenarios as a test-writing contract; the per-task
+// code-reviewer and validator read them as the conformance bar each
+// scenario_id must pass before the task can be approved.
+//
+// Output shape per scenario:
+//
+//	### scenario.<id>
+//	- Given: <given>
+//	- When: <when>
+//	- Then:
+//	  - <then[0]>
+//	  - <then[1]>
+//	  ...
+//
+// Returns "" when scenarios is empty so the fragment-condition gate
+// handles the elide-cleanly path for legacy plans.
+func renderTaskScenarios(role prompt.Role, scenarios []prompt.ScenarioSpec) string {
+	if len(scenarios) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	switch role {
+	case prompt.RoleDeveloper:
+		sb.WriteString("ACCEPTANCE SCENARIOS — your tests MUST exercise the given/when/then of EACH scenario below.\n\n")
+		sb.WriteString("For every scenario you do not have a test covering, the per-task reviewer will reject your work as fixable. Do not skip a scenario because it looks similar to another — each one's specific Given/When/Then is the contract.\n\n")
+	case prompt.RoleReviewer:
+		sb.WriteString("ACCEPTANCE SCENARIOS — for EACH scenario below, the developer's test suite MUST contain a test exercising its Given/When/Then.\n\n")
+		sb.WriteString("Verification protocol — execute this for EVERY scenario:\n")
+		sb.WriteString("1. Read the scenario's Given/When/Then.\n")
+		sb.WriteString("2. Use bash cat / git diff to find a test that exercises that specific behavior.\n")
+		sb.WriteString("3. If no test exists, or the test asserts something other than what Then specifies, that scenario is a violation.\n")
+		sb.WriteString("4. Set verdict=rejected with rejection_type=fixable. Quote the scenario_id and the missing/incorrect assertion in feedback.\n\n")
+		sb.WriteString("You CANNOT approve if any scenario lacks a test exercising its Then assertions. \"The code looks right and the dev's tests pass\" is NOT sufficient — the dev's tests may pass while missing the scenario contract entirely.\n\n")
+	case prompt.RoleValidator:
+		sb.WriteString("ACCEPTANCE SCENARIOS — the structural-validator should confirm that test files in the worktree reference each scenario below by ID or by the Given/When/Then assertions.\n\n")
+	default:
+		sb.WriteString("ACCEPTANCE SCENARIOS — the BDD contract this task must satisfy.\n\n")
+	}
+	for _, s := range scenarios {
+		if s.ID != "" {
+			fmt.Fprintf(&sb, "### %s\n", s.ID)
+		} else {
+			sb.WriteString("### (unnamed scenario)\n")
+		}
+		if s.Given != "" {
+			fmt.Fprintf(&sb, "- **Given:** %s\n", s.Given)
+		}
+		if s.When != "" {
+			fmt.Fprintf(&sb, "- **When:** %s\n", s.When)
+		}
+		if len(s.Then) > 0 {
+			sb.WriteString("- **Then:**\n")
+			for _, t := range s.Then {
+				fmt.Fprintf(&sb, "  - %s\n", t)
+			}
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func renderResolvedHarnessProfiles(title string, profiles []prompt.ResolvedHarnessProfileContext) string {
 	if len(profiles) == 0 {
 		return ""

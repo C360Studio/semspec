@@ -1421,6 +1421,9 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		"scenario_branch": exec.RequirementBranch,
 		"file_scope":      node.FileScope,
 	}
+	if nodeScenarios := filterScenariosByIDs(exec.Scenarios, node.ScenarioIDs); len(nodeScenarios) > 0 {
+		taskReq["scenarios"] = nodeScenarios
+	}
 	if err := c.sendTaskCreate(ctx, taskReq); err != nil {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch node %q failed: %v", nodeID, err))
 		return
@@ -2031,6 +2034,31 @@ func (c *Component) advanceToNextStoryLocked(ctx context.Context, exec *requirem
 	}
 
 	c.dispatchCurrentStoryLocked(ctx, exec, plan)
+}
+
+// filterScenariosByIDs returns the subset of scenarios whose IDs match the
+// provided ID list. Preserves the order of the input scenarios slice (not
+// the ID list). Returns nil when ids is empty so the caller can decide to
+// omit the field from the dispatch payload entirely. Used by
+// dispatchNextNodeLocked to scope a DAG node's scenarios from the parent
+// requirement's full set before sending the TaskCreateRequest — the
+// per-task developer + code-reviewer prompts then ground in just the
+// scenarios this node is responsible for.
+func filterScenariosByIDs(scenarios []workflow.Scenario, ids []string) []workflow.Scenario {
+	if len(ids) == 0 || len(scenarios) == 0 {
+		return nil
+	}
+	wanted := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		wanted[id] = struct{}{}
+	}
+	out := make([]workflow.Scenario, 0, len(ids))
+	for _, s := range scenarios {
+		if _, ok := wanted[s.ID]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // scopeScenariosToCurrentStory returns the subset of exec.Scenarios whose

@@ -182,6 +182,24 @@ type TaskContext struct {
 	// that bypasses the diff gate (see
 	// .semspec/investigation-diff-gate-2026-05-12.md).
 	WorktreePath string
+
+	// Scenarios are the BDD scenarios this task is responsible for
+	// satisfying. When non-empty, developer + per-task code-reviewer +
+	// validator prompts render each scenario's given/when/then so the
+	// dev grounds tests in the contract and the reviewer can verify
+	// each scenario_id has a test exercising its specific behavior
+	// before approving. Empty for mock fixtures or legacy plans without
+	// a per-task scenario binding — prompts fall back to the title-only
+	// shape so old fixtures keep working.
+	//
+	// Closes the disconnect surfaced by paid mavlink-hard 2026-06-03:
+	// per-task reviewer was structurally blind to scenarios (only the
+	// req-level scenario-reviewer saw them), so Cline approved internally-
+	// consistent code that the req-level reviewer then rejected on every
+	// scenario. Grounding both dev and per-task reviewer in the contract
+	// shifts the contract check earlier (TDD-cycle granular, cheap)
+	// instead of req-level (full DAG restart, expensive).
+	Scenarios []ScenarioSpec
 }
 
 // ResolvedHarnessProfileContext is a prompt-safe projection of a selected

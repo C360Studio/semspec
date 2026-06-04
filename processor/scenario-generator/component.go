@@ -914,21 +914,28 @@ func attachStoryIDs(scenarios []workflow.Scenario, plan *workflow.Plan, requirem
 }
 
 // retryKey returns the dispatchretry.State key for a scenario-generator
-// dispatch. Per-Story dispatch (storyID non-empty) keys by storyID so two
-// Stories under one Requirement get distinct retry registry entries;
-// legacy per-Requirement dispatch keys by requirementID for back-compat
-// with pre-Sarah plans and mock fixtures.
+// dispatch. The key always pins (slug, requirementID, storyID) so each
+// parallel dispatch occupies its own slot in the retry registry. Legacy
+// per-Requirement dispatch (storyID empty) collapses to slug/requirementID
+// for back-compat with pre-Sarah plans and mock fixtures.
 //
 // Closes go-reviewer Pass-2 finding C1: pre-fix, the producer
 // (dispatchPerStory / SetActiveLoop) keyed by storyID while the consumer
 // (handleLoopCompletion / retryOrFail / IsStaleLoop / Clear) keyed by
-// requirementID, so per-Story Track entries were written and never
-// looked up. The result was a silent disablement of the retry registry
-// in per-Story mode — a single Bob parse glitch hard-failed the entire
-// plan with zero retries despite MaxGenerationRetries.
+// requirementID — per-Story Track entries were written and never looked
+// up. A single Bob parse glitch hard-failed the entire plan with zero
+// retries despite MaxGenerationRetries.
+//
+// Closes ADR-044 silent-drop regression (paid mavlink-hard 2026-06-03):
+// pre-fix, the producer + consumer both keyed by storyID alone — symmetric
+// at the legacy-shape level, but under M:N (1 Story covering N Requirements)
+// every parallel scengen dispatch collided on the same key. Track was
+// first-wins, SetActiveLoop was last-wins, IsStaleLoop dropped the first
+// N-1 completions silently as "stale." Including requirementID alongside
+// storyID gives each parallel dispatch its own slot.
 func retryKey(slug, requirementID, storyID string) string {
 	if storyID != "" {
-		return slug + "/" + storyID
+		return slug + "/" + storyID + "/" + requirementID
 	}
 	return slug + "/" + requirementID
 }
