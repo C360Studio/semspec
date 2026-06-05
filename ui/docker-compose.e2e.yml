@@ -173,11 +173,12 @@ services:
       retries: 5
       # start_period covers cold-load and slow-network first-pull scenarios.
       # Empirical: warm-disk model load ~80-90s; first-time HF fetch on a slow
-      # connection adds another minute or two. 180s start_period + 50s post-
-      # start retry budget (5 × 10s) = 230s total grace before unhealthy. No
-      # cost on warm-load runs — start_period only suppresses failure counting,
-      # doesn't delay the healthy transition.
-      start_period: 180s
+      # connection adds another minute or two. 2026-06-04 paid run #6 hit
+      # 223s cold-load on arm64 (7s past the previous 230s grace) → compose
+      # --wait gave up. Bumped to 300s + 50s retry = 350s. No cost on warm
+      # runs — start_period only suppresses failure counting, doesn't delay
+      # the healthy transition.
+      start_period: 300s
     # 12-core host budget (see docs); 1 CPU is plenty for arctic-embed-s
     # (33M params, Rust/fastembed-rs). Iso-tested at 16/16 silent
     # successes during 30+ min @hard run.

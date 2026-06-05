@@ -143,6 +143,9 @@
         "description": "BDD scenario generation",
         "preferred": [
           "gemini-flash"
+        ],
+        "fallback": [
+          "gemini-pro"
         ]
       },
       "plan_review": {
@@ -336,14 +339,14 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 75,
-        "timeout": "900s",
+        "max_iterations": 120,
+        "timeout": "1800s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
         "trajectory_detail": "full",
         "consumer": {
-          "ack_wait": "720s",
+          "ack_wait": "1440s",
           "heartbeat_interval": "240s"
         }
       }
@@ -354,7 +357,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "900s",
+        "timeout": "1800s",
         "ports": {
           "inputs": [
             {
@@ -364,7 +367,7 @@
               "stream_name": "AGENT",
               "required": true,
               "config": {
-                "ack_wait": "720s",
+                "ack_wait": "1440s",
                 "heartbeat_interval": "240s"
               }
             }
@@ -606,7 +609,7 @@
         "max_review_iterations": 3,
         "auto_approve": false,
         "default_capability": "planning",
-        "auto_reject_on_exhaustion": false,
+        "auto_reject_on_exhaustion": true,
         "sandbox_url": "http://sandbox:8090"
       }
     },

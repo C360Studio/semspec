@@ -53,10 +53,7 @@ and the OSH + MAVSDK release configurations.
 ## Harness profiles
 
 The `mavlink.px4-sitl.mavsdk-smoke` profile in
-`workflow/harnesscatalog/catalog/mavlink.yaml` is the integration
-evidence target for live PX4 SITL + mavsdk_server proof. For the MVP
-demo, the fixture runs final QA at synthesis level: dev-path tests and
-Murat review should prove code quality and identify whether live SITL
-runtime proof is present, missing, or deferred. Semspec-managed live
-SITL orchestration is post-MVP. The raw `mavlink.raw-mavlink-direct`
+`workflow/harnesscatalog/catalog/mavlink.yaml` provides a live PX4 SITL
++ mavsdk_server qa-runner service. The architect selects it for the
+required smoke acceptance test; the raw `mavlink.raw-mavlink-direct`
 compatibility profile covers the generic-MAVLink path.
