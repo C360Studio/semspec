@@ -432,7 +432,18 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 			if len(comp.Capabilities) > 0 {
 				fmt.Fprintf(&sb, "**Implements capabilities:** %s\n\n", strings.Join(comp.Capabilities, ", "))
 			}
+			if len(comp.UpstreamRefs) > 0 {
+				fmt.Fprintf(&sb, "**Depends on upstream:** %s\n\n", strings.Join(comp.UpstreamRefs, ", "))
+			}
 		}
+	}
+
+	if archCtx := prompt.FormatArchitectureContext(prompt.ArchitectureProjection{
+		Integrations: p.Integrations,
+		Upstreams:    p.Upstreams,
+	}); archCtx != "" {
+		sb.WriteString(archCtx)
+		sb.WriteString("\n")
 	}
 
 	if len(p.Requirements) > 0 {
@@ -730,6 +741,20 @@ The previous round was reviewed and rejected. Read every finding before deciding
 
 %s
 %s`, p.ReviewFindings, reviewFindingsActionDirective())
+	}
+
+	if p.PreviousArchitectureJSON != "" {
+		// Give the architect its prior design so it REVISES rather than
+		// rewrites from scratch — a fresh rewrite tends to re-introduce the
+		// exact shape the reviewer just rejected. Mirrors the planner's
+		// PreviousPlanJSON revision base.
+		prevErr += fmt.Sprintf(`
+
+## Previous Architecture (Revise This — Do Not Rewrite From Scratch)
+
+Below is the architecture you produced last round. Start from it and make the MINIMAL changes that address the findings above. Preserve every part that was not flagged — especially resolved upstream_resolutions coordinates and component boundaries that already passed.
+
+`+"```json\n%s\n```", p.PreviousArchitectureJSON)
 	}
 
 	return fmt.Sprintf(`Analyze the following plan and its requirements to produce architecture decisions.
@@ -1343,6 +1368,12 @@ func renderRecoveryAgentPrompt(r *prompt.RecoveryPromptContext) string {
 		sb.WriteString("\n## Last Failure Feedback (what the wedged agent was responding to before escalation)\n\n")
 		sb.WriteString(r.LastFailureFeedback)
 		sb.WriteString("\n")
+	}
+
+	if r.ArchitectureContext != "" {
+		sb.WriteString("\n")
+		sb.WriteString(r.ArchitectureContext)
+		sb.WriteString("\nUse the architecture above to diagnose the ROOT of the wedge. A missing or mis-resolved upstream dependency, a wrong component boundary, or an integration target the dev cannot satisfy is an ARCHITECTURE problem — name it precisely in your diagnosis and choose escalate_human (do NOT mark_unrecoverable) so the architecture can be revised rather than the work abandoned.\n")
 	}
 
 	if len(r.TrajectorySteps) == 0 {

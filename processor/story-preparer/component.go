@@ -484,6 +484,8 @@ func buildPromptContext(plan *workflow.Plan, previousError string) *prompt.Story
 	}
 
 	var components []prompt.StoryPreparerComponent
+	var integrations []prompt.IntegrationInfo
+	var upstreams []prompt.UpstreamResolutionInfo
 	if plan.Architecture != nil {
 		components = make([]prompt.StoryPreparerComponent, len(plan.Architecture.ComponentBoundaries))
 		for i, comp := range plan.Architecture.ComponentBoundaries {
@@ -492,8 +494,12 @@ func buildPromptContext(plan *workflow.Plan, previousError string) *prompt.Story
 				Responsibility:      comp.Responsibility,
 				ImplementationFiles: append([]string(nil), comp.ImplementationFiles...),
 				Capabilities:        append([]string(nil), comp.Capabilities...),
+				UpstreamRefs:        append([]string(nil), comp.UpstreamRefs...),
 			}
 		}
+		proj := prompt.ProjectArchitecture(plan.Architecture)
+		integrations = proj.Integrations
+		upstreams = proj.Upstreams
 	}
 
 	reqs := make([]prompt.ExistingRequirementSummary, len(plan.Requirements))
@@ -531,6 +537,8 @@ func buildPromptContext(plan *workflow.Plan, previousError string) *prompt.Story
 		PlanContext:            plan.Context,
 		Capabilities:           caps,
 		ArchitectureComponents: components,
+		Integrations:           integrations,
+		Upstreams:              upstreams,
 		Requirements:           reqs,
 		PreviousError:          previousError,
 		StoryRecoveryHints:     recoveryHints,

@@ -52,6 +52,16 @@ type StoryPreparerPromptContext struct {
 	// agent's diagnosis so Sarah's re-prep prompt sees "Story X failed
 	// because Y; re-shard with Z in mind."
 	StoryRecoveryHints []StoryRecoveryHint
+
+	// Integrations and Upstreams give Sarah the integration shape and the
+	// architect's resolved external dependencies. Under the M:N model Sarah
+	// decides coverage joins (which requirements/capabilities a component-
+	// anchored Story carries); seeing which components have integration
+	// targets / upstream dependencies — rather than inferring it from
+	// capability names — is load-bearing for that decision. Empty when the
+	// architecture declared no integrations / external dependencies.
+	Integrations []IntegrationInfo
+	Upstreams    []UpstreamResolutionInfo
 }
 
 // StoryRecoveryHint pairs a Story ID with the recovery-agent diagnosis
@@ -85,4 +95,8 @@ type StoryPreparerComponent struct {
 	Responsibility      string
 	ImplementationFiles []string
 	Capabilities        []string
+	// UpstreamRefs names the UpstreamResolution entries this component
+	// depends on. Sarah uses it to see which components carry external
+	// integration weight when deciding coverage joins.
+	UpstreamRefs []string
 }

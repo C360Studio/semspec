@@ -639,6 +639,16 @@ type Plan struct {
 	// Nil when SkipArchitecture is true or before the phase completes.
 	Architecture *ArchitectureDocument `json:"architecture,omitempty"`
 
+	// PreviousArchitectureJSON carries the prior ArchitectureDocument (as JSON)
+	// across an architecture-phase re-entry. plan-manager captures it just
+	// before clearing plan.Architecture for an R2 architecture re-run; the
+	// architecture-generator threads it into the architect's prompt so Winston
+	// revises the prior design instead of rewriting from scratch and re-
+	// introducing the same shape the reviewer just rejected. Mirrors the
+	// planner's PreviousPlanJSON. Cleared once the architect produces a new
+	// architecture. Transient — empty on the forward flow.
+	PreviousArchitectureJSON string `json:"previous_architecture_json,omitempty"`
+
 	// Requirements, Scenarios, Stories, and PlanDecisions are populated when
 	// the plan is written to the PLAN_STATES KV bucket so downstream watchers
 	// have everything they need without follow-up queries.

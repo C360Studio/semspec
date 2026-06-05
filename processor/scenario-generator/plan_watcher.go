@@ -69,13 +69,13 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 // requirement in the plan. Requirements are inline in the KV value — no
 // additional query needed.
 func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.Plan) {
-	// Build architecture context once for all requirements.
+	// Build architecture context once for all requirements. Bob writes
+	// scenarios that reference actors, integration points, components, and the
+	// architect's resolved upstream dependencies — so feed the full faithful
+	// projection, not just actors+integrations.
 	var archContext string
 	if plan.Architecture != nil {
-		archContext = prompt.FormatArchitectureContext(
-			toActorInfos(plan.Architecture.Actors),
-			toIntegrationInfos(plan.Architecture.Integrations),
-		)
+		archContext = prompt.FormatArchitectureContext(prompt.ProjectArchitecture(plan.Architecture))
 	}
 
 	// Load the harness catalog once per plan. ADR-041 Move 3 classifier
@@ -191,22 +191,6 @@ func emissionsToWireTiers(emissions []TierEmission) []payloads.RequiredTier {
 			Tag:               e.Tier,
 			HarnessProfileIDs: e.HarnessProfileIDs,
 		})
-	}
-	return out
-}
-
-func toActorInfos(actors []workflow.ActorDef) []prompt.ActorInfo {
-	out := make([]prompt.ActorInfo, len(actors))
-	for i, a := range actors {
-		out[i] = prompt.ActorInfo{Name: a.Name, Type: a.Type, Triggers: a.Triggers}
-	}
-	return out
-}
-
-func toIntegrationInfos(integrations []workflow.IntegrationPoint) []prompt.IntegrationInfo {
-	out := make([]prompt.IntegrationInfo, len(integrations))
-	for i, ip := range integrations {
-		out[i] = prompt.IntegrationInfo{Name: ip.Name, Direction: ip.Direction, Protocol: ip.Protocol}
 	}
 	return out
 }

@@ -355,6 +355,28 @@ qa-reviewer judges coverage against this declared surface.`)
 			},
 		},
 		{
+			// software.task-upstream-resolutions renders the architect's
+			// resolved external dependencies (build-manifest coordinate + API
+			// surfaces) for the Developer and per-task code-Reviewer. Fires
+			// only when TaskContext.UpstreamResolutions is populated.
+			//
+			// Closes the run #6 root cause: Winston resolved concrete
+			// coordinates (e.g. io.mavsdk:mavsdk:3.16.0) into the graph, but no
+			// prompt read them, so the dev re-hallucinated dep coords and burned
+			// TDD cycles on gradle resolution failures. Grounding the dev in the
+			// resolved coordinate + signatures removes the re-discovery loop;
+			// grounding the reviewer lets it check the impl against the surface.
+			ID:       "software.task-upstream-resolutions",
+			Category: prompt.CategoryDomainContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && len(ctx.TaskContext.UpstreamResolutions) > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				return prompt.FormatUpstreamResolutions(ctx.TaskContext.UpstreamResolutions)
+			},
+		},
+		{
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},

@@ -428,10 +428,12 @@ func (c *Component) initExecutionStore(ctx context.Context) {
 	}
 }
 
-// readPlanTestSurface returns the plan's declared test_surface, or nil when
-// unavailable (bucket missing, plan missing, architecture missing, surface
-// unset). Callers treat nil as "no test_surface declared" and proceed.
-func (c *Component) readPlanTestSurface(ctx context.Context, slug string) *workflow.TestSurface {
+// readPlan loads the plan from PLAN_STATES once so a single dispatch can derive
+// all of its architecture-backed prompt context (test_surface, harness
+// profiles, upstream resolutions) from one fetch + unmarshal instead of one
+// per field. Returns nil when the bucket, key, or value is unavailable;
+// callers treat nil as "no plan context" and proceed.
+func (c *Component) readPlan(ctx context.Context, slug string) *workflow.Plan {
 	if c.planBucket == nil || slug == "" {
 		return nil
 	}
@@ -443,10 +445,43 @@ func (c *Component) readPlanTestSurface(ctx context.Context, slug string) *workf
 	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
 		return nil
 	}
-	if plan.Architecture == nil {
+	return &plan
+}
+
+// planArchitecture nil-safely returns the plan's architecture document.
+func planArchitecture(plan *workflow.Plan) *workflow.ArchitectureDocument {
+	if plan == nil {
+		return nil
+	}
+	return plan.Architecture
+}
+
+// planTestSurface returns the plan's declared test_surface, or nil when absent.
+func planTestSurface(plan *workflow.Plan) *workflow.TestSurface {
+	if plan == nil || plan.Architecture == nil {
 		return nil
 	}
 	return plan.Architecture.TestSurface
+}
+
+// planHarnessProfiles resolves the plan's selected harness profiles against the
+// catalog so the developer/reviewer prompts carry full profile details. Returns
+// nil when the plan, architecture, or selections are absent.
+func (c *Component) planHarnessProfiles(plan *workflow.Plan) []prompt.ResolvedHarnessProfileContext {
+	if plan == nil || plan.Architecture == nil || len(plan.Architecture.HarnessProfiles) == 0 {
+		return nil
+	}
+	catalog, err := harnesscatalog.Load("")
+	if err != nil {
+		c.logger.Warn("Failed to load harness catalog for task context", "error", err)
+		return nil
+	}
+	resolved, err := catalog.ResolveSelections(plan.Architecture.HarnessProfiles)
+	if err != nil {
+		c.logger.Warn("Invalid harness profile selection in plan", "error", err)
+		return nil
+	}
+	return resolvedHarnessProfilesToPrompt(resolved)
 }
 
 // scenariosToSpecs converts a slice of workflow.Scenario into the prompt-
@@ -467,34 +502,6 @@ func scenariosToSpecs(scenarios []workflow.Scenario) []prompt.ScenarioSpec {
 		})
 	}
 	return out
-}
-
-func (c *Component) readPlanHarnessProfiles(ctx context.Context, slug string) []prompt.ResolvedHarnessProfileContext {
-	if c.planBucket == nil || slug == "" {
-		return nil
-	}
-	entry, err := c.planBucket.Get(ctx, slug)
-	if err != nil {
-		return nil
-	}
-	var plan workflow.Plan
-	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-		return nil
-	}
-	if plan.Architecture == nil || len(plan.Architecture.HarnessProfiles) == 0 {
-		return nil
-	}
-	catalog, err := harnesscatalog.Load("")
-	if err != nil {
-		c.logger.Warn("Failed to load harness catalog for task context", "slug", slug, "error", err)
-		return nil
-	}
-	resolved, err := catalog.ResolveSelections(plan.Architecture.HarnessProfiles)
-	if err != nil {
-		c.logger.Warn("Invalid harness profile selection in plan", "slug", slug, "error", err)
-		return nil
-	}
-	return resolvedHarnessProfilesToPrompt(resolved)
 }
 
 func resolvedHarnessProfilesToPrompt(resolved []harnesscatalog.ResolvedSelection) []prompt.ResolvedHarnessProfileContext {
@@ -1595,17 +1602,22 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 	// Wire task context for execution roles.
 	if role == prompt.RoleDeveloper ||
 		role == prompt.RoleValidator || role == prompt.RoleReviewer {
+		// Fetch the plan once; derive every architecture-backed field from it
+		// rather than re-fetching PLAN_STATES per field (3 reads × 3 roles per
+		// TDD cycle pre-consolidation).
+		plan := c.readPlan(ctx, exec.Slug)
 		asmCtx.TaskContext = &prompt.TaskContext{
-			PlanGoal:        exec.Title,
-			IsRetry:         exec.TDDCycle > 0,
-			Feedback:        exec.Feedback,
-			Iteration:       exec.TDDCycle + 1, // 1-based for display
-			MaxIterations:   exec.MaxTDDCycles,
-			Checklist:       c.checklist,
-			TestSurface:     c.readPlanTestSurface(ctx, exec.Slug),
-			HarnessProfiles: c.readPlanHarnessProfiles(ctx, exec.Slug),
-			WorktreePath:    exec.WorktreePath,
-			Scenarios:       scenariosToSpecs(exec.Scenarios),
+			PlanGoal:            exec.Title,
+			IsRetry:             exec.TDDCycle > 0,
+			Feedback:            exec.Feedback,
+			Iteration:           exec.TDDCycle + 1, // 1-based for display
+			MaxIterations:       exec.MaxTDDCycles,
+			Checklist:           c.checklist,
+			TestSurface:         planTestSurface(plan),
+			HarnessProfiles:     c.planHarnessProfiles(plan),
+			WorktreePath:        exec.WorktreePath,
+			Scenarios:           scenariosToSpecs(exec.Scenarios),
+			UpstreamResolutions: prompt.ProjectUpstreams(planArchitecture(plan)),
 		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
