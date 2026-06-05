@@ -642,7 +642,7 @@ func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementE
 		"dag":             json.RawMessage(dagRaw),
 		"sorted_node_ids": sorted,
 	}
-	// Include the Story cursor when populated. dispatchDecomposerLocked seeds
+	// Include the Story cursor when populated. dispatchSynthesizerLocked seeds
 	// these the first time the requirement enters per-Story dispatch, and
 	// advanceToNextStoryLocked re-enters here after incrementing the cursor —
 	// so this single sendReqPhase site is the chokepoint for keeping KV in
@@ -984,15 +984,15 @@ func (c *Component) recordNodeSuccessLocked(ctx context.Context, exec *requireme
 // DAG synthesis from Sarah-prepared Stories
 // ---------------------------------------------------------------------------
 
-// dispatchDecomposerLocked synthesizes the TaskDAG from Sarah-prepared
-// Stories on the plan and hands off to applyParsedDAGLocked. The function
-// kept its legacy name to localize the rename diff after ADR-043 PR 4g
-// retired the decomposer LLM path; conceptually it is now a synthesizer.
+// dispatchSynthesizerLocked synthesizes the TaskDAG from Sarah-prepared
+// Stories on the plan and hands off to applyParsedDAGLocked. (The LLM
+// decomposer path was retired in ADR-043 PR 4g — synthesis from Sarah's
+// Stories is the only DAG source.)
 //
 // Synthesis failure (no plan, no Stories for this requirement, invalid
 // DAG) marks the requirement failed — Sarah is always-on post-PR 4l, so
 // a missing Story is a planning-phase bug, not a runtime fallback case.
-func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirementExecution) {
+func (c *Component) dispatchSynthesizerLocked(ctx context.Context, exec *requirementExecution) {
 	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
 	if err != nil {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("load plan from KV failed: %v", err))
@@ -1842,7 +1842,7 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 		"feedback", feedback,
 	)
 
-	c.dispatchDecomposerLocked(ctx, exec)
+	c.dispatchSynthesizerLocked(ctx, exec)
 }
 
 // isNodeDirty returns true if a node should be re-executed on retry.

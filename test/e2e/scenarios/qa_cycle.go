@@ -122,9 +122,6 @@ func (s *QACycleScenario) Name() string { return s.name }
 
 // Description implements Scenario.
 func (s *QACycleScenario) Description() string {
-	if s.qaLevel == "integration" {
-		return "QA phase end-to-end at qa_level=integration: qa-runner invokes act, runs integration tests, qa-reviewer approves"
-	}
 	return "QA phase end-to-end at qa_level=unit: sandbox runs go test, qa-reviewer approves, plan → complete"
 }
 

@@ -222,27 +222,6 @@ func (c *Component) resolveRepoRoot() string {
 	return wd
 }
 
-// resolveProjectHostPath returns the HOST filesystem path to the project
-// workspace. This differs from resolveRepoRoot: semspec runs in a container
-// where the workspace is mounted at a container path (e.g., /workspace), but
-// qa-runner needs the HOST path to bind-mount when it spawns act's sibling
-// containers via the Docker socket.
-//
-// Reads PROJECT_HOST_PATH env var (set by compose from ${SEMSPEC_REPO:-.}).
-// Falls back to SEMSPEC_REPO for host-run scenarios. Returns empty string
-// when neither is resolvable — caller should reject the publish rather than
-// invent a bogus path.
-func (c *Component) resolveProjectHostPath() string {
-	if v := os.Getenv("PROJECT_HOST_PATH"); v != "" {
-		return v
-	}
-	// Host-run (no container): the host path IS the repo root.
-	if v := os.Getenv("SEMSPEC_REPO"); v != "" {
-		return v
-	}
-	return ""
-}
-
 // resolveProjectQALevel reads the project config from disk and returns its
 // QA level, falling back to QALevelSynthesis when project.json is missing
 // or has no qa_level set. Call this when creating a new plan so the plan's

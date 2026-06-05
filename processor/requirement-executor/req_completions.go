@@ -297,7 +297,7 @@ func (c *Component) resumeInterruptedExecutions(ctx context.Context) {
 			c.logger.Info("Resuming: re-running DAG synthesis",
 				"entity_id", exec.EntityID, "slug", exec.Slug)
 			c.startExecutionTimeoutLocked(exec)
-			c.dispatchDecomposerLocked(ctx, exec)
+			c.dispatchSynthesizerLocked(ctx, exec)
 			resumed++
 
 		case exec.DAG != nil && exec.CurrentNodeIdx < len(exec.SortedNodeIDs):

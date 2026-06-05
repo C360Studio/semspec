@@ -218,7 +218,7 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 	}
 
 	c.startExecutionTimeoutLocked(exec)
-	c.dispatchDecomposerLocked(ctx, exec)
+	c.dispatchSynthesizerLocked(ctx, exec)
 }
 
 // claimExecution sends a claim mutation to execution-manager. Returns true if

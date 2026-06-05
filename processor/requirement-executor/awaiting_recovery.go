@@ -256,7 +256,7 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 		"max_recovery_restarts", c.maxRecoveryRestarts(),
 	)
 
-	c.dispatchDecomposerLocked(ctx, exec)
+	c.dispatchSynthesizerLocked(ctx, exec)
 }
 
 // findAwaitingByRequirement locates an active exec in

@@ -118,16 +118,17 @@ func testCommand(pc *workflow.ProjectConfig, fallback string) string {
 func javaQAWorkflow(pc *workflow.ProjectConfig) string {
 	cmd := testCommand(pc, "./gradlew test")
 	return fmt.Sprintf(`name: QA
-# Default QA workflow scaffolded by semspec. Customize as needed.
+# Default QA workflow scaffolded by semspec as the OPERATOR's CI contract.
+# semspec gates on unit (in its sandbox); your CI runs this file for the
+# heavier tiers — semspec no longer executes them (ADR-045). Customize as needed.
 #
-# integration: runs at qa_level=integration AND qa_level=full.
-# e2e:         runs at qa_level=full only (Playwright browser flows).
+# integration / e2e: run by YOUR CI (e.g. GitHub Actions).
 #
 # Harness profiles split into three orchestration types (ADR-039):
-#   - services: qa-runner renders services: blocks into this file from
-#     the catalog. Tests read the endpoint from the env qa-runner injects.
+#   - services: semspec renders services: blocks into this file from the
+#     catalog. Tests read the endpoint from the env your CI injects.
 #   - testcontainers: tests spawn containers via the Testcontainers
-#     library (uses the docker socket act mounts into runner containers).
+#     library (the dev sandbox also runs these via its docker socket).
 #   - pure-fixture: tests hold the fixture directly.
 # This default scaffold ships the toolchain + test command; services-class
 # blocks are injected by plan-manager from architecture.harness_profiles[].

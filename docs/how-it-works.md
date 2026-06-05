@@ -125,9 +125,8 @@ With Docker Compose (recommended):
 |-----------|---------|
 | **nats** | JetStream message bus for all inter-component communication |
 | **semspec** | All 22 semspec components + semstreams infrastructure |
-| **sandbox** | Isolated code execution environment for agents |
+| **sandbox** | Isolated code execution environment for agents; also runs `qa_level=unit` tests |
 | **semsource** | Source code indexing (AST, git, docs) → knowledge graph |
-| **qa-runner** | Runs `.github/workflows/qa.yml` via nektos/act for `qa_level=integration`/`full` |
 | **ui** | SvelteKit frontend (SSR) |
 | **gateway** | Caddy reverse proxy — routes API to semspec, UI to frontend |
 
@@ -327,8 +326,9 @@ Semspec registers 22 components at startup alongside the full semstreams compone
 │  execution-manager      TDD pipeline per DAG node:                  │
 │                          developer → validator → reviewer            │
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │
-│                          scoped by qa_level (synthesis/unit/          │
-│                          integration/full)                           │
+│                          scoped by qa_level (synthesis/unit).         │
+│                          Heavier tiers run in the operator's CI       │
+│                          against the emitted qa.yml (ADR-045)         │
 │  plan-decision-handler  PlanDecision OODA loop and cascade           │
 │  recovery-agent         Wedge recovery — manager-role agents that    │
 │                          unstick stuck loops via trajectory analysis │

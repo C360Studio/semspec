@@ -59,9 +59,6 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
-      # PROJECT_HOST_PATH is the HOST path to the workspace (needed so qa-runner
-      # can bind-mount the same tree into act's sibling containers).
-      - PROJECT_HOST_PATH=${PWD}/test/e2e/workspace
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
       # bash tool default 120s is too aggressive for fixtures that exercise

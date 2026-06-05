@@ -61,13 +61,6 @@ services:
       - NATS_URL=nats://nats:4222
       - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
-      # PROJECT_HOST_PATH is the HOST filesystem path of /workspace, embedded
-      # in QARequestedEvent so qa-runner can act-bind-mount it into sibling
-      # containers. Must match WORKSPACE_HOST_PATH and the qa-runner mount
-      # below. Without this, plan-manager refuses to publish the QA event
-      # for qa_level=integration/full plans and the plan sits in
-      # ready_for_qa until test timeout (caught take-34 2026-05-17).
-      - PROJECT_HOST_PATH=${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # bash tool default timeout (120s) is too aggressive for e2e fixtures
       # that exercise full toolchain installs/compiles: mvn test cold-cache
