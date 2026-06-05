@@ -32,8 +32,8 @@ func TestRenderArchitectPrompt_RevisionBaseInjected(t *testing.T) {
 }
 
 // TestRenderRecoveryAgentPrompt_ArchitectureContext verifies recovery sees the
-// architecture surface + the diagnosis steer when the wedged plan has an
-// architecture, and that the prompt does not reference a non-existent action.
+// architecture surface and is steered to architecture_revise (not escalate_human)
+// when the wedged plan has an architecture and the root looks architectural.
 func TestRenderRecoveryAgentPrompt_ArchitectureContext(t *testing.T) {
 	t.Parallel()
 	out := renderRecoveryAgentPrompt(&prompt.RecoveryPromptContext{
@@ -44,10 +44,7 @@ func TestRenderRecoveryAgentPrompt_ArchitectureContext(t *testing.T) {
 	if !strings.Contains(out, "io.mavsdk:mavsdk:3.16.0") {
 		t.Error("recovery prompt missing the architecture context")
 	}
-	if !strings.Contains(out, "escalate_human") {
-		t.Error("recovery prompt should steer architecture-root wedges to escalate_human (the honest interim landing)")
-	}
-	if strings.Contains(out, "architecture_revise") {
-		t.Error("recovery prompt must NOT name architecture_revise — that action does not exist until a later phase")
+	if !strings.Contains(out, "architecture_revise") {
+		t.Error("recovery prompt should steer architecture-root wedges to architecture_revise")
 	}
 }

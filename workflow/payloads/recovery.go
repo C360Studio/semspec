@@ -57,12 +57,37 @@ const (
 	// Distinct from narrow_scope: narrow_scope reduces the task's file
 	// surface; story_reprepare re-authors the task DAG itself.
 	//
-	// ADR-043 PR 4i lands the action vocabulary; callers materialize once
-	// execution dispatches per-Story (PR 4h). Until then this action is
-	// reserved infrastructure — the closed-set parser accepts it and the
-	// PlanDecision routing maps it, but no recovery dispatch currently
-	// emits it.
+	// ADR-043 PR 4i landed the action vocabulary; the recovery persona prompt
+	// now steers Story-shaping wedges here (software.go closed-action set), the
+	// closed-set parser accepts it, and the PlanDecision routing drives the
+	// stories_generated → preparing_stories re-prep on accept.
 	RecoveryActionStoryReprepare RecoveryActionKind = "story_reprepare"
+
+	// RecoveryActionArchitectureRevise — wedge analysis points at Winston's
+	// architecture as the ROOT: a mis-resolved upstream dependency, a wrong
+	// component boundary, or an integration target the dev cannot satisfy.
+	// The problem is upstream of Sarah's Story-shaping and upstream of any
+	// single requirement's prompt — re-prepping Stories or sharpening the
+	// dev prompt against a broken architecture only re-wedges.
+	//
+	// Heaviest action in the set. On accept, plan-manager captures the prior
+	// architecture into PreviousArchitectureJSON, clears Architecture +
+	// Stories + Scenarios, resets ALL requirement executions, writes the
+	// recovery diagnosis to ReviewFormattedFindings (the channel the
+	// architecture-generator already reads on revision rounds), and drives
+	// the back-transition implementing → requirements_generated so the
+	// architect re-fires and REVISES the prior architecture against the
+	// diagnosis. The full downstream pipeline (Sarah → Bob → execution)
+	// then re-runs clean.
+	//
+	// Distinct from story_reprepare: story_reprepare keeps Architecture and
+	// asks Sarah to re-shard; architecture_revise discards the architecture
+	// itself. Distinct from mark_unrecoverable: mark_unrecoverable abandons
+	// the work; architecture_revise repairs the root and continues. The
+	// recovery prompt steers an architecture-root diagnosis here (instead of
+	// escalate_human) when the architecture context is available — see
+	// software_render.go renderRecoveryAgentPrompt.
+	RecoveryActionArchitectureRevise RecoveryActionKind = "architecture_revise"
 )
 
 // RecoveryLayer identifies which recovery layer attempted the action. Per

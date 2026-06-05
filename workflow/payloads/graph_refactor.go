@@ -259,11 +259,16 @@ var PlanDecisionCascadeRequestType = message.Type{
 // PlanDecisionAcceptedEvent is the payload published after a cascade completes
 // successfully. It summarizes what was affected by the accepted PlanDecision.
 type PlanDecisionAcceptedEvent struct {
-	ProposalID             string   `json:"proposal_id"`
-	Slug                   string   `json:"slug"`
-	TraceID                string   `json:"trace_id,omitempty"`
-	AffectedRequirementIDs []string `json:"affected_requirement_ids"`
-	AffectedScenarioIDs    []string `json:"affected_scenario_ids"`
+	ProposalID string `json:"proposal_id"`
+	Slug       string `json:"slug"`
+	TraceID    string `json:"trace_id,omitempty"`
+	// Kind echoes the accepted proposal's kind so consumers can branch without
+	// re-loading the plan. Empty for pre-existing/legacy producers (treated as
+	// requirement_change by consumers). The requirement-executor keys off
+	// architecture_revise to abandon — rather than resume — in-flight execs.
+	Kind                   workflow.PlanDecisionKind `json:"kind,omitempty"`
+	AffectedRequirementIDs []string                  `json:"affected_requirement_ids"`
+	AffectedScenarioIDs    []string                  `json:"affected_scenario_ids"`
 }
 
 // Schema implements message.Payload.

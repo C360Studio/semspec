@@ -31,3 +31,39 @@ func TestPlanDecision_NoAffectedRequirements(t *testing.T) {
 		t.Errorf("AffectedScenarioIDs = %d, want 0", len(result.AffectedScenarioIDs))
 	}
 }
+
+// TestPlanDecision_ArchitectureRevise_NoOp verifies the architecture_revise
+// cascade is a no-op even with Stories + Scenarios present: the plan-manager
+// accept handler already wiped those entities and reset execution inline, so
+// the cascade must not dirty-mark anything (it records only the affected reqs
+// for telemetry). Without an explicit case this kind would fall through to the
+// requirement_change default and wrongly dirty-mark scenarios.
+func TestPlanDecision_ArchitectureRevise_NoOp(t *testing.T) {
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.slug.recovery.abcd1234",
+		Kind:           workflow.PlanDecisionKindArchitectureRevise,
+		AffectedReqIDs: []string{"req-0"},
+	}
+	stories := []workflow.Story{{ID: "story-1", RequirementIDs: []string{"req-0"}}}
+	scenarios := []workflow.Scenario{{ID: "scenario-1", RequirementID: "req-0", StoryID: "story-1"}}
+
+	result, err := PlanDecision(proposal, stories, scenarios)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.AffectedScenarioIDs) != 0 {
+		t.Errorf("AffectedScenarioIDs = %d, want 0 (cascade is a no-op for architecture_revise)", len(result.AffectedScenarioIDs))
+	}
+	if len(result.AffectedStoryIDs) != 0 {
+		t.Errorf("AffectedStoryIDs = %d, want 0", len(result.AffectedStoryIDs))
+	}
+	if len(result.AffectedRequirementIDs) != 1 {
+		t.Errorf("AffectedRequirementIDs = %d, want 1 (telemetry only)", len(result.AffectedRequirementIDs))
+	}
+	// Kind must be echoed onto the Result so the PlanDecisionAcceptedEvent
+	// carries it — the requirement-executor branches on it to abandon (not
+	// resume) in-flight execs.
+	if result.Kind != workflow.PlanDecisionKindArchitectureRevise {
+		t.Errorf("Result.Kind = %q, want architecture_revise", result.Kind)
+	}
+}

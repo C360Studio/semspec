@@ -75,18 +75,42 @@ Implemented across four phases on `fix/role-context-audit-train`:
    `EffectiveQALevel` coerces any stale `integration`/`full` snapshot to `synthesis`. The harness
    catalog and the qa.yml emitter stay — qa.yml is now an operator-CI contract.
 
-## Deferred (designed, not yet implemented)
+## `architecture_revise` recovery action (implemented — follow-up to this ADR)
 
-- **`architecture_revise` recovery action.** When recovery diagnoses an *architecture-root* wedge
-  (a missing/mis-resolved upstream dependency, a wrong component boundary, an un-runnable
-  integration target), the right action is to re-run the architect with the prior architecture as
-  a revision base (`PreviousArchitectureJSON`, already plumbed) plus the wedge diagnosis. This
-  requires a new `RecoveryActionKind` + `PlanDecisionKind`, an accept handler that captures the
-  prior architecture and resets the execution/story/scenario state, **and a new back-transition
-  in the status DAG** (an execution-phase status → `requirements_generated`), which today is
-  strict-sequential and forward-only. That state-machine change + execution-state reset is a
-  focused follow-up. **Interim:** recovery now *sees* the architecture (Phase 1) and is steered to
-  `escalate_human` with a precise architecture diagnosis rather than `mark_unrecoverable`.
+When recovery diagnoses an *architecture-root* wedge (a missing/mis-resolved upstream dependency,
+a wrong component boundary, an un-runnable integration target), the recovery-agent now picks
+`architecture_revise` instead of `escalate_human`. On accept, plan-manager captures the prior
+architecture into `PreviousArchitectureJSON` (the revision base the architect already reads),
+routes the diagnosis into `ReviewFormattedFindings`, wipes Architecture + Stories + Scenarios,
+resets all requirement executions, and drives the new back-transition `implementing →
+requirements_generated`. The architect re-fires and *revises* the prior architecture against the
+diagnosis; the full pipeline (Sarah → Bob → execution) re-runs clean.
+
+Because this fires from `implementing` — a LIVE phase with in-flight executor state, unlike its
+sibling `story_reprepare` (which fires from the quiescent `stories_generated`) — three guards
+make it safe:
+
+1. **Auto-accept cap** (`plan-decision-handler.max_auto_architecture_revises`, default 1). Each
+   accepted `architecture_revise` is a full, expensive re-run; the cap bounds the
+   `implement → wedge → revise → …` loop. Past the cap the decision stays proposed for human
+   review. The count is monotonic — `PlanDecisions` survive the entity wipe.
+2. **Abandon-not-resume.** `PlanDecisionAcceptedEvent` now carries `Kind`; the requirement-executor
+   abandons (terminates + drops from `activeExecs`) all in-flight execs for the slug instead of
+   resuming the wedged one, so the stale DAG can't race the architect re-run on the shared
+   `req.<slug>.<reqID>` key.
+3. **Atomic-ish apply.** The back-transition is checked before any mutation or I/O (an out-of-window
+   accept is a clean no-op); the execution reset runs on a detached context before the in-memory
+   wipe, so a reset failure aborts the accept with the plan untouched.
+
+**Known limitation (LOW, cost not correctness):** the reset clears `req.<slug>.*` EXECUTION_STATES
+rows but not `task.<slug>.*` rows, and the requirement-executor has no channel to force-cancel
+in-flight execution-manager TDD loops. On a genuinely-parallel hard-tier plan, a sibling node's
+loop can run out its token budget before noticing the slug restarted (its terminal write is
+absorbed by the `activeExecs` cache-miss no-op — no corruption, just wasted spend). The M:N
+cohesive shape (one dev loop per Story) does not hit this. A follow-up could thread loop
+cancellation through execution-manager.
+
+## Deferred (designed, not yet implemented)
 
 - **Sarah-authored per-task scenario partitions.** Would let a fixable Story rejection re-run a
   *subset* of nodes instead of the whole Story. Requires a `Task.ScenarioIDs` schema + Sarah

@@ -42,6 +42,17 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 			comment: "pre-existing path unchanged",
 		},
 		{
+			name: "architecture_revise is auto-acceptable",
+			dec: &workflow.PlanDecision{
+				ProposedBy:     "recovery-agent",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindArchitectureRevise,
+				AffectedReqIDs: []string{"req.demo.1"},
+			},
+			wantOK:  true,
+			comment: "heaviest recovery kind; user chose auto-accept",
+		},
+		{
 			name: "execution_exhausted stays human-gated",
 			dec: &workflow.PlanDecision{
 				ProposedBy:     "recovery-agent",

@@ -1585,6 +1585,8 @@ CLOSED ACTION SET (output one of these via submit_work):
 - refine_prompt — rewrite the wedged agent's task prompt with explicit context they missed. Use this when the trajectory shows they had the answer in front of them (e.g. a graph_search hit, a reviewer hint) but didn't act on it. REQUIRES "refined_prompt" field.
 - narrow_scope — reduce the wedged task's scope (e.g. limit to one file, one dependency). Use when the trajectory shows thrashing across too many concerns. Provide scope_changes as a structured JSON object describing the reduction.
 - split_req — decompose the requirement into smaller requirements. Heavier than narrow_scope; only when the plan-level decomposition was clearly wrong.
+- story_reprepare — Sarah's Story-shaping is the root cause (wrong task DAG, missing files_owned, mis-selected components). Reaches back to story-preparer for a re-prep cycle; your diagnosis becomes Sarah's RecoveryHint.
+- architecture_revise — the ARCHITECTURE is the root: a mis-resolved upstream dependency, a wrong component boundary, or an integration target the dev cannot satisfy. Re-runs the architect to revise the architecture, then re-runs the whole pipeline beneath it. Heaviest action — pick it only when the wedge is upstream of any single requirement or Story.
 - escalate_human — you analysed the wedge and the diagnosis is the deliverable; no programmatic action fits. Surfaces in the UI with your diagnosis.
 - mark_unrecoverable — the goal cannot succeed from current state regardless of agent (upstream artifact missing, fixture malformed, scope contradicts another requirement).
 
@@ -1612,21 +1614,23 @@ Rules:
 			Content: `Output Format — submit_work arguments
 
 Required fields:
-- action: one of refine_prompt | narrow_scope | split_req | story_reprepare | escalate_human | mark_unrecoverable
+- action: one of refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise | escalate_human | mark_unrecoverable
 - diagnosis: 2-6 sentences describing what the trajectory shows the agent doing wrong and what the underlying mistake is. REQUIRED for every action.
-- recovery_succeeded: true when refine_prompt | narrow_scope | split_req | story_reprepare plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
+- recovery_succeeded: true when refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
 
 Action-specific fields:
 - refine_prompt requires: refined_prompt — a complete replacement task prompt that, when handed to the wedged role, would produce the work the agent should have produced.
 - narrow_scope and split_req require: scope_changes — a structured JSON object describing the reduction (which files / which sub-requirements / which concerns to keep, which to drop).
 - story_reprepare: no extra fields beyond diagnosis — the diagnosis becomes Sarah's RecoveryHint when she re-shards the requirement's Stories.
+- architecture_revise: no extra fields beyond diagnosis — the diagnosis becomes the architect's revision feedback (ReviewFormattedFindings) when the architecture is re-run.
 - escalate_human and mark_unrecoverable: no extra fields beyond diagnosis.
 
 Choosing between actions (ADR-043 PR 4i):
 - refine_prompt: the dev had the answer in front of it but didn't act. Same task, sharper prompt.
 - narrow_scope: the task's file surface was too broad; reduce it. Same DAG node, fewer files.
 - split_req: the plan-level decomposition was wrong; the requirement was too coarse. Heavier — mutates plan structure.
-- story_reprepare: Sarah's Story-shaping is the root cause — wrong task DAG, missing files_owned, mis-selected components. Reaches back to story-preparer for a re-prep cycle on the affected requirement; the diagnosis carries forward as Sarah's RecoveryHint.
+- story_reprepare: Sarah's Story-shaping is the root cause — wrong task DAG, missing files_owned, mis-selected components. Reaches back to story-preparer for a re-prep cycle on the affected requirement; the diagnosis carries forward as Sarah's RecoveryHint. The architecture itself is sound.
+- architecture_revise: the architecture is the root — a mis-resolved upstream dependency the dev keeps hallucinating, a wrong component boundary, an integration target no requirement can satisfy. Heavier than story_reprepare: it discards the architecture (not just the Stories) and re-runs the architect, then the whole pipeline beneath. Pick it when re-prepping Stories or sharpening the prompt against the SAME architecture would only re-wedge.
 - escalate_human: analysis is the deliverable; no programmatic action fits.
 - mark_unrecoverable: the wedge cannot succeed from current state regardless of refinements.
 

@@ -12,6 +12,7 @@ func TestPlanDecisionKind_IsValid(t *testing.T) {
 		PlanDecisionKindRequirementChange:  true,
 		PlanDecisionKindExecutionExhausted: true,
 		PlanDecisionKindStoryReprepare:     true,
+		PlanDecisionKindArchitectureRevise: true,
 		"":                                 false,
 		"not-a-kind":                       false,
 		"requirement-change":               false, // hyphen not underscore

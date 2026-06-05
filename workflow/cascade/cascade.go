@@ -11,6 +11,14 @@ import (
 
 // Result summarizes the effect of accepting a PlanDecision.
 type Result struct {
+	// Kind echoes the accepted proposal's kind so downstream consumers of the
+	// PlanDecisionAcceptedEvent can branch on it without re-loading the plan.
+	// Load-bearing for architecture_revise: the requirement-executor abandons
+	// (rather than resumes) in-flight execs for the slug when it sees this kind,
+	// since the plan is restarting from the architect — resuming the wedged exec
+	// would race the re-run.
+	Kind workflow.PlanDecisionKind
+
 	AffectedRequirementIDs []string
 	// AffectedStoryIDs lists Story IDs the cascade dirty-marked. Populated
 	// for Kind=story_reprepare (the cascade target is Stories + Scenarios)
@@ -36,6 +44,10 @@ type Result struct {
 //   - Kind=execution_exhausted: terminal acknowledgement; cascade is a
 //     no-op (callers shouldn't invoke PlanDecision for this kind, but
 //     the function returns empty Result safely if they do).
+//   - Kind=architecture_revise: no-op. The plan-manager accept handler
+//     already wiped Architecture + Stories + Scenarios and reset all
+//     requirement executions inline; the re-run regenerates everything
+//     from the architect down, so there is nothing to dirty-mark.
 //
 // Pure business logic — no I/O. Caller loads the plan from KV and passes
 // stories + scenarios. Returns the IDs that were dirty-marked so
@@ -47,6 +59,7 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 	}
 
 	result := &Result{
+		Kind:                   proposal.Kind,
 		AffectedRequirementIDs: make([]string, 0, len(proposal.AffectedReqIDs)),
 		AffectedStoryIDs:       make([]string, 0),
 		AffectedScenarioIDs:    make([]string, 0),
@@ -86,6 +99,14 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 		// Terminal kind — cascade is a no-op beyond recording the
 		// AffectedRequirementIDs already populated above for caller
 		// telemetry. Stories + Scenarios stay empty.
+
+	case workflow.PlanDecisionKindArchitectureRevise:
+		// The plan-manager accept handler already wiped Architecture +
+		// Stories + Scenarios and reset all requirement executions inline,
+		// then drove implementing → requirements_generated. There is nothing
+		// left for the dirty-cascade to mark — the re-run regenerates every
+		// entity from the architect down. No-op beyond the recorded
+		// AffectedRequirementIDs (caller telemetry).
 
 	default:
 		// Kind=requirement_change OR unset (back-compat with pre-Kind records).

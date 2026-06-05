@@ -310,10 +310,16 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// implementing → awaiting_review (no QA, auto_approve_review=false or GitHub)
 		// implementing → complete (level=none; direct terminal with no review)
 		// implementing → changed (change proposal deprecated requirements)
+		// implementing → requirements_generated (architecture_revise recovery:
+		//   a wedge rooted in the architecture is escalated; the recovery-agent's
+		//   architecture_revise PlanDecision wipes Architecture/Stories/Scenarios +
+		//   all requirement executions and re-runs the architect. This is the one
+		//   execution-phase → plan-prep back-edge in the otherwise forward-only DAG;
+		//   gated to the architecture_revise accept path in plan-manager.)
 		// implementing → rejected (execution escalation)
 		return target == StatusReviewingRollup || target == StatusReviewingQA || target == StatusReadyForQA ||
 			target == StatusAwaitingReview || target == StatusComplete ||
-			target == StatusChanged || target == StatusRejected
+			target == StatusChanged || target == StatusRequirementsGenerated || target == StatusRejected
 	case StatusReviewingRollup:
 		// Legacy state — equivalent to reviewing_qa at level=synthesis. Kept for
 		// in-flight plans at upgrade time. New code should emit reviewing_qa.
@@ -1710,6 +1716,20 @@ const (
 	// story-shaping degraded into requirement_change cascades that didn't
 	// actually re-run Sarah. Closes the cross-pass synthesis Train C.
 	PlanDecisionKindStoryReprepare PlanDecisionKind = "story_reprepare"
+
+	// PlanDecisionKindArchitectureRevise marks a decision proposing that
+	// Winston re-run the architecture. Heaviest recovery kind: on accept,
+	// plan-manager captures PreviousArchitectureJSON, clears Architecture +
+	// Stories + Scenarios, resets all requirement executions, and drives the
+	// back-transition implementing → requirements_generated so the architect
+	// re-fires and revises the prior architecture against the recovery
+	// diagnosis (carried via ReviewFormattedFindings — the same channel the
+	// R2 architecture re-entry uses). Distinct from story_reprepare, whose
+	// cascade keeps Architecture and only re-shards Stories; this kind
+	// discards the architecture itself and the cascade is a no-op because the
+	// accept handler already performed the wipe inline. Emitted by the
+	// recovery-agent for the architecture_revise action.
+	PlanDecisionKindArchitectureRevise PlanDecisionKind = "architecture_revise"
 )
 
 // String returns the string representation of the plan decision kind.
@@ -1722,7 +1742,8 @@ func (k PlanDecisionKind) IsValid() bool {
 	switch k {
 	case PlanDecisionKindRequirementChange,
 		PlanDecisionKindExecutionExhausted,
-		PlanDecisionKindStoryReprepare:
+		PlanDecisionKindStoryReprepare,
+		PlanDecisionKindArchitectureRevise:
 		return true
 	default:
 		return false

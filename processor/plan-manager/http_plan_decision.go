@@ -492,45 +492,15 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 	proposal.Status = workflow.PlanDecisionStatusAccepted
 	proposal.DecidedAt = &now
 
-	// ADR-037 stage-1 (a3): when accepting a recovery PlanDecision, apply
-	// the rationale as supplementary feedback on the affected entity(ies)
-	// via RecoveryHint. Execution-manager prepends Req.RecoveryHint onto
-	// exec.Feedback at next-cycle developer dispatch; Sarah reads
-	// Story.RecoveryHint at re-prep time (Train C step 4) so the
-	// manager-role agent's recommendation reaches the wedged role through
-	// the existing retry-feedback channel. No new prompt fragment, no new
-	// wire shape. Gated by ProposedBy="recovery-agent" so qa-reviewer +
-	// req-executor proposals (which use the same wire) don't get hint
-	// application.
-	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
-		applyRecoveryHint(plan, proposal)
-	}
-
-	// Train C step 4: when a story_reprepare PlanDecision is accepted,
-	// drive the back-transition stories_generated → preparing_stories so
-	// Sarah's watcher claims and re-preps. The affected Stories STAY in
-	// plan.Stories with their RecoveryHint set (written by
-	// applyRecoveryHint above) so Sarah's prompt iterates the full Story
-	// set and sees which entries need re-authoring; her emission then
-	// REPLACES plan.Stories per the existing handleStoriesMutation
-	// wipe-and-replace contract.
-	//
-	// In-place transition check (NOT setPlanStatusCached) avoids a double
-	// KV put: setPlanStatusCached would save, then the trailing ps.save
-	// below would save again — both putting status=preparing_stories. The
-	// watcher would see two identical events and dispatch Sarah twice. The
-	// inline check + mutation lets the existing trailing save be the sole
-	// persist point. An invalid transition (plan moved past
-	// stories_generated while the human review window was open) leaves the
-	// plan in place + logs a warning.
-	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
-		current := plan.EffectiveStatus()
-		if current.CanTransitionTo(workflow.StatusPreparingStories) {
-			plan.Status = workflow.StatusPreparingStories
-		} else {
-			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
-				"slug", slug, "proposal_id", proposalID, "current_status", current)
-		}
+	// Kind-specific accept effects — ADR-037 stage-1 (a3) recovery hint,
+	// story_reprepare back-transition (Train C step 4), architecture_revise
+	// wipe+reset — are shared with the mutation accept path via
+	// applyPlanDecisionAcceptEffects so both stay identical. See that helper
+	// for the per-kind contract.
+	if err := c.applyPlanDecisionAcceptEffects(r.Context(), plan, proposal, slug); err != nil {
+		c.logger.Error("Failed to apply plan decision accept effects", "slug", slug, "proposal_id", proposalID, "error", err)
+		http.Error(w, "Failed to accept plan decision", http.StatusInternalServerError)
+		return
 	}
 
 	if err := c.plans.save(r.Context(), plan); err != nil {

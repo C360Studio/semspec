@@ -91,6 +91,7 @@ func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 		payloads.RecoveryActionNarrowScope,
 		payloads.RecoveryActionSplitReq,
 		payloads.RecoveryActionStoryReprepare,
+		payloads.RecoveryActionArchitectureRevise,
 		payloads.RecoveryActionEscalateHuman,
 		payloads.RecoveryActionMarkUnrecoverable:
 	default:
