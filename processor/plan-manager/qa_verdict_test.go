@@ -30,9 +30,9 @@ func TestHandleQAVerdictMutation_PersistsVerdictSummary(t *testing.T) {
 
 	event := workflow.QAVerdictEvent{
 		Slug:    slug,
-		Level:   workflow.QALevelIntegration,
+		Level:   workflow.QALevelUnit,
 		Verdict: workflow.QAVerdictNeedsChanges,
-		Summary: "Integration tier surfaced a coverage gap.",
+		Summary: "Unit tier surfaced a coverage gap.",
 		Dimensions: workflow.QAVerdictDimensions{
 			RequirementFulfillment: "All four requirements implemented.",
 			Coverage:               "Missing assertions for the 5xx path.",
@@ -58,10 +58,10 @@ func TestHandleQAVerdictMutation_PersistsVerdictSummary(t *testing.T) {
 	if stored.QAVerdictSummary.Verdict != workflow.QAVerdictNeedsChanges {
 		t.Errorf("Verdict = %q, want needs_changes", stored.QAVerdictSummary.Verdict)
 	}
-	if stored.QAVerdictSummary.Level != workflow.QALevelIntegration {
-		t.Errorf("Level = %q, want integration", stored.QAVerdictSummary.Level)
+	if stored.QAVerdictSummary.Level != workflow.QALevelUnit {
+		t.Errorf("Level = %q, want unit", stored.QAVerdictSummary.Level)
 	}
-	if stored.QAVerdictSummary.Summary != "Integration tier surfaced a coverage gap." {
+	if stored.QAVerdictSummary.Summary != "Unit tier surfaced a coverage gap." {
 		t.Errorf("Summary = %q, want full summary", stored.QAVerdictSummary.Summary)
 	}
 	if stored.QAVerdictSummary.Dimensions.Coverage != "Missing assertions for the 5xx path." {
@@ -120,7 +120,7 @@ func TestHandleQAVerdictMutation_PersistsSummaryOnMergeFail(t *testing.T) {
 
 	event := workflow.QAVerdictEvent{
 		Slug:    slug,
-		Level:   workflow.QALevelIntegration,
+		Level:   workflow.QALevelUnit,
 		Verdict: workflow.QAVerdictApproved,
 		Summary: "Tests cover all requirements; ready for assembly.",
 		Dimensions: workflow.QAVerdictDimensions{

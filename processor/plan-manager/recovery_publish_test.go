@@ -43,7 +43,7 @@ func TestHandleQAVerdictMutation_NeedsChangesFiresRecoveryRequested(t *testing.T
 
 	event := workflow.QAVerdictEvent{
 		Slug:    slug,
-		Level:   workflow.QALevelIntegration,
+		Level:   workflow.QALevelUnit,
 		Verdict: workflow.QAVerdictNeedsChanges,
 		Summary: "Integration test has hardcoded time.Sleep — replace with active polling.",
 		TraceID: "trace-qa-1",
@@ -117,7 +117,7 @@ func TestHandleQAVerdictMutation_NeedsChangesPopulatesAffectedRequirementIDs(t *
 
 	event := workflow.QAVerdictEvent{
 		Slug:    slug,
-		Level:   workflow.QALevelIntegration,
+		Level:   workflow.QALevelUnit,
 		Verdict: workflow.QAVerdictNeedsChanges,
 		Summary: "Coverage gap on the 5xx path.",
 		TraceID: "trace-qa-affected",
@@ -168,7 +168,7 @@ func TestHandleQAVerdictMutation_RejectedFiresRecoveryRequested(t *testing.T) {
 
 	event := workflow.QAVerdictEvent{
 		Slug:    slug,
-		Level:   workflow.QALevelIntegration,
+		Level:   workflow.QALevelUnit,
 		Verdict: workflow.QAVerdictRejected,
 		Summary: "Unrecoverable: scope drift across all requirements.",
 		TraceID: "trace-qa-2",
@@ -201,7 +201,7 @@ func TestHandleQAVerdictMutation_ApprovedDoesNotFireRecoveryRequested(t *testing
 
 	event := workflow.QAVerdictEvent{
 		Slug:    slug,
-		Level:   workflow.QALevelIntegration,
+		Level:   workflow.QALevelUnit,
 		Verdict: workflow.QAVerdictApproved,
 		Summary: "All requirements met.",
 		TraceID: "trace-qa-3",

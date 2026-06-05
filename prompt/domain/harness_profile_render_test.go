@@ -47,7 +47,7 @@ func TestRenderResolvedHarnessProfilesFromRealCatalog(t *testing.T) {
 
 	out := renderResolvedHarnessProfiles("## Harness Profiles", ctxs)
 
-	if !strings.Contains(out, "`services`-orchestrated profiles, qa-runner brings the stack up") {
+	if !strings.Contains(out, "`services`-orchestrated profiles (e.g. live SITL) are operator-tier") {
 		t.Errorf("intro missing services-orchestrated guidance:\n%s", out)
 	}
 	if !strings.Contains(out, "`testcontainers` or `pure-fixture` profiles, the test fixture owns") {

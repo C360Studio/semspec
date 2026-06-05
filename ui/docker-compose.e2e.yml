@@ -276,42 +276,6 @@ services:
           cpus: "2"
           memory: 12G
 
-  # qa-runner handles integration and full QA tiers via nektos/act.
-  # Port offset +200 from dev (8091) → 8291 for UI-E2E isolation.
-  qa-runner:
-    build:
-      context: ..
-      dockerfile: docker/qa-runner.Dockerfile
-    ports:
-      - "8291:8091"
-    depends_on:
-      workspace-init:
-        condition: service_completed_successfully
-      nats:
-        condition: service_healthy
-      # semspec creates the WORKFLOW stream during startup; qa-runner's
-      # QA subscriber waits ~60s (30 retries × 2s) for that stream and
-      # exits with code 1 if absent. On slow startups (cold semembed,
-      # slow network) semspec takes >60s to be ready, so qa-runner must
-      # gate on semspec health rather than just NATS.
-      semspec:
-        condition: service_healthy
-    environment:
-      - NATS_URL=nats://nats:4222
-      # Same WORKSPACE_HOST_PATH as semspec — both must point at the same
-      # host path or act sibling containers and semspec's published QA event
-      # disagree on what workspace to mount.
-      - PROJECT_HOST_PATH=${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-
 volumes:
   ui-nats-data:
 

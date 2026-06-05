@@ -2534,10 +2534,11 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 					sb.WriteString("- `assertion_quality`: Are assertions meaningful and specific?\n")
 					sb.WriteString("- `regression_surface`: What existing behavior is at risk? Is it covered?\n\n")
 					sb.WriteString("Leave `flake_judgment` as empty string (single run, not enough data).\n\n")
-				case workflow.QALevelIntegration, workflow.QALevelFull:
-					sb.WriteString("At **integration/full** level, populate all six dimensions:\n")
-					sb.WriteString("- `requirement_fulfillment`, `capability_evidence`, `coverage`, `assertion_quality`, `regression_surface`\n")
-					sb.WriteString("- `flake_judgment`: Do failures look like genuine defects or likely flakiness?\n\n")
+				default:
+					// Only synthesis/unit reach qa-reviewer; any other value is a
+					// stale/coerced level — fall back to the synthesis dimensions
+					// rather than emitting an empty section.
+					sb.WriteString("Populate `requirement_fulfillment` and `capability_evidence`; leave the rest empty.\n\n")
 				}
 
 				return sb.String()

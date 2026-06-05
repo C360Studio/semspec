@@ -57,34 +57,12 @@ func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
 	return &QACycleScenario{config: cfg, qaLevel: "unit", name: "qa-cycle"}
 }
 
-// NewQACycleIntegrationScenario creates a qa-cycle variant at qa_level=
-// integration. Exercises the qa-runner path: act invocation against a
-// .github/workflows/qa.yml that runs `go test -tags=integration`.
-func NewQACycleIntegrationScenario(cfg *config.Config) *QACycleScenario {
-	return &QACycleScenario{config: cfg, qaLevel: "integration", name: "qa-cycle-integration"}
-}
-
-// NewQACycleServicesScenario creates a qa-cycle variant at qa_level=
-// integration that pre-seeds a services-enriched qa.yml in the workspace.
-// Verifies ADR-039 Phase 1b: qa-runner's host Docker socket mount lets act
-// spawn sibling service containers (nginx:alpine on port 80) that the job
-// steps can reach by service name. A readiness probe (wget --spider) gates
-// the integration test step so a workflow-passing run proves the sibling
-// container actually came up — not just that the syntax parsed.
-//
-// Differs from qa-cycle-integration in exactly two places: the customQAYAML
-// override below, and the scenario name (which selects the mock-LLM fixture
-// directory). The mock-LLM fixtures are an unchanged clone of qa-cycle-
-// integration's because Phase 1b is about the qa-runner substrate, not the
-// orchestration above it.
-func NewQACycleServicesScenario(cfg *config.Config) *QACycleScenario {
-	return &QACycleScenario{
-		config:       cfg,
-		qaLevel:      "integration",
-		name:         "qa-cycle-services",
-		customQAYAML: servicesEnrichedQAYAML,
-	}
-}
+// NOTE: the qa-cycle-integration and qa-cycle-services scenarios were removed
+// with the qa-runner executor (BMAD realignment Phase 3). Integration/services
+// tiers now run in the operator's CI, not via a semspec executor, so there is
+// no in-process path for an e2e scenario to exercise. The remaining
+// customQAYAML / servicesEnrichedQAYAML plumbing below is dead and is swept in
+// Phase 4.
 
 // servicesEnrichedQAYAML is the Phase 1b proof workflow. It declares one
 // service (nginx:alpine, port 80) and probes its reachability before running

@@ -8,9 +8,10 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-// QA phase payloads — target-project test execution gate between reviewing_rollup
-// and complete. qa-runner consumes QARequestedPayload and publishes QACompletedPayload.
-// qa-reviewer consumes QACompletedPayload (failure path) to emit PlanDecisions.
+// QA phase payloads — target-project test execution gate before complete. The
+// sandbox consumes QARequestedPayload (unit mode) and publishes
+// QACompletedPayload; qa-reviewer consumes QACompletedPayload (failure path) to
+// emit PlanDecisions. Heavier tiers run in the operator's CI, not a semspec executor.
 
 // QARequestedType is the message type for QA execution requests.
 var QARequestedType = message.Type{
@@ -35,13 +36,11 @@ func (p *QARequestedPayload) Validate() error {
 	if err := workflow.ValidateSlug(p.Slug); err != nil {
 		return fmt.Errorf("slug: %w", err)
 	}
-	if p.WorkspaceHostPath == "" {
-		return fmt.Errorf("workspace_host_path is required")
-	}
-	// Mode must be one of the executor-bound levels. none and synthesis don't
-	// publish QARequestedEvent — they skip QA or go straight to reviewing_qa.
-	if !p.Mode.IsValid() || p.Mode == workflow.QALevelNone || p.Mode == workflow.QALevelSynthesis {
-		return fmt.Errorf("mode must be unit|integration|full, got %q", p.Mode)
+	// Mode must be the sandbox-executed unit level. none and synthesis don't
+	// publish QARequestedEvent (they skip QA or go straight to reviewing_qa);
+	// heavier tiers run in the operator's CI, not via a semspec executor.
+	if p.Mode != workflow.QALevelUnit {
+		return fmt.Errorf("mode must be unit, got %q", p.Mode)
 	}
 	return nil
 }

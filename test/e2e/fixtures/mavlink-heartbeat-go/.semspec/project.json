@@ -13,5 +13,5 @@
   ],
   "tooling": {},
   "repository": {},
-  "qa_level": "integration"
+  "qa_level": "unit"
 }

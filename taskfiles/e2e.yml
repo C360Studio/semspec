@@ -354,7 +354,6 @@ tasks:
         docker logs ui-semspec-1 > $OUT/semspec.log 2>&1 || echo "  semspec logs: not available"
         docker logs ui-semsource-1 > $OUT/semsource.log 2>&1 || echo "  semsource logs: not available"
         docker logs ui-sandbox-1 > $OUT/sandbox.log 2>&1 || echo "  sandbox logs: not available"
-        docker logs ui-qa-runner-1 > $OUT/qa-runner.log 2>&1 || echo "  qa-runner logs: not available"
         curl -s 'http://localhost:3000/message-logger/entries?limit=2000' > $OUT/messages.json 2>/dev/null || echo "  messages: not available"
         curl -s 'http://localhost:3000/agentic-dispatch/loops' > $OUT/loops.json 2>/dev/null || echo "  loops: not available"
         curl -s 'http://localhost:3000/plan-manager/plans' > $OUT/plans.json 2>/dev/null || echo "  plans: not available"

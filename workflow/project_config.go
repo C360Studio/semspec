@@ -54,10 +54,11 @@ type ProjectConfig struct {
 
 	// QALevel is the project-wide QA policy applied at plan completion.
 	// Values: "none" (escape hatch), "synthesis" (default, LLM verdict only,
-	// no test execution), "unit" (sandbox runs project tests), "integration"
-	// (qa-runner via act), "full" (integration + e2e). Plans snapshot this
-	// value at creation — changing qa_level does not affect in-flight plans.
-	// Empty string is treated as "synthesis".
+	// no test execution), "unit" (sandbox runs project tests). Heavier tiers
+	// (testcontainers integration, services-class live SITL, e2e) run in the
+	// operator's CI against the emitted qa.yml, not via a semspec executor.
+	// Plans snapshot this value at creation — changing qa_level does not affect
+	// in-flight plans. Empty string is treated as "synthesis".
 	QALevel QALevel `json:"qa_level,omitempty"`
 
 	// QATestCommand is the shell command the sandbox runs at qa.level=unit.
@@ -74,10 +75,10 @@ type ProjectConfig struct {
 }
 
 // EffectiveQALevel returns the project's QA level, defaulting to synthesis
-// when unset. Matches Plan.EffectiveQALevel so both config surfaces agree on
-// the empty-value interpretation.
+// when unset or no longer a defined level (coerces a stale "integration"/"full"
+// snapshot). Matches Plan.EffectiveQALevel so both config surfaces agree.
 func (pc *ProjectConfig) EffectiveQALevel() QALevel {
-	if pc == nil || pc.QALevel == "" {
+	if pc == nil || !pc.QALevel.IsValid() {
 		return QALevelSynthesis
 	}
 	return pc.QALevel

@@ -63,32 +63,6 @@ services:
       timeout: 3s
       retries: 3
 
-  # qa-runner handles integration and full QA tiers via nektos/act.
-  # It mounts the Docker socket to spawn act job containers — see
-  # docker/qa-runner.Dockerfile for the trust boundary documentation.
-  qa-runner:
-    build:
-      context: .
-      dockerfile: docker/qa-runner.Dockerfile
-      # Socket-mounted — runs trusted orchestration code only.
-    depends_on:
-      nats:
-        condition: service_healthy
-    environment:
-      - NATS_URL=nats://nats:4222
-      - PROJECT_HOST_PATH=${SEMSPEC_REPO:-.}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${SEMSPEC_REPO:-.}:/workspace
-    ports:
-      - "8091:8091"
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
-
   semspec:
     image: ghcr.io/c360studio/semspec:main
     extra_hosts:

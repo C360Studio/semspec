@@ -22,7 +22,7 @@ func TestRenderQASummary_PassedRun(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:    "qa-pass",
 		Title:   "QA test",
-		QALevel: workflow.QALevelIntegration,
+		QALevel: workflow.QALevelUnit,
 		QARun: &workflow.QARun{
 			RunID:       "run-123",
 			Passed:      true,
@@ -36,7 +36,7 @@ func TestRenderQASummary_PassedRun(t *testing.T) {
 	md := RenderQASummary(plan)
 	checks := map[string]bool{
 		"# QA Summary: QA test": true,
-		"`integration`":         true,
+		"`unit`":                true,
 		"## Executor result":    true,
 		"PASSED":                true,
 		"`run-123`":             true,
@@ -105,10 +105,10 @@ func TestRenderQASummary_WithVerdictSummary(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:    "with-verdict",
 		Title:   "Verdict carrier",
-		QALevel: workflow.QALevelIntegration,
+		QALevel: workflow.QALevelUnit,
 		QAVerdictSummary: &workflow.QAVerdictSummary{
 			Verdict:    workflow.QAVerdictApproved,
-			Level:      workflow.QALevelIntegration,
+			Level:      workflow.QALevelUnit,
 			Summary:    "Plan satisfies the change request and tests cover the new surface.",
 			RecordedAt: time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC),
 			Dimensions: workflow.QAVerdictDimensions{
@@ -127,7 +127,7 @@ func TestRenderQASummary_WithVerdictSummary(t *testing.T) {
 	}{
 		{"## Reviewer verdict", true},
 		{"**Verdict:** `approved`", true},
-		{"**Level assessed:** `integration`", true},
+		{"**Level assessed:** `unit`", true},
 		{"2026-05-16T12:00:00Z", true},
 		{"Plan satisfies the change request", true},
 		{"### Dimensions", true},

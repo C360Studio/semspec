@@ -108,10 +108,11 @@ type UserSignalErrorEvent struct {
 // (act-based) for integration and full. qa-reviewer is always the verdict
 // gate, consuming QACompletedEvent and emitting QAVerdictEvent.
 
-// QARequestedEvent is published by plan-manager when a plan enters ready_for_qa.
-// Consumer routing is by Mode: QALevelUnit → sandbox, QALevelIntegration|Full
-// → qa-runner container. Level=synthesis skips this event (plan goes straight
-// to reviewing_qa) and level=none skips QA entirely.
+// QARequestedEvent is published by plan-manager when a unit-level plan enters
+// ready_for_qa, so the sandbox runs the project's test suite before
+// qa-reviewer interprets. Level=synthesis skips this event (the plan goes
+// straight to reviewing_qa) and level=none skips QA entirely. Heavier tiers
+// run in the operator's CI, not via a semspec executor.
 type QARequestedEvent struct {
 	Slug              string  `json:"slug"`
 	PlanID            string  `json:"plan_id"`
