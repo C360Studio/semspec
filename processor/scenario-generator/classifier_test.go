@@ -38,11 +38,13 @@ func TestClassify_AlwaysEmitsUnit(t *testing.T) {
 	}
 }
 
-func TestClassify_ServicesProfileEmitsIntegration(t *testing.T) {
-	// A services-class profile selected in the architecture must produce a
-	// @integration emission bound to that profile. The fix for issue #37:
-	// without this, the dev produces only unit-tier code and the req-reviewer
-	// rejects on integration-tier expectations.
+func TestClassify_ServicesProfileIsOperatorTierNoIntegration(t *testing.T) {
+	// A services-class profile (live PX4 SITL daemon) is OPERATOR-TIER: the
+	// dev sandbox cannot stand it up, so the classifier must NOT make it a
+	// gating @integration tier. It reaches the operator via the emitted
+	// qa.yml; semspec does not gate the dev on evidence it can't produce.
+	// This is the capability gate behind defer-and-note (replaces the old
+	// issue-#37 behavior that forced @integration and caused infinite reject).
 	cat := fakeCatalog(harnesscatalog.Profile{
 		ID:            "mavlink.px4-sitl.mavsdk-smoke",
 		Orchestration: harnesscatalog.OrchestrationServices,
@@ -54,23 +56,13 @@ func TestClassify_ServicesProfileEmitsIntegration(t *testing.T) {
 	}
 	emissions := Classify(workflow.Requirement{ID: "r1"}, nil, arch, cat)
 
-	if len(emissions) != 2 {
-		t.Fatalf("expected @unit + @integration, got %d: %+v", len(emissions), emissions)
-	}
-	if emissions[0].Tier != workflow.TierUnit {
-		t.Errorf("expected first emission @unit, got %q", emissions[0].Tier)
-	}
-	if emissions[1].Tier != workflow.TierIntegration {
-		t.Errorf("expected second emission @integration, got %q", emissions[1].Tier)
-	}
-	if len(emissions[1].HarnessProfileIDs) != 1 || emissions[1].HarnessProfileIDs[0] != "mavlink.px4-sitl.mavsdk-smoke" {
-		t.Errorf("expected @integration bound to mavlink.px4-sitl.mavsdk-smoke, got %v", emissions[1].HarnessProfileIDs)
+	if len(emissions) != 1 || emissions[0].Tier != workflow.TierUnit {
+		t.Fatalf("expected only @unit for a services-class (operator-tier) profile, got %+v", emissions)
 	}
 }
 
 func TestClassify_TestcontainersProfileEmitsIntegration(t *testing.T) {
-	// testcontainers-class is equivalent to services-class for tier-emission
-	// purposes — both imply a peer process the dev sandbox can't run.
+	// testcontainers-class IS sandbox-runnable, so it gates as @integration.
 	cat := fakeCatalog(harnesscatalog.Profile{
 		ID:            "db.postgres.testcontainers",
 		Orchestration: harnesscatalog.OrchestrationTestcontainers,
@@ -111,15 +103,13 @@ func TestClassify_PureFixtureProfileNoIntegration(t *testing.T) {
 	}
 }
 
-func TestClassify_MultipleServicesProfilesEmitPerProfile(t *testing.T) {
-	// Architecture binds two services-class profiles → two @integration
-	// emissions, one per profile. Plan-reviewer rule
-	// scenario.missing_integration_for_services (Move 4) requires ≥1
-	// scenario per bound services-class profile, so the classifier must
-	// surface each profile separately.
+func TestClassify_MultipleTestcontainersProfilesEmitPerProfile(t *testing.T) {
+	// Architecture binds two testcontainers-class profiles → two @integration
+	// emissions, one per profile, so coverage can be demanded per bound
+	// sandbox-runnable profile.
 	cat := fakeCatalog(
-		harnesscatalog.Profile{ID: "a", Orchestration: harnesscatalog.OrchestrationServices},
-		harnesscatalog.Profile{ID: "b", Orchestration: harnesscatalog.OrchestrationServices},
+		harnesscatalog.Profile{ID: "a", Orchestration: harnesscatalog.OrchestrationTestcontainers},
+		harnesscatalog.Profile{ID: "b", Orchestration: harnesscatalog.OrchestrationTestcontainers},
 	)
 	arch := &workflow.ArchitectureDocument{
 		HarnessProfiles: []workflow.HarnessProfileSelection{
@@ -142,7 +132,7 @@ func TestClassify_DuplicateProfileSelectionsDedupe(t *testing.T) {
 	// identical @integration scenarios.
 	cat := fakeCatalog(harnesscatalog.Profile{
 		ID:            "a",
-		Orchestration: harnesscatalog.OrchestrationServices,
+		Orchestration: harnesscatalog.OrchestrationTestcontainers,
 	})
 	arch := &workflow.ArchitectureDocument{
 		HarnessProfiles: []workflow.HarnessProfileSelection{

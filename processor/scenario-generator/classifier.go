@@ -35,12 +35,15 @@ type TierEmission struct {
 // Rules:
 //
 //   - @unit always emits (every requirement needs unit coverage as a baseline).
-//   - @integration emits when ANY selected harness profile resolves through
-//     the catalog as services-class or testcontainers-class — orchestrations
-//     that imply a peer process the dev sandbox can't run. Each such profile
-//     becomes a HarnessProfileIDs binding on its own emission entry so the
-//     plan-reviewer's `scenario.missing_integration_for_services` rule
-//     (ADR-041 Move 4) sees coverage per services-class profile.
+//   - @integration emits ONLY for testcontainers-class profiles — the
+//     integration tier the dev sandbox can actually execute. Services-class
+//     profiles (a live external daemon such as PX4 SITL) are OPERATOR-TIER:
+//     the sandbox cannot stand them up, so they are not a gating tier. The
+//     architect still selects them by risk and they are emitted into the
+//     operator's qa.yml CI contract; semspec does not gate the dev/Story on
+//     evidence it structurally cannot produce. This is the capability gate
+//     behind the defer-and-note model — services-class proof runs in the
+//     operator's CI, not in the sandbox.
 //   - @e2e emits when the requirement's capability declares SurfaceUI in its
 //     Surfaces list (set by Mary's analyst sub-phase per Move 2). Capabilities
 //     without a UI surface produce no @e2e scenarios.
@@ -48,8 +51,7 @@ type TierEmission struct {
 //     without an explicit signal. ADR-041 §"Tier-emission classifier".
 //
 // Binding approximation (PR 2 interim): every architecturally-selected
-// services-class or testcontainers-class profile is treated as relevant to
-// every requirement. The strict "profiles bound to C's components via
+// testcontainers-class profile is treated as relevant to every requirement. The strict "profiles bound to C's components via
 // architecture.harness_profiles[].used_by" semantics from the ADR require a
 // Capability ↔ Component mapping that doesn't exist on the data model yet
 // (ComponentDef has no CapabilityName field and Requirement has no
@@ -79,13 +81,12 @@ func Classify(
 }
 
 // integrationEmissions walks the architect's selected harness profiles and
-// returns one TierEmission per services-class or testcontainers-class
-// profile. Returns nil when no architecture is present, no profiles are
-// selected, or no selected profile is integration-class.
-//
-// Each entry binds exactly one profile so the plan-reviewer rule
-// `scenario.missing_integration_for_services` (Move 4) can demand at least
-// one scenario per bound services-class profile.
+// returns one TierEmission per TESTCONTAINERS-class profile — the integration
+// tier the dev sandbox can execute. Services-class (live-daemon) and
+// pure-fixture profiles are skipped: services-class is operator-tier (runs in
+// the operator's CI via the emitted qa.yml, never gated in the sandbox) and
+// pure-fixture is covered at @unit. Returns nil when no architecture is
+// present, no profiles are selected, or none are testcontainers-class.
 func integrationEmissions(arch *workflow.ArchitectureDocument, cat *harnesscatalog.Catalog) []TierEmission {
 	if arch == nil || cat == nil || len(arch.HarnessProfiles) == 0 {
 		return nil
@@ -100,8 +101,10 @@ func integrationEmissions(arch *workflow.ArchitectureDocument, cat *harnesscatal
 		if !ok {
 			continue
 		}
-		orch := profile.EffectiveOrchestration()
-		if orch != harnesscatalog.OrchestrationServices && orch != harnesscatalog.OrchestrationTestcontainers {
+		// Capability gate: only testcontainers-class integration runs in the
+		// sandbox and may gate the dev/Story. Services-class (live SITL etc.)
+		// is operator-tier — skip it here; it reaches the operator via qa.yml.
+		if profile.EffectiveOrchestration() != harnesscatalog.OrchestrationTestcontainers {
 			continue
 		}
 		seen[sel.ProfileID] = struct{}{}
