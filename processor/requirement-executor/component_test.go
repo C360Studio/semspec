@@ -1920,194 +1920,27 @@ func TestParseReactivePayload_EmptyPayload_ReturnsError(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Coverage gap tripwire — uncoveredFailedScenarios + restructure escalation.
-// ---------------------------------------------------------------------------
-
-func execWithNodes(nodes []*TaskNode) *requirementExecution {
-	exec := &requirementExecution{
-		NodeIndex: make(map[string]*TaskNode, len(nodes)),
-	}
-	for _, n := range nodes {
-		exec.SortedNodeIDs = append(exec.SortedNodeIDs, n.ID)
-		exec.NodeIndex[n.ID] = n
-	}
-	return exec
-}
-
-func TestUncoveredFailedScenarios(t *testing.T) {
+// TestRequirementReviewerFixableRerunsStoryOnExistingBranch pins the
+// Story-altitude retry contract that replaced the (impossible) scenario→node
+// dirty-targeting. A fixable Murat rejection — even without per-scenario
+// verdicts, which the old code rejected as "invalid targeting" — must start a
+// retry that re-runs the whole Story DAG on the EXISTING branch: RetryCount
+// incremented, NodeResults reset, DirtyNodeIDs nil (all nodes re-run), branch
+// preserved (no restructure), and the reviewer feedback carried forward.
+func TestRequirementReviewerFixableRerunsStoryOnExistingBranch(t *testing.T) {
 	c := newTestComponent(t)
-
-	cases := []struct {
-		name     string
-		nodes    []*TaskNode
-		verdicts []ScenarioVerdict
-		want     []string
-	}{
-		{
-			name:     "no failures returns nil",
-			nodes:    []*TaskNode{{ID: "n1", ScenarioIDs: []string{"s1"}}},
-			verdicts: []ScenarioVerdict{{ScenarioID: "s1", Passed: true}},
-			want:     nil,
-		},
-		{
-			name: "all failed scenarios covered returns nil",
-			nodes: []*TaskNode{
-				{ID: "n1", ScenarioIDs: []string{"s1"}},
-				{ID: "n2", ScenarioIDs: []string{"s2"}},
-			},
-			verdicts: []ScenarioVerdict{
-				{ScenarioID: "s1", Passed: false},
-				{ScenarioID: "s2", Passed: false},
-			},
-			want: nil,
-		},
-		{
-			name: "zero nodes with scenario_ids returns every failed id",
-			nodes: []*TaskNode{
-				{ID: "n1"},
-				{ID: "n2"},
-			},
-			verdicts: []ScenarioVerdict{
-				{ScenarioID: "s-b", Passed: false},
-				{ScenarioID: "s-a", Passed: false},
-			},
-			want: []string{"s-a", "s-b"},
-		},
-		{
-			name: "partial coverage returns only uncovered ids sorted",
-			nodes: []*TaskNode{
-				{ID: "n1", ScenarioIDs: []string{"s2"}},
-			},
-			verdicts: []ScenarioVerdict{
-				{ScenarioID: "s2", Passed: false},
-				{ScenarioID: "s1", Passed: false},
-				{ScenarioID: "s3", Passed: false},
-			},
-			want: []string{"s1", "s3"},
-		},
-		{
-			name: "passed scenarios never show up even if uncovered",
-			nodes: []*TaskNode{
-				{ID: "n1", ScenarioIDs: []string{"s1"}},
-			},
-			verdicts: []ScenarioVerdict{
-				{ScenarioID: "s1", Passed: false},
-				{ScenarioID: "s2", Passed: true}, // passed + uncovered, irrelevant
-			},
-			want: nil,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := c.uncoveredFailedScenarios(execWithNodes(tc.nodes), tc.verdicts)
-			if len(got) != len(tc.want) {
-				t.Fatalf("len(uncovered)=%d want %d; got=%v", len(got), len(tc.want), got)
-			}
-			for i := range got {
-				if got[i] != tc.want[i] {
-					t.Errorf("uncovered[%d]=%q want %q", i, got[i], tc.want[i])
-				}
-			}
-		})
-	}
-}
-
-func boolPtr(v bool) *bool {
-	return &v
-}
-
-func TestValidateFixableReviewTargeting(t *testing.T) {
-	exec := &requirementExecution{
-		Scenarios: []workflow.Scenario{
-			{ID: "s1", StoryID: "story.1"},
-			{ID: "s2", StoryID: "story.1"},
-		},
-		SortedStoryIDs:  []string{"story.1"},
-		CurrentStoryIdx: 0,
-	}
-
-	cases := []struct {
-		name     string
-		verdicts []requirementReviewScenarioItem
-		wantErr  string
-	}{
-		{
-			name: "complete targeted rejection",
-			verdicts: []requirementReviewScenarioItem{
-				{ScenarioID: "s1", Passed: boolPtr(false), Feedback: "missing coverage"},
-				{ScenarioID: "s2", Passed: boolPtr(true)},
-			},
-		},
-		{
-			name:     "empty verdicts rejected",
-			verdicts: nil,
-			wantErr:  "requires scenario_verdicts",
-		},
-		{
-			name: "missing passed rejected",
-			verdicts: []requirementReviewScenarioItem{
-				{ScenarioID: "s1", Feedback: "missing coverage"},
-				{ScenarioID: "s2", Passed: boolPtr(true)},
-			},
-			wantErr: "passed is required",
-		},
-		{
-			name: "missing scoped scenario rejected",
-			verdicts: []requirementReviewScenarioItem{
-				{ScenarioID: "s1", Passed: boolPtr(false)},
-			},
-			wantErr: "missing scoped scenario ids",
-		},
-		{
-			name: "all pass cannot drive fixable retry",
-			verdicts: []requirementReviewScenarioItem{
-				{ScenarioID: "s1", Passed: boolPtr(true)},
-				{ScenarioID: "s2", Passed: boolPtr(true)},
-			},
-			wantErr: "at least one failed",
-		},
-		{
-			name: "outside scoped surface rejected",
-			verdicts: []requirementReviewScenarioItem{
-				{ScenarioID: "s1", Passed: boolPtr(false)},
-				{ScenarioID: "s3", Passed: boolPtr(true)},
-			},
-			wantErr: "outside the scoped review surface",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := validateFixableReviewTargeting(exec, tc.verdicts)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("validateFixableReviewTargeting() error = %v, want nil", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("validateFixableReviewTargeting() error = %v, want containing %q", err, tc.wantErr)
-			}
-		})
-	}
-}
-
-func TestRequirementReviewerRejectedFixableWithoutScenarioVerdictsFailsClosed(t *testing.T) {
-	c := newTestComponent(t)
-	c.config.MaxReviewRetries = 3
 
 	dag := &TaskDAG{
 		Nodes: []TaskNode{
-			{ID: "node-a", ScenarioIDs: []string{"s1"}},
-			{ID: "node-b", ScenarioIDs: []string{"s2"}},
+			{ID: "node-a", ScenarioIDs: []string{"s1", "s2"}},
+			{ID: "node-b", ScenarioIDs: []string{"s1", "s2"}},
 		},
 	}
 	exec := &requirementExecution{
-		EntityID:          workflow.EntityPrefix() + ".exec.req.run.targeting",
-		Slug:              "targeting",
-		RequirementID:     "requirement.targeting.1",
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.fixable",
+		Slug:              "fixable",
+		RequirementID:     "requirement.fixable.1",
+		RequirementBranch: "req/fixable",
 		DAG:               dag,
 		SortedNodeIDs:     []string{"node-a", "node-b"},
 		NodeIndex:         map[string]*TaskNode{"node-a": &dag.Nodes[0], "node-b": &dag.Nodes[1]},
@@ -2115,33 +1948,50 @@ func TestRequirementReviewerRejectedFixableWithoutScenarioVerdictsFailsClosed(t 
 		NodeResults:       []NodeResult{{NodeID: "node-a"}, {NodeID: "node-b"}},
 		MaxRetries:        2,
 		RetryCount:        0,
-		ReviewRetryCount:  3,
 		CurrentStoryIdx:   0,
-		SortedStoryIDs:    []string{"story.targeting.1"},
-		Scenarios:         []workflow.Scenario{{ID: "s1", StoryID: "story.targeting.1"}, {ID: "s2", StoryID: "story.targeting.1"}},
+		SortedStoryIDs:    []string{"story.fixable.1"},
+		Scenarios:         []workflow.Scenario{{ID: "s1", StoryID: "story.fixable.1"}, {ID: "s2", StoryID: "story.fixable.1"}},
 		CurrentNodeTaskID: "reviewer",
 	}
 
+	// Fixable rejection WITHOUT scenario_verdicts — the old code failed this
+	// closed; the Story-altitude retry accepts it (the feedback alone drives
+	// the re-run).
 	event := &agentic.LoopCompletedEvent{
 		Outcome: agentic.OutcomeSuccess,
-		Result:  `{"verdict":"rejected","rejection_type":"fixable","feedback":"Scenario 1 needs a test, but I forgot the structured verdicts."}`,
+		Result:  `{"verdict":"rejected","rejection_type":"fixable","feedback":"The lifecycle test does not assert on the boot handshake."}`,
 	}
 
 	exec.mu.Lock()
 	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
 	exec.mu.Unlock()
 
-	if exec.RetryCount != 0 {
-		t.Errorf("RetryCount = %d, want 0; invalid reviewer targeting must not start a requirement retry", exec.RetryCount)
+	if exec.RetryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1; a fixable rejection must start a retry", exec.RetryCount)
 	}
 	if len(exec.DirtyNodeIDs) != 0 {
-		t.Errorf("DirtyNodeIDs = %v, want empty; invalid reviewer targeting must not dirty the DAG", exec.DirtyNodeIDs)
+		t.Errorf("DirtyNodeIDs = %v, want nil; the Story-altitude retry re-runs all nodes, no scenario→node targeting", exec.DirtyNodeIDs)
 	}
-	if len(exec.NodeResults) != 2 {
-		t.Errorf("NodeResults length = %d, want 2; invalid reviewer targeting must not trim completed work", len(exec.NodeResults))
+	if exec.NodeResults != nil {
+		t.Errorf("NodeResults = %v, want nil; the retry resets node results so every node re-dispatches", exec.NodeResults)
 	}
-	if c.requirementsFailed.Load() != 1 {
-		t.Errorf("requirementsFailed = %d, want 1; exhausted invalid reviewer output should fail closed", c.requirementsFailed.Load())
+	if exec.DAG == nil {
+		t.Error("DAG was discarded; a fixable retry must preserve the DAG (only restructure re-synthesizes)")
+	}
+	if exec.LastReviewFeedback == "" {
+		t.Error("LastReviewFeedback empty; reviewer feedback must carry forward into the re-run")
+	}
+	// The re-run must actually re-dispatch from the START of the DAG, not skip
+	// to review: VisitedNodes reset to empty (so the completion check at
+	// dispatchNextNodeLocked doesn't short-circuit) and the cursor advanced onto
+	// the first node (idx 0). A regression that left VisitedNodes populated or
+	// DirtyNodeIDs as a subset would silently skip nodes — these assertions guard
+	// the "re-runs the WHOLE Story" contract.
+	if len(exec.VisitedNodes) != 0 {
+		t.Errorf("VisitedNodes = %v, want empty; the retry must reset visited state so all nodes re-run", exec.VisitedNodes)
+	}
+	if exec.CurrentNodeIdx != 0 {
+		t.Errorf("CurrentNodeIdx = %d, want 0; the retry must re-dispatch from the first node", exec.CurrentNodeIdx)
 	}
 }
 

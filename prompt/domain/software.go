@@ -2248,6 +2248,25 @@ You optimize for CORRECTNESS against the scenario specification.`,
 				sc := ctx.ScenarioReviewContext
 				var sb strings.Builder
 
+				// Plan/requirement framing so the gate judges in context.
+				if sc.PlanTitle != "" || sc.RequirementTitle != "" {
+					sb.WriteString("## Story Under Review\n\n")
+					if sc.PlanTitle != "" {
+						sb.WriteString(fmt.Sprintf("**Plan:** %s\n", sc.PlanTitle))
+					}
+					if sc.PlanGoal != "" {
+						sb.WriteString(fmt.Sprintf("**Goal:** %s\n", sc.PlanGoal))
+					}
+					if sc.RequirementTitle != "" {
+						sb.WriteString(fmt.Sprintf("**Requirement:** %s\n", sc.RequirementTitle))
+					}
+					sb.WriteString("\n")
+				}
+				if sc.ArchitectureContext != "" {
+					sb.WriteString(sc.ArchitectureContext)
+					sb.WriteString("\n")
+				}
+
 				// Multi-scenario path (requirement-level review with per-scenario verdicts).
 				if len(sc.Scenarios) > 0 {
 					sb.WriteString("Acceptance Criteria (evaluate EACH scenario independently):\n\n")

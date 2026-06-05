@@ -326,6 +326,19 @@ type ScenarioReviewContext struct {
 	// RetryFeedback carries the reviewer's feedback from a prior rejection.
 	// When non-empty, this is a retry — the reviewer should note what was fixed.
 	RetryFeedback string
+
+	// PlanTitle, PlanGoal, RequirementTitle frame the Story gate so Murat
+	// judges the scenarios in context rather than in isolation. Empty when the
+	// plan could not be loaded.
+	PlanTitle        string
+	PlanGoal         string
+	RequirementTitle string
+
+	// ArchitectureContext is the pre-rendered architecture surface (components,
+	// resolved upstream dependencies, integrations) so the Story gate can check
+	// the implementation against the architect's resolved decisions. Empty when
+	// the plan has no architecture.
+	ArchitectureContext string
 }
 
 // ScenarioSpec identifies a scenario for per-scenario verdict tracking.

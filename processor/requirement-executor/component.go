@@ -22,7 +22,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sort"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -39,6 +40,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/jsonutil"
+	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/parseincident"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
@@ -139,6 +141,13 @@ type Component struct {
 	sandbox       sandboxClient     // nil when sandbox is disabled
 	assembler     *prompt.Assembler // composes system prompts for requirement-level review
 
+	// Story-gate (Murat) review knowledge — symmetric with the per-task
+	// reviewer in execution-manager so the requirement-level gate sees the
+	// same project standards + team lessons rather than judging in isolation.
+	standards       *workflow.Standards
+	lessonWriter    *lessons.Writer
+	errorCategories *workflow.ErrorCategoryRegistry
+
 	inputPorts  []component.Port
 	outputPorts []component.Port
 
@@ -208,6 +217,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			ComponentName: componentName,
 		},
 	}
+	c.initReviewKnowledge()
 
 	for _, p := range cfg.Ports.Inputs {
 		c.inputPorts = append(c.inputPorts, component.BuildPortFromDefinition(
@@ -1513,7 +1523,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 	// scenarios that weren't in its prompt context.
 	scopedScenarios := scopeScenariosToCurrentStory(exec)
 
-	asmCtx := c.buildRequirementReviewContext(exec, reviewerModel, scopedScenarios)
+	asmCtx := c.buildRequirementReviewContext(ctx, exec, reviewerModel, scopedScenarios)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	var reviewerEndpoint *ssmodel.EndpointConfig
@@ -1621,6 +1631,10 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 
 	exec.ReviewVerdict = result.Verdict
 	exec.ReviewFeedback = result.Feedback
+	// Per-scenario verdicts are no longer used for node targeting (the
+	// Story-gate retry re-runs the whole Story). Retained on the exec so Phase 3
+	// can record which scenarios were deferred-and-noted (un-runnable tier)
+	// vs genuinely failed.
 	exec.ScenarioVerdicts = result.toScenarioVerdicts()
 
 	if result.Verdict == "approved" {
@@ -1650,27 +1664,15 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 
 	switch result.RejectionType {
 	case "restructure":
+		// Restructure discards the branch and re-synthesizes the DAG from
+		// scratch — used when the Story's whole approach is wrong.
 		c.startRestructureRetryLocked(ctx, exec, result.Feedback)
 	default:
-		// "fixable" retry needs per-scenario targeting. If any failed scenario
-		// has no DAG node carrying its ID, the decomposer emitted a DAG that
-		// cannot be fixed by touching a subset — escalate to restructure and
-		// hand the uncovered IDs back as actionable feedback. This replaces an
-		// earlier silent "mark all nodes dirty" fallback that masked decomposer
-		// bugs and lit up the whole DAG every retry.
-		scenarioVerdicts := result.toScenarioVerdicts()
-		if uncovered := c.uncoveredFailedScenarios(exec, scenarioVerdicts); len(uncovered) > 0 {
-			c.logger.Error("Coverage gap — failed scenarios have no DAG node mapping; forcing restructure",
-				"entity_id", exec.EntityID,
-				"uncovered_scenario_ids", uncovered,
-			)
-			c.startRestructureRetryLocked(ctx, exec, fmt.Sprintf(
-				"coverage gap: failed scenarios [%s] have no DAG node with matching scenario_ids. Regenerate the DAG so every scenario is assigned to at least one node. Reviewer feedback: %s",
-				strings.Join(uncovered, ", "), result.Feedback,
-			))
-			return
-		}
-		c.startFixableRetryLocked(ctx, exec, result.Feedback, scenarioVerdicts)
+		// "fixable" — the Story's approach is sound but the implementation
+		// doesn't yet satisfy the acceptance scenarios. Re-run the Story on the
+		// existing branch with feedback (no scenario→node targeting; see
+		// startFixableRetryLocked).
+		c.startFixableRetryLocked(ctx, exec, result.Feedback)
 	}
 }
 
@@ -1698,17 +1700,12 @@ func (c *Component) parseRequirementReviewResultLocked(exec *requirementExecutio
 		result.RejectionType = "fixable"
 	}
 	switch result.RejectionType {
-	case "fixable":
-		if err := validateFixableReviewTargeting(exec, result.ScenarioVerdicts); err != nil {
-			c.logger.Warn("Invalid fixable requirement reviewer targeting",
-				"entity_id", exec.EntityID,
-				"error", err,
-			)
-			return result, err
-		}
-	case "restructure":
-		// Restructure explicitly discards the DAG, so scenario-level dirty
-		// targeting is not required.
+	case "fixable", "restructure":
+		// Both are valid. Neither needs scenario-level node targeting: fixable
+		// re-runs the whole Story on the existing branch; restructure discards
+		// the branch and re-synthesizes. (The old per-scenario targeting was
+		// removed — every node carried the full Story scenario set, so it could
+		// never localize a failure to a node.)
 	default:
 		return result, fmt.Errorf("invalid rejection_type: %s", result.RejectionType)
 	}
@@ -1739,176 +1736,50 @@ func (c *Component) handleInvalidRequirementReviewResultLocked(ctx context.Conte
 	c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer returned invalid result after max retries: %s", reason))
 }
 
-func validateFixableReviewTargeting(exec *requirementExecution, verdicts []requirementReviewScenarioItem) error {
-	scoped := scopeScenariosToCurrentStory(exec)
-	if len(scoped) == 0 {
-		return fmt.Errorf("fixable rejection requires scoped scenarios, but reviewer had no scenario surface")
-	}
-	if len(verdicts) == 0 {
-		return fmt.Errorf("fixable rejection requires scenario_verdicts for every scoped scenario")
-	}
-
-	expected := make(map[string]struct{}, len(scoped))
-	for _, s := range scoped {
-		expected[s.ID] = struct{}{}
-	}
-
-	seen := make(map[string]struct{}, len(verdicts))
-	failedCount := 0
-	for i, sv := range verdicts {
-		if sv.ScenarioID == "" {
-			return fmt.Errorf("scenario_verdicts[%d].scenario_id is required", i)
-		}
-		if _, ok := expected[sv.ScenarioID]; !ok {
-			return fmt.Errorf("scenario_verdicts[%d].scenario_id %q is outside the scoped review surface", i, sv.ScenarioID)
-		}
-		if sv.Passed == nil {
-			return fmt.Errorf("scenario_verdicts[%d].passed is required for fixable rejection targeting", i)
-		}
-		seen[sv.ScenarioID] = struct{}{}
-		if !*sv.Passed {
-			failedCount++
-		}
-	}
-
-	if len(seen) < len(expected) {
-		var missing []string
-		for id := range expected {
-			if _, ok := seen[id]; !ok {
-				missing = append(missing, id)
-			}
-		}
-		sort.Strings(missing)
-		return fmt.Errorf("scenario_verdicts missing scoped scenario ids: %s", strings.Join(missing, ", "))
-	}
-	if failedCount == 0 {
-		return fmt.Errorf("fixable rejection requires at least one failed scenario verdict")
-	}
-	return nil
-}
-
-// uncoveredFailedScenarios returns the sorted IDs of failed scenarios that
-// don't appear in any DAG node's ScenarioIDs. An empty return means every
-// failed scenario can be targeted for fixable retry.
-func (c *Component) uncoveredFailedScenarios(exec *requirementExecution, verdicts []ScenarioVerdict) []string {
-	failed := make(map[string]bool)
-	for _, sv := range verdicts {
-		if !sv.Passed {
-			failed[sv.ScenarioID] = true
-		}
-	}
-	if len(failed) == 0 {
-		return nil
-	}
-	for _, nodeID := range exec.SortedNodeIDs {
-		node, ok := exec.NodeIndex[nodeID]
-		if !ok {
-			continue
-		}
-		for _, sid := range node.ScenarioIDs {
-			delete(failed, sid)
-		}
-	}
-	if len(failed) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(failed))
-	for sid := range failed {
-		out = append(out, sid)
-	}
-	sort.Strings(out)
-	return out
-}
-
-// startFixableRetryLocked handles a fixable rejection by mapping failed scenarios
-// to dirty DAG nodes and re-running only those nodes through the TDD pipeline.
-// Clean nodes are preserved — their worktree commits stay on the RequirementBranch.
+// startFixableRetryLocked handles a fixable Story-gate rejection. Murat's
+// verdict is at Story/scenario altitude; a failed scenario cannot be localized
+// to a single DAG node because every node carries the full Story scenario set
+// (synthesize_dag assigns ScenariosForStory to every node — there is no
+// per-task scenario partition). So a fixable rejection re-runs the WHOLE Story
+// DAG on the EXISTING branch — commits are preserved (unlike restructure, which
+// deletes the branch and re-synthesizes) and the reviewer feedback is threaded
+// into each node prompt so the dev fixes forward against the existing code.
+//
+// This is the coarse BMAD quality-gate behaviour: a Story PASSES or RETURNS for
+// rework. Subset targeting would require Sarah-authored per-task scenario
+// partitions (deliberately not added). A single node that ERRORS mid-DAG is a
+// different case — that IS localizable and uses retryNodeAtRequirementLevelLocked.
 // Caller must hold exec.mu.
-func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requirementExecution, feedback string, verdicts []ScenarioVerdict) {
+func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requirementExecution, feedback string) {
 	exec.RetryCount++
 	exec.LastReviewFeedback = feedback
 	exec.ReviewRetryCount = 0 // reset reviewer parse-retry budget for new attempt
 	exec.terminated = false   // allow new terminal write
 
-	// Collect failed scenario IDs.
-	failedScenarios := make(map[string]bool)
-	for _, sv := range verdicts {
-		if !sv.Passed {
-			failedScenarios[sv.ScenarioID] = true
-		}
-	}
-
-	// Map failed scenarios → dirty nodes via ScenarioIDs on TaskNode.
-	var dirtyNodes []string
-	for _, nodeID := range exec.SortedNodeIDs {
-		node, ok := exec.NodeIndex[nodeID]
-		if !ok {
-			continue
-		}
-		for _, sid := range node.ScenarioIDs {
-			if failedScenarios[sid] {
-				dirtyNodes = append(dirtyNodes, nodeID)
-				break
-			}
-		}
-	}
-
-	exec.DirtyNodeIDs = dirtyNodes
-
-	// Reset execution tracking for dirty nodes only.
-	for _, nodeID := range dirtyNodes {
-		delete(exec.VisitedNodes, nodeID)
-	}
-	// Remove node results for dirty nodes.
-	var cleanResults []NodeResult
-	dirtySet := make(map[string]bool, len(dirtyNodes))
-	for _, id := range dirtyNodes {
-		dirtySet[id] = true
-	}
-	for _, nr := range exec.NodeResults {
-		if !dirtySet[nr.NodeID] {
-			cleanResults = append(cleanResults, nr)
-		}
-	}
-	exec.NodeResults = cleanResults
-
-	// Mirror the in-memory trim to KV. KV NodeResults is otherwise
-	// append-only via handleReqNodeMutation; without this replace, the
-	// dirty entries would survive in KV and reappear on the next restart
-	// via rebuildExecFromKV. Closes Pass-1 H4b. Best-effort: failure logs
-	// but does not abort the retry — the retry can still proceed with
-	// the local view, and a future commit will re-mirror the state.
-	wfResults := make([]workflow.NodeResult, 0, len(cleanResults))
-	for _, nr := range cleanResults {
-		wfResults = append(wfResults, workflow.NodeResult{
-			NodeID:        nr.NodeID,
-			FilesModified: nr.FilesModified,
-			Summary:       nr.Summary,
-			CommitSHA:     nr.CommitSHA,
-		})
-	}
-	if err := c.sendReqReplaceNodeResults(ctx, exec.storeKey, wfResults); err != nil {
-		c.logger.Warn("Failed to replace KV NodeResults on fixable retry",
-			"entity_id", exec.EntityID, "dirty_nodes", len(dirtyNodes), "error", err)
-	}
-
-	// Reset node index to re-dispatch from the beginning.
-	// dispatchNextNodeLocked skips clean nodes automatically.
+	// Re-run every node (no scenario→node targeting). Preserve the branch.
+	exec.DirtyNodeIDs = nil
+	exec.VisitedNodes = make(map[string]bool)
+	exec.NodeResults = nil
 	exec.CurrentNodeIdx = -1
 
-	// Update KV state.
+	// Mirror the NodeResults reset to KV — it is append-only via
+	// handleReqNodeMutation, so without this stale entries reappear on the
+	// next restart via rebuildExecFromKV. Best-effort.
+	if err := c.sendReqResetNodeResults(ctx, exec.storeKey); err != nil {
+		c.logger.Warn("Failed to reset KV NodeResults on fixable retry",
+			"entity_id", exec.EntityID, "error", err)
+	}
+
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
 		"retry_count": exec.RetryCount,
-		"dirty_nodes": dirtyNodes,
 	}); err != nil {
 		c.logger.Warn("Failed to send req.phase mutation for retry", "error", err)
 	}
 
-	c.logger.Info("Starting fixable retry — re-running dirty nodes",
+	c.logger.Info("Starting fixable retry — re-running Story on existing branch",
 		"entity_id", exec.EntityID,
 		"retry_count", exec.RetryCount,
-		"dirty_nodes", len(dirtyNodes),
-		"clean_nodes", len(exec.SortedNodeIDs)-len(dirtyNodes),
+		"nodes", len(exec.SortedNodeIDs),
 		"feedback", feedback,
 	)
 
@@ -1975,10 +1846,10 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 }
 
 // isNodeDirty returns true if a node should be re-executed on retry.
-// First attempts and restructure retries run all nodes by phase/DAG state.
-// Targeted fixable retries run only nodes listed in DirtyNodeIDs; invalid
-// reviewer targeting fails closed before dispatch instead of treating an empty
-// dirty set as a full-DAG retry.
+// With an empty DirtyNodeIDs (first attempt, Story-gate fixable retry, or
+// restructure) every node re-runs. DirtyNodeIDs is set only by the single-node
+// mid-DAG error path (retryNodeAtRequirementLevelLocked), which CAN localize
+// the failure; the Story-gate fixable retry cannot, so it re-runs all nodes.
 func (c *Component) isNodeDirty(exec *requirementExecution, nodeID string) bool {
 	if exec.RetryCount == 0 || len(exec.DirtyNodeIDs) == 0 {
 		return true // first attempt or no dirty list — all nodes are "dirty"
@@ -1999,7 +1870,7 @@ func (c *Component) isNodeDirty(exec *requirementExecution, nodeID string) bool 
 // (rather than recomputing inside) guarantees buildReviewPrompt and this
 // function see the SAME verdict surface, which is the load-bearing contract
 // behind go-reviewer Pass-1 C5.
-func (c *Component) buildRequirementReviewContext(exec *requirementExecution, reviewerModel string, scoped []workflow.Scenario) *prompt.AssemblyContext {
+func (c *Component) buildRequirementReviewContext(ctx context.Context, exec *requirementExecution, reviewerModel string, scoped []workflow.Scenario) *prompt.AssemblyContext {
 	var endpoint *ssmodel.EndpointConfig
 	if c.modelRegistry != nil {
 		endpoint = c.modelRegistry.GetEndpoint(reviewerModel)
@@ -2031,7 +1902,7 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution, re
 		rc.RetryFeedback = exec.LastReviewFeedback
 	}
 
-	return &prompt.AssemblyContext{
+	asmCtx := &prompt.AssemblyContext{
 		Role:                  prompt.RoleScenarioReviewer,
 		Provider:              resolveProvider(reviewerModel),
 		Domain:                "software",
@@ -2041,6 +1912,88 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution, re
 		Persona:               prompt.GlobalPersonas().ForRole(prompt.RoleScenarioReviewer),
 		Vocabulary:            prompt.GlobalPersonas().Vocabulary(),
 		HasResponseFormat:     terminal.EndpointSupportsResponseFormat(endpoint),
+	}
+
+	// Symmetric context with the per-task reviewer: project standards + rotated
+	// team lessons (the Story gate used to judge in isolation — go-reviewer #3).
+	if c.standards != nil {
+		asmCtx.Standards = prompt.NewStandardsContext(c.standards.ForRole(string(prompt.RoleScenarioReviewer)))
+	}
+	asmCtx.LessonsLearned = c.rotateReviewLessons(ctx)
+
+	// Plan/requirement framing + architecture so Murat judges scenarios in
+	// context, not in isolation. Best-effort: a missing plan just leaves the
+	// fields empty.
+	if plan, err := c.loadPlanFromKV(ctx, exec.Slug); err == nil && plan != nil {
+		rc.PlanTitle = plan.Title
+		rc.PlanGoal = plan.Goal
+		rc.ArchitectureContext = prompt.FormatArchitectureContext(prompt.ProjectArchitecture(plan.Architecture))
+		for _, r := range plan.Requirements {
+			if r.ID == exec.RequirementID {
+				rc.RequirementTitle = r.Title
+				break
+			}
+		}
+	}
+
+	return asmCtx
+}
+
+// rotateReviewLessons returns the role-scoped team lessons for the Story gate,
+// or nil when the lesson writer is unset or there are none. Mirrors the
+// per-task reviewer's lesson injection in execution-manager.
+func (c *Component) rotateReviewLessons(ctx context.Context) *prompt.LessonsLearned {
+	if c.lessonWriter == nil {
+		return nil
+	}
+	graphCtx := context.WithoutCancel(ctx)
+	entries, err := c.lessonWriter.RotateLessonsForRole(graphCtx, string(prompt.RoleScenarioReviewer), 10)
+	if err != nil || len(entries) == 0 {
+		return nil
+	}
+	tk := &prompt.LessonsLearned{}
+	for _, les := range entries {
+		lesson := prompt.LessonEntry{
+			Category:      les.Source,
+			Summary:       les.Summary,
+			InjectionForm: les.InjectionForm,
+			Positive:      les.Positive,
+			Role:          les.Role,
+		}
+		if len(les.CategoryIDs) > 0 && c.errorCategories != nil {
+			if catDef, ok := c.errorCategories.Get(les.CategoryIDs[0]); ok {
+				lesson.Guidance = catDef.Guidance
+			}
+		}
+		tk.Lessons = append(tk.Lessons, lesson)
+	}
+	return tk
+}
+
+// initReviewKnowledge loads the project standards + error categories and wires
+// the lesson writer so the Story-gate (Murat) review has the same knowledge
+// surface as the per-task reviewer. Best-effort: missing files just leave the
+// gate without that context.
+//
+// Called from the factory (not Start) deliberately: it only reads disk and
+// constructs a lazy lessons.Writer over the already-set tripleWriter — no NATS
+// I/O or KV access happens here, so there is no Start-ordering dependency. Do
+// not "align" this to execution-manager's Start-time init without that in mind.
+func (c *Component) initReviewKnowledge() {
+	c.lessonWriter = &lessons.Writer{TW: c.tripleWriter, Logger: c.logger}
+
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	catPath := filepath.Join(repoRoot, "configs", "error_categories.json")
+	if reg, err := workflow.LoadErrorCategories(catPath); err != nil {
+		c.logger.Debug("Failed to load error categories — lesson guidance disabled", "error", err)
+	} else {
+		c.errorCategories = reg
+	}
+	if stds := workflow.LoadStandardsFromDisk(repoRoot); stds != nil && len(stds.Items) > 0 {
+		c.standards = stds
 	}
 }
 

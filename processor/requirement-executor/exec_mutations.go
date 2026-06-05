@@ -63,24 +63,6 @@ func (c *Component) sendReqResetNodeResults(ctx context.Context, key string) err
 	return err
 }
 
-// sendReqReplaceNodeResults asks execution-manager to REPLACE the
-// NodeResults slice on the existing KV entry with the supplied list.
-// Used by the fixable-retry path that keeps non-dirty NodeResults and
-// drops dirty ones — without this, the KV-side slice would still carry
-// the dirty entries (handleReqNodeMutation only appends) and the next
-// restart's rebuildExecFromKV would resurrect them. Closes go-reviewer
-// Pass-1 H4b. nil natsClient short-circuits (unit tests).
-func (c *Component) sendReqReplaceNodeResults(ctx context.Context, key string, results []workflow.NodeResult) error {
-	if c.natsClient == nil {
-		return nil
-	}
-	_, err := c.sendMutation(ctx, mutReqResetNodeResults, map[string]any{
-		"key":          key,
-		"node_results": results,
-	})
-	return err
-}
-
 // sendReqNode sends a DAG node update mutation to execution-manager.
 func (c *Component) sendReqNode(ctx context.Context, key string, nodeIdx int, nodeTaskID string, result *workflow.NodeResult) error {
 	req := map[string]any{
