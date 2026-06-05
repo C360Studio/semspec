@@ -2,6 +2,7 @@ package planmanager
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
@@ -20,6 +21,81 @@ import (
 // Post-fix, story-phase findings clear only Stories + Scenarios and
 // return StatusArchitectureGenerated — Sarah's watcher claim point,
 // triggering a re-prep of Stories from the (still-valid) architecture.
+// TestDetermineR2ReentryPoint_PreviousArchitectureLifecycle pins the
+// PreviousArchitectureJSON revision-carry-over contract: the architecture
+// re-entry CAPTURES the prior architecture (so the architect revises rather
+// than rewrites), while every other branch CLEARS any stale carry-over so a
+// leftover from a failed prior architecture re-run can't leak into a
+// plan/requirements re-entry whose regenerated requirements no longer match it.
+func TestDetermineR2ReentryPoint_PreviousArchitectureLifecycle(t *testing.T) {
+	arch := &workflow.ArchitectureDocument{Decisions: []workflow.ArchDecision{{Title: "use Go"}}}
+
+	t.Run("architecture phase captures prior architecture", func(t *testing.T) {
+		c := setupTestComponent(t)
+		plan := &workflow.Plan{Slug: "demo", Architecture: arch}
+		findings, _ := json.Marshal([]workflow.PlanReviewFinding{
+			{Severity: "error", Status: "violation", Phase: "architecture", SOPID: "architecture.component_missing_implementation_files"},
+		})
+
+		target := c.determineR2ReentryPoint(plan, findings)
+
+		if target != workflow.StatusRequirementsGenerated {
+			t.Fatalf("target = %s, want StatusRequirementsGenerated", target)
+		}
+		if plan.Architecture != nil {
+			t.Error("plan.Architecture should be cleared for re-generation")
+		}
+		if plan.PreviousArchitectureJSON == "" {
+			t.Error("PreviousArchitectureJSON should capture the prior architecture for the revision base")
+		}
+		if !strings.Contains(plan.PreviousArchitectureJSON, "use Go") {
+			t.Errorf("PreviousArchitectureJSON missing prior content: %q", plan.PreviousArchitectureJSON)
+		}
+	})
+
+	// Every non-architecture branch must clear stale carry-over (H1 leak guard).
+	leakCases := []struct {
+		name  string
+		phase string
+	}{
+		{"plan phase clears stale carry-over", "plan"},
+		{"requirements phase clears stale carry-over", "requirements"},
+		{"scenarios phase clears stale carry-over", "scenarios"},
+	}
+	for _, tc := range leakCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			c := setupTestComponent(t)
+			plan := &workflow.Plan{
+				Slug:                     "demo",
+				Architecture:             arch,
+				PreviousArchitectureJSON: `{"stale":"from a failed prior architecture re-run"}`,
+			}
+			findings, _ := json.Marshal([]workflow.PlanReviewFinding{
+				{Severity: "error", Status: "violation", Phase: tc.phase, SOPID: "x"},
+			})
+
+			c.determineR2ReentryPoint(plan, findings)
+
+			if plan.PreviousArchitectureJSON != "" {
+				t.Errorf("%s: stale PreviousArchitectureJSON survived (would leak into a forward-flow architect prompt): %q", tc.phase, plan.PreviousArchitectureJSON)
+			}
+		})
+	}
+
+	t.Run("unparseable findings clear stale carry-over", func(t *testing.T) {
+		c := setupTestComponent(t)
+		plan := &workflow.Plan{
+			Slug:                     "demo",
+			PreviousArchitectureJSON: `{"stale":"x"}`,
+		}
+		c.determineR2ReentryPoint(plan, json.RawMessage(`not json`))
+		if plan.PreviousArchitectureJSON != "" {
+			t.Errorf("stale PreviousArchitectureJSON survived the unparseable-findings fallback: %q", plan.PreviousArchitectureJSON)
+		}
+	})
+}
+
 func TestDetermineR2ReentryPoint_StoriesPhaseRoutesToArchitectureGenerated(t *testing.T) {
 	c := setupTestComponent(t)
 	plan := &workflow.Plan{

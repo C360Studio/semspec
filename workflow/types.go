@@ -116,8 +116,13 @@ func (s Status) String() string {
 }
 
 // QALevel describes the project-level quality-assurance depth applied at
-// plan completion. Each level is a strict superset of the previous and uses
-// different execution substrate.
+// plan completion.
+//
+// semspec executes only what the sandbox can run (unit). Heavier tiers
+// (integration via testcontainers, services-class live SITL, e2e) run in the
+// OPERATOR's CI against the emitted qa.yml — semspec designs + gates, it does
+// not stand up those environments (the integration/full levels and the
+// act-based qa-runner that ran them were removed in the BMAD realignment).
 type QALevel string
 
 const (
@@ -128,14 +133,8 @@ const (
 	// pre-QA-phase rollup review behavior. Default.
 	QALevelSynthesis QALevel = "synthesis"
 	// QALevelUnit runs the project's existing test suite in the sandbox at
-	// plan-completion time, then qa-reviewer interprets. No qa-runner needed.
+	// plan-completion time, then qa-reviewer interprets.
 	QALevelUnit QALevel = "unit"
-	// QALevelIntegration runs .github/workflows/qa.yml via the qa-runner
-	// container (act-based). Adds integration-tagged tests with real fixtures.
-	QALevelIntegration QALevel = "integration"
-	// QALevelFull adds e2e browser flows (Playwright) on top of integration,
-	// with screenshot/trace/video artifact collection.
-	QALevelFull QALevel = "full"
 )
 
 // String returns the string representation of the QA level.
@@ -146,18 +145,11 @@ func (l QALevel) String() string {
 // IsValid returns true if the level is one of the defined values.
 func (l QALevel) IsValid() bool {
 	switch l {
-	case QALevelNone, QALevelSynthesis, QALevelUnit, QALevelIntegration, QALevelFull:
+	case QALevelNone, QALevelSynthesis, QALevelUnit:
 		return true
 	default:
 		return false
 	}
-}
-
-// UsesQARunner returns true if this level requires the qa-runner container.
-// Synthesis runs in-process; unit runs in the sandbox; integration and full
-// require the act-based qa-runner.
-func (l QALevel) UsesQARunner() bool {
-	return l == QALevelIntegration || l == QALevelFull
 }
 
 // UsesSandboxTests returns true if this level runs the project's test suite
@@ -639,6 +631,16 @@ type Plan struct {
 	// Nil when SkipArchitecture is true or before the phase completes.
 	Architecture *ArchitectureDocument `json:"architecture,omitempty"`
 
+	// PreviousArchitectureJSON carries the prior ArchitectureDocument (as JSON)
+	// across an architecture-phase re-entry. plan-manager captures it just
+	// before clearing plan.Architecture for an R2 architecture re-run; the
+	// architecture-generator threads it into the architect's prompt so Winston
+	// revises the prior design instead of rewriting from scratch and re-
+	// introducing the same shape the reviewer just rejected. Mirrors the
+	// planner's PreviousPlanJSON. Cleared once the architect produces a new
+	// architecture. Transient — empty on the forward flow.
+	PreviousArchitectureJSON string `json:"previous_architecture_json,omitempty"`
+
 	// Requirements, Scenarios, Stories, and PlanDecisions are populated when
 	// the plan is written to the PLAN_STATES KV bucket so downstream watchers
 	// have everything they need without follow-up queries.
@@ -662,8 +664,8 @@ type Plan struct {
 	// plan creation so a running plan is immutable under QA policy changes.
 	// Empty string is treated as QALevelSynthesis (the behavior-preserving
 	// default). Decides the branch point at implementing convergence:
-	// none → complete; synthesis → reviewing_qa; unit/integration/full →
-	// ready_for_qa + QARequestedEvent published for the appropriate executor.
+	// none → complete; synthesis → reviewing_qa; unit → ready_for_qa +
+	// QARequestedEvent published to the sandbox executor.
 	QALevel QALevel `json:"qa_level,omitempty"`
 
 	// QARun captures the executor result for this plan's QA phase. Populated by
@@ -741,10 +743,14 @@ type QAVerdictSummary struct {
 }
 
 // EffectiveQALevel returns the plan's QA level, defaulting to synthesis when
-// unset. Centralized so the branch point and verdict handlers agree on the
-// empty-value interpretation.
+// unset OR when the snapshotted value is no longer a defined level. The latter
+// guards plans/configs created before the integration/full levels were removed:
+// a stale "integration"/"full" must coerce to synthesis rather than fall
+// through routing into a silent wedge (routed to ready_for_qa but never
+// dispatched and never claimed). Centralized so the branch point and verdict
+// handlers agree on the interpretation.
 func (p *Plan) EffectiveQALevel() QALevel {
-	if p.QALevel == "" {
+	if !p.QALevel.IsValid() {
 		return QALevelSynthesis
 	}
 	return p.QALevel

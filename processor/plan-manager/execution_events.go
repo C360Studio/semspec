@@ -370,9 +370,11 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 	}
 }
 
-// publishQARequestIfNeeded fires when a plan is routed to ready_for_qa. It
-// publishes a QARequestedEvent with the appropriate Mode so the matching
-// executor (sandbox for unit, qa-runner for integration/full) picks it up.
+// publishQARequestIfNeeded fires when a plan is routed to ready_for_qa. For
+// unit-level QA it publishes a QARequestedEvent so the sandbox runs the
+// project's test suite before qa-reviewer interprets. synthesis/none don't
+// dispatch (synthesis is claimed directly by qa-reviewer; none skips QA).
+// Heavier tiers run in the operator's CI, not via a semspec executor.
 // No-op when plan.Status != ready_for_qa or natsClient is nil (tests).
 func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow.Plan) {
 	if plan == nil || plan.Status != workflow.StatusReadyForQA || c.natsClient == nil {
@@ -380,57 +382,32 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 	}
 
 	level := plan.EffectiveQALevel()
-	if !level.UsesQARunner() && !level.UsesSandboxTests() {
-		return
-	}
-
-	// qa-runner bind-mounts the workspace via the Docker socket — it needs
-	// the HOST path, not semspec's container path. Without this, act will
-	// try to bind a container-local path on the host and silently produce
-	// an empty workspace.
-	workspaceHost := c.resolveProjectHostPath()
-	if workspaceHost == "" {
-		c.logger.Error("Refusing to publish QARequestedEvent — PROJECT_HOST_PATH unset",
-			"slug", plan.Slug, "level", level,
-			"hint", "set PROJECT_HOST_PATH on the semspec service so qa-runner can resolve the host workspace")
+	if !level.UsesSandboxTests() {
 		return
 	}
 
 	// Load project config for test command (language-aware default).
 	pc := workflow.LoadProjectConfigFromDisk(c.resolveRepoRoot())
 
-	// Render the qa.yml. Two paths:
-	//
-	//   1. ADR-039 Phase 1c — when the plan's architecture selected
-	//      services-orchestrated harness profiles and the operator did not
-	//      opt out via qa_skip_service_injection, overwrite the workspace
-	//      qa.yml with a catalog-injected workflow. The injection bundles the
-	//      catalog-derived `services:` block with the act DooD-required
-	//      `container:` block on the integration job
-	//      ([[act-dood-services-require-container-block]]).
-	//
-	//   2. Fallback — call EnsureQAWorkflow, which writes the language-aware
-	//      scaffold only when no qa.yml exists. Preserves operator-owned
-	//      workflows and matches pre-Phase-1c behaviour.
-	//
-	// Both paths are non-fatal: a render or write failure logs a warning and
-	// lets qa-runner surface the clearer act-side error.
+	// Emit the operator's CI contract (.github/workflows/qa.yml). When the
+	// architecture selected services-orchestrated harness profiles, render the
+	// catalog-injected services block (ADR-039 Phase 1c) so the operator's CI
+	// can stand up the live integration targets semspec's sandbox cannot;
+	// otherwise scaffold the language-aware default without clobbering an
+	// operator-owned workflow. Non-fatal: a failure just logs.
 	if !c.maybeRenderQAWithServices(plan, pc) {
 		if err := projectmanager.EnsureQAWorkflow(c.resolveRepoRoot(), pc, c.logger); err != nil {
-			c.logger.Warn("Failed to scaffold qa.yml before QA dispatch — qa-runner may fail with missing workflow",
-				"slug", plan.Slug, "error", err)
+			c.logger.Warn("Failed to scaffold operator qa.yml", "slug", plan.Slug, "error", err)
 		}
 	}
 
 	req := &payloads.QARequestedPayload{
 		QARequestedEvent: workflow.QARequestedEvent{
-			Slug:              plan.Slug,
-			PlanID:            plan.ID,
-			Mode:              level,
-			WorkspaceHostPath: workspaceHost,
-			WorkflowPath:      ".github/workflows/qa.yml",
-			TestCommand:       pc.EffectiveTestCommand(),
-			TraceID:           uuid.New().String(),
+			Slug:        plan.Slug,
+			PlanID:      plan.ID,
+			Mode:        level,
+			TestCommand: pc.EffectiveTestCommand(),
+			TraceID:     uuid.New().String(),
 		},
 	}
 
@@ -461,39 +438,17 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 // targetForQALevel chooses the post-implementing status based on the plan's
 // QA level. Called at implementing convergence and force-complete.
 //
-// level=none       → StatusComplete (or StatusAwaitingReview when gated)
-// level=synthesis  → StatusReadyForQA (qa-reviewer claims it, no tests run)
-// level=unit        → StatusReadyForQA (sandbox runs project tests first)
-// level=integration → StatusReadyForQA (qa-runner via act in a clean-room
+// level=none      → StatusComplete (or StatusAwaitingReview when gated)
+// level=synthesis → StatusReadyForQA (qa-reviewer claims it directly, no tests run)
+// level=unit      → StatusReadyForQA (the sandbox runs project tests first via
 //
-//	runner against the rendered .github/workflows/qa.yml.
-//	Per ADR-039, services-class harness profiles render
-//	as qa.yml services: blocks from the catalog and
-//	qa-runner brings them up. For testcontainers-class
-//	profiles dev's TDD already exercised them via the
-//	docker socket mounted on the sandbox, so qa-runner
-//	doubles as a reproducibility gate catching "passes
-//	with dev's working state, fails fresh checkout" cases.)
+//	a QARequestedEvent, then qa-reviewer interprets the result)
 //
-// level=full        → StatusReadyForQA (qa-runner runs the integration
-//
-//	job plus the e2e job from .github/workflows/qa.yml,
-//	adding Playwright/browser flows on top of
-//	integration tests)
-//
-// Two integration models coexist on the same qa.yml:
-//   - services-class profiles (e.g. PX4 SITL via
-//     mavlink.px4-sitl.mavsdk-smoke) introduce real services FIRST at
-//     qa-runner — dev never saw them. ADR-039 wires the rendering.
-//   - testcontainers-class profiles run in dev's TDD via the docker
-//     socket AND again at qa-runner as a reproducibility check.
-//
-// Orchestration type lives on the catalog Profile (ADR-039 Phase 1a).
-//
-// qa-reviewer owns the ready_for_qa → reviewing_qa transition via
-// plan.mutation.qa.start, mirroring plan-reviewer's mutation-driven shape.
-// For non-synthesis levels, publishQARequestIfNeeded additionally fires a
-// QARequestedEvent so the executor runs before qa-reviewer claims the plan.
+// Heavier tiers (testcontainers integration, services-class live SITL, e2e)
+// are NOT executed by semspec — they run in the operator's CI against the
+// emitted qa.yml. qa-reviewer owns the ready_for_qa → reviewing_qa transition
+// via plan.mutation.qa.start; for unit, publishQARequestIfNeeded additionally
+// fires a QARequestedEvent so the sandbox runs before qa-reviewer claims it.
 func (c *Component) targetForQALevel(level workflow.QALevel, plan *workflow.Plan, _ string) workflow.Status {
 	switch level {
 	case workflow.QALevelNone:

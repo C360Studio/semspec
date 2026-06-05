@@ -411,6 +411,29 @@ func capabilityForRequest(req *payloads.RecoveryRequested) model.Capability {
 	return model.CapabilityPlanWedgeRecovery
 }
 
+// readPlanArchitectureContext loads the wedged plan from PLAN_STATES and
+// pre-renders its architecture surface so recovery can diagnose what the wedge
+// actually was. Best-effort: returns "" when the bucket, plan, or architecture
+// is absent (early plan-layer wedges have no architecture yet).
+func (c *Component) readPlanArchitectureContext(ctx context.Context, slug string) string {
+	if c.natsClient == nil || slug == "" {
+		return ""
+	}
+	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "PLAN_STATES")
+	if err != nil {
+		return ""
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return ""
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return ""
+	}
+	return prompt.FormatArchitectureContext(prompt.ProjectArchitecture(plan.Architecture))
+}
+
 // dispatchRecovery is the load-bearing path: fetch trajectory, build prompt,
 // resolve model, publish TaskMessage.
 func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.RecoveryRequested) error {
@@ -447,6 +470,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		EscalationReason:    req.EscalationReason,
 		LastFailureFeedback: req.LastFailureFeedback,
 		TrajectorySteps:     steps,
+		ArchitectureContext: c.readPlanArchitectureContext(ctx, req.Slug),
 	}
 
 	var (

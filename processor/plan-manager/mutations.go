@@ -343,6 +343,8 @@ func (c *Component) handleArchitectureMutation(ctx context.Context, data []byte)
 	if req.Architecture != nil {
 		plan.Architecture = req.Architecture
 	}
+	// A fresh architecture supersedes any revision carry-over.
+	plan.PreviousArchitectureJSON = ""
 	plan.Status = workflow.StatusArchitectureGenerated
 
 	if err := ps.save(ctx, plan); err != nil {
@@ -1814,6 +1816,13 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 // in place, story-phase findings clear only Stories + Scenarios and
 // return to StatusArchitectureGenerated — Sarah's watcher claim point.
 func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON json.RawMessage) workflow.Status {
+	// Clear any stale revision carry-over up front; only the architecture
+	// re-entry branch below re-captures it (just before nil-ing Architecture).
+	// Without this, a PreviousArchitectureJSON left over from a failed prior
+	// architecture re-run could leak into a plan/requirements re-entry whose
+	// regenerated requirements no longer match that architecture.
+	plan.PreviousArchitectureJSON = ""
+
 	var findings []workflow.PlanReviewFinding
 	if err := json.Unmarshal(findingsJSON, &findings); err != nil {
 		// Can't parse findings — fall back to clear everything.
@@ -1868,6 +1877,13 @@ func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON js
 
 	case phaseHit["architecture"]:
 		// Re-generate architecture (and downstream stories + scenarios).
+		// Capture the prior architecture so the architect revises it instead
+		// of rewriting from scratch (mirrors planner PreviousPlanJSON).
+		if plan.Architecture != nil {
+			if b, err := json.Marshal(plan.Architecture); err == nil {
+				plan.PreviousArchitectureJSON = string(b)
+			}
+		}
 		plan.Architecture = nil
 		plan.Stories = nil
 		plan.Scenarios = nil

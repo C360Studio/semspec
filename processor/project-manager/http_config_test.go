@@ -41,12 +41,12 @@ func TestHandleConfig_NoopPatchPreservesTimestamp(t *testing.T) {
 		Version:       "1.0.0",
 		InitializedAt: originalTS,
 		UpdatedAt:     originalTS,
-		QALevel:       workflow.QALevelIntegration,
+		QALevel:       workflow.QALevelUnit,
 		QATestCommand: "./gradlew test",
 	})
 
 	// PATCH with the SAME qa_level and qa_test_command — should be a no-op.
-	qaLevel := string(workflow.QALevelIntegration)
+	qaLevel := string(workflow.QALevelUnit)
 	qaCmd := "./gradlew test"
 	body, err := json.Marshal(map[string]*string{
 		"qa_level":        &qaLevel,
@@ -200,7 +200,7 @@ func TestHandleConfig_RealChangePatchUpdatesTimestamp(t *testing.T) {
 		QALevel:       workflow.QALevelSynthesis,
 	})
 
-	qaLevel := string(workflow.QALevelIntegration)
+	qaLevel := string(workflow.QALevelUnit)
 	body, err := json.Marshal(map[string]*string{"qa_level": &qaLevel})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -222,7 +222,7 @@ func TestHandleConfig_RealChangePatchUpdatesTimestamp(t *testing.T) {
 
 	var afterFile workflow.ProjectConfig
 	readJSONFile(t, filepath.Join(repoRoot, ".semspec", workflow.ProjectConfigFile), &afterFile)
-	if afterFile.QALevel != workflow.QALevelIntegration {
+	if afterFile.QALevel != workflow.QALevelUnit {
 		t.Errorf("QALevel = %q, want integration", afterFile.QALevel)
 	}
 	if !afterFile.UpdatedAt.After(originalTS) {

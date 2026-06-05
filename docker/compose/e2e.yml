@@ -59,9 +59,6 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
-      # PROJECT_HOST_PATH is the HOST path to the workspace (needed so qa-runner
-      # can bind-mount the same tree into act's sibling containers).
-      - PROJECT_HOST_PATH=${PWD}/test/e2e/workspace
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
       # bash tool default 120s is too aggressive for fixtures that exercise
@@ -265,40 +262,6 @@ services:
         limits:
           cpus: "2"
           memory: 12G
-
-  # qa-runner handles integration and full QA tiers via nektos/act.
-  # Port offset +100 from dev (8091) → 8191 for E2E isolation.
-  qa-runner:
-    build:
-      context: ../..
-      dockerfile: docker/qa-runner.Dockerfile
-    ports:
-      - "8191:8091"
-    depends_on:
-      nats:
-        condition: service_healthy
-      # semspec creates the WORKFLOW stream during startup; qa-runner's
-      # QA subscriber waits ~60s (30 retries × 2s) for that stream and
-      # exits with code 1 if absent. On slow startups (cold semembed,
-      # slow network) semspec takes >60s to be ready, so qa-runner must
-      # gate on semspec health rather than just NATS.
-      semspec:
-        condition: service_healthy
-    environment:
-      - NATS_URL=nats://nats:4222
-      - PROJECT_HOST_PATH=${PWD}/test/e2e/workspace
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Mount at the host absolute path inside the container so act's --bind
-      # (which tells the host daemon to bind-mount into act-spawned runners)
-      # resolves the same path on both sides of the docker.sock share.
-      - ${PWD}/test/e2e/workspace:${PWD}/test/e2e/workspace
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
 
 volumes:
   nats-data:

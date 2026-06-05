@@ -24,7 +24,7 @@ func TestRenderRunSummary_CompletePlan(t *testing.T) {
 		Slug:       "summary-test",
 		Title:      "Driver build",
 		Status:     workflow.StatusComplete,
-		QALevel:    workflow.QALevelIntegration,
+		QALevel:    workflow.QALevelUnit,
 		CreatedAt:  time.Date(2026, 5, 16, 0, 0, 0, 0, time.UTC),
 		ApprovedAt: &approved,
 		Requirements: []workflow.Requirement{
@@ -55,7 +55,7 @@ func TestRenderRunSummary_CompletePlan(t *testing.T) {
 	checks := map[string]bool{
 		"# Run summary: Driver build":            true,
 		"**Terminal status:** `complete`":        true,
-		"**QA level:** `integration`":            true,
+		"**QA level:** `unit`":                   true,
 		"## Timeline":                            true,
 		"## Plan shape":                          true,
 		"Requirements: **1**":                    true,

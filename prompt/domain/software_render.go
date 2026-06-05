@@ -432,7 +432,18 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 			if len(comp.Capabilities) > 0 {
 				fmt.Fprintf(&sb, "**Implements capabilities:** %s\n\n", strings.Join(comp.Capabilities, ", "))
 			}
+			if len(comp.UpstreamRefs) > 0 {
+				fmt.Fprintf(&sb, "**Depends on upstream:** %s\n\n", strings.Join(comp.UpstreamRefs, ", "))
+			}
 		}
+	}
+
+	if archCtx := prompt.FormatArchitectureContext(prompt.ArchitectureProjection{
+		Integrations: p.Integrations,
+		Upstreams:    p.Upstreams,
+	}); archCtx != "" {
+		sb.WriteString(archCtx)
+		sb.WriteString("\n")
 	}
 
 	if len(p.Requirements) > 0 {
@@ -549,7 +560,7 @@ Generate scenarios that define the observable behavior for this %s. Emit AT LEAS
 
 **Tier discipline (load-bearing):**
 - @unit scenarios describe in-process behavior with fakes/fixtures. NEVER mention real services, real network endpoints, SITL containers, databases, or peer processes in @unit text.
-- @integration scenarios assume the bound harness is RUNNING and its endpoint is read from environment variables. Reference the profile IDs from "Required tiers" verbatim in harness_profile_ids. The test code does NOT start the harness — qa-runner does that.
+- @integration scenarios assume the bound harness is RUNNING and its endpoint is read from environment variables. Reference the profile IDs from "Required tiers" verbatim in harness_profile_ids. The test code does NOT start the harness — the operator's CI (or, for testcontainers profiles, the test fixture) does that.
 - @e2e scenarios describe a real user driving a real UI through a real browser session.
 
 Do NOT include implementation details — describe WHAT happens at the tier's observation point, not HOW it is implemented.
@@ -732,6 +743,20 @@ The previous round was reviewed and rejected. Read every finding before deciding
 %s`, p.ReviewFindings, reviewFindingsActionDirective())
 	}
 
+	if p.PreviousArchitectureJSON != "" {
+		// Give the architect its prior design so it REVISES rather than
+		// rewrites from scratch — a fresh rewrite tends to re-introduce the
+		// exact shape the reviewer just rejected. Mirrors the planner's
+		// PreviousPlanJSON revision base.
+		prevErr += fmt.Sprintf(`
+
+## Previous Architecture (Revise This — Do Not Rewrite From Scratch)
+
+Below is the architecture you produced last round. Start from it and make the MINIMAL changes that address the findings above. Preserve every part that was not flagged — especially resolved upstream_resolutions coordinates and component boundaries that already passed.
+
+`+"```json\n%s\n```", p.PreviousArchitectureJSON)
+	}
+
 	return fmt.Sprintf(`Analyze the following plan and its requirements to produce architecture decisions.
 
 **Goal:** %s
@@ -831,7 +856,7 @@ func writeCoversLine(sb *strings.Builder, covers map[string][]string) {
 	fmt.Fprintf(sb, "- **Covers:** %s\n", strings.Join(parts, "; "))
 }
 
-const harnessProfilesIntro = "Use these details when your node touches the selected integration. For `services`-orchestrated profiles, qa-runner brings the stack up as qa.yml services from this catalog metadata — read the endpoint from the host/env qa-runner injects rather than starting your own container. For `testcontainers` or `pure-fixture` profiles, the test fixture owns the integration peer.\n\n"
+const harnessProfilesIntro = "Use these details when your node touches the selected integration. `services`-orchestrated profiles (e.g. live SITL) are operator-tier: the operator's CI brings the stack up as qa.yml services from this catalog metadata — your test reads the endpoint from the env the CI injects rather than starting its own container, and semspec does NOT gate your work on that tier. For `testcontainers` or `pure-fixture` profiles, the test fixture owns the integration peer and runs in the sandbox.\n\n"
 
 // renderTaskScenarios renders the BDD scenarios this task is responsible
 // for satisfying. The role-specific intro changes the framing — the
@@ -1303,7 +1328,7 @@ const planReviewerCompletenessR2 = "## Completeness Criteria (Round 2 — Requir
 	"6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent, component boundaries must not overlap, actors must have distinct trigger sets, and integration points must not contradict component boundaries. (phase: \"architecture\")\n" +
 	"7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Requirements involving external systems should map to declared integration points. Requirements triggered by user actions should map to declared actors. Flag requirements that conflict with architectural decisions. (phase: \"requirements\", target_id: the conflicting requirement ID)\n" +
 	"7a. **Upstream resolution discipline** — When the architecture references an external library, API, or framework (anywhere in technology_choices, integrations, or component_boundaries), the architect MUST have populated `architecture.upstream_resolutions[]` with the resolved coordinate + the API surface the developer will integrate against. The dev no longer has a research sub-agent (shelved 2026-05-15) — the architect's resolutions are the developer's pre-loaded reading list, and missing resolutions reproduce the take-23 wedge (35 external file reads, 0 worktree writes, iter budget exhausted on re-discovery). Apply the following STRUCTURAL checks; emit Path B-shape findings (action + target_field + target_value) so the architect's revision is unambiguous: (a) For every external library named in technology_choices, integrations, or any component_boundaries[].dependencies entry that is NOT also a component_boundaries[].name (i.e., it points outside the system), there MUST be a matching `architecture.upstream_resolutions[]` entry whose `name` matches. Missing resolution → action=\"add\", target_field=\"architecture.upstream_resolutions\", target_value=\"<lib-name> with coordinate, source_ref, and apis from the canonical docs you fetched in inspection step 4\". (b) Every `upstream_resolutions[]` entry MUST have non-empty `coordinate` (machine-resolvable: groupId:artifactId:version, name@version, github URL@tag — vague hints like \"OSH 2.x\" do NOT satisfy), non-empty `source_ref` (the URL or file path proving the coordinate), and at least one `apis[]` entry. Missing field → action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].<field>\", target_value=\"<concrete value to populate from your inspection notes>\". (c) Every `apis[]` entry MUST have non-empty `citation` (file path or URL where the signature was verified). An uncited surface is a guess; mark it action=\"add\", target_field=\"architecture.upstream_resolutions[<name>].apis[<symbol>].citation\", target_value=\"<URL or path>\". (d) Bidirectional invariant: for every `component_boundaries[].upstream_refs` entry, the named resolution MUST exist in `upstream_resolutions[]`. For every `upstream_resolutions[].used_by` entry, the named component MUST exist in `component_boundaries[]` AND that component's `upstream_refs[]` MUST list the resolution back. Mismatch → action=\"add\", target_field=\"architecture.<the side missing the back-link>\", target_value=\"<the name to add>\". (e) Goodhart guard: do NOT reject for \"the apis section seems short\" or \"more notes would help\" — those are subjective and unenforceable. Only reject for STRUCTURAL violations (missing field, missing citation, missing back-link, vague coordinate). If you cannot name the SPECIFIC missing field per Path B's directive shape, the finding doesn't pass the bar. (phase: \"architecture\", target_id: the upstream_resolutions entry name OR the component name OR \"<missing>\" when the entry doesn't exist yet)\n" +
-	"7b. **Integration-target harness profile discipline** — Every `upstream_resolutions[]` entry whose `role` field is \"integration_target\" MUST be covered by at least one valid `architecture.harness_profiles[]` selection. The catalog is the integration tier's structural anchor: the architect selects a profile ID and the developer resolves system-owned images, ports, readiness, required test assertions, and runner compatibility from the catalog. Apply Path B-shape findings: (a) Unknown profile ID → action=\"replace\", target_field=\"architecture.harness_profiles[<profile_id>].profile_id\", target_value=\"<valid catalog profile_id>\". Do not accept invented IDs or inline runner topology. (b) Missing coverage for an integration_target → action=\"add\", target_field=\"architecture.harness_profiles\", target_value=\"{profile_id: <catalog profile_id>, used_by: [<component>], purpose: <why this proves the integration>, covers: [<integration_target name or facet>]}\". (c) `harness_profiles[]` entries MUST have non-empty `profile_id`, `used_by`, and `purpose`; `covers` is optional but SHOULD name the integration target, protocol facet, plugin group, or scenario when the mapping is not obvious. (d) The architect MUST NOT author `image`, `port`, `access_method`, `env`, startup order, or readiness fields in architecture JSON; those details belong only to the catalog and are rendered downstream for developers. (e) Inverse goodhart guard: do NOT reject `runtime_dep` or `build_dep` resolutions for missing harness profiles. Only flag the integration_target shape. (f) Architect bias correction: when the architect classifies as `runtime_dep` something that's clearly a separate process (database driver, message-queue client library, gRPC stub for a remote service, MAVLink SITL/autopilot endpoint), the role is wrong. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].role\", target_value=\"integration_target\" plus a paired harness profile selection. (g) Scenario binding source (ADR-041 Move 6): the `architecture.harness_profiles[].profile_id` values established by this rule are the IDs that downstream `Scenario.HarnessProfileIDs` reference. The scenario-generator binds @integration scenarios by copying profile_ids from this list verbatim; the structural-validator's harness-profile-discipline check verifies the dev's test files contain those exact ID strings; qa-runner routes via the same IDs. Treat each profile_id as a stable wire-level identifier — renames cascade across plan + scenarios + tests + qa.yml. (phase: \"architecture\", target_id: the upstream_resolutions entry name OR the harness_profiles entry profile_id)\n" +
+	"7b. **Integration-target harness profile discipline** — Every `upstream_resolutions[]` entry whose `role` field is \"integration_target\" MUST be covered by at least one valid `architecture.harness_profiles[]` selection. The catalog is the integration tier's structural anchor: the architect selects a profile ID and the developer resolves system-owned images, ports, readiness, required test assertions, and runner compatibility from the catalog. Apply Path B-shape findings: (a) Unknown profile ID → action=\"replace\", target_field=\"architecture.harness_profiles[<profile_id>].profile_id\", target_value=\"<valid catalog profile_id>\". Do not accept invented IDs or inline runner topology. (b) Missing coverage for an integration_target → action=\"add\", target_field=\"architecture.harness_profiles\", target_value=\"{profile_id: <catalog profile_id>, used_by: [<component>], purpose: <why this proves the integration>, covers: [<integration_target name or facet>]}\". (c) `harness_profiles[]` entries MUST have non-empty `profile_id`, `used_by`, and `purpose`; `covers` is optional but SHOULD name the integration target, protocol facet, plugin group, or scenario when the mapping is not obvious. (d) The architect MUST NOT author `image`, `port`, `access_method`, `env`, startup order, or readiness fields in architecture JSON; those details belong only to the catalog and are rendered downstream for developers. (e) Inverse goodhart guard: do NOT reject `runtime_dep` or `build_dep` resolutions for missing harness profiles. Only flag the integration_target shape. (f) Architect bias correction: when the architect classifies as `runtime_dep` something that's clearly a separate process (database driver, message-queue client library, gRPC stub for a remote service, MAVLink SITL/autopilot endpoint), the role is wrong. action=\"replace\", target_field=\"architecture.upstream_resolutions[<name>].role\", target_value=\"integration_target\" plus a paired harness profile selection. (g) Scenario binding source (ADR-041 Move 6): the `architecture.harness_profiles[].profile_id` values established by this rule are the IDs that downstream `Scenario.HarnessProfileIDs` reference. The scenario-generator binds @integration scenarios by copying profile_ids from this list verbatim; the structural-validator's harness-profile-discipline check verifies the dev's test files contain those exact ID strings; the operator's CI routes via the same IDs. Treat each profile_id as a stable wire-level identifier — renames cascade across plan + scenarios + tests + qa.yml. (phase: \"architecture\", target_id: the upstream_resolutions entry name OR the harness_profiles entry profile_id)\n" +
 	"8. **Scenario-actor coverage** — Scenarios should reference the actors declared in the architecture. If the architecture declares an actor (e.g., a \"scheduler\" or \"event\" type) but no scenario has a Given/When involving that actor's triggers, flag as a warning — the plan may have blind spots for that actor's behavior. (phase: \"scenarios\")\n" +
 	"9. **Scenario-integration coverage** — Scenarios should exercise the integration points declared in the architecture. If the architecture declares an integration (e.g., an outbound HTTP API or a database) but no scenario verifies that integration's behavior or error handling, flag as a warning — untested integration boundaries are a common source of production failures. (phase: \"scenarios\")\n\n"
 
@@ -1343,6 +1368,12 @@ func renderRecoveryAgentPrompt(r *prompt.RecoveryPromptContext) string {
 		sb.WriteString("\n## Last Failure Feedback (what the wedged agent was responding to before escalation)\n\n")
 		sb.WriteString(r.LastFailureFeedback)
 		sb.WriteString("\n")
+	}
+
+	if r.ArchitectureContext != "" {
+		sb.WriteString("\n")
+		sb.WriteString(r.ArchitectureContext)
+		sb.WriteString("\nUse the architecture above to diagnose the ROOT of the wedge. A missing or mis-resolved upstream dependency, a wrong component boundary, or an integration target the dev cannot satisfy is an ARCHITECTURE problem — name it precisely in your diagnosis and choose escalate_human (do NOT mark_unrecoverable) so the architecture can be revised rather than the work abandoned.\n")
 	}
 
 	if len(r.TrajectorySteps) == 0 {

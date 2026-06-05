@@ -97,7 +97,7 @@ state management layer. Components own their entity lifecycle.
 | `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
 | `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
 | `execution-manager` | `processor/execution-manager/` | TDD pipeline: developer → validator → reviewer |
-| `qa-reviewer` | `processor/qa-reviewer/` | Release-readiness verdict (Murat); scoped by project `qa_level` (synthesis/unit/integration/full) |
+| `qa-reviewer` | `processor/qa-reviewer/` | Release-readiness verdict (Murat); scoped by project `qa_level` (synthesis/unit). Heavier tiers run in the operator's CI (ADR-045) |
 | `requirement-executor` | `processor/requirement-executor/` | DAG decomposition and serial node execution |
 | `scenario-orchestrator` | `processor/scenario-orchestrator/` | Dispatches pending requirements for execution |
 | `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, cascade |

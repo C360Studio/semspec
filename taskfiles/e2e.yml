@@ -354,7 +354,6 @@ tasks:
         docker logs ui-semspec-1 > $OUT/semspec.log 2>&1 || echo "  semspec logs: not available"
         docker logs ui-semsource-1 > $OUT/semsource.log 2>&1 || echo "  semsource logs: not available"
         docker logs ui-sandbox-1 > $OUT/sandbox.log 2>&1 || echo "  sandbox logs: not available"
-        docker logs ui-qa-runner-1 > $OUT/qa-runner.log 2>&1 || echo "  qa-runner logs: not available"
         curl -s 'http://localhost:3000/message-logger/entries?limit=2000' > $OUT/messages.json 2>/dev/null || echo "  messages: not available"
         curl -s 'http://localhost:3000/agentic-dispatch/loops' > $OUT/loops.json 2>/dev/null || echo "  loops: not available"
         curl -s 'http://localhost:3000/plan-manager/plans' > $OUT/plans.json 2>/dev/null || echo "  plans: not available"
@@ -750,6 +749,20 @@ tasks:
             hard|mavlink-hard)  echo '3' ;;
             *)                  echo '2' ;;
           esac
+      # Sidecar max-duration must outlive Playwright's per-test cap or the
+      # watcher dies during the most interesting window (post-stage-1
+      # execution where convergence happens). Each tier's value is its
+      # PLAYWRIGHT_TIMEOUT below plus ~20m for teardown grace. Previously
+      # hardcoded 60m which silently killed coverage on hard tiers — caught
+      # 2026-06-03 paid mavlink-hard #4 forensics.
+      WATCH_MAX_DURATION:
+        sh: |
+          case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
+            hard)               echo '140m' ;;  # PW cap 120m + 20m
+            mavlink-hard)       echo '200m' ;;  # PW cap 180m + 20m
+            mavlink-decode)     echo '100m' ;;  # PW cap 80m + 20m
+            *)                  echo '40m' ;;   # easy/medium PW cap 20m + 20m
+          esac
     # Export E2E_FIXTURE to docker-compose env so semspec's /workspace mount
     # ($E2E_FIXTURE:-go-project in ui/docker-compose.e2e.yml) matches what the
     # epic overlay hardcodes for sandbox + workspace semsource. Without this
@@ -779,7 +792,7 @@ tasks:
           ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
-      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Backend-req-timeout={{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s Recovery-timeout={{.RECOVERY_TIMEOUT_SECONDS}}s Req-retries={{.MAX_REQUIREMENT_RETRIES}}"
+      - echo "[WATCH:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Epic={{if .EPIC_OVERLAY}}on{{else}}off{{end}} Backend-req-timeout={{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s Recovery-timeout={{.RECOVERY_TIMEOUT_SECONDS}}s Req-retries={{.MAX_REQUIREMENT_RETRIES}} Sidecar-max-duration={{.WATCH_MAX_DURATION}}"
       - mkdir -p {{.OUT_DIR}}
       - echo "[WATCH:LLM] Artifacts will land in {{.OUT_DIR}}"
       # Build the host-side semspec binary that runs the watch sidecar.
@@ -820,7 +833,7 @@ tasks:
           --http http://localhost:3000 \
           --nats nats://localhost:4223 \
           --nats-monitor http://localhost:8223 \
-          --max-duration 60m \
+          --max-duration {{.WATCH_MAX_DURATION}} \
           --snapshot-interval 60s \
           --out-dir {{.OUT_DIR}} > {{.OUT_DIR}}/watch.log 2>&1 &
         echo $! > {{.OUT_DIR}}/watch.pid

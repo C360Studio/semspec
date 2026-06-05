@@ -52,11 +52,13 @@ and the OSH + MAVSDK release configurations.
 
 ## Harness profiles
 
-The `mavlink.px4-sitl.mavsdk-smoke` profile in
-`workflow/harnesscatalog/catalog/mavlink.yaml` is the integration
-evidence target for live PX4 SITL + mavsdk_server proof. For the MVP
-demo, the fixture runs final QA at synthesis level: dev-path tests and
-Murat review should prove code quality and identify whether live SITL
-runtime proof is present, missing, or deferred. Semspec-managed live
-SITL orchestration is post-MVP. The raw `mavlink.raw-mavlink-direct`
-compatibility profile covers the generic-MAVLink path.
+The architect selects harness profiles by risk. The `mavlink.px4-sitl.mavsdk-smoke`
+profile in `workflow/harnesscatalog/catalog/mavlink.yaml` is a services-class
+live PX4 SITL + mavsdk_server target — it is **operator-tier**: semspec's sandbox
+cannot stand it up, so it is NOT a gating tier. It is emitted into the operator's
+`qa.yml` CI contract for the operator to run; semspec defers-and-notes it rather
+than blocking the dev on evidence the sandbox can't produce.
+
+The sandbox-runnable gate is the raw `mavlink.raw-mavlink-direct` (pure-fixture,
+covered at @unit) plus any testcontainers-class profile. The dev/Story is gated on
+those; live SITL proof is the operator's CI responsibility.

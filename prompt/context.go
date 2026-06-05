@@ -200,6 +200,16 @@ type TaskContext struct {
 	// shifts the contract check earlier (TDD-cycle granular, cheap)
 	// instead of req-level (full DAG restart, expensive).
 	Scenarios []ScenarioSpec
+
+	// UpstreamResolutions are the architect's resolved external dependencies —
+	// concrete build-manifest coordinates plus the API surfaces (symbol,
+	// signature, lifecycle) the dev integrates against. When non-empty, the
+	// developer + per-task code-reviewer prompts render them so the dev wires
+	// the exact pinned coordinate instead of hallucinating one, and the
+	// reviewer checks the implementation against the resolved surface. Empty
+	// when the architecture declared no external dependencies. Closes the
+	// run #6 root cause where Winston resolved coordinates the dev never saw.
+	UpstreamResolutions []UpstreamResolutionInfo
 }
 
 // ResolvedHarnessProfileContext is a prompt-safe projection of a selected
@@ -316,6 +326,19 @@ type ScenarioReviewContext struct {
 	// RetryFeedback carries the reviewer's feedback from a prior rejection.
 	// When non-empty, this is a retry — the reviewer should note what was fixed.
 	RetryFeedback string
+
+	// PlanTitle, PlanGoal, RequirementTitle frame the Story gate so Murat
+	// judges the scenarios in context rather than in isolation. Empty when the
+	// plan could not be loaded.
+	PlanTitle        string
+	PlanGoal         string
+	RequirementTitle string
+
+	// ArchitectureContext is the pre-rendered architecture surface (components,
+	// resolved upstream dependencies, integrations) so the Story gate can check
+	// the implementation against the architect's resolved decisions. Empty when
+	// the plan has no architecture.
+	ArchitectureContext string
 }
 
 // ScenarioSpec identifies a scenario for per-scenario verdict tracking.

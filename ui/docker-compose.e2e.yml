@@ -61,13 +61,6 @@ services:
       - NATS_URL=nats://nats:4222
       - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
-      # PROJECT_HOST_PATH is the HOST filesystem path of /workspace, embedded
-      # in QARequestedEvent so qa-runner can act-bind-mount it into sibling
-      # containers. Must match WORKSPACE_HOST_PATH and the qa-runner mount
-      # below. Without this, plan-manager refuses to publish the QA event
-      # for qa_level=integration/full plans and the plan sits in
-      # ready_for_qa until test timeout (caught take-34 2026-05-17).
-      - PROJECT_HOST_PATH=${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # bash tool default timeout (120s) is too aggressive for e2e fixtures
       # that exercise full toolchain installs/compiles: mvn test cold-cache
@@ -173,11 +166,12 @@ services:
       retries: 5
       # start_period covers cold-load and slow-network first-pull scenarios.
       # Empirical: warm-disk model load ~80-90s; first-time HF fetch on a slow
-      # connection adds another minute or two. 180s start_period + 50s post-
-      # start retry budget (5 × 10s) = 230s total grace before unhealthy. No
-      # cost on warm-load runs — start_period only suppresses failure counting,
-      # doesn't delay the healthy transition.
-      start_period: 180s
+      # connection adds another minute or two. 2026-06-04 paid run #6 hit
+      # 223s cold-load on arm64 (7s past the previous 230s grace) → compose
+      # --wait gave up. Bumped to 300s + 50s retry = 350s. No cost on warm
+      # runs — start_period only suppresses failure counting, doesn't delay
+      # the healthy transition.
+      start_period: 300s
     # 12-core host budget (see docs); 1 CPU is plenty for arctic-embed-s
     # (33M params, Rust/fastembed-rs). Iso-tested at 16/16 silent
     # successes during 30+ min @hard run.
@@ -274,42 +268,6 @@ services:
         limits:
           cpus: "2"
           memory: 12G
-
-  # qa-runner handles integration and full QA tiers via nektos/act.
-  # Port offset +200 from dev (8091) → 8291 for UI-E2E isolation.
-  qa-runner:
-    build:
-      context: ..
-      dockerfile: docker/qa-runner.Dockerfile
-    ports:
-      - "8291:8091"
-    depends_on:
-      workspace-init:
-        condition: service_completed_successfully
-      nats:
-        condition: service_healthy
-      # semspec creates the WORKFLOW stream during startup; qa-runner's
-      # QA subscriber waits ~60s (30 retries × 2s) for that stream and
-      # exits with code 1 if absent. On slow startups (cold semembed,
-      # slow network) semspec takes >60s to be ready, so qa-runner must
-      # gate on semspec health rather than just NATS.
-      semspec:
-        condition: service_healthy
-    environment:
-      - NATS_URL=nats://nats:4222
-      # Same WORKSPACE_HOST_PATH as semspec — both must point at the same
-      # host path or act sibling containers and semspec's published QA event
-      # disagree on what workspace to mount.
-      - PROJECT_HOST_PATH=${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8091/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-      start_period: 10s
 
 volumes:
   ui-nats-data:

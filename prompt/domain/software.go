@@ -355,6 +355,28 @@ qa-reviewer judges coverage against this declared surface.`)
 			},
 		},
 		{
+			// software.task-upstream-resolutions renders the architect's
+			// resolved external dependencies (build-manifest coordinate + API
+			// surfaces) for the Developer and per-task code-Reviewer. Fires
+			// only when TaskContext.UpstreamResolutions is populated.
+			//
+			// Closes the run #6 root cause: Winston resolved concrete
+			// coordinates (e.g. io.mavsdk:mavsdk:3.16.0) into the graph, but no
+			// prompt read them, so the dev re-hallucinated dep coords and burned
+			// TDD cycles on gradle resolution failures. Grounding the dev in the
+			// resolved coordinate + signatures removes the re-discovery loop;
+			// grounding the reviewer lets it check the impl against the surface.
+			ID:       "software.task-upstream-resolutions",
+			Category: prompt.CategoryDomainContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && len(ctx.TaskContext.UpstreamResolutions) > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				return prompt.FormatUpstreamResolutions(ctx.TaskContext.UpstreamResolutions)
+			},
+		},
+		{
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
@@ -2226,6 +2248,25 @@ You optimize for CORRECTNESS against the scenario specification.`,
 				sc := ctx.ScenarioReviewContext
 				var sb strings.Builder
 
+				// Plan/requirement framing so the gate judges in context.
+				if sc.PlanTitle != "" || sc.RequirementTitle != "" {
+					sb.WriteString("## Story Under Review\n\n")
+					if sc.PlanTitle != "" {
+						sb.WriteString(fmt.Sprintf("**Plan:** %s\n", sc.PlanTitle))
+					}
+					if sc.PlanGoal != "" {
+						sb.WriteString(fmt.Sprintf("**Goal:** %s\n", sc.PlanGoal))
+					}
+					if sc.RequirementTitle != "" {
+						sb.WriteString(fmt.Sprintf("**Requirement:** %s\n", sc.RequirementTitle))
+					}
+					sb.WriteString("\n")
+				}
+				if sc.ArchitectureContext != "" {
+					sb.WriteString(sc.ArchitectureContext)
+					sb.WriteString("\n")
+				}
+
 				// Multi-scenario path (requirement-level review with per-scenario verdicts).
 				if len(sc.Scenarios) > 0 {
 					sb.WriteString("Acceptance Criteria (evaluate EACH scenario independently):\n\n")
@@ -2493,10 +2534,11 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 					sb.WriteString("- `assertion_quality`: Are assertions meaningful and specific?\n")
 					sb.WriteString("- `regression_surface`: What existing behavior is at risk? Is it covered?\n\n")
 					sb.WriteString("Leave `flake_judgment` as empty string (single run, not enough data).\n\n")
-				case workflow.QALevelIntegration, workflow.QALevelFull:
-					sb.WriteString("At **integration/full** level, populate all six dimensions:\n")
-					sb.WriteString("- `requirement_fulfillment`, `capability_evidence`, `coverage`, `assertion_quality`, `regression_surface`\n")
-					sb.WriteString("- `flake_judgment`: Do failures look like genuine defects or likely flakiness?\n\n")
+				default:
+					// Only synthesis/unit reach qa-reviewer; any other value is a
+					// stale/coerced level — fall back to the synthesis dimensions
+					// rather than emitting an empty section.
+					sb.WriteString("Populate `requirement_fulfillment` and `capability_evidence`; leave the rest empty.\n\n")
 				}
 
 				return sb.String()

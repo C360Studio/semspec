@@ -54,4 +54,16 @@ type RecoveryPromptContext struct {
 	// loop_id (plan-layer wedges today) or the trajectory fetch failed —
 	// the renderer surfaces "trajectory unavailable" in that case.
 	TrajectorySteps []string
+
+	// ArchitectureContext is the pre-rendered architecture surface (components,
+	// resolved upstream dependencies, integrations, actors) for the wedged
+	// plan. Without it recovery is blind to WHAT the wedge actually was — in
+	// run #6 it picked mark_unrecoverable because it couldn't see that the
+	// architecture had resolved (or mis-resolved) the dependency the dev kept
+	// failing on. Seeing the architecture lets recovery diagnose accurately and
+	// escalate for an architecture revision when the architecture is the
+	// problem (a dedicated architecture-targeting recovery action lands in a
+	// later phase). Empty when the plan has no architecture (early plan-layer
+	// wedges).
+	ArchitectureContext string
 }

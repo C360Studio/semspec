@@ -108,19 +108,18 @@ type UserSignalErrorEvent struct {
 // (act-based) for integration and full. qa-reviewer is always the verdict
 // gate, consuming QACompletedEvent and emitting QAVerdictEvent.
 
-// QARequestedEvent is published by plan-manager when a plan enters ready_for_qa.
-// Consumer routing is by Mode: QALevelUnit → sandbox, QALevelIntegration|Full
-// → qa-runner container. Level=synthesis skips this event (plan goes straight
-// to reviewing_qa) and level=none skips QA entirely.
+// QARequestedEvent is published by plan-manager when a unit-level plan enters
+// ready_for_qa, so the sandbox runs the project's test suite before
+// qa-reviewer interprets. Level=synthesis skips this event (the plan goes
+// straight to reviewing_qa) and level=none skips QA entirely. Heavier tiers
+// run in the operator's CI, not via a semspec executor.
 type QARequestedEvent struct {
-	Slug              string  `json:"slug"`
-	PlanID            string  `json:"plan_id"`
-	Mode              QALevel `json:"mode"`                   // unit | integration | full
-	WorkspaceHostPath string  `json:"workspace_host_path"`    // resolved HOST path for docker -v mount
-	WorkflowPath      string  `json:"workflow_path"`          // relative path inside workspace, default .github/workflows/qa.yml (integration+ only)
-	TestCommand       string  `json:"test_command,omitempty"` // project-configured command for unit mode, e.g. "go test ./..."
-	TimeoutSeconds    int     `json:"timeout_seconds,omitempty"`
-	TraceID           string  `json:"trace_id,omitempty"`
+	Slug           string  `json:"slug"`
+	PlanID         string  `json:"plan_id"`
+	Mode           QALevel `json:"mode"`                   // unit (the only sandbox-executed level)
+	TestCommand    string  `json:"test_command,omitempty"` // project-configured command, e.g. "go test ./..."
+	TimeoutSeconds int     `json:"timeout_seconds,omitempty"`
+	TraceID        string  `json:"trace_id,omitempty"`
 }
 
 // QAFailure describes a single test or job failure surfaced by qa-runner.

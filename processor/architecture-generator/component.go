@@ -333,14 +333,15 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	}
 
 	archCtx := &prompt.ArchitectPromptContext{
-		Goal:            plan.Goal,
-		PlanContext:     plan.Context,
-		ScopeInclude:    plan.Scope.Include,
-		ScopeExclude:    plan.Scope.Exclude,
-		ScopeProtected:  plan.Scope.DoNotTouch,
-		Requirements:    reqSummaries,
-		HarnessProfiles: c.harnessProfileCards(),
-		PreviousError:   previousError,
+		Goal:                     plan.Goal,
+		PlanContext:              plan.Context,
+		ScopeInclude:             plan.Scope.Include,
+		ScopeExclude:             plan.Scope.Exclude,
+		ScopeProtected:           plan.Scope.DoNotTouch,
+		Requirements:             reqSummaries,
+		HarnessProfiles:          c.harnessProfileCards(),
+		PreviousError:            previousError,
+		PreviousArchitectureJSON: plan.PreviousArchitectureJSON,
 	}
 	if len(reviewFindings) > 0 {
 		archCtx.ReviewFindings = reviewFindings[0]

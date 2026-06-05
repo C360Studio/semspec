@@ -103,7 +103,9 @@ func (h *qaHandler) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Only handle unit mode — qa-runner handles integration and full.
+	// Only unit mode is sandbox-executed. Heavier tiers run in the operator's
+	// CI (the qa-runner act executor was removed); plan-manager no longer
+	// publishes any non-unit QARequestedEvent, so this is a defensive guard.
 	if evt.Mode != workflow.QALevelUnit {
 		h.logger.Debug("Skipping non-unit QARequestedEvent",
 			"slug", evt.Slug, "mode", evt.Mode)
