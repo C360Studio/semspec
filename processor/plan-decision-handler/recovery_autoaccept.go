@@ -115,6 +115,18 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 			if _, seen := acceptedIDs[dec.ID]; seen {
 				continue
 			}
+			// architecture_revise cap (C1 loop guard): refuse to auto-accept
+			// past MaxAutoArchitectureRevises already-accepted architecture_revise
+			// decisions on this plan. Counted from the persisted PlanDecisions
+			// (monotonic across the wipe). Past the cap the decision stays
+			// proposed for human review rather than burning another full re-run.
+			if dec.Kind == workflow.PlanDecisionKindArchitectureRevise &&
+				countAcceptedArchitectureRevises(planView.PlanDecisions) >= c.config.MaxAutoArchitectureRevises {
+				c.logger.Warn("architecture_revise auto-accept budget exhausted; leaving for human review",
+					"slug", planView.Slug, "proposal_id", dec.ID,
+					"max_auto_architecture_revises", c.config.MaxAutoArchitectureRevises)
+				continue
+			}
 			acceptedIDs[dec.ID] = now
 			c.invokeAccept(ctx, planView.Slug, dec.ID)
 		}
@@ -132,12 +144,32 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 //     step 4). The cascade dirty-marks Stories + scenarios; plan-manager
 //     drives stories_generated → preparing_stories so Sarah re-runs with
 //     the diagnosis as Story.RecoveryHint.
+//   - PlanDecisionKindArchitectureRevise — architecture_revise action.
+//     plan-manager wipes Architecture + Stories + Scenarios + all
+//     requirement executions and drives implementing →
+//     requirements_generated so Winston re-runs with the diagnosis as
+//     ReviewFormattedFindings.
 //
 // Other kinds (execution_exhausted terminal records, qa-reviewer
 // proposals, human proposals) stay human-gated. AffectedReqIDs is the
 // load-bearing predicate for both auto-acceptable kinds: it scopes the
 // cascade target, and an empty list signals "the wedge isn't scoped to
 // specific work — needs human triage."
+// countAcceptedArchitectureRevises counts PlanDecisions already in accepted
+// status with Kind=architecture_revise. Used as the monotonic loop bound for
+// the architecture_revise auto-accept cap — the count survives the entity wipe
+// because PlanDecisions are never cleared, so it strictly increases each cycle.
+func countAcceptedArchitectureRevises(decisions []workflow.PlanDecision) int {
+	n := 0
+	for i := range decisions {
+		if decisions[i].Kind == workflow.PlanDecisionKindArchitectureRevise &&
+			decisions[i].Status == workflow.PlanDecisionStatusAccepted {
+			n++
+		}
+	}
+	return n
+}
+
 func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	if dec == nil {
 		return false
@@ -150,7 +182,8 @@ func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	}
 	switch dec.Kind {
 	case workflow.PlanDecisionKindRequirementChange,
-		workflow.PlanDecisionKindStoryReprepare:
+		workflow.PlanDecisionKindStoryReprepare,
+		workflow.PlanDecisionKindArchitectureRevise:
 		// auto-acceptable
 	default:
 		return false

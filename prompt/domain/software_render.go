@@ -1373,7 +1373,7 @@ func renderRecoveryAgentPrompt(r *prompt.RecoveryPromptContext) string {
 	if r.ArchitectureContext != "" {
 		sb.WriteString("\n")
 		sb.WriteString(r.ArchitectureContext)
-		sb.WriteString("\nUse the architecture above to diagnose the ROOT of the wedge. A missing or mis-resolved upstream dependency, a wrong component boundary, or an integration target the dev cannot satisfy is an ARCHITECTURE problem — name it precisely in your diagnosis and choose escalate_human (do NOT mark_unrecoverable) so the architecture can be revised rather than the work abandoned.\n")
+		sb.WriteString("\nUse the architecture above to diagnose the ROOT of the wedge. A missing or mis-resolved upstream dependency, a wrong component boundary, or an integration target the dev cannot satisfy is an ARCHITECTURE problem — name it precisely in your diagnosis and choose architecture_revise so the architect re-runs and revises the architecture against your diagnosis (do NOT mark_unrecoverable, which abandons the work, and do NOT escalate_human, which only surfaces the problem without fixing it). Reserve story_reprepare for cases where the architecture is sound but Sarah's Story-shaping is wrong.\n")
 	}
 
 	if len(r.TrajectorySteps) == 0 {

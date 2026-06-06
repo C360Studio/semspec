@@ -733,6 +733,10 @@ func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason st
 //     Story.RecoveryHint set. Pre-Train-C, story_reprepare mapped to
 //     requirement_change, which silently degraded into a scenarios-only
 //     cascade that left Sarah's stories unchanged.
+//   - architecture_revise → architecture_revise. Heaviest kind: plan-manager
+//     wipes Architecture + Stories + Scenarios + all requirement executions
+//     and drives implementing → requirements_generated so the architect
+//     re-fires. Distinct from story_reprepare (which keeps the architecture).
 //   - escalate_human / mark_unrecoverable → execution_exhausted. Terminal;
 //     plan-manager auto-archives when the subject req reaches a non-failed
 //     terminal state.
@@ -744,6 +748,8 @@ func recoveryActionToPlanDecisionKind(action payloads.RecoveryActionKind) workfl
 		return workflow.PlanDecisionKindRequirementChange
 	case payloads.RecoveryActionStoryReprepare:
 		return workflow.PlanDecisionKindStoryReprepare
+	case payloads.RecoveryActionArchitectureRevise:
+		return workflow.PlanDecisionKindArchitectureRevise
 	case payloads.RecoveryActionEscalateHuman, payloads.RecoveryActionMarkUnrecoverable:
 		return workflow.PlanDecisionKindExecutionExhausted
 	default:

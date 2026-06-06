@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -281,6 +282,41 @@ func (c *Component) findAwaitingByRequirement(slug, requirementID string) *requi
 	return nil
 }
 
+// abandonExecsForSlug tears down every active requirement execution for a slug.
+// Called when an architecture_revise PlanDecision is accepted: the plan is
+// restarting from the architect, so all in-flight execs (the wedged one in
+// awaiting-recovery plus any siblings still running in parallel) are stale and
+// must be dropped before the re-run reaches execution. For each exec it stops
+// timers, marks it terminated (so any late cross-component callback — a task
+// completion that lands after the wipe — hits the terminated guard and no-ops
+// instead of writing to the deterministic req.<slug>.<reqID> key the fresh exec
+// will reuse), and removes it from activeExecs via cleanupExecutionLocked.
+//
+// Returns the count abandoned. The in-flight agentic loops themselves are not
+// force-cancelled here (req-executor has no cancellation channel to them); they
+// run to completion and their terminal writes are absorbed by the terminated
+// guard. EXECUTION_STATES rows were already deleted by plan-manager's reset.
+func (c *Component) abandonExecsForSlug(slug string) int {
+	abandoned := 0
+	for _, key := range c.activeExecs.Keys() {
+		exec, ok := c.activeExecs.Get(key)
+		if !ok || exec == nil {
+			continue
+		}
+		exec.mu.Lock()
+		if exec.Slug != slug {
+			exec.mu.Unlock()
+			continue
+		}
+		exec.terminated = true
+		exec.awaitingRecovery = false
+		c.cleanupExecutionLocked(exec, false)
+		exec.mu.Unlock()
+		abandoned++
+	}
+	return abandoned
+}
+
 // startPlanDecisionAcceptedConsumer subscribes req-executor to
 // workflow.events.plan-decision.accepted so the awaiting-recovery resume
 // path can fire on auto-accept (or human-accept). Best-effort: a watch
@@ -335,6 +371,23 @@ func (c *Component) handlePlanDecisionAccepted(lifecycleCtx, msgCtx context.Cont
 	}
 	if err := evt.Validate(); err != nil {
 		c.logger.Warn("Invalid PlanDecisionAcceptedEvent", "error", err)
+		_ = msg.Ack()
+		return
+	}
+
+	// architecture_revise restarts the plan from the architect: plan-manager
+	// has already wiped Architecture + Stories + Scenarios and reset the
+	// requirement executions in EXECUTION_STATES. The wedged exec(s) must NOT
+	// be resumed — resuming would re-decompose against the now-deleted DAG and
+	// race the architect re-run, and the resumed exec shares the deterministic
+	// req.<slug>.<reqID> store key with the fresh exec the re-run will create,
+	// so a late write would corrupt it. Abandon every active exec for the slug
+	// instead, then return before the resume loop below. The architect-driven
+	// re-run creates clean execs once it reaches execution.
+	if evt.Kind == workflow.PlanDecisionKindArchitectureRevise {
+		abandoned := c.abandonExecsForSlug(evt.Slug)
+		c.logger.Info("Abandoned in-flight execs on architecture_revise accept",
+			"slug", evt.Slug, "proposal_id", evt.ProposalID, "abandoned", abandoned)
 		_ = msg.Ack()
 		return
 	}

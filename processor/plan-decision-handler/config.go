@@ -45,6 +45,18 @@ type Config struct {
 	// off so recovery stays diagnosis-only until the operator decides.
 	AutoAcceptRecovery bool `json:"auto_accept_recovery" schema:"type:boolean,description:Auto-accept PlanDecisions from recovery-agent (ADR-037 stage-2 apply path),category:advanced,default:false"`
 
+	// MaxAutoArchitectureRevises bounds how many architecture_revise recovery
+	// PlanDecisions the watcher will auto-accept for a single plan. Each accepted
+	// architecture_revise wipes Architecture + Stories + Scenarios and re-runs the
+	// whole pipeline from the architect — the heaviest, most expensive recovery
+	// action. Without a cap, a plan whose revised architecture still wedges would
+	// loop (implement → wedge → architecture_revise → implement → …) burning a
+	// full re-run each cycle. Once this many architecture_revise decisions are
+	// already accepted on the plan, further ones stay proposed for human review.
+	// The count is monotonic — PlanDecisions persist across the wipe. Default 1:
+	// one automatic architecture revision, then a human must decide.
+	MaxAutoArchitectureRevises int `json:"max_auto_architecture_revises" schema:"type:int,description:Max architecture_revise recovery decisions auto-accepted per plan before human review,category:advanced,default:1,min:0,max:10"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -52,11 +64,12 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:      "WORKFLOW",
-		ConsumerName:    "plan-decision-handler",
-		TriggerSubject:  "workflow.trigger.plan-decision-cascade",
-		AcceptedSubject: "workflow.events.plan-decision.accepted",
-		TimeoutSeconds:  120,
+		StreamName:                 "WORKFLOW",
+		ConsumerName:               "plan-decision-handler",
+		TriggerSubject:             "workflow.trigger.plan-decision-cascade",
+		AcceptedSubject:            "workflow.events.plan-decision.accepted",
+		TimeoutSeconds:             120,
+		MaxAutoArchitectureRevises: 1,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

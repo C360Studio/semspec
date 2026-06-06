@@ -29,12 +29,13 @@ func TestRecoveryActionToPlanDecisionKind(t *testing.T) {
 	// default falls to execution_exhausted (terminal), so an unrecognized
 	// action will route to "terminal" without test failure — silent.
 	cases := map[payloads.RecoveryActionKind]workflow.PlanDecisionKind{
-		payloads.RecoveryActionRefinePrompt:      workflow.PlanDecisionKindRequirementChange,
-		payloads.RecoveryActionNarrowScope:       workflow.PlanDecisionKindRequirementChange,
-		payloads.RecoveryActionSplitReq:          workflow.PlanDecisionKindRequirementChange,
-		payloads.RecoveryActionStoryReprepare:    workflow.PlanDecisionKindStoryReprepare,
-		payloads.RecoveryActionEscalateHuman:     workflow.PlanDecisionKindExecutionExhausted,
-		payloads.RecoveryActionMarkUnrecoverable: workflow.PlanDecisionKindExecutionExhausted,
+		payloads.RecoveryActionRefinePrompt:       workflow.PlanDecisionKindRequirementChange,
+		payloads.RecoveryActionNarrowScope:        workflow.PlanDecisionKindRequirementChange,
+		payloads.RecoveryActionSplitReq:           workflow.PlanDecisionKindRequirementChange,
+		payloads.RecoveryActionStoryReprepare:     workflow.PlanDecisionKindStoryReprepare,
+		payloads.RecoveryActionArchitectureRevise: workflow.PlanDecisionKindArchitectureRevise,
+		payloads.RecoveryActionEscalateHuman:      workflow.PlanDecisionKindExecutionExhausted,
+		payloads.RecoveryActionMarkUnrecoverable:  workflow.PlanDecisionKindExecutionExhausted,
 	}
 	for action, want := range cases {
 		got := recoveryActionToPlanDecisionKind(action)

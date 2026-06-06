@@ -338,6 +338,7 @@ func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.Plan
 		ProposalID:             req.ProposalID,
 		Slug:                   req.Slug,
 		TraceID:                req.TraceID,
+		Kind:                   result.Kind,
 		AffectedRequirementIDs: result.AffectedRequirementIDs,
 		AffectedScenarioIDs:    result.AffectedScenarioIDs,
 	}

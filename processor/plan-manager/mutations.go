@@ -1799,6 +1799,147 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 	return resetCount, nil
 }
 
+// applyArchitectureRevise performs the state mutation for an accepted
+// architecture_revise PlanDecision (RecoveryActionArchitectureRevise). It is
+// the execution-phase counterpart of determineR2ReentryPoint's "architecture"
+// case: capture the prior architecture so the architect REVISES rather than
+// rewrites, wipe Architecture + Stories + Scenarios, reset every requirement
+// execution so the re-run can't fast-complete via the executor's Tier-1 dedup,
+// route the recovery diagnosis into ReviewFormattedFindings (the channel the
+// architecture-generator already reads on revision rounds — component.go:301),
+// and drive the back-transition implementing → requirements_generated so the
+// architect re-fires.
+//
+// Called inline from both accept paths (mutation + HTTP). It does the status
+// mutation IN PLACE rather than via setPlanStatusCached for the same reason
+// the story_reprepare block does: the trailing ps.save in the caller is the
+// sole persist point, so an inline status set avoids a double save / double
+// watcher event. The caller skips applyRecoveryHint for this kind — the
+// diagnosis reaches the architect through ReviewFormattedFindings, not through
+// per-entity RecoveryHints (which would otherwise leak stale architecture
+// context into a future developer prompt).
+//
+// The EXECUTION_STATES reset is I/O (NATS request/reply via resetRequirement-
+// Executions, scope "all"); a reset error is returned so the caller can fail
+// the accept rather than half-apply the revision. A back-transition that the
+// DAG rejects (plan already moved past implementing while a human-review
+// window was open) leaves the plan in place and logs a warning — consistent
+// with the story_reprepare block's defensive handling.
+func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision) error {
+	// Check the back-transition is legal BEFORE any mutation or I/O. An
+	// out-of-window accept (plan moved past implementing while the accept
+	// landed late) must be a clean no-op — wiping a terminal plan's entities
+	// or deleting its executions would corrupt it (closes go-reviewer M2).
+	from := plan.EffectiveStatus()
+	if !from.CanTransitionTo(workflow.StatusRequirementsGenerated) {
+		c.logger.Warn("architecture_revise accepted but plan cannot back-transition to requirements_generated; leaving plan untouched",
+			"slug", plan.Slug, "proposal_id", proposal.ID, "current_status", from)
+		return nil
+	}
+
+	// Reset all requirement executions BEFORE the in-memory wipe so a reset
+	// failure aborts the accept with the plan untouched (no half-applied
+	// revision). Detached context: the reset is N sequential NATS request/
+	// replies and must finish even if the caller's request context is
+	// cancelled mid-accept (closes go-reviewer H2/M3). Clearing EXECUTION_STATES
+	// stops the re-run from fast-completing via the executor's Tier-1 dedup.
+	resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), plan.Slug, "all", nil)
+	if err != nil {
+		return fmt.Errorf("reset requirement executions for architecture_revise: %w", err)
+	}
+
+	reviseArchitectureState(plan, proposal)
+
+	c.logger.Info("Architecture revise applied — plan re-queued for architecture regeneration",
+		"slug", plan.Slug,
+		"proposal_id", proposal.ID,
+		"reset_count", resetCount,
+		"from_status", from,
+		"had_previous_architecture", plan.PreviousArchitectureJSON != "")
+	return nil
+}
+
+// applyPlanDecisionAcceptEffects performs the kind-specific state mutation when
+// a PlanDecision is accepted. Shared by the mutation and HTTP accept paths so
+// both stay byte-identical. Branches on proposal.Kind:
+//
+//   - architecture_revise → applyArchitectureRevise (capture prior architecture,
+//     wipe Architecture + Stories + Scenarios, reset all requirement executions,
+//     drive implementing → requirements_generated). Routes the diagnosis through
+//     ReviewFormattedFindings, so the recovery-hint + story_reprepare branches
+//     are intentionally skipped.
+//   - any other kind → apply the recovery hint when proposed_by=recovery-agent,
+//     and for story_reprepare drive stories_generated → preparing_stories so
+//     Sarah re-runs with Story.RecoveryHint set (Train C step 4).
+//
+// The status mutations are done IN PLACE (NOT setPlanStatusCached): the caller's
+// trailing save is the sole persist point, avoiding a double save / double
+// watcher event. An out-of-window plan (already moved past the source status
+// while a human-review window was open) is left in place with a warning.
+func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
+	if proposal.Kind == workflow.PlanDecisionKindArchitectureRevise {
+		return c.applyArchitectureRevise(ctx, plan, proposal)
+	}
+
+	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
+		applyRecoveryHint(plan, proposal)
+	}
+
+	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
+		current := plan.EffectiveStatus()
+		if current.CanTransitionTo(workflow.StatusPreparingStories) {
+			plan.Status = workflow.StatusPreparingStories
+		} else {
+			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
+				"slug", slug, "proposal_id", proposal.ID, "current_status", current)
+		}
+	}
+	return nil
+}
+
+// reviseArchitectureState performs the pure in-memory state mutation for an
+// accepted architecture_revise PlanDecision, with no I/O so it is unit-testable
+// in isolation (the seam):
+//
+//   - route the recovery diagnosis into ReviewFormattedFindings (the channel
+//     the architecture-generator reads on revision rounds);
+//   - capture the prior architecture into PreviousArchitectureJSON so the
+//     architect REVISES rather than rewrites (mirrors determineR2ReentryPoint's
+//     "architecture" case);
+//   - wipe Architecture + Stories + Scenarios;
+//   - drive the back-transition implementing → requirements_generated.
+//
+// The wipe is gated behind the same CanTransitionTo check the caller performs,
+// so it is also safe standalone: an out-of-window plan is left entirely
+// untouched and the function reports transitioned=false (closes go-reviewer M2 —
+// the wipe no longer precedes the transition check). Returns whether the
+// transition was applied and the status evaluated from. The EXECUTION_STATES
+// reset is the caller's responsibility — it is NATS I/O.
+func reviseArchitectureState(plan *workflow.Plan, proposal *workflow.PlanDecision) (transitioned bool, from workflow.Status) {
+	from = plan.EffectiveStatus()
+	if !from.CanTransitionTo(workflow.StatusRequirementsGenerated) {
+		return false, from
+	}
+
+	if proposal.Rationale != "" {
+		plan.ReviewFormattedFindings = proposal.Rationale
+	}
+
+	// Clear any stale carry-over first so a failed marshal leaves no leftover.
+	plan.PreviousArchitectureJSON = ""
+	if plan.Architecture != nil {
+		if b, err := json.Marshal(plan.Architecture); err == nil {
+			plan.PreviousArchitectureJSON = string(b)
+		}
+	}
+	plan.Architecture = nil
+	plan.Stories = nil
+	plan.Scenarios = nil
+
+	plan.Status = workflow.StatusRequirementsGenerated
+	return true, from
+}
+
 // determineR2ReentryPoint examines review findings to pick the minimal re-entry
 // point for Round 2. When findings carry phase markers, the plan can retry only
 // the affected phase instead of clearing everything.
@@ -2058,32 +2199,8 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 	proposal.Status = workflow.PlanDecisionStatusAccepted
 	proposal.DecidedAt = &now
 
-	// Mirror HTTP path: apply recovery hint when proposed_by=recovery-agent.
-	// Gate stays on ProposedBy + non-empty Rationale; future apply shapes
-	// for other proposer roles land in this same branch.
-	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
-		applyRecoveryHint(plan, proposal)
-	}
-
-	// Mirror HTTP path: drive the stories_generated → preparing_stories
-	// back-transition when a story_reprepare PlanDecision is accepted.
-	// The affected Stories stay in plan.Stories with their RecoveryHint
-	// set (applyRecoveryHint above); Sarah's prompt iterates the full
-	// Story set on re-prep and her emission replaces plan.Stories per
-	// the existing handleStoriesMutation wipe-and-replace contract.
-	// Train C step 4.
-	//
-	// In-place transition check (NOT setPlanStatusCached) avoids a
-	// double-save / double-event — see the matching block in
-	// handleAcceptPlanDecision for the explanation.
-	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
-		current := plan.EffectiveStatus()
-		if current.CanTransitionTo(workflow.StatusPreparingStories) {
-			plan.Status = workflow.StatusPreparingStories
-		} else {
-			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
-				"slug", req.Slug, "proposal_id", req.ProposalID, "current_status", current)
-		}
+	if err := c.applyPlanDecisionAcceptEffects(ctx, plan, proposal, req.Slug); err != nil {
+		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
 	if err := ps.save(ctx, plan); err != nil {

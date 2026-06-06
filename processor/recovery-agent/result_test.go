@@ -90,6 +90,24 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 	})
 
+	// architecture_revise is the heaviest action: the architecture itself is
+	// the wedge root (mis-resolved upstream dep, wrong component boundary).
+	// No extra fields beyond diagnosis — the diagnosis becomes the architect's
+	// revision feedback when plan-manager re-runs the architecture.
+	t.Run("happy path architecture_revise", func(t *testing.T) {
+		raw := `{"action":"architecture_revise","diagnosis":"Winston pinned io.mavsdk:mavsdk:3.16.0 but the driver requires the 2.x API; every dev cycle re-hallucinates the dep coords.","recovery_succeeded":true}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected ok, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionArchitectureRevise {
+			t.Errorf("Action: got %q, want architecture_revise", got.Action)
+		}
+		if !strings.Contains(got.Diagnosis, "mavsdk") {
+			t.Errorf("diagnosis content lost: %q", got.Diagnosis)
+		}
+	})
+
 	cases := []struct {
 		name string
 		raw  string
