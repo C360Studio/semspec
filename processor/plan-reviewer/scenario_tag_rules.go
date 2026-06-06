@@ -24,12 +24,14 @@ import (
 //   - scenario.missing_unit_coverage — a requirement has zero @unit
 //     scenarios. Every requirement needs unit coverage as a baseline per
 //     ADR-041.
-//   - scenario.missing_integration_for_services — the architect bound a
-//     services-class or testcontainers-class harness profile to the plan
-//     but no scenario tags @integration with that profile_id. The
-//     binding-relevance logic mirrors processor/scenario-generator's
-//     classifier.go (integrationEmissions); if you change one, change the
-//     other or extract to a shared package.
+//   - scenario.missing_integration_for_services (error) /
+//     scenario.deferred_integration_for_services (warning) — the architect
+//     bound an integration-capable harness profile but no scenario tags
+//     @integration with that profile_id. Severity is capability-gated by
+//     orchestration class: testcontainers-class (sandbox-runnable) errors;
+//     services-class (operator-tier SITL) is a deferred warning, never a
+//     rejection (ADR-045 defer-and-note). Mirrors the scenario-generator
+//     classifier.go capability gate; if you change one, change the other.
 //   - scenario.harness_id_unresolved — a Scenario.HarnessProfileIDs entry
 //     names a profile_id that doesn't resolve through the harness catalog.
 //   - scenario.unit_mentions_services (warn) — a @unit scenario's
@@ -135,32 +137,46 @@ func scenarioMissingUnitCoverageFindings(plan *workflow.Plan) []workflow.PlanRev
 }
 
 // scenarioMissingIntegrationForServicesFindings flags requirements bound to
-// services-class or testcontainers-class harness profiles that have no
-// @integration scenario tagging that profile.
+// integration-capable harness profiles that have no @integration scenario
+// tagging that profile. Severity is capability-gated by orchestration class,
+// mirroring the scenario-generator classifier (classifier.go:104 — "@integration
+// emits ONLY for testcontainers-class profiles"):
 //
-// Binding semantics mirror processor/scenario-generator/classifier.go
-// (integrationEmissions): every architecturally-selected services-class or
-// testcontainers-class profile is treated as relevant to every requirement.
-// Coarse but correct (over-emits rather than under-detects). Tighten when
-// capability-component binding lands.
+//   - testcontainers-class → ERROR. The integration environment is
+//     sandbox-runnable, so a missing @integration scenario is a real coverage
+//     gap that must be fixed before execution.
+//   - services-class → WARNING (deferred-and-noted, ADR-045). The integration
+//     environment (e.g. PX4 SITL) is operator-tier — it can't run in the
+//     sandbox, so its runtime proof is deferred to the operator's CI via qa.yml.
+//     Missing @integration coverage here is recorded for Murat's traceability
+//     but MUST NOT reject the plan: ADR-045 mandates defer-and-note, never
+//     reject, for un-runnable-in-sandbox tiers. Pre-ADR-045 this rule errored
+//     on services-class too, which infinite-rejected SITL plans against the
+//     revision cap (caught on the 2026-06-06 gemini mavlink-hard run — the
+//     architect selected mavlink.px4-sitl.mavsdk-smoke and the LLM reviewer
+//     approved, but this rule overrode to needs_changes every round).
+//
+// Binding semantics are coarse: every architecturally-selected profile is
+// treated as relevant to every requirement (over-emits rather than
+// under-detects). Tighten when capability-component binding lands.
 func scenarioMissingIntegrationForServicesFindings(plan *workflow.Plan, catalog *harnesscatalog.Catalog) []workflow.PlanReviewFinding {
 	if plan == nil || plan.Architecture == nil || catalog == nil {
 		return nil
 	}
-	servicesIDs := servicesClassProfileIDs(plan.Architecture, catalog)
-	if len(servicesIDs) == 0 {
+	testcontainersIDs, servicesIDs := integrationProfileIDsByClass(plan.Architecture, catalog)
+	if len(testcontainersIDs) == 0 && len(servicesIDs) == 0 {
 		return nil
 	}
 	byReq := scenariosByRequirement(plan)
 	var findings []workflow.PlanReviewFinding
 	for _, req := range plan.Requirements {
-		for _, profileID := range servicesIDs {
+		for _, profileID := range testcontainersIDs {
 			if hasIntegrationScenarioForProfile(byReq[req.ID], profileID) {
 				continue
 			}
 			findings = append(findings, workflow.PlanReviewFinding{
 				SOPID:       "scenario.missing_integration_for_services",
-				SOPTitle:    "Requirement bound to services-class harness lacks @integration scenario (ADR-041 Move 4)",
+				SOPTitle:    "Requirement bound to testcontainers-class harness lacks @integration scenario (ADR-041 Move 4)",
 				Severity:    "error",
 				Status:      "violation",
 				Category:    "structural",
@@ -169,8 +185,27 @@ func scenarioMissingIntegrationForServicesFindings(plan *workflow.Plan, catalog 
 				Action:      "add",
 				TargetField: fmt.Sprintf("requirement.%s.scenarios", req.ID),
 				TargetValue: fmt.Sprintf("@integration scenario with harness_profile_ids containing %q", profileID),
-				Issue:       fmt.Sprintf("Requirement %s has no @integration scenario tagging harness profile %q. The architect selected this integration evidence target; without an @integration scenario Murat cannot trace whether runtime proof is present, missing, or deferred.", req.ID, profileID),
+				Issue:       fmt.Sprintf("Requirement %s has no @integration scenario tagging testcontainers-class harness profile %q. This integration environment is sandbox-runnable; without an @integration scenario Murat cannot trace whether runtime proof is present.", req.ID, profileID),
 				Suggestion:  fmt.Sprintf("Add at least one scenario tagged @integration with harness_profile_ids containing %q. The scenario's Given assumes the integration environment is available and its endpoint is read from environment variables; the scenario does NOT instruct test code to start external services.", profileID),
+			})
+		}
+		for _, profileID := range servicesIDs {
+			if hasIntegrationScenarioForProfile(byReq[req.ID], profileID) {
+				continue
+			}
+			findings = append(findings, workflow.PlanReviewFinding{
+				SOPID:       "scenario.deferred_integration_for_services",
+				SOPTitle:    "Services-class harness integration deferred to operator CI (ADR-045 defer-and-note)",
+				Severity:    "warning",
+				Status:      "violation",
+				Category:    "structural",
+				Phase:       "scenarios",
+				TargetID:    req.ID,
+				Action:      "review",
+				TargetField: fmt.Sprintf("requirement.%s.scenarios", req.ID),
+				TargetValue: fmt.Sprintf("@integration scenario with harness_profile_ids containing %q (optional — operator-tier)", profileID),
+				Issue:       fmt.Sprintf("Requirement %s has no @integration scenario tagging services-class harness profile %q. This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).", req.ID, profileID),
+				Suggestion:  fmt.Sprintf("Optional: if a runtime contract is worth pinning, add an @integration scenario tagging %q so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml.", profileID),
 			})
 		}
 	}
@@ -315,15 +350,24 @@ func hasTag(s workflow.Scenario, tag string) bool {
 	return false
 }
 
-// servicesClassProfileIDs returns the set of profile IDs the architect
-// selected whose catalog orchestration is services or testcontainers, with
-// duplicates removed. Preserves architect-selected order.
-func servicesClassProfileIDs(arch *workflow.ArchitectureDocument, catalog *harnesscatalog.Catalog) []string {
+// integrationProfileIDsByClass partitions the architect-selected harness
+// profiles into the two integration-capable orchestration classes, deduped and
+// in architect-selected order:
+//
+//   - testcontainers: sandbox-runnable integration environments — a missing
+//     @integration scenario is an ERROR (the proof can run here).
+//   - services: operator-tier integration environments (e.g. SITL) — a missing
+//     @integration scenario is a deferred WARNING, never a rejection (ADR-045
+//     defer-and-note; runtime proof runs in the operator's CI via qa.yml).
+//
+// pure-fixture and unknown classes are excluded. This is the reviewer-side
+// counterpart of the scenario-generator classifier's capability gate
+// (classifier.go:104), which only emits @integration for testcontainers-class.
+func integrationProfileIDsByClass(arch *workflow.ArchitectureDocument, catalog *harnesscatalog.Catalog) (testcontainers, services []string) {
 	if arch == nil || catalog == nil {
-		return nil
+		return nil, nil
 	}
 	seen := make(map[string]struct{})
-	var out []string
 	for _, sel := range arch.HarnessProfiles {
 		if _, dup := seen[sel.ProfileID]; dup {
 			continue
@@ -332,14 +376,16 @@ func servicesClassProfileIDs(arch *workflow.ArchitectureDocument, catalog *harne
 		if !ok {
 			continue
 		}
-		orch := profile.EffectiveOrchestration()
-		if orch != harnesscatalog.OrchestrationServices && orch != harnesscatalog.OrchestrationTestcontainers {
-			continue
+		switch profile.EffectiveOrchestration() {
+		case harnesscatalog.OrchestrationTestcontainers:
+			seen[sel.ProfileID] = struct{}{}
+			testcontainers = append(testcontainers, sel.ProfileID)
+		case harnesscatalog.OrchestrationServices:
+			seen[sel.ProfileID] = struct{}{}
+			services = append(services, sel.ProfileID)
 		}
-		seen[sel.ProfileID] = struct{}{}
-		out = append(out, sel.ProfileID)
 	}
-	return out
+	return testcontainers, services
 }
 
 // matchedToken returns the first token from `tokens` that appears in any of

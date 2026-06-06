@@ -133,13 +133,13 @@ func TestScenarioMissingUnitCoverage_FiresPerRequirement(t *testing.T) {
 	}
 }
 
-// TestScenarioMissingIntegrationForServices_FiresWhenProfileUncovered is
-// the load-bearing rule that closes the issue-#37 gap: when the architect
-// binds a services-class profile, the scenario-generator MUST emit at
-// least one @integration scenario tagging that profile per requirement.
-// Without this rule, the dev sees integration-tier obligations only in
-// review feedback (too late) instead of in the scenario set.
-func TestScenarioMissingIntegrationForServices_FiresWhenProfileUncovered(t *testing.T) {
+// TestScenarioMissingIntegrationForServices_ServicesClassIsDeferredWarning pins
+// the ADR-045 defer-and-note contract (regression test for the 2026-06-06
+// gemini mavlink-hard infinite-reject wedge): when the architect binds a
+// SERVICES-class profile (operator-tier SITL, un-runnable in the sandbox), a
+// missing @integration scenario is recorded as a WARNING — never an error, so
+// it cannot upgrade the verdict to needs_changes and burn the revision cap.
+func TestScenarioMissingIntegrationForServices_ServicesClassIsDeferredWarning(t *testing.T) {
 	catalog := makeCatalog(
 		harnesscatalog.Profile{ID: "mavlink.px4-sitl", Orchestration: harnesscatalog.OrchestrationServices},
 	)
@@ -155,19 +155,99 @@ func TestScenarioMissingIntegrationForServices_FiresWhenProfileUncovered(t *test
 			makeScenario("s1", "r1", "given", []string{workflow.TierUnit}, nil),
 			makeScenario("s2", "r1", "given", []string{workflow.TierIntegration}, []string{"mavlink.px4-sitl"}),
 			makeScenario("s3", "r2", "given", []string{workflow.TierUnit}, nil),
-			// r2 has no @integration scenario — this is the failure mode
+			// r2 has no @integration scenario — deferred (not rejected) for services-class.
 		},
 	}
 	findings := scenarioMissingIntegrationForServicesFindings(plan, catalog)
 
 	if len(findings) != 1 {
-		t.Fatalf("expected exactly one finding for r2, got %d: %+v", len(findings), findings)
+		t.Fatalf("expected exactly one deferred finding for r2, got %d: %+v", len(findings), findings)
 	}
 	if findings[0].TargetID != "r2" {
 		t.Errorf("expected finding on r2, got %q", findings[0].TargetID)
 	}
+	if findings[0].Severity != "warning" {
+		t.Errorf("services-class missing @integration must be a deferred WARNING, got severity %q (ADR-045)", findings[0].Severity)
+	}
+	if findings[0].SOPID != "scenario.deferred_integration_for_services" {
+		t.Errorf("expected deferred SOPID, got %q", findings[0].SOPID)
+	}
 	if !strings.Contains(findings[0].TargetValue, "mavlink.px4-sitl") {
 		t.Errorf("finding TargetValue should mention the profile_id, got %q", findings[0].TargetValue)
+	}
+}
+
+// TestScenarioMissingIntegrationForServices_TestcontainersClassErrors pins that
+// a TESTCONTAINERS-class profile (sandbox-runnable) still hard-errors when no
+// @integration scenario covers it — that proof CAN run in the sandbox, so a
+// missing scenario is a real coverage gap, mirroring the classifier's gate.
+func TestScenarioMissingIntegrationForServices_TestcontainersClassErrors(t *testing.T) {
+	catalog := makeCatalog(
+		harnesscatalog.Profile{ID: "pg.testcontainers", Orchestration: harnesscatalog.OrchestrationTestcontainers},
+	)
+	plan := &workflow.Plan{
+		Architecture: &workflow.ArchitectureDocument{
+			HarnessProfiles: []workflow.HarnessProfileSelection{{ProfileID: "pg.testcontainers"}},
+		},
+		Requirements: []workflow.Requirement{makeReq("r1", "uncovered", "cap-a")},
+		Scenarios: []workflow.Scenario{
+			makeScenario("s1", "r1", "given", []string{workflow.TierUnit}, nil),
+		},
+	}
+	findings := scenarioMissingIntegrationForServicesFindings(plan, catalog)
+
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly one error finding for r1, got %d: %+v", len(findings), findings)
+	}
+	if findings[0].Severity != "error" {
+		t.Errorf("testcontainers-class missing @integration must ERROR, got severity %q", findings[0].Severity)
+	}
+	if findings[0].SOPID != "scenario.missing_integration_for_services" {
+		t.Errorf("expected error SOPID, got %q", findings[0].SOPID)
+	}
+}
+
+// TestScenarioMissingIntegrationForServices_MixedClassesDoNotCrossContaminate
+// pins that when the architect selects BOTH a testcontainers-class and a
+// services-class profile, the uncovered testcontainers profile errors and the
+// uncovered services profile defers — the two partitions don't bleed severity.
+func TestScenarioMissingIntegrationForServices_MixedClassesDoNotCrossContaminate(t *testing.T) {
+	catalog := makeCatalog(
+		harnesscatalog.Profile{ID: "pg.testcontainers", Orchestration: harnesscatalog.OrchestrationTestcontainers},
+		harnesscatalog.Profile{ID: "mavlink.px4-sitl", Orchestration: harnesscatalog.OrchestrationServices},
+	)
+	plan := &workflow.Plan{
+		Architecture: &workflow.ArchitectureDocument{
+			HarnessProfiles: []workflow.HarnessProfileSelection{
+				{ProfileID: "pg.testcontainers"},
+				{ProfileID: "mavlink.px4-sitl"},
+			},
+		},
+		Requirements: []workflow.Requirement{makeReq("r1", "uncovered", "cap-a")},
+		Scenarios: []workflow.Scenario{
+			makeScenario("s1", "r1", "given", []string{workflow.TierUnit}, nil),
+		},
+	}
+	findings := scenarioMissingIntegrationForServicesFindings(plan, catalog)
+
+	bySeverity := map[string]workflow.PlanReviewFinding{}
+	for _, f := range findings {
+		bySeverity[f.Severity] = f
+	}
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings (one per class), got %d: %+v", len(findings), findings)
+	}
+	if bySeverity["error"].SOPID != "scenario.missing_integration_for_services" {
+		t.Errorf("testcontainers profile should produce the error finding, got %+v", bySeverity["error"])
+	}
+	if !strings.Contains(bySeverity["error"].TargetValue, "pg.testcontainers") {
+		t.Errorf("error finding should reference the testcontainers profile, got %q", bySeverity["error"].TargetValue)
+	}
+	if bySeverity["warning"].SOPID != "scenario.deferred_integration_for_services" {
+		t.Errorf("services profile should produce the deferred warning, got %+v", bySeverity["warning"])
+	}
+	if !strings.Contains(bySeverity["warning"].TargetValue, "mavlink.px4-sitl") {
+		t.Errorf("warning finding should reference the services profile, got %q", bySeverity["warning"].TargetValue)
 	}
 }
 

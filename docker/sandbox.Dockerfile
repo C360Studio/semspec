@@ -98,12 +98,20 @@ RUN existing_user=$(getent passwd ${SANDBOX_UID} | cut -d: -f1) \
     && chown -R sandbox:sandbox /go
 
 COPY --from=builder /sandbox /usr/local/bin/sandbox
+# Entrypoint wrapper: configures GitHub auth (curl + git) from GITHUB_TOKEN at
+# container start so agent upstream-resolution calls don't hit the GitHub
+# unauthenticated rate limit. Copied + made executable as root before USER drop.
+COPY docker/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
+RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
 
 USER sandbox
+# Explicit HOME so the entrypoint writes ~/.netrc + ~/.curlrc to the sandbox
+# user's home deterministically (Docker does not always derive HOME from USER).
+ENV HOME=/home/sandbox
 RUN git config --global user.email "sandbox@semspec.dev" \
     && git config --global user.name "Semspec Sandbox"
 WORKDIR /workspace
 EXPOSE 8090
 
-ENTRYPOINT ["sandbox"]
+ENTRYPOINT ["sandbox-entrypoint.sh"]
 CMD ["--addr", ":8090", "--repo", "/workspace"]
