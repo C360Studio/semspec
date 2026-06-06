@@ -181,6 +181,21 @@ func (c *Catalog) RequiredProfiles(selections []workflow.HarnessProfileSelection
 	return required, nil
 }
 
+// ValidIDsSorted returns the catalog's profile IDs in deterministic order. Used
+// to build a precise "select only from: …" hint when a selection fails to
+// resolve, so an architecture-generation retry sees the valid options inline.
+func (c *Catalog) ValidIDsSorted() []string {
+	if c == nil {
+		return nil
+	}
+	ids := make([]string, 0, len(c.Profiles))
+	for id := range c.Profiles {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // ProfilesSorted returns catalog profiles ordered by ID for deterministic
 // prompt rendering and tests.
 func (c *Catalog) ProfilesSorted() []Profile {

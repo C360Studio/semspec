@@ -3,6 +3,7 @@ package harnesscatalog
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -168,6 +169,59 @@ func TestResolveSelectionsRejectsUnknownAndSplitsRequired(t *testing.T) {
 	}
 	if len(required) != 1 || required[0].Profile.ID != "mavlink.px4-sitl.mavsdk-smoke" {
 		t.Fatalf("RequiredProfiles() = %#v, want only PX4 smoke", required)
+	}
+}
+
+// TestValidateSelectionsCatchesArchitectHallucination pins the arch-gen guard
+// for the 2026-06-06 incident: the architect selected "docker.generic" (not in
+// the catalog), twice. ValidateSelections must reject it, and ValidIDsSorted
+// must surface the real options for the retry hint.
+func TestValidateSelectionsCatchesArchitectHallucination(t *testing.T) {
+	catalog, err := LoadBuiltIn()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The exact incident shape: a hallucinated id, selected twice.
+	err = catalog.ValidateSelections([]workflow.HarnessProfileSelection{
+		{ProfileID: "docker.generic"},
+		{ProfileID: "docker.generic"},
+	})
+	if err == nil {
+		t.Fatal("ValidateSelections accepted hallucinated 'docker.generic'; expected rejection")
+	}
+
+	// A real catalog selection must pass.
+	if err := catalog.ValidateSelections([]workflow.HarnessProfileSelection{
+		{ProfileID: "mavlink.px4-sitl.mavsdk-smoke"},
+	}); err != nil {
+		t.Fatalf("ValidateSelections rejected a real profile_id: %v", err)
+	}
+
+	// Empty selections are valid (architecture may select no harness profiles).
+	if err := catalog.ValidateSelections(nil); err != nil {
+		t.Fatalf("ValidateSelections(nil) = %v, want nil", err)
+	}
+
+	// ValidIDsSorted surfaces the real options (the retry hint) deterministically.
+	ids := catalog.ValidIDsSorted()
+	if len(ids) == 0 {
+		t.Fatal("ValidIDsSorted returned no profile IDs")
+	}
+	if !sort.StringsAreSorted(ids) {
+		t.Errorf("ValidIDsSorted not sorted: %v", ids)
+	}
+	found := false
+	for _, id := range ids {
+		if id == "mavlink.px4-sitl.mavsdk-smoke" {
+			found = true
+		}
+		if id == "docker.generic" {
+			t.Error("ValidIDsSorted contains the hallucinated id")
+		}
+	}
+	if !found {
+		t.Errorf("ValidIDsSorted missing a known catalog id: %v", ids)
 	}
 }
 
