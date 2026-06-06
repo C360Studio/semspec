@@ -1613,8 +1613,20 @@ Rules:
 			Roles:    []prompt.Role{prompt.RoleRecoveryAgent},
 			Content: `Output Format — submit_work arguments
 
+The FIRST field you write MUST be "action". It is the decision; the diagnosis
+only explains it. Decide the action before you write anything else, and never
+omit it — a submit_work without an "action" cannot be applied and the wedge is
+abandoned. The shape is:
+
+  {
+    "action": "refine_prompt",            // REQUIRED FIRST — pick one from the set below
+    "recovery_succeeded": true,
+    "diagnosis": "...",                    // REQUIRED — explains the action
+    "refined_prompt": "..."               // only for refine_prompt
+  }
+
 Required fields:
-- action: one of refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise | escalate_human | mark_unrecoverable
+- action: one of refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise | escalate_human | mark_unrecoverable. REQUIRED — write it first.
 - diagnosis: 2-6 sentences describing what the trajectory shows the agent doing wrong and what the underlying mistake is. REQUIRED for every action.
 - recovery_succeeded: true when refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
 

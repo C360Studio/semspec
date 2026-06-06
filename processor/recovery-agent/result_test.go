@@ -108,6 +108,53 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 	})
 
+	// Action-omission safety net (go-reviewer / run #7): mid-tier models
+	// sometimes write the refined_prompt payload but drop the `action` label.
+	// When the payload is unambiguous (refined_prompt present), infer
+	// refine_prompt instead of terminal-failing the wedge.
+	t.Run("infers refine_prompt when action omitted but refined_prompt present", func(t *testing.T) {
+		raw := `{"diagnosis":"Agent created the test in org/sensorhub/driver/mavsdk instead of org/sensorhub/impl/sensor/mavsdk; needs explicit file paths.","recovery_succeeded":true,"refined_prompt":"Create the source files at src/main/java/org/sensorhub/impl/sensor/mavsdk/ per the architecture."}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected inference to succeed, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionRefinePrompt {
+			t.Errorf("Action: got %q, want refine_prompt (inferred)", got.Action)
+		}
+		if !strings.Contains(got.RefinedPrompt, "impl/sensor/mavsdk") {
+			t.Errorf("refined_prompt content lost: %q", got.RefinedPrompt)
+		}
+		// Mirror the run-#7 incident shape: recovery_succeeded was true.
+		if !got.RecoverySucceeded {
+			t.Error("RecoverySucceeded should survive inference (incident had it true)")
+		}
+	})
+
+	// But an action-less result with NO unambiguous payload still errors —
+	// scope_changes is ambiguous (narrow_scope vs split_req) so it is NOT
+	// inferred, and diagnosis-only stays human-gated.
+	t.Run("does not infer from scope_changes (ambiguous)", func(t *testing.T) {
+		raw := `{"diagnosis":"too broad","recovery_succeeded":true,"scope_changes":{"keep":["a.go"]}}`
+		_, err := parseRecoveryResult(raw)
+		if !errors.Is(err, errResultMissingAction) {
+			t.Errorf("expected errResultMissingAction (scope_changes is ambiguous), got %v", err)
+		}
+	})
+
+	// Both payloads present + no action: refined_prompt wins (refine_prompt
+	// maps to the same requirement_change kind as narrow_scope/split_req, so
+	// this picks the unambiguous one and the downstream cascade is identical).
+	t.Run("infers refine_prompt when both refined_prompt and scope_changes present", func(t *testing.T) {
+		raw := `{"diagnosis":"d","recovery_succeeded":true,"refined_prompt":"do X at path Y","scope_changes":{"keep":["a.go"]}}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected inference to succeed, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionRefinePrompt {
+			t.Errorf("Action: got %q, want refine_prompt (refined_prompt is unambiguous)", got.Action)
+		}
+	})
+
 	cases := []struct {
 		name string
 		raw  string
