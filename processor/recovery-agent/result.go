@@ -78,8 +78,24 @@ func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 	if err := json.Unmarshal([]byte(raw), &rr); err != nil {
 		return nil, fmt.Errorf("unmarshal recovery result: %w", err)
 	}
+	// Recovery agents (esp. mid-tier models) sometimes write an action's
+	// payload but omit the structured `action` label, describing the fix only
+	// in prose. Rather than terminal-fail a wedge the agent believed
+	// recoverable, infer the action when the payload makes it UNAMBIGUOUS.
+	// Only refine_prompt qualifies: a non-empty refined_prompt has exactly one
+	// matching action. scope_changes is deliberately NOT inferred — it maps to
+	// both narrow_scope and split_req, so guessing would pick the wrong one.
+	// Caught 2026-06-06 gemini mavlink-hard run #7: the agent emitted a
+	// refine_prompt-shaped diagnosis ("needs a refined prompt with explicit
+	// file paths") + recovery_succeeded but no action → execution_exhausted →
+	// requirement terminal-failed → plan rejected. The prompt-side fix
+	// (action-first directive) is primary; this is the parse-side safety net.
 	if rr.Action == "" {
-		return nil, errResultMissingAction
+		if strings.TrimSpace(rr.RefinedPrompt) != "" {
+			rr.Action = string(payloads.RecoveryActionRefinePrompt)
+		} else {
+			return nil, errResultMissingAction
+		}
 	}
 	if rr.Diagnosis == "" {
 		return nil, errResultMissingDiag
