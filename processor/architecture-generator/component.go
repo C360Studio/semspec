@@ -573,6 +573,64 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 	}
 }
 
+// validateGeneratedArchitecture runs the ADR-043 arch-gen validators in order.
+// Returns a non-empty (rule, msg) on the first rejection (empty rule = valid):
+//   - component_implementation_files: each component owns ≥1 source-code file.
+//   - capability_coverage: every analyst-declared capability is implemented by
+//     ≥1 component.
+//   - harness_profile_resolution: every architecture.harness_profiles[] entry
+//     names a real catalog profile_id. Guards architect hallucination (e.g.
+//     "docker.generic", 2026-06-06 gemini mavlink-hard DEBUG run) at the source
+//     layer — the prompt lists the valid IDs + "do not invent", but mid-tier
+//     models still invent; without this guard the bad ID passes arch-gen,
+//     persists, is faithfully copied by the scenario-generator, and only
+//     surfaces two layers downstream at the scenario gate where the retry can't
+//     reach back to fix the architect within the R2 cap. The retry message
+//     appends the valid options so the architect picks a real profile. Catalog
+//     load failure is non-fatal (skip rather than block on infra — matches
+//     harnessProfileCards()).
+func (c *Component) validateGeneratedArchitecture(architecture *workflow.ArchitectureDocument, kvPlan *workflow.Plan) (rule, msg string) {
+	if err := workflow.ValidateComponentImplementationFiles(architecture.ComponentBoundaries); err != nil {
+		return "component_implementation_files", fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())
+	}
+	if kvPlan != nil {
+		if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
+			return "capability_coverage", fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())
+		}
+	}
+	if cat, catErr := harnesscatalog.Load(""); catErr == nil {
+		if err := cat.ValidateSelections(architecture.HarnessProfiles); err != nil {
+			return "harness_profile_resolution", fmt.Sprintf(
+				"architecture validation failed (harness profile resolution): %s — %s",
+				err.Error(), harnessResolutionHint(cat, err))
+		}
+	} else {
+		c.logger.Warn("Harness catalog load failed; skipping harness-profile resolution check", "error", catErr)
+	}
+	return "", ""
+}
+
+// harnessResolutionHint tailors the retry guidance to the validation failure
+// class so the architect's next cycle gets the RIGHT correction, not a
+// contradictory one:
+//   - unknown profile_id → list the valid catalog IDs to pick from (the
+//     hallucination case, e.g. "docker.generic").
+//   - duplicate profile_id → consolidate, don't re-list. A profile_id is
+//     selected ONCE with a multi-element used_by[]; repeating it is malformed
+//     per the schema (workflow.HarnessProfileSelection) — "select from catalog"
+//     would be misleading here since the ID is already valid.
+//   - empty profile_id → drop the empty entry.
+func harnessResolutionHint(cat *harnesscatalog.Catalog, err error) string {
+	switch {
+	case strings.Contains(err.Error(), "duplicate"):
+		return "list each profile_id at most once — use a single harness_profiles[] entry with a multi-element used_by[] instead of repeating the profile"
+	case strings.Contains(err.Error(), "is required"):
+		return "remove the harness_profiles[] entry with the empty profile_id, or set it to a valid catalog ID"
+	default: // unknown harness profile
+		return "select ONLY from the available catalog profiles: " + strings.Join(cat.ValidIDsSorted(), ", ")
+	}
+}
+
 // handleLoopCompletion processes a completed architecture-generator agent loop.
 // It parses the ArchitectureDocument from the loop result and sends a mutation
 // to plan-manager via plan.mutation.architecture.generated.
@@ -629,28 +687,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		}
 	}
 
-	// ADR-043 PR 2: Winston's tech-spec scope must be complete before
-	// persistence. Each component owns ≥1 source-code file; every capability
-	// declared by the analyst is implemented by ≥1 component. Validator
-	// failures funnel through retryOrFail so the LLM gets another cycle with
-	// the rejection message as feedback — mirrors the parse-failure path.
-	if err := workflow.ValidateComponentImplementationFiles(architecture.ComponentBoundaries); err != nil {
+	// ADR-043: validate Winston's tech-spec scope before persistence. Validator
+	// failures funnel through retryOrFail so the LLM gets another cycle with the
+	// rejection message as feedback — mirrors the parse-failure path.
+	if rule, msg := c.validateGeneratedArchitecture(architecture, kvPlan); rule != "" {
 		c.generationsFailed.Add(1)
-		msg := fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())
 		c.logger.Warn("Architecture rejected by ADR-043 validator",
-			"slug", slug, "loop_id", loop.ID, "rule", "component_implementation_files", "error", err)
+			"slug", slug, "loop_id", loop.ID, "rule", rule, "error", msg)
 		c.retryOrFail(ctx, slug, msg)
 		return
-	}
-	if kvPlan != nil {
-		if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
-			c.generationsFailed.Add(1)
-			msg := fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())
-			c.logger.Warn("Architecture rejected by ADR-043 validator",
-				"slug", slug, "loop_id", loop.ID, "rule", "capability_coverage", "error", err)
-			c.retryOrFail(ctx, slug, msg)
-			return
-		}
 	}
 
 	if err := c.publishArchitectureGenerated(ctx, slug, architecture); err != nil {
