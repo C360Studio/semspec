@@ -108,6 +108,12 @@ services:
     environment:
       # Enables the qa-unit subscriber during E2E runs that exercise qa_level=unit.
       - NATS_URL=nats://nats:4222
+      # GitHub auth for agent upstream-resolution (curl/git). sandbox-entrypoint.sh
+      # configures ~/.netrc + ~/.curlrc when set, so the architect's GitHub REST
+      # probes don't hit the 60/hr unauthenticated rate limit. Mirrors the UI-LLM
+      # stack (ui/docker-compose.e2e-llm.yml); empty default = no-op on stacks
+      # (mock/CRUD) that never reach a real architect.
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
     volumes:
       - ../../test/e2e/workspace:/workspace
       # DooD for Testcontainers — dev's TDD loop spawns real integration-test
