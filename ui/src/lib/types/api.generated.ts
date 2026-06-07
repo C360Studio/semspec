@@ -2732,6 +2732,7 @@ export interface components {
                 }[];
                 component_boundaries: {
                     capabilities?: string[];
+                    capability_indices?: number[];
                     dependencies: string[];
                     implementation_files?: string[];
                     name: string;
@@ -3004,6 +3005,7 @@ export interface components {
                 }[];
                 component_boundaries: {
                     capabilities?: string[];
+                    capability_indices?: number[];
                     dependencies: string[];
                     implementation_files?: string[];
                     name: string;

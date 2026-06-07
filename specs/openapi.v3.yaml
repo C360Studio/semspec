@@ -2096,6 +2096,10 @@ components:
                                         items:
                                             type: string
                                         type: array
+                                    capability_indices:
+                                        items:
+                                            type: integer
+                                        type: array
                                     dependencies:
                                         items:
                                             type: string
@@ -2828,6 +2832,10 @@ components:
                                     capabilities:
                                         items:
                                             type: string
+                                        type: array
+                                    capability_indices:
+                                        items:
+                                            type: integer
                                         type: array
                                     dependencies:
                                         items:

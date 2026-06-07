@@ -870,15 +870,28 @@ type ComponentDef struct {
 	// entry per component once PR 2 ships.
 	ImplementationFiles []string `json:"implementation_files,omitempty"`
 
+	// CapabilityIndices are 0-based indices into the analyst's Exploration
+	// capability list — the capabilities this component implements (ADR-043
+	// Move 1, indexed form added 2026-06-07). The architect references
+	// capabilities by INDEX rather than re-typing names: mid-tier models
+	// paraphrase kebab-case identifiers ("typed-control-streams" →
+	// "typed-controlstreams"), and exact-string capability matching then
+	// fails coverage on cosmetically-wrong names. Indexing makes the
+	// architect→analyst capability link mismatch-proof. The system resolves
+	// these to Capabilities (the names) via workflow.ResolveCapabilityIndices;
+	// an out-of-range index is rejected at arch-gen.
+	CapabilityIndices []int `json:"capability_indices,omitempty"`
+
 	// Capabilities are kebab-case Capability.Name entries this component
-	// implements (ADR-043 Move 1). Winston's bidirectional bridge between
-	// Mary's capability list and the file space he just declared.
-	// Plan-reviewer R2 rule capability.unresolved_in_architecture rejects
-	// capabilities that have no component whose Capabilities list contains
-	// them.
+	// implements (ADR-043 Move 1). SYSTEM-DERIVED from CapabilityIndices when
+	// those are present (the architect no longer authors names); falls back to
+	// architect-authored values for records/tests predating the indexed form.
+	// Winston's bidirectional bridge between Mary's capability list and the
+	// file space he just declared. Plan-reviewer R2 rule
+	// capability.unresolved_in_architecture rejects capabilities that have no
+	// component whose Capabilities list contains them.
 	//
-	// omitempty for the same back-compat reason as ImplementationFiles;
-	// new plans require ≥1 entry per component once PR 2 ships.
+	// omitempty for the same back-compat reason as ImplementationFiles.
 	Capabilities []string `json:"capabilities,omitempty"`
 }
 

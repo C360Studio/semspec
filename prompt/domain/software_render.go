@@ -706,6 +706,18 @@ func renderArchitectPrompt(p *prompt.ArchitectPromptContext) string {
 	scopeExclude := formatScopeListLocal(p.ScopeExclude, "none")
 	scopeProtected := formatScopeListLocal(p.ScopeProtected, "none")
 
+	var capSection strings.Builder
+	if len(p.Capabilities) > 0 {
+		capSection.WriteString("\n## Capabilities (from analyst)\n\n")
+		capSection.WriteString("Map every capability to a component. In each component_boundaries[] entry, set `capability_indices` to the 0-based indices below (index 0 = first entry) — do NOT re-type capability names; reference them by index so the mapping can't drift. Every capability MUST appear in at least one component's `capability_indices`.\n\n")
+		for i, c := range p.Capabilities {
+			fmt.Fprintf(&capSection, "### Capability #%d — %s\n", i, c.Name)
+			if c.Description != "" {
+				fmt.Fprintf(&capSection, "%s\n\n", c.Description)
+			}
+		}
+	}
+
 	var reqSection strings.Builder
 	if len(p.Requirements) > 0 {
 		reqSection.WriteString("\n## Requirements\n\n")
@@ -769,6 +781,7 @@ Below is the architecture you produced last round. Start from it and make the MI
 - Protected (do not touch): %s
 %s
 %s
+%s
 ## Your Task
 
 1. Use bash and graph tools to explore the codebase — understand the existing technology stack, project structure, and patterns already in use.
@@ -798,7 +811,7 @@ Below is the architecture you produced last round. Start from it and make the MI
 **Optional fields** — human documentation in plan.md; only include when they add real value:
 
 - **technology_choices**: array of {category, choice, rationale} — when introducing or formally endorsing a stack choice. Skip when reusing whatever the project already has.
-- **component_boundaries**: array of {name, responsibility, dependencies[]} — when the change introduces a new module or service. Skip for changes scoped to existing components.
+- **component_boundaries**: array of {name, responsibility, dependencies[], implementation_files[], capability_indices[]} — every component maps to capabilities via capability_indices (0-based indices into the Capabilities list above), NOT re-typed names. Every analyst capability must appear in at least one component's capability_indices.
 - **data_flow**: string — when data movement between components is non-obvious. Skip for trivial flows.
 - **decisions**: array of {id, title, decision, rationale} — architecture decision records (use IDs like ARCH-001) for trade-offs future contributors will want to understand. Skip for routine choices.
 
@@ -807,7 +820,7 @@ Below is the architecture you produced last round. Start from it and make the MI
 - Walk actors[]: each human or system actor with a trigger that produces user-visible output needs one e2e_flow. Scheduler and event actors only need e2e coverage if the flow touches the UI or external systems; otherwise integration coverage is sufficient.
 - It's fine for test_surface.integration_flows to reference requirement scenarios via scenario_refs — reviewers use this to verify the test authors wrote tests that actually implement the declared surface.
 %s`, p.Goal, p.PlanContext, scopeInclude, scopeExclude, scopeProtected,
-		reqSection.String(), harnessSection, prevErr)
+		capSection.String(), reqSection.String(), harnessSection, prevErr)
 }
 
 func renderArchitectHarnessCards(cards []prompt.HarnessProfileCard) string {

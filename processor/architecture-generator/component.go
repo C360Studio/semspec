@@ -345,6 +345,18 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		}
 	}
 
+	// Capability list (indexed) so the architect references capabilities by
+	// capability_index in component_boundaries instead of re-typing names.
+	var capCards []prompt.CapabilityCard
+	if plan.Exploration != nil {
+		for _, cap := range plan.Exploration.Capabilities {
+			capCards = append(capCards, prompt.CapabilityCard{
+				Name:        cap.Name,
+				Description: cap.Description,
+			})
+		}
+	}
+
 	archCtx := &prompt.ArchitectPromptContext{
 		Goal:                     plan.Goal,
 		PlanContext:              plan.Context,
@@ -352,6 +364,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		ScopeExclude:             plan.Scope.Exclude,
 		ScopeProtected:           plan.Scope.DoNotTouch,
 		Requirements:             reqSummaries,
+		Capabilities:             capCards,
 		HarnessProfiles:          c.harnessProfileCards(),
 		PreviousError:            previousError,
 		PreviousArchitectureJSON: plan.PreviousArchitectureJSON,
@@ -622,7 +635,16 @@ func (c *Component) validateGeneratedArchitecture(ctx context.Context, architect
 			fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())})
 	}
 	if kvPlan != nil {
-		if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
+		// Resolve architect-authored capability_indices into capability names
+		// FIRST (mutates ComponentBoundaries in place) so the coverage check —
+		// and everything downstream — sees canonical names, not paraphrases.
+		// An out-of-range index is its own failure; when it occurs the names
+		// aren't resolved, so skip the (now-meaningless) coverage check this
+		// round and let the architect fix the indices.
+		if err := workflow.ResolveCapabilityIndices(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
+			failures = append(failures, failure{"capability_index_resolution",
+				fmt.Sprintf("architecture validation failed (capability index resolution): %s", err.Error())})
+		} else if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
 			failures = append(failures, failure{"capability_coverage",
 				fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())})
 		}

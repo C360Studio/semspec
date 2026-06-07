@@ -382,26 +382,49 @@ func ValidateTaskDAG(parentStoryID string, tasks []Task) error {
 	return nil
 }
 
-// ValidateCapabilityCoverage checks that every Capability declared in the
-// exploration is implemented by at least one ComponentDef whose Capabilities
-// list contains the capability's Name (ADR-043 Move 1, plan-reviewer R2
-// rule capability.unresolved_in_architecture). Empty exploration or empty
-// components slice is treated as "nothing to validate yet" — pre-PR 2
-// plans and back-compat reads pass through clean. The check fires once the
-// exploration is populated AND the architecture has components.
+// ResolveCapabilityIndices populates each component's Capabilities (names) from
+// its architect-authored CapabilityIndices, resolving indices against the
+// analyst's Exploration capability list. This is what makes the
+// architect→analyst capability link mismatch-proof (2026-06-07): the architect
+// references capabilities by index, the system fills in the canonical names, so
+// a paraphrased name can never slip through coverage.
 //
-// Returns ErrInvalidStoryStructure wrapped with a COMPLETE coverage hint: ALL
-// uncovered capabilities (not just the first), the full declared-capability set,
-// and the architect's current component→capabilities mapping. The
-// architecture-generator surfaces this back to Winston via retry-feedback.
-//
-// Reporting only the first miss (the pre-2026-06-07 behavior) produced
-// whack-a-mole across retries: the architect fixed the named capability, blindly
-// restructured, and dropped another — on a 2026-06-07 mavlink-hard run it
-// oscillated (4 components → 1 → 1) and exhausted all retries without ever
-// covering all four capabilities. The complete hint gives the architect the full
-// target plus its current state so it can close coverage in one cycle (mirrors
-// harnessResolutionHint listing all valid catalog IDs).
+// An out-of-range index is rejected (the architect referenced a capability that
+// doesn't exist). Components that carry no CapabilityIndices are left untouched
+// (back-compat with records/tests that authored Capabilities names directly).
+// No-op when the exploration has no capabilities.
+func ResolveCapabilityIndices(exp *Exploration, components []ComponentDef) error {
+	if exp == nil || len(exp.Capabilities) == 0 {
+		return nil
+	}
+	n := len(exp.Capabilities)
+	for i := range components {
+		c := &components[i]
+		if len(c.CapabilityIndices) == 0 {
+			continue
+		}
+		names := make([]string, 0, len(c.CapabilityIndices))
+		seen := make(map[int]bool, len(c.CapabilityIndices))
+		for _, idx := range c.CapabilityIndices {
+			if idx < 0 || idx >= n {
+				return fmt.Errorf("%w: component %q references capability_index %d which is out of range (0..%d) — index into the analyst's Capabilities list, do not invent indices",
+					ErrInvalidStoryStructure, c.Name, idx, n-1)
+			}
+			if seen[idx] {
+				continue
+			}
+			seen[idx] = true
+			names = append(names, exp.Capabilities[idx].Name)
+		}
+		c.Capabilities = names
+	}
+	return nil
+}
+
+// ValidateCapabilityCoverage checks that every capability is implemented by at
+// least one component. With ResolveCapabilityIndices run first, the component
+// names are guaranteed to be canonical, so this is now a pure coverage check
+// (no name-mismatch class).
 func ValidateCapabilityCoverage(exp *Exploration, components []ComponentDef) error {
 	if exp == nil || len(exp.Capabilities) == 0 || len(components) == 0 {
 		return nil
@@ -473,8 +496,12 @@ func ValidateComponentImplementationFiles(components []ComponentDef) error {
 			return fmt.Errorf("%w: component %q implementation_files %v contains only documentation files — every component must own at least one source-code file",
 				ErrInvalidStoryStructure, c.Name, c.ImplementationFiles)
 		}
-		if len(c.Capabilities) == 0 {
-			return fmt.Errorf("%w: component %q has empty capabilities — every component must implement at least one capability from plan.exploration.capabilities[]",
+		// Capability declared via either form: indexed (capability_indices, the
+		// architect's contract) or named (Capabilities, back-compat / post-resolution).
+		// This check runs before ResolveCapabilityIndices populates names, so it
+		// must accept the indices form.
+		if len(c.Capabilities) == 0 && len(c.CapabilityIndices) == 0 {
+			return fmt.Errorf("%w: component %q has empty capability_indices — every component must implement at least one capability (reference the analyst's Capabilities list by 0-based index)",
 				ErrInvalidStoryStructure, c.Name)
 		}
 	}
