@@ -586,11 +586,13 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 	}
 }
 
-// validateGeneratedArchitecture runs the ADR-043 arch-gen validators in order.
-// Returns a non-empty (rule, msg) on the first rejection (empty rule = valid):
+// validateGeneratedArchitecture runs ALL the ADR-043 arch-gen validators and
+// reports EVERY failure together (empty rule = valid). The validators:
 //   - component_implementation_files: each component owns ≥1 source-code file.
 //   - capability_coverage: every analyst-declared capability is implemented by
 //     ≥1 component.
+//   - upstream_import_resolution: code-symbol APIs carry a qualified import.
+//   - upstream_coordinate_resolution (#126): each coordinate resolves for real.
 //   - harness_profile_resolution: every architecture.harness_profiles[] entry
 //     names a real catalog profile_id. Guards architect hallucination (e.g.
 //     "docker.generic", 2026-06-06 gemini mavlink-hard DEBUG run) at the source
@@ -598,35 +600,64 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 //     models still invent; without this guard the bad ID passes arch-gen,
 //     persists, is faithfully copied by the scenario-generator, and only
 //     surfaces two layers downstream at the scenario gate where the retry can't
-//     reach back to fix the architect within the R2 cap. The retry message
-//     appends the valid options so the architect picks a real profile. Catalog
-//     load failure is non-fatal (skip rather than block on infra — matches
-//     harnessProfileCards()).
+//     reach back to fix the architect within the R2 cap. Catalog load failure is
+//     non-fatal (skip rather than block on infra — matches harnessProfileCards()).
+//
+// AGGREGATE reporting (2026-06-07): the validators used to short-circuit on the
+// first failure, so a single retry only ever surfaced ONE problem. With multiple
+// independent checks (coverage + coordinate + harness) an architecture that
+// violates two of them produced cross-validator oscillation — the architect
+// fixed the reported one, blindly restructured, and regressed the other, never
+// seeing "satisfy BOTH at once" (caught on a mavlink-hard run: A1 coverage → A2
+// coordinate → A3 coverage-again, exhausted). Running every validator and
+// returning every failure lets the architect close all constraints in one cycle.
+// The combined rule is comma-joined (for logging) and the combined msg lists
+// each failure delimited.
 func (c *Component) validateGeneratedArchitecture(ctx context.Context, architecture *workflow.ArchitectureDocument, kvPlan *workflow.Plan) (rule, msg string) {
+	type failure struct{ rule, msg string }
+	var failures []failure
+
 	if err := workflow.ValidateComponentImplementationFiles(architecture.ComponentBoundaries); err != nil {
-		return "component_implementation_files", fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())
+		failures = append(failures, failure{"component_implementation_files",
+			fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())})
 	}
 	if kvPlan != nil {
 		if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
-			return "capability_coverage", fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())
+			failures = append(failures, failure{"capability_coverage",
+				fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())})
 		}
 	}
 	if err := workflow.ValidateUpstreamImports(architecture.UpstreamResolutions); err != nil {
-		return "upstream_import_resolution", fmt.Sprintf("architecture validation failed (upstream import resolution): %s", err.Error())
+		failures = append(failures, failure{"upstream_import_resolution",
+			fmt.Sprintf("architecture validation failed (upstream import resolution): %s", err.Error())})
 	}
-	if rule, msg := c.validateUpstreamCoordinates(ctx, architecture.UpstreamResolutions); rule != "" {
-		return rule, msg
+	if r, m := c.validateUpstreamCoordinates(ctx, architecture.UpstreamResolutions); r != "" {
+		failures = append(failures, failure{r, m})
 	}
 	if cat, catErr := harnesscatalog.Load(""); catErr == nil {
 		if err := cat.ValidateSelections(architecture.HarnessProfiles); err != nil {
-			return "harness_profile_resolution", fmt.Sprintf(
+			failures = append(failures, failure{"harness_profile_resolution", fmt.Sprintf(
 				"architecture validation failed (harness profile resolution): %s — %s",
-				err.Error(), harnessResolutionHint(cat, err))
+				err.Error(), harnessResolutionHint(cat, err))})
 		}
 	} else {
 		c.logger.Warn("Harness catalog load failed; skipping harness-profile resolution check", "error", catErr)
 	}
-	return "", ""
+
+	if len(failures) == 0 {
+		return "", ""
+	}
+	if len(failures) == 1 {
+		return failures[0].rule, failures[0].msg
+	}
+	rules := make([]string, len(failures))
+	var combined strings.Builder
+	fmt.Fprintf(&combined, "architecture has %d validation issues — fix ALL of them in your next submission; fixing one while regressing another will be rejected again:\n", len(failures))
+	for i, f := range failures {
+		rules[i] = f.rule
+		fmt.Fprintf(&combined, "\n[%d] (%s) %s\n", i+1, f.rule, f.msg)
+	}
+	return strings.Join(rules, ","), combined.String()
 }
 
 // harnessResolutionHint tailors the retry guidance to the validation failure
