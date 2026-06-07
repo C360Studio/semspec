@@ -4,7 +4,79 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow/payloads"
 )
+
+// TestParseScenariosFromResult_StoresCanonicalHarnessIDsNotEcho pins the fix for
+// the 2026-06-06 flash-truncation incident: harness_profile_ids is a
+// SYSTEM-OWNED binding. The system stores the canonical IDs from the
+// RequiredTier binding, NOT the LLM's echoed (here: truncated) copy.
+func TestParseScenariosFromResult_StoresCanonicalHarnessIDsNotEcho(t *testing.T) {
+	c := &Component{logger: slog.Default()}
+
+	// Bob echoes a TRUNCATED id (missing the "mavlink." prefix) — exactly the
+	// flash failure. A @unit scenario also wrongly carries a harness id.
+	result := `{"scenarios":[
+		{"title":"integ","given":"the SITL env is up","when":"the driver connects","then":["a heartbeat is received"],"tags":["@integration"],"harness_profile_ids":["px4-sitl.mavsdk-smoke"]},
+		{"title":"unit","given":"a config","when":"the builder runs","then":["the fallback string is used"],"tags":["@unit"],"harness_profile_ids":["px4-sitl.mavsdk-smoke"]}
+	]}`
+	tiers := []payloads.RequiredTier{
+		{Tag: "@integration", HarnessProfileIDs: []string{"mavlink.px4-sitl.mavsdk-smoke"}},
+	}
+
+	got, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1", tiers)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d scenarios, want 2", len(got))
+	}
+	// @integration scenario gets the CANONICAL fully-qualified id, not Bob's echo.
+	if len(got[0].HarnessProfileIDs) != 1 || got[0].HarnessProfileIDs[0] != "mavlink.px4-sitl.mavsdk-smoke" {
+		t.Errorf("integration harness ids = %v, want [mavlink.px4-sitl.mavsdk-smoke] (canonical, not the truncated echo)", got[0].HarnessProfileIDs)
+	}
+	// @unit scenario gets NO harness id regardless of what Bob echoed.
+	if len(got[1].HarnessProfileIDs) != 0 {
+		t.Errorf("unit harness ids = %v, want empty (no binding for @unit)", got[1].HarnessProfileIDs)
+	}
+}
+
+// TestParseScenariosFromResult_ServicesClassIntegrationGetsEmptyBinding pins the
+// ADR-045 contract: when no testcontainers @integration tier is bound (services-
+// class/SITL only — classifier emits no RequiredTier for it), an @integration
+// scenario gets EMPTY harness IDs and parses cleanly (no error). Operator-tier
+// proof reaches the operator via qa.yml, not a sandbox-gated scenario binding.
+func TestParseScenariosFromResult_ServicesClassIntegrationGetsEmptyBinding(t *testing.T) {
+	c := &Component{logger: slog.Default()}
+	// Bob authored an @integration scenario (and echoed a services id), but the
+	// dispatch carried NO @integration RequiredTier (services is operator-tier).
+	result := `{"scenarios":[
+		{"title":"sitl","given":"the SITL env is up","when":"the driver connects","then":["a heartbeat arrives"],"tags":["@integration"],"harness_profile_ids":["mavlink.px4-sitl.mavsdk-smoke"]}
+	]}`
+	got, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1", nil)
+	if err != nil {
+		t.Fatalf("services-class @integration must parse cleanly, got: %v", err)
+	}
+	if len(got) != 1 || len(got[0].HarnessProfileIDs) != 0 {
+		t.Errorf("services-class @integration harness ids = %v, want empty (operator-tier, qa.yml-owned)", got[0].HarnessProfileIDs)
+	}
+}
+
+// TestCanonicalHarnessIDs covers the pure tier→ids lookup: dedup, multi-tag,
+// and tiers with no binding return nil.
+func TestCanonicalHarnessIDs(t *testing.T) {
+	canon := map[string][]string{
+		"@integration": {"mavlink.px4-sitl.mavsdk-smoke", "mavlink.px4-sitl.mavsdk-smoke", "pg.testcontainers"},
+	}
+	got := canonicalHarnessIDs([]string{"@integration"}, canon)
+	if len(got) != 2 || got[0] != "mavlink.px4-sitl.mavsdk-smoke" || got[1] != "pg.testcontainers" {
+		t.Errorf("got %v, want deduped [mavlink.px4-sitl.mavsdk-smoke pg.testcontainers]", got)
+	}
+	if ids := canonicalHarnessIDs([]string{"@unit"}, canon); ids != nil {
+		t.Errorf("@unit (no binding) = %v, want nil", ids)
+	}
+}
 
 // TestScenarioIDFor_LegacyShape pins the pre-ADR-043 scenario ID format
 // for back-compat with mock fixtures and pre-Sarah plans: when no story
@@ -68,11 +140,11 @@ func TestParseScenariosFromResult_PerStoryProducesDistinctIDsAcrossStories(t *te
 		{"title":"happy","given":"a precondition","when":"an action","then":["an assertion"],"tags":["@unit"]}
 	]}`
 
-	storyA, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1")
+	storyA, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1", nil)
 	if err != nil {
 		t.Fatalf("parse storyA: %v", err)
 	}
-	storyB, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.2")
+	storyB, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.2", nil)
 	if err != nil {
 		t.Fatalf("parse storyB: %v", err)
 	}
@@ -102,7 +174,7 @@ func TestParseScenariosFromResult_LegacyDispatchPreservesPreADR043IDs(t *testing
 		{"title":"happy","given":"a precondition","when":"an action","then":["an assertion"],"tags":["@unit"]}
 	]}`
 
-	scenarios, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "")
+	scenarios, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "", nil)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -125,11 +197,11 @@ func TestParseScenariosFromResult_DeterministicAcrossReRuns(t *testing.T) {
 		{"title":"b","given":"g","when":"w","then":["t"],"tags":["@unit"]}
 	]}`
 
-	first, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1")
+	first, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1", nil)
 	if err != nil {
 		t.Fatalf("first parse: %v", err)
 	}
-	second, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1")
+	second, err := c.parseScenariosFromResult(result, "demo", "req.demo.1", "story.demo.1.1", nil)
 	if err != nil {
 		t.Fatalf("second parse: %v", err)
 	}

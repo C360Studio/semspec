@@ -588,7 +588,31 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	scenarios, err := c.parseScenariosFromResult(loop.Result, slug, requirementID, storyID)
+	// Recover the canonical RequiredTiers from the tracked dispatch request so
+	// the system attaches the authoritative harness profile IDs by tier instead
+	// of trusting the LLM's echoed copy (see parseScenariosFromResult). Reuses
+	// the binding already computed by Classify at dispatch — no re-derivation.
+	//
+	// Invariant: the retry entry is present here. handleLoopCompletion only runs
+	// for loops that complete LIVE in the session that dispatched them (the
+	// replay guard discards pre-restart completions), and Track ran at dispatch;
+	// Snapshot precedes the Clear below. If that invariant ever breaks (durable
+	// dispatchretry, or relaxed replay guard) requiredTiers is nil → empty
+	// harness bindings; we log so the degradation is observable rather than
+	// silent. We deliberately do NOT fall back to the LLM echo — that would
+	// reintroduce the truncation bug this fix removes.
+	var requiredTiers []payloads.RequiredTier
+	if entry, ok := c.retry.Snapshot(key); ok && entry != nil {
+		if p, _ := entry.Payload.(*scenarioRetryPayload); p != nil && p.req != nil {
+			requiredTiers = p.req.RequiredTiers
+		}
+	}
+	if requiredTiers == nil {
+		c.logger.Warn("No tracked RequiredTiers at scenario completion; harness profile bindings will be empty",
+			"slug", slug, "requirement_id", requirementID, "story_id", storyID, "loop_id", loop.ID)
+	}
+
+	scenarios, err := c.parseScenariosFromResult(loop.Result, slug, requirementID, storyID, requiredTiers)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		parseErrorMsg := fmt.Sprintf("failed to parse scenarios: %s", err.Error())
@@ -797,7 +821,28 @@ func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback str
 // #73 closed C2, which surfaces this collision — and this PR closes it.
 //
 // Closes go-reviewer Pass-2 finding C3.
-func (c *Component) parseScenariosFromResult(result, slug, requirementID, storyID string) ([]workflow.Scenario, error) {
+// canonicalHarnessIDs returns the system-owned harness profile IDs for a
+// scenario's tier — the classifier's canonical RequiredTier binding looked up by
+// the scenario's tier tag. Returns nil when the tier has no binding (@unit/@e2e,
+// or @integration when only operator-tier/pure-fixture profiles are selected).
+// Deduped, order-stable. This is the authoritative value stored on the scenario;
+// the LLM's echoed harness_profile_ids are intentionally discarded.
+func canonicalHarnessIDs(tags []string, canonByTag map[string][]string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, tag := range tags {
+		for _, id := range canonByTag[tag] {
+			if _, dup := seen[id]; dup {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+func (c *Component) parseScenariosFromResult(result, slug, requirementID, storyID string, requiredTiers []payloads.RequiredTier) ([]workflow.Scenario, error) {
 	if result == "" {
 		return nil, fmt.Errorf("empty result")
 	}
@@ -837,6 +882,26 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID, storyI
 	reqSeq := requirementSequence(requirementID)
 	storySeq := storySequence(storyID)
 
+	// harness_profile_ids is a SYSTEM-OWNED binding, not authorial. The
+	// classifier already computed the canonical catalog IDs per tier
+	// (RequiredTier, dispatched in the request); we attach them here by tier
+	// rather than trusting the LLM's echoed copy. Mid-tier models (gemini-flash)
+	// truncate/mangle the long dotted IDs — 2026-06-06 flash dropped the
+	// "mavlink." prefix → harness_id_unresolved reject on a value the system
+	// already knew. This mirrors how story-preparer stores architecture-resolved
+	// canonical values instead of LLM-typed strings. Bob still AUTHORS the tier
+	// TAG (@unit/@integration/…) and the given/when/then prose; the system owns
+	// the catalog ID binding. Tiers with no canonical binding (@unit, or
+	// @integration when only operator-tier/pure-fixture profiles exist) get no
+	// IDs — correct: operator-tier proof reaches the operator via qa.yml, not a
+	// sandbox-gated scenario binding (ADR-045).
+	canonByTag := make(map[string][]string, len(requiredTiers))
+	for _, t := range requiredTiers {
+		if len(t.HarnessProfileIDs) > 0 {
+			canonByTag[t.Tag] = append(canonByTag[t.Tag], t.HarnessProfileIDs...)
+		}
+	}
+
 	now := time.Now()
 	scenarios := make([]workflow.Scenario, len(raw))
 	for i, s := range raw {
@@ -859,7 +924,7 @@ func (c *Component) parseScenariosFromResult(result, slug, requirementID, storyI
 			When:              s.When,
 			Then:              s.Then,
 			Tags:              s.Tags,
-			HarnessProfileIDs: s.HarnessProfileIDs,
+			HarnessProfileIDs: canonicalHarnessIDs(s.Tags, canonByTag),
 			Status:            workflow.ScenarioStatusPending,
 			CreatedAt:         now,
 			UpdatedAt:         now,
