@@ -969,6 +969,25 @@ type UpstreamResolution struct {
 	//   - "https://github.com/opensensorhub/osh-core/releases/tag/v2.0.0"
 	SourceRef string `json:"source_ref"`
 
+	// ResolutionKind classifies HOW the artifact is consumed, which selects the
+	// system-side reality check applied at arch-gen (issue #126):
+	//   - "maven_central": published Java jar; verified numFound>0 on Central.
+	//   - "source_build": built from a git source; verified the source_ref URL
+	//     resolves. The honest kind for deps with no published jar.
+	//   - "kmp_multiplatform": Kotlin Multiplatform; verified the coordinate or
+	//     its "-jvm" suffix resolves on Central.
+	//   - "unresolved": architect could not find a consumable artifact — a
+	//     first-class honest flag (surfaced to the reviewer), NOT a fabricated
+	//     coordinate. No network check.
+	// Empty is inferred from the coordinate shape: a Maven-shaped
+	// "group:artifact:version" defaults to maven_central (so the fabrication
+	// check still fires on architects/records that omit the field); non-Maven
+	// shapes infer to unchecked. The check is performed by the SYSTEM, not
+	// self-reported by the model — see workflow.ResolutionKind. Added 2026-06-07
+	// after a meshtastic run shipped fabricated coordinates (numFound=0) that
+	// passed every gate. omitempty/additive for back-compat.
+	ResolutionKind string `json:"resolution_kind,omitempty"`
+
 	// APIs are the specific surfaces the dev will integrate against.
 	// At least one entry is the architect's normal contribution — without
 	// any APIs, the resolution is just a pin in the build manifest with

@@ -1,6 +1,7 @@
 package architecturegenerator
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -72,7 +73,7 @@ func TestValidateGeneratedArchitecture_HarnessGate(t *testing.T) {
 		},
 		HarnessProfiles: []workflow.HarnessProfileSelection{{ProfileID: "docker.generic"}},
 	}
-	rule, msg := c.validateGeneratedArchitecture(bad, nil)
+	rule, msg := c.validateGeneratedArchitecture(context.Background(), bad, nil)
 	if rule != "harness_profile_resolution" {
 		t.Fatalf("rule = %q, want harness_profile_resolution (msg=%q)", rule, msg)
 	}
@@ -86,7 +87,7 @@ func TestValidateGeneratedArchitecture_HarnessGate(t *testing.T) {
 		},
 		HarnessProfiles: []workflow.HarnessProfileSelection{{ProfileID: "mavlink.px4-sitl.mavsdk-smoke"}},
 	}
-	if rule, msg := c.validateGeneratedArchitecture(good, nil); rule != "" {
+	if rule, msg := c.validateGeneratedArchitecture(context.Background(), good, nil); rule != "" {
 		t.Errorf("clean architecture rejected: rule=%q msg=%q", rule, msg)
 	}
 }

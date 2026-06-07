@@ -2269,6 +2269,8 @@ components:
                                         type: string
                                     name:
                                         type: string
+                                    resolution_kind:
+                                        type: string
                                     role:
                                         type: string
                                     source_ref:
@@ -2999,6 +3001,8 @@ components:
                                     coordinate:
                                         type: string
                                     name:
+                                        type: string
+                                    resolution_kind:
                                         type: string
                                     role:
                                         type: string

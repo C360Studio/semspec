@@ -2789,6 +2789,7 @@ export interface components {
                     }[];
                     coordinate: string;
                     name: string;
+                    resolution_kind?: string;
                     role?: string;
                     source_ref: string;
                     used_by?: string[];
@@ -3060,6 +3061,7 @@ export interface components {
                     }[];
                     coordinate: string;
                     name: string;
+                    resolution_kind?: string;
                     role?: string;
                     source_ref: string;
                     used_by?: string[];

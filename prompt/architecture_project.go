@@ -44,12 +44,13 @@ func ProjectUpstreams(arch *workflow.ArchitectureDocument) []UpstreamResolutionI
 			}
 		}
 		out[i] = UpstreamResolutionInfo{
-			Name:       u.Name,
-			Coordinate: u.Coordinate,
-			SourceRef:  u.SourceRef,
-			Role:       u.Role,
-			UsedBy:     append([]string(nil), u.UsedBy...),
-			APIs:       apis,
+			Name:           u.Name,
+			Coordinate:     u.Coordinate,
+			SourceRef:      u.SourceRef,
+			ResolutionKind: string(u.EffectiveResolutionKind()),
+			Role:           u.Role,
+			UsedBy:         append([]string(nil), u.UsedBy...),
+			APIs:           apis,
 		}
 	}
 	return out
