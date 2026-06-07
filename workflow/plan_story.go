@@ -452,3 +452,42 @@ func ValidateComponentImplementationFiles(components []ComponentDef) error {
 	}
 	return nil
 }
+
+// codeSymbolImportKinds are the APISurface kinds the developer imports by a
+// fully-qualified reference. message/config_field surfaces are not imported and
+// need no import field.
+var codeSymbolImportKinds = map[string]bool{
+	"class": true, "interface": true, "type": true,
+	"function": true, "annotation": true, "constant": true,
+}
+
+// ValidateUpstreamImports rejects an upstream resolution APISurface whose
+// `import` is a bare, unqualified symbol for a code-symbol kind — a provably
+// wrong value the developer cannot actually import (a real import names a
+// package: it contains ".", "/", or "::"). This is the deterministic,
+// non-gameable backstop for the 2026-06-07 wedge where only the bare symbol
+// "System" was resolved and the dev burned 3.4M tokens rediscovering
+// io.mavsdk.System via javap.
+//
+// EMPTY imports are intentionally NOT rejected here: the architect prompt + the
+// plan-reviewer rule 7a-c2 own the presence judgment, which a deterministic
+// presence gate would Goodhart into fabricated package paths. This check fires
+// only when an import IS present but is just the bare symbol again.
+func ValidateUpstreamImports(resolutions []UpstreamResolution) error {
+	for _, u := range resolutions {
+		for _, a := range u.APIs {
+			if !codeSymbolImportKinds[a.Kind] {
+				continue
+			}
+			imp := strings.TrimSpace(a.Import)
+			if imp == "" {
+				continue
+			}
+			if !strings.ContainsAny(imp, "./") && !strings.Contains(imp, "::") {
+				return fmt.Errorf("%w: upstream resolution %q api %q has a bare import %q with no package qualifier — the dev cannot import it; provide the fully-qualified reference (e.g. io.mavsdk.System) verified against the artifact",
+					ErrInvalidStoryStructure, u.Name, a.Symbol, imp)
+			}
+		}
+	}
+	return nil
+}

@@ -179,6 +179,13 @@ func renderArchUpstreamResolutions(b *strings.Builder, ur []workflow.UpstreamRes
 					b.WriteString(fmt.Sprintf(" — `%s`", a.Signature))
 				}
 				b.WriteString("\n")
+				if a.Import != "" {
+					b.WriteString(fmt.Sprintf("    import: `%s`", a.Import))
+					if a.Artifact != "" {
+						b.WriteString(fmt.Sprintf(" (from artifact `%s`)", a.Artifact))
+					}
+					b.WriteString("\n")
+				}
 				if a.Citation != "" {
 					b.WriteString(fmt.Sprintf("    *cited from %s*\n", a.Citation))
 				}

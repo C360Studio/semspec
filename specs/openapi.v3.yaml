@@ -2242,7 +2242,11 @@ components:
                                     apis:
                                         items:
                                             properties:
+                                                artifact:
+                                                    type: string
                                                 citation:
+                                                    type: string
+                                                import:
                                                     type: string
                                                 kind:
                                                     type: string
@@ -2460,6 +2464,8 @@ components:
                             - created_at
                         type: object
                     type: array
+                previous_architecture_json:
+                    type: string
                 project_id:
                     type: string
                 qa_level:
@@ -2523,6 +2529,8 @@ components:
                         dimensions:
                             properties:
                                 assertion_quality:
+                                    type: string
+                                capability_evidence:
                                     type: string
                                 coverage:
                                     type: string
@@ -2679,10 +2687,12 @@ components:
                 stories:
                     items:
                         properties:
-                            components:
+                            capability_names:
                                 items:
                                     type: string
                                 type: array
+                            component_name:
+                                type: string
                             created_at:
                                 format: date-time
                                 type: string
@@ -2706,8 +2716,10 @@ components:
                                 type: string
                             recovery_hint:
                                 type: string
-                            requirement_id:
-                                type: string
+                            requirement_ids:
+                                items:
+                                    type: string
+                                type: array
                             status:
                                 type: string
                             tasks:
@@ -2746,7 +2758,6 @@ components:
                                 type: string
                         required:
                             - id
-                            - requirement_id
                             - title
                             - created_at
                             - updated_at
@@ -2962,7 +2973,11 @@ components:
                                     apis:
                                         items:
                                             properties:
+                                                artifact:
+                                                    type: string
                                                 citation:
+                                                    type: string
+                                                import:
                                                     type: string
                                                 kind:
                                                     type: string
@@ -3197,6 +3212,8 @@ components:
                             - created_at
                         type: object
                     type: array
+                previous_architecture_json:
+                    type: string
                 project_id:
                     type: string
                 qa_level:
@@ -3260,6 +3277,8 @@ components:
                         dimensions:
                             properties:
                                 assertion_quality:
+                                    type: string
+                                capability_evidence:
                                     type: string
                                 coverage:
                                     type: string
@@ -3418,10 +3437,12 @@ components:
                 stories:
                     items:
                         properties:
-                            components:
+                            capability_names:
                                 items:
                                     type: string
                                 type: array
+                            component_name:
+                                type: string
                             created_at:
                                 format: date-time
                                 type: string
@@ -3445,8 +3466,10 @@ components:
                                 type: string
                             recovery_hint:
                                 type: string
-                            requirement_id:
-                                type: string
+                            requirement_ids:
+                                items:
+                                    type: string
+                                type: array
                             status:
                                 type: string
                             tasks:
@@ -3485,7 +3508,6 @@ components:
                                 type: string
                         required:
                             - id
-                            - requirement_id
                             - title
                             - created_at
                             - updated_at

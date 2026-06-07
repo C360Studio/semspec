@@ -2778,7 +2778,9 @@ export interface components {
                 } | null;
                 upstream_resolutions?: {
                     apis?: {
+                        artifact?: string;
                         citation: string;
+                        import?: string;
                         kind: string;
                         lifecycle?: string;
                         notes?: string;
@@ -2861,6 +2863,7 @@ export interface components {
                 status: string;
                 title: string;
             }[];
+            previous_architecture_json?: string;
             project_id: string;
             qa_level?: string;
             qa_run?: {
@@ -2887,6 +2890,7 @@ export interface components {
             qa_verdict_summary?: {
                 dimensions?: {
                     assertion_quality?: string;
+                    capability_evidence?: string;
                     coverage?: string;
                     flake_judgment?: string;
                     regression_surface?: string;
@@ -2950,7 +2954,8 @@ export interface components {
             slug: string;
             status?: string;
             stories?: {
-                components?: string[];
+                capability_names?: string[];
+                component_name?: string;
                 /** Format: date-time */
                 created_at: string;
                 depends_on?: string[];
@@ -2961,7 +2966,7 @@ export interface components {
                 prepared_at?: string | null;
                 prepared_by?: string;
                 recovery_hint?: string;
-                requirement_id: string;
+                requirement_ids?: string[];
                 status?: string;
                 tasks?: {
                     /** Format: date-time */
@@ -3044,7 +3049,9 @@ export interface components {
                 } | null;
                 upstream_resolutions?: {
                     apis?: {
+                        artifact?: string;
                         citation: string;
+                        import?: string;
                         kind: string;
                         lifecycle?: string;
                         notes?: string;
@@ -3133,6 +3140,7 @@ export interface components {
                 status: string;
                 title: string;
             }[];
+            previous_architecture_json?: string;
             project_id: string;
             qa_level?: string;
             qa_run?: {
@@ -3159,6 +3167,7 @@ export interface components {
             qa_verdict_summary?: {
                 dimensions?: {
                     assertion_quality?: string;
+                    capability_evidence?: string;
                     coverage?: string;
                     flake_judgment?: string;
                     regression_surface?: string;
@@ -3223,7 +3232,8 @@ export interface components {
             stage: string;
             status?: string;
             stories?: {
-                components?: string[];
+                capability_names?: string[];
+                component_name?: string;
                 /** Format: date-time */
                 created_at: string;
                 depends_on?: string[];
@@ -3234,7 +3244,7 @@ export interface components {
                 prepared_at?: string | null;
                 prepared_by?: string;
                 recovery_hint?: string;
-                requirement_id: string;
+                requirement_ids?: string[];
                 status?: string;
                 tasks?: {
                     /** Format: date-time */

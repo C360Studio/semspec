@@ -598,6 +598,9 @@ func (c *Component) validateGeneratedArchitecture(architecture *workflow.Archite
 			return "capability_coverage", fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())
 		}
 	}
+	if err := workflow.ValidateUpstreamImports(architecture.UpstreamResolutions); err != nil {
+		return "upstream_import_resolution", fmt.Sprintf("architecture validation failed (upstream import resolution): %s", err.Error())
+	}
 	if cat, catErr := harnesscatalog.Load(""); catErr == nil {
 		if err := cat.ValidateSelections(architecture.HarnessProfiles); err != nil {
 			return "harness_profile_resolution", fmt.Sprintf(
