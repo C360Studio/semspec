@@ -161,19 +161,19 @@ func (c *Component) initTaskExecution(ctx context.Context, exec *taskExecution) 
 
 	// Write initial triples from exec fields (no trigger needed).
 	entityID := exec.EntityID
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "task-execution")
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseDeveloping)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, exec.Slug)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TaskID, exec.TaskID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Title, exec.Title)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TDDCycle, 0)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxTDDCycles, exec.MaxTDDCycles)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, exec.TraceID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Model, exec.Model)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CurrentStage, phaseDeveloping)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.Type, "task-execution")
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.Phase, phaseDeveloping)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.Slug, exec.Slug)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.TaskID, exec.TaskID)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.Title, exec.Title)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.TDDCycle, 0)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.MaxTDDCycles, exec.MaxTDDCycles)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.TraceID, exec.TraceID)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.Model, exec.Model)
+	_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.CurrentStage, phaseDeveloping)
 	if exec.Prompt != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Prompt, exec.Prompt)
+		_ = c.tripleWriter.UpdateTriple(ctx, entityID, wf.Prompt, exec.Prompt)
 	}
 
 	if err := c.createWorktree(ctx, exec); err != nil {
