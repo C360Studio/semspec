@@ -114,3 +114,39 @@ func TestValidateUpstreamCoordinates(t *testing.T) {
 		}
 	})
 }
+
+// TestValidateGeneratedArchitecture_AggregatesFailures pins that an architecture
+// violating MULTIPLE validators reports ALL of them at once (not first-only), so
+// the architect can fix every constraint in one cycle instead of oscillating
+// (2026-06-07 mavlink-hard: A1 coverage → A2 coordinate → A3 coverage-again).
+func TestValidateGeneratedArchitecture_AggregatesFailures(t *testing.T) {
+	c := newTestComponent(fakeVerifier{exists: map[string]bool{}}) // nothing resolves
+	arch := &workflow.ArchitectureDocument{
+		ComponentBoundaries: []workflow.ComponentDef{
+			{Name: "driver", ImplementationFiles: []string{"src/Driver.java"}, Capabilities: []string{"cap-a"}},
+		},
+		// fabricated maven coordinate → #126 rejects; no APIs → import check passes
+		UpstreamResolutions: []workflow.UpstreamResolution{
+			{Name: "Fake", Coordinate: "com.fake:nope:1.0"},
+		},
+	}
+	// exploration declares cap-b which no component covers → capability_coverage fails
+	kvPlan := &workflow.Plan{Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{
+		{Name: "cap-a"}, {Name: "cap-b"},
+	}}}
+
+	rule, msg := c.validateGeneratedArchitecture(context.Background(), arch, kvPlan)
+	if rule == "" {
+		t.Fatal("expected rejection")
+	}
+	for _, want := range []string{"capability_coverage", "upstream_coordinate_resolution"} {
+		if !strings.Contains(rule, want) {
+			t.Errorf("combined rule %q missing %q", rule, want)
+		}
+	}
+	for _, want := range []string{"fix ALL", "cap-b", "com.fake:nope:1.0", "[1]", "[2]"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("combined msg missing %q\n--- msg ---\n%s", want, msg)
+		}
+	}
+}
