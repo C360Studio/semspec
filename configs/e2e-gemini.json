@@ -98,12 +98,12 @@
     },
     "capabilities": {
       "planning": {
-        "description": "Plan generation and architecture",
+        "description": "Plan generation, architecture, and story coverage partitioning",
         "preferred": [
-          "gemini-flash"
+          "gemini-pro"
         ],
         "fallback": [
-          "gemini-pro"
+          "gemini-flash"
         ]
       },
       "writing": {
@@ -113,7 +113,7 @@
         ]
       },
       "coding": {
-        "description": "Code generation, implementation. Bumped to pro 2026-05-11 take 12: gemini-flash invented dep coords (io.opensensorhub vs org.sensorhub) despite a clear comment hint + readable /sources/osh/ mount. The developer is doing the hardest single task (write code that compiles AND satisfies scenarios AND respects scope AND doesn't fabricate); flash had insufficient comprehension budget for the @hard fixture. Cost rises ~3-5x per dev dispatch but @hard is testing reliability, not cost.",
+        "description": "Code generation and implementation (developer agent)",
         "preferred": [
           "gemini-pro"
         ],
@@ -122,7 +122,7 @@
         ]
       },
       "reviewing": {
-        "description": "Code review, quality analysis. Take 6 (gemini @hard 2026-05-10) showed reviewer-loop wedges as the residual class after persona changes closed the URL-guessing wedge — flash had trouble holding the rubric over a non-trivial Java diff. Bumped to pro primary so reviewer reasoning matches the leverage of the gate (one wrong approval costs 30+ minutes of downstream work).",
+        "description": "Code review and quality analysis (per-node code reviewer)",
         "preferred": [
           "gemini-pro"
         ],
@@ -131,7 +131,7 @@
         ]
       },
       "requirement_generation": {
-        "description": "Requirement decomposition — partitioning a plan into reqs with non-overlapping file ownership + chain-dep DAG. Decomposition reasoning closer to architecture than to writing; gemini-flash variance (2 vs 4 reqs across runs 2026-05-05) confirms mid-tier is too thin. Pro preferred, flash fallback.",
+        "description": "Requirement decomposition — partitioning a plan into requirements with non-overlapping file ownership and a chain-dependency DAG",
         "preferred": [
           "gemini-pro"
         ],
@@ -149,7 +149,7 @@
         ]
       },
       "plan_review": {
-        "description": "SOP-aware plan review. Plan-reviewer is the gate before execution — a wrong approval costs ~75min of execution wallclock for @hard. Bumped to pro primary 2026-05-10 alongside reviewing/qa: the gate reasons over goal/context/scope/requirements/scenarios in one pass and flash's discrimination at that span was at the edge in take 1 (two rejections + iter-3 approval).",
+        "description": "SOP-aware plan review — the gate before execution, reasoning over goal/context/scope/requirements/scenarios",
         "preferred": [
           "gemini-pro"
         ],
@@ -167,7 +167,7 @@
         ]
       },
       "qa": {
-        "description": "Rollup quality review — release-readiness verdict over the assembled plan. Fires once per plan; a false approval ships broken work past the human-in-loop gate. Bumped to pro primary 2026-05-10: cheapest insurance of the three review gates because qa runs only once per plan, not three times like plan-review.",
+        "description": "Rollup quality review — release-readiness verdict over the assembled plan (fires once per plan)",
         "preferred": [
           "gemini-pro"
         ],
@@ -176,7 +176,7 @@
         ]
       },
       "lesson_decomposition": {
-        "description": "ADR-033 lesson decomposer — rare, benefits from a smarter model",
+        "description": "ADR-033 lesson decomposer",
         "preferred": [
           "gemini-pro",
           "gemini-flash"
@@ -202,7 +202,7 @@
         "timeout": "10s"
       },
       "answer_synthesis": {
-        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once. Take 3 (gemini @hard 2026-05-10) wedged here: seminstruct-answer 1.7B-on-CPU hit 30s context-deadline-exceeded on real @hard queries (extractive composition over community summaries can be slower than the toy-fixture benchmark suggested). Mirroring community_summary's resolution: gemini-flash-lite primary (sub-second, Google's quality bar over the sub-7B floor) with seminstruct-answer kept as fallback for offline/quota scenarios.",
+        "description": "graph-query globalSearch answer composition — ephemeral, agent reads once",
         "preferred": [
           "gemini-flash-lite"
         ],
@@ -212,7 +212,7 @@
         "timeout": "30s"
       },
       "community_summary": {
-        "description": "graph-clustering community summarization — background batch, persisted into graph. seminstruct-8B-on-CPU validated 2026-05-06 ADR-036 Phase 2 to be too slow at any scale beyond toy fixtures (>180s per community on 2 CPUs). gemini-flash-lite gives sub-second response and Google's quality bar exceeds the MS GraphRAG sub-7B floor anyway. Local seminstruct-summary kept as fallback for offline/quota scenarios.",
+        "description": "graph-clustering community summarization — background batch, persisted into the graph",
         "preferred": [
           "gemini-flash-lite"
         ],
@@ -222,7 +222,7 @@
         "timeout": "300s"
       },
       "question_answering": {
-        "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
+        "description": "Answerer-agent backend for ask_question routes",
         "preferred": [
           "gemini-pro"
         ],
@@ -232,7 +232,7 @@
         "timeout": "60s"
       },
       "task_decomposition": {
-        "description": "requirement-executor decomposer — DAG of executable nodes from a requirement. Planner-class reasoning, not coder-class generation.",
+        "description": "requirement-executor decomposer — DAG of executable nodes from a requirement",
         "preferred": [
           "gemini-pro"
         ],
@@ -241,7 +241,7 @@
         ]
       },
       "plan_wedge_recovery": {
-        "description": "ADR-037 stage 1 — manager-role recovery agent dispatched on plan-manager escalations (revision-cap exhaustion, plan-review wedges). Reasons over the wedged planner's full trajectory + plan state to pick a RecoveryAction (refine_prompt | narrow_scope | split_req | escalate_human | mark_unrecoverable). Per ADR-037 setup-time-human-decision: pro primary because the recovery agent must out-reason the wedged agent it's recovering, not match it.",
+        "description": "ADR-037 stage 1 recovery agent for plan-manager escalations (revision-cap exhaustion, plan-review wedges); reads the wedged trajectory + plan state to pick a RecoveryAction",
         "preferred": [
           "gemini-pro"
         ],
@@ -250,7 +250,7 @@
         ]
       },
       "execution_wedge_recovery": {
-        "description": "ADR-037 stage 1 — manager-role recovery agent dispatched on execution-manager escalations (TDD-cycle exhaustion, iter=N tool-loop wedges, fixable-rejection cascades). Reads the wedged developer's full trajectory (capped 80 steps via internal/trajectory) plus reviewer feedback to diagnose and pick a RecoveryAction. Pro primary: same reasoning as plan_wedge_recovery — recovery must dominate the wedge.",
+        "description": "ADR-037 stage 1 recovery agent for execution-manager escalations (TDD-cycle exhaustion, iter=N tool-loop wedges, fixable-rejection cascades); reads the wedged developer trajectory + reviewer feedback to pick a RecoveryAction",
         "preferred": [
           "gemini-pro"
         ],
@@ -259,7 +259,7 @@
         ]
       },
       "coordinator_recovery": {
-        "description": "ADR-037 stage 2 — coordinator-component recovery agent dispatched on QA failures and on cross-phase wedges where phase-local recovery already ran (Layer=coordinator). Reads the prior recovery record from RECOVERY_STATES so it doesn't repeat the same action shape. Pro primary; this is the last recovery layer before escalate_human.",
+        "description": "ADR-037 stage 2 coordinator recovery agent for QA failures and cross-phase wedges (Layer=coordinator); reads the prior recovery record from RECOVERY_STATES to avoid repeating an action shape",
         "preferred": [
           "gemini-pro"
         ],
