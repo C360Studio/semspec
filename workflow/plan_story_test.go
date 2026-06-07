@@ -591,7 +591,20 @@ func TestValidateCapabilityCoverage(t *testing.T) {
 				{Name: "auth-service", Capabilities: []string{"auth"}},
 			},
 			wantErr:   ErrInvalidStoryStructure,
-			errPhrase: `capability "session" has no component`,
+			errPhrase: `UNCOVERED (add each to some component's capabilities list): session`,
+		},
+		{
+			name: "multiple uncovered are ALL reported (complete hint, not first-only)",
+			exp: &Exploration{Capabilities: []Capability{
+				{Name: "osh-mavsdk-driver"}, {Name: "cs-api-telemetry"},
+				{Name: "cs-api-control"}, {Name: "raw-mavlink-fallback"},
+			}},
+			components: []ComponentDef{
+				{Name: "driver", Capabilities: []string{"cs-api-control"}},
+			},
+			wantErr: ErrInvalidStoryStructure,
+			// all three uncovered named + full declared set + current mapping
+			errPhrase: "osh-mavsdk-driver, cs-api-telemetry, raw-mavlink-fallback",
 		},
 	}
 	for _, tc := range cases {

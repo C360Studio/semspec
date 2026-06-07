@@ -390,10 +390,18 @@ func ValidateTaskDAG(parentStoryID string, tasks []Task) error {
 // plans and back-compat reads pass through clean. The check fires once the
 // exploration is populated AND the architecture has components.
 //
-// Returns ErrInvalidStoryStructure wrapped with the first unresolved
-// capability name. The architecture-generator surfaces this back to Winston
-// via retry-feedback so the LLM can extend the offending component or add
-// a new one in the next cycle.
+// Returns ErrInvalidStoryStructure wrapped with a COMPLETE coverage hint: ALL
+// uncovered capabilities (not just the first), the full declared-capability set,
+// and the architect's current component→capabilities mapping. The
+// architecture-generator surfaces this back to Winston via retry-feedback.
+//
+// Reporting only the first miss (the pre-2026-06-07 behavior) produced
+// whack-a-mole across retries: the architect fixed the named capability, blindly
+// restructured, and dropped another — on a 2026-06-07 mavlink-hard run it
+// oscillated (4 components → 1 → 1) and exhausted all retries without ever
+// covering all four capabilities. The complete hint gives the architect the full
+// target plus its current state so it can close coverage in one cycle (mirrors
+// harnessResolutionHint listing all valid catalog IDs).
 func ValidateCapabilityCoverage(exp *Exploration, components []ComponentDef) error {
 	if exp == nil || len(exp.Capabilities) == 0 || len(components) == 0 {
 		return nil
@@ -404,13 +412,33 @@ func ValidateCapabilityCoverage(exp *Exploration, components []ComponentDef) err
 			covered[capName] = struct{}{}
 		}
 	}
+
+	var uncovered, declared []string
 	for _, cap := range exp.Capabilities {
+		declared = append(declared, cap.Name)
 		if _, ok := covered[cap.Name]; !ok {
-			return fmt.Errorf("%w: capability %q has no component whose capabilities list contains it — every capability declared by the analyst must be implemented by at least one component",
-				ErrInvalidStoryStructure, cap.Name)
+			uncovered = append(uncovered, cap.Name)
 		}
 	}
-	return nil
+	if len(uncovered) == 0 {
+		return nil
+	}
+
+	var current strings.Builder
+	for i, c := range components {
+		if i > 0 {
+			current.WriteString("; ")
+		}
+		fmt.Fprintf(&current, "%s=[%s]", c.Name, strings.Join(c.Capabilities, ", "))
+	}
+
+	return fmt.Errorf("%w: capability coverage incomplete — %d of %d analyst-declared capabilities are implemented by no component. "+
+		"UNCOVERED (add each to some component's capabilities list): %s. "+
+		"ALL declared capabilities (every one MUST appear in at least one component's capabilities list): %s. "+
+		"Your current components → capabilities: %s. "+
+		"A single component MAY list multiple capabilities — extend an existing component or add one so every declared capability is covered; do not drop a previously-covered capability while adding the missing ones",
+		ErrInvalidStoryStructure, len(uncovered), len(declared),
+		strings.Join(uncovered, ", "), strings.Join(declared, ", "), current.String())
 }
 
 // ValidateComponentImplementationFiles checks that every ComponentDef in
