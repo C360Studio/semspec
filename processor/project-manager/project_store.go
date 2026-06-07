@@ -226,22 +226,22 @@ func (s *projectStore) writeConfigTriples(ctx context.Context, pc *workflow.Proj
 	}
 	entityID := workflow.ProjectConfigEntityID("project")
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigType, "project")
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.ProjectConfigFile)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigName, pc.Name)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigOrg, pc.Org)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigPlatform, pc.Platform)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, pc.UpdatedAt.Format(time.RFC3339))
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigApproved, pc.ApprovedAt != nil)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigType, "project")
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.ProjectConfigFile)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigName, pc.Name)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigOrg, pc.Org)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigPlatform, pc.Platform)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, pc.UpdatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApproved, pc.ApprovedAt != nil)
 	if pc.ApprovedAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, pc.ApprovedAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, pc.ApprovedAt.Format(time.RFC3339))
 	}
 
 	jsonBlob, err := json.Marshal(pc)
 	if err != nil {
 		return err
 	}
-	return tw.WriteTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
+	return tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
 }
 
 // writeChecklistTriples writes triples for checklist config.
@@ -252,19 +252,19 @@ func (s *projectStore) writeChecklistTriples(ctx context.Context, cl *workflow.C
 	}
 	entityID := workflow.ProjectConfigEntityID("checklist")
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigType, "checklist")
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.ChecklistFile)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, cl.UpdatedAt.Format(time.RFC3339))
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigApproved, cl.ApprovedAt != nil)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigType, "checklist")
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.ChecklistFile)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, cl.UpdatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApproved, cl.ApprovedAt != nil)
 	if cl.ApprovedAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, cl.ApprovedAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, cl.ApprovedAt.Format(time.RFC3339))
 	}
 
 	jsonBlob, err := json.Marshal(cl)
 	if err != nil {
 		return err
 	}
-	return tw.WriteTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
+	return tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
 }
 
 // writeStandardsTriples writes triples for standards config.
@@ -275,19 +275,19 @@ func (s *projectStore) writeStandardsTriples(ctx context.Context, st *workflow.S
 	}
 	entityID := workflow.ProjectConfigEntityID("standards")
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigType, "standards")
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.StandardsFile)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, st.UpdatedAt.Format(time.RFC3339))
-	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigApproved, st.ApprovedAt != nil)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigType, "standards")
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.StandardsFile)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, st.UpdatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApproved, st.ApprovedAt != nil)
 	if st.ApprovedAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, st.ApprovedAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, st.ApprovedAt.Format(time.RFC3339))
 	}
 
 	jsonBlob, err := json.Marshal(st)
 	if err != nil {
 		return err
 	}
-	return tw.WriteTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
+	return tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
 }
 
 // ----------------------------------------------------------------------------

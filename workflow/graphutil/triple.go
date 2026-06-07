@@ -89,6 +89,83 @@ func (tw *TripleWriter) WriteTriple(ctx context.Context, entityID, predicate str
 	return nil
 }
 
+// RemoveTriple removes ALL triples for (entityID, predicate) via
+// graph.mutation.triple.remove. Idempotent: removing a predicate that does not
+// exist (or an absent entity) is a no-op success.
+func (tw *TripleWriter) RemoveTriple(ctx context.Context, entityID, predicate string) error {
+	req := graph.RemoveTripleRequest{Subject: entityID, Predicate: predicate}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal remove request: %w", err)
+	}
+	if tw.NATSClient == nil {
+		return nil
+	}
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, "graph.mutation.triple.remove", data, 5*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		tw.Logger.Warn("Triple remove request failed",
+			"predicate", predicate, "entity_id", entityID, "error", err)
+		return fmt.Errorf("triple remove request: %w", err)
+	}
+	var resp graph.RemoveTripleResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return fmt.Errorf("unmarshal remove response: %w", err)
+	}
+	if !resp.Success {
+		tw.Logger.Warn("Triple remove rejected by graph-ingest",
+			"predicate", predicate, "entity_id", entityID, "error", resp.Error)
+		return fmt.Errorf("triple remove rejected: %s", resp.Error)
+	}
+	return nil
+}
+
+// UpdateTriple upserts a SINGLE-VALUED predicate: it removes any existing
+// triples for (entityID, predicate), then writes the new value, so the entity
+// holds exactly one value per predicate rather than accumulating every
+// historical value.
+//
+// WHY this exists: graph-ingest's AddTriple is APPEND-ONLY
+// (entity.Triples = append(...), never replace-by-(subject,predicate)). Writing
+// a scalar with WriteTriple on every mutation therefore grows the entity
+// unboundedly. A retry-heavy plan-prep run bloated the plan entity past the
+// 1 MiB KV value cap (2026-06-07), after which every write — including the
+// recovery PlanDecision — was rejected and the plan went terminal. UpdateTriple
+// bounds the entity to its field set.
+//
+// Use UpdateTriple for scalar fields that change over an entity's lifetime
+// (status, title, timestamps, last_error, review fields). Keep WriteTriple
+// (append) for genuinely multi-valued predicates — list members and edges
+// (scope entries, trace IDs, affected requirement IDs, capability links).
+func (tw *TripleWriter) UpdateTriple(ctx context.Context, entityID, predicate string, object any) error {
+	// Best-effort remove: a failed remove only risks a lingering stale value, it
+	// must not block recording the latest. The common path removes cleanly and
+	// keeps the entity bounded.
+	if err := tw.RemoveTriple(ctx, entityID, predicate); err != nil {
+		tw.Logger.Warn("UpdateTriple remove step failed (continuing with add)",
+			"predicate", predicate, "entity_id", entityID, "error", err)
+	}
+	return tw.WriteTriple(ctx, entityID, predicate, object)
+}
+
+// ReplaceTripleList replaces ALL values of a multi-valued predicate with the
+// given set: it removes every existing (entityID, predicate) triple, then
+// appends one per value. Use for list/edge predicates (scope entries, trace
+// IDs, open questions) so re-writing the list on each mutation does not append
+// duplicates and grow the entity without bound. Pass nil/empty to clear it.
+func (tw *TripleWriter) ReplaceTripleList(ctx context.Context, entityID, predicate string, objects []string) error {
+	if err := tw.RemoveTriple(ctx, entityID, predicate); err != nil {
+		tw.Logger.Warn("ReplaceTripleList remove step failed (continuing)",
+			"predicate", predicate, "entity_id", entityID, "error", err)
+	}
+	var firstErr error
+	for _, o := range objects {
+		if err := tw.WriteTriple(ctx, entityID, predicate, o); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
+}
+
 // ReadEntity fetches an entity's triples from ENTITY_STATES via graph-ingest
 // NATS request/reply. Returns a map of predicate → object (as string).
 // Non-string objects are JSON-encoded.

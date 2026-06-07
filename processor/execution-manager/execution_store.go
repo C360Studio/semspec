@@ -373,52 +373,50 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 		entityID = workflow.TaskExecutionEntityID(exec.Slug, exec.TaskID)
 	}
 
-	_ = tw.WriteTriple(ctx, entityID, wf.Type, "task-execution")
-	_ = tw.WriteTriple(ctx, entityID, wf.Slug, exec.Slug)
-	_ = tw.WriteTriple(ctx, entityID, wf.TaskID, exec.TaskID)
-	_ = tw.WriteTriple(ctx, entityID, wf.Title, exec.Title)
-	_ = tw.WriteTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
+	_ = tw.UpdateTriple(ctx, entityID, wf.Type, "task-execution")
+	_ = tw.UpdateTriple(ctx, entityID, wf.Slug, exec.Slug)
+	_ = tw.UpdateTriple(ctx, entityID, wf.TaskID, exec.TaskID)
+	_ = tw.UpdateTriple(ctx, entityID, wf.Title, exec.Title)
+	_ = tw.UpdateTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
+	if err := tw.UpdateTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
 		return fmt.Errorf("write phase: %w", err)
 	}
-	_ = tw.WriteTriple(ctx, entityID, wf.TDDCycle, exec.TDDCycle)
-	_ = tw.WriteTriple(ctx, entityID, wf.MaxTDDCycles, exec.MaxTDDCycles)
+	_ = tw.UpdateTriple(ctx, entityID, wf.TDDCycle, exec.TDDCycle)
+	_ = tw.UpdateTriple(ctx, entityID, wf.MaxTDDCycles, exec.MaxTDDCycles)
 	if exec.TraceID != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.TraceID, exec.TraceID)
+		_ = tw.UpdateTriple(ctx, entityID, wf.TraceID, exec.TraceID)
 	}
 	if exec.WorktreePath != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.WorktreePath, exec.WorktreePath)
+		_ = tw.UpdateTriple(ctx, entityID, wf.WorktreePath, exec.WorktreePath)
 	}
 	if exec.WorktreeBranch != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.WorktreeBranch, exec.WorktreeBranch)
+		_ = tw.UpdateTriple(ctx, entityID, wf.WorktreeBranch, exec.WorktreeBranch)
 	}
-	// Files modified — one triple per path.
-	for _, f := range exec.FilesModified {
-		_ = tw.WriteTriple(ctx, entityID, wf.FilesModified, f)
-	}
+	// Files modified — replace the whole list (multi-valued, re-written each save).
+	_ = tw.ReplaceTripleList(ctx, entityID, wf.FilesModified, exec.FilesModified)
 	if exec.ValidationPassed {
-		_ = tw.WriteTriple(ctx, entityID, wf.ValidationPassed, "true")
+		_ = tw.UpdateTriple(ctx, entityID, wf.ValidationPassed, "true")
 	}
 	if exec.Verdict != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.Verdict, exec.Verdict)
+		_ = tw.UpdateTriple(ctx, entityID, wf.Verdict, exec.Verdict)
 	}
 	if exec.Feedback != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.Feedback, exec.Feedback)
+		_ = tw.UpdateTriple(ctx, entityID, wf.Feedback, exec.Feedback)
 	}
 	if exec.RejectionType != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.RejectionType, exec.RejectionType)
+		_ = tw.UpdateTriple(ctx, entityID, wf.RejectionType, exec.RejectionType)
 	}
 	if exec.ErrorReason != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.ErrorReason, exec.ErrorReason)
+		_ = tw.UpdateTriple(ctx, entityID, wf.ErrorReason, exec.ErrorReason)
 	}
 	if exec.EscalationReason != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.EscalationReason, exec.EscalationReason)
+		_ = tw.UpdateTriple(ctx, entityID, wf.EscalationReason, exec.EscalationReason)
 	}
 	if exec.AgentID != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.AgentID, exec.AgentID)
+		_ = tw.UpdateTriple(ctx, entityID, wf.AgentID, exec.AgentID)
 	}
 	if exec.Model != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.Model, exec.Model)
+		_ = tw.UpdateTriple(ctx, entityID, wf.Model, exec.Model)
 	}
 
 	return nil
@@ -434,24 +432,24 @@ func (s *executionStore) writeReqTriples(ctx context.Context, exec *workflow.Req
 		entityID = workflow.RequirementExecutionEntityID(exec.Slug, exec.RequirementID)
 	}
 
-	_ = tw.WriteTriple(ctx, entityID, wf.Type, "requirement-execution")
-	_ = tw.WriteTriple(ctx, entityID, wf.Slug, exec.Slug)
-	_ = tw.WriteTriple(ctx, entityID, wf.RequirementID, exec.RequirementID)
-	_ = tw.WriteTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
+	_ = tw.UpdateTriple(ctx, entityID, wf.Type, "requirement-execution")
+	_ = tw.UpdateTriple(ctx, entityID, wf.Slug, exec.Slug)
+	_ = tw.UpdateTriple(ctx, entityID, wf.RequirementID, exec.RequirementID)
+	_ = tw.UpdateTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
+	if err := tw.UpdateTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
 		return fmt.Errorf("write phase: %w", err)
 	}
 	if exec.TraceID != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.TraceID, exec.TraceID)
+		_ = tw.UpdateTriple(ctx, entityID, wf.TraceID, exec.TraceID)
 	}
 	if exec.NodeCount > 0 {
-		_ = tw.WriteTriple(ctx, entityID, wf.NodeCount, exec.NodeCount)
+		_ = tw.UpdateTriple(ctx, entityID, wf.NodeCount, exec.NodeCount)
 	}
 	if exec.ErrorReason != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.ErrorReason, exec.ErrorReason)
+		_ = tw.UpdateTriple(ctx, entityID, wf.ErrorReason, exec.ErrorReason)
 	}
 	if exec.ReviewVerdict != "" {
-		_ = tw.WriteTriple(ctx, entityID, wf.Verdict, exec.ReviewVerdict)
+		_ = tw.UpdateTriple(ctx, entityID, wf.Verdict, exec.ReviewVerdict)
 	}
 
 	return nil

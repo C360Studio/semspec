@@ -735,8 +735,8 @@ func (c *Component) createWorktree(ctx context.Context, exec *taskExecution) err
 	}
 	exec.WorktreePath = wtInfo.Path
 	exec.WorktreeBranch = wtInfo.Branch
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.WorktreePath, wtInfo.Path)
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.WorktreeBranch, wtInfo.Branch)
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.WorktreePath, wtInfo.Path)
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.WorktreeBranch, wtInfo.Branch)
 	c.logger.Info("Worktree created",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
@@ -915,11 +915,9 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		return
 	}
 
-	// Write developer output triples — one triple per modified file.
-	for _, f := range exec.FilesModified {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FilesModified, f)
-	}
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidating); err != nil {
+	// Write developer output triples — replace the whole modified-file list.
+	_ = c.tripleWriter.ReplaceTripleList(ctx, exec.EntityID, wf.FilesModified, exec.FilesModified)
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseValidating); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseValidating, "error", err)
 	}
 	exec.Stage = phaseValidating
@@ -1073,12 +1071,12 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	exec.Feedback = result.Feedback
 	exec.ReviewerLLMRequestIDs = result.LLMRequestIDs
 
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Verdict, result.Verdict)
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Verdict, result.Verdict)
 	if result.Feedback != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Feedback, result.Feedback)
+		_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Feedback, result.Feedback)
 	}
 	if result.RejectionType != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.RejectionType, result.RejectionType)
+		_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.RejectionType, result.RejectionType)
 	}
 
 	c.logger.Info("Code review verdict",
@@ -1146,7 +1144,7 @@ func (c *Component) parseCodeReviewResult(raw string, slug string) (payloads.Tas
 // triple, classifies feedback, and routes the retry or escalation.
 func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
 	exec.Stage = phaseRejected
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRejected); err != nil {
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseRejected); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseRejected, "error", err)
 	}
 
@@ -1273,7 +1271,7 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	exec.terminated = true
 
 	exec.Stage = phaseApproved
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseApproved, "error", err)
 	}
 	c.syncToStore(ctx, exec)
@@ -1316,10 +1314,10 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 	// budget exhausted upstream" log fires with escalation_reason="".
 	// Caught 2026-05-08 take 7 OpenRouter @easy.
 	exec.EscalationReason = reason
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseEscalated, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.EscalationReason, reason)
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.EscalationReason, reason)
 	c.syncToStore(ctx, exec)
 
 	c.executionsEscalated.Add(1)
@@ -1419,11 +1417,11 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 	exec.Stage = phaseError
 	exec.ErrorReason = reason
 	exec.ErrorClass = workflow.ClassifyErrorReason(reason)
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorClass, exec.ErrorClass)
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.ErrorClass, exec.ErrorClass)
 	c.syncToStore(ctx, exec)
 
 	c.errors.Add(1)
@@ -1505,8 +1503,8 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	// Keep Feedback — accumulated for next developer prompt.
 	exec.Feedback = feedback
 
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.TDDCycle, exec.TDDCycle)
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseDeveloping); err != nil {
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.TDDCycle, exec.TDDCycle)
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseDeveloping); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseDeveloping, "error", err)
 	}
 	exec.Stage = phaseDeveloping
@@ -1874,10 +1872,10 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	exec.ValidationPassed = result.Passed
 	exec.ValidationResults = result.CheckResults
 
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ValidationPassed, fmt.Sprintf("%t", exec.ValidationPassed))
+	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.ValidationPassed, fmt.Sprintf("%t", exec.ValidationPassed))
 
 	if !exec.ValidationPassed {
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
+		if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
 			c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
 		}
 		exec.Stage = phaseValidationFailed
@@ -1899,7 +1897,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		"tdd_cycle", exec.TDDCycle,
 	)
 
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
 	}
 	exec.Stage = phaseReviewing
