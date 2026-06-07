@@ -98,12 +98,12 @@
     },
     "capabilities": {
       "planning": {
-        "description": "Plan generation and architecture",
+        "description": "Plan generation, architecture, and story coverage partitioning",
         "preferred": [
-          "gemini-flash"
+          "gemini-pro"
         ],
         "fallback": [
-          "gemini-pro"
+          "gemini-flash"
         ]
       },
       "writing": {
