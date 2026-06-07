@@ -75,12 +75,23 @@ type Component struct {
 	// retry tracks per-plan attempts keyed by slug; payload is *workflow.Plan.
 	retry *dispatchretry.State
 
+	// verifier performs the system-side upstream-coordinate reality check at
+	// arch-gen (issue #126). Defaulted to the HTTP implementation; tests inject
+	// a fake. Network errors are non-fatal (skip), so a no-egress environment
+	// degrades to pre-#126 behavior rather than blocking.
+	verifier upstreamVerifier
+
 	// Metrics
 	triggersProcessed  atomic.Int64
 	generationsSkipped atomic.Int64
 	generationsFailed  atomic.Int64
-	lastActivityMu     sync.RWMutex
-	lastActivity       time.Time
+	// coordinateChecksSkipped counts upstream-coordinate probes that could not be
+	// performed (network/infra/inconclusive) and were skipped non-fatally. A
+	// nonzero value means the #126 gate ran partially blind — distinguishes
+	// "verified real" from "skipped the probe" when auditing a clean pass.
+	coordinateChecksSkipped atomic.Int64
+	lastActivityMu          sync.RWMutex
+	lastActivity            time.Time
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +155,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			MaxRetries: config.MaxGenerationRetries,
 			BackoffMs:  config.RetryBackoffMs,
 		}),
+		verifier: newHTTPUpstreamVerifier(),
 	}, nil
 }
 
@@ -224,7 +236,8 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.logger.Info("architecture-generator stopped",
 		"triggers_processed", c.triggersProcessed.Load(),
 		"generations_skipped", c.generationsSkipped.Load(),
-		"generations_failed", c.generationsFailed.Load())
+		"generations_failed", c.generationsFailed.Load(),
+		"coordinate_checks_skipped", c.coordinateChecksSkipped.Load())
 
 	return nil
 }
@@ -589,7 +602,7 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 //     appends the valid options so the architect picks a real profile. Catalog
 //     load failure is non-fatal (skip rather than block on infra — matches
 //     harnessProfileCards()).
-func (c *Component) validateGeneratedArchitecture(architecture *workflow.ArchitectureDocument, kvPlan *workflow.Plan) (rule, msg string) {
+func (c *Component) validateGeneratedArchitecture(ctx context.Context, architecture *workflow.ArchitectureDocument, kvPlan *workflow.Plan) (rule, msg string) {
 	if err := workflow.ValidateComponentImplementationFiles(architecture.ComponentBoundaries); err != nil {
 		return "component_implementation_files", fmt.Sprintf("architecture validation failed (implementation files): %s", err.Error())
 	}
@@ -600,6 +613,9 @@ func (c *Component) validateGeneratedArchitecture(architecture *workflow.Archite
 	}
 	if err := workflow.ValidateUpstreamImports(architecture.UpstreamResolutions); err != nil {
 		return "upstream_import_resolution", fmt.Sprintf("architecture validation failed (upstream import resolution): %s", err.Error())
+	}
+	if rule, msg := c.validateUpstreamCoordinates(ctx, architecture.UpstreamResolutions); rule != "" {
+		return rule, msg
 	}
 	if cat, catErr := harnesscatalog.Load(""); catErr == nil {
 		if err := cat.ValidateSelections(architecture.HarnessProfiles); err != nil {
@@ -631,6 +647,62 @@ func harnessResolutionHint(cat *harnesscatalog.Catalog, err error) string {
 		return "remove the harness_profiles[] entry with the empty profile_id, or set it to a valid catalog ID"
 	default: // unknown harness profile
 		return "select ONLY from the available catalog profiles: " + strings.Join(cat.ValidIDsSorted(), ", ")
+	}
+}
+
+// validateUpstreamCoordinates is the issue-#126 reality check: it independently
+// re-verifies each upstream coordinate against its authoritative source (Maven
+// Central for maven/KMP kinds; the source_ref URL for source_build), so a
+// fabricated coordinate that passed the bare-import check is rejected before it
+// reaches the dev. The check is SYSTEM-side (this component performs it), not
+// self-reported by the architect — that is what makes it non-gameable.
+//
+// Verification errors are non-fatal: a network/infra failure logs and SKIPS the
+// resolution rather than rejecting, so an environment without egress degrades to
+// pre-#126 behavior instead of blocking every plan. Only a definitive
+// non-existence rejects, funneling through retryOrFail with the disconfirming
+// evidence so the architect re-resolves (as source_build / kmp / unresolved, or
+// a coordinate that actually resolves) instead of looping on a dead one.
+func (c *Component) validateUpstreamCoordinates(ctx context.Context, resolutions []workflow.UpstreamResolution) (rule, msg string) {
+	if c.verifier == nil {
+		return "", ""
+	}
+	checks := workflow.PlanUpstreamChecks(resolutions)
+	if len(checks) == 0 {
+		return "", ""
+	}
+	// Bound total verification cost so a pathological all-timeout set of probes
+	// cannot stall arch-gen. Per-probe timeout lives in the verifier; this is the
+	// aggregate ceiling. On expiry the remaining probes error → skip (non-fatal).
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	for _, check := range checks {
+		exists, err := c.verifier.Exists(ctx, check)
+		if err != nil {
+			c.coordinateChecksSkipped.Add(1)
+			c.logger.Warn("Upstream coordinate verification skipped (non-fatal)",
+				"resolution", check.ResolutionName, "coordinate", check.Coordinate,
+				"kind", check.Kind, "error", err)
+			continue
+		}
+		if rejected, reason := workflow.DecideUpstreamVerdict(check, exists); rejected {
+			return "upstream_coordinate_resolution", fmt.Sprintf(
+				"architecture validation failed (upstream coordinate resolution): %s — %s",
+				reason, upstreamCoordinateHint(check))
+		}
+	}
+	return "", ""
+}
+
+// upstreamCoordinateHint tailors the retry guidance to the failing kind so the
+// architect's next cycle gets the RIGHT correction — re-resolve to a real
+// coordinate or declare the honest non-Maven kind, never re-fabricate.
+func upstreamCoordinateHint(check workflow.CoordinateCheck) string {
+	switch check.Kind {
+	case workflow.ResolutionKindSourceBuild:
+		return "provide a source_ref URL that resolves (the git repo/tag must exist), or set resolution_kind to \"unresolved\" if no consumable source exists — do NOT cite a dead URL"
+	default: // maven_central / kmp
+		return "do NOT fabricate a Maven coordinate from a gradle GROUP property or git tag. If the dep is genuinely published, give a coordinate that resolves on Maven Central; if it is built from source (no published jar) set resolution_kind=\"source_build\" with a buildable source_ref; if it is Kotlin Multiplatform set resolution_kind=\"kmp_multiplatform\"; if you cannot find any consumable artifact set resolution_kind=\"unresolved\" and note why. The system re-checks Maven Central, so an invented coordinate will keep being rejected"
 	}
 }
 
@@ -693,7 +765,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	// ADR-043: validate Winston's tech-spec scope before persistence. Validator
 	// failures funnel through retryOrFail so the LLM gets another cycle with the
 	// rejection message as feedback — mirrors the parse-failure path.
-	if rule, msg := c.validateGeneratedArchitecture(architecture, kvPlan); rule != "" {
+	if rule, msg := c.validateGeneratedArchitecture(ctx, architecture, kvPlan); rule != "" {
 		c.generationsFailed.Add(1)
 		c.logger.Warn("Architecture rejected by ADR-043 validator",
 			"slug", slug, "loop_id", loop.ID, "rule", rule, "error", msg)

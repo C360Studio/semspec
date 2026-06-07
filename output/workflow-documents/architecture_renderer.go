@@ -155,6 +155,9 @@ func renderArchUpstreamResolutions(b *strings.Builder, ur []workflow.UpstreamRes
 	for _, r := range ur {
 		b.WriteString(fmt.Sprintf("### %s\n\n", r.Name))
 		b.WriteString(fmt.Sprintf("- **Coordinate:** `%s`\n", r.Coordinate))
+		if kind := r.EffectiveResolutionKind(); kind != workflow.ResolutionKindMavenCentral && kind != "" {
+			b.WriteString(fmt.Sprintf("- **Resolution kind:** `%s`\n", kind))
+		}
 		if r.Role != "" {
 			b.WriteString(fmt.Sprintf("- **Role:** `%s`\n", r.Role))
 		}

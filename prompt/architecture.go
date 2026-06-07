@@ -84,6 +84,18 @@ func writeUpstreamsBody(sb *strings.Builder, upstreams []UpstreamResolutionInfo)
 			role = "runtime_dep"
 		}
 		fmt.Fprintf(sb, "- **%s** `%s` (%s)\n", u.Name, u.Coordinate, role)
+		// Surface the consumption kind when it is NOT a plain published jar —
+		// the dev must clone+build (source_build), use a platform artifact (kmp),
+		// or knows no consumable artifact exists (unresolved). maven_central is
+		// the implied default and stays quiet to avoid noise (issue #126).
+		switch u.ResolutionKind {
+		case "source_build":
+			sb.WriteString("  - resolution: source_build (no published jar — clone + build from source / run codegen)\n")
+		case "kmp_multiplatform":
+			sb.WriteString("  - resolution: kmp_multiplatform (use the -jvm platform artifact)\n")
+		case "unresolved":
+			sb.WriteString("  - resolution: UNRESOLVED (architect found no consumable artifact — confirm before relying on this dep)\n")
+		}
 		if u.SourceRef != "" {
 			fmt.Fprintf(sb, "  - source: %s\n", u.SourceRef)
 		}

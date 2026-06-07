@@ -64,12 +64,13 @@ type ComponentInfo struct {
 // APIs are the load-bearing facts the developer needs so it never re-discovers
 // (or hallucinates) a dependency the architect already resolved.
 type UpstreamResolutionInfo struct {
-	Name       string
-	Coordinate string
-	SourceRef  string
-	Role       string // build_dep | runtime_dep | integration_target
-	UsedBy     []string
-	APIs       []APISurfaceInfo
+	Name           string
+	Coordinate     string
+	SourceRef      string
+	ResolutionKind string // maven_central | source_build | kmp_multiplatform | unresolved
+	Role           string // build_dep | runtime_dep | integration_target
+	UsedBy         []string
+	APIs           []APISurfaceInfo
 }
 
 // APISurfaceInfo is a lightweight view of a resolved external symbol the dev
