@@ -34,6 +34,8 @@ func ProjectUpstreams(arch *workflow.ArchitectureDocument) []UpstreamResolutionI
 		for j, a := range u.APIs {
 			apis[j] = APISurfaceInfo{
 				Symbol:    a.Symbol,
+				Import:    a.Import,
+				Artifact:  a.Artifact,
 				Kind:      a.Kind,
 				Signature: a.Signature,
 				Lifecycle: a.Lifecycle,

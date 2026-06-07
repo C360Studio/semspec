@@ -76,6 +76,8 @@ type UpstreamResolutionInfo struct {
 // integrates against. Mirrors workflow.APISurface.
 type APISurfaceInfo struct {
 	Symbol    string
+	Import    string
+	Artifact  string
 	Kind      string
 	Signature string
 	Lifecycle string

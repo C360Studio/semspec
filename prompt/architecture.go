@@ -99,6 +99,18 @@ func writeUpstreamsBody(sb *strings.Builder, upstreams []UpstreamResolutionInfo)
 				fmt.Fprintf(sb, ": `%s`", api.Signature)
 			}
 			sb.WriteString("\n")
+			// Import is the paste-ready, verified fully-qualified reference —
+			// render it FIRST and prominently so the dev uses it verbatim instead
+			// of guessing the package and rediscovering it (2026-06-07 mavsdk thrash).
+			if api.Import != "" {
+				fmt.Fprintf(sb, "    - import: `%s`", api.Import)
+				if api.Artifact != "" {
+					fmt.Fprintf(sb, " (from artifact `%s`)", api.Artifact)
+				}
+				sb.WriteString("\n")
+			} else if api.Artifact != "" {
+				fmt.Fprintf(sb, "    - artifact: `%s`\n", api.Artifact)
+			}
 			if api.Lifecycle != "" {
 				fmt.Fprintf(sb, "    - lifecycle: %s\n", api.Lifecycle)
 			}

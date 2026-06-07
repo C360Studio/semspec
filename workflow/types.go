@@ -1015,6 +1015,32 @@ type APISurface struct {
 	// methods, include the qualifier: "Connection.send" not "send".
 	Symbol string `json:"symbol"`
 
+	// Import is the FULLY-QUALIFIED, paste-ready reference the dev needs to
+	// actually use the symbol — the language's import/using/include form, NOT
+	// the bare symbol. Examples:
+	//   - Java:   "io.mavsdk.System"            (import io.mavsdk.System;)
+	//   - Go:     "github.com/foo/bar/baz.Client"
+	//   - Python: "requests.Session"
+	//   - TS:     "@scope/pkg" (the module specifier)
+	// REQUIRED for code-symbol kinds (class, interface, type, function,
+	// annotation, constant) — the architect MUST resolve and VERIFY this
+	// against the actual artifact (it has bash/curl to inspect the jar/package),
+	// not concatenate the coordinate's groupId with the symbol and hope. Without
+	// it the dev guesses the package, the import fails to resolve, and the dev
+	// burns its iteration budget rediscovering what the architect already had
+	// in hand (caught 2026-06-07: gemini dev spent 170 steps / 3.4M tokens
+	// running javap to find io.mavsdk.System because only the bare "System"
+	// symbol was resolved). Empty is acceptable only for config_field kinds.
+	Import string `json:"import,omitempty"`
+
+	// Artifact is the coordinate the symbol actually resolves IN, when it
+	// differs from the parent UpstreamResolution.Coordinate. A single library
+	// often splits across artifacts (e.g. io.mavsdk:mavsdk vs
+	// io.mavsdk:mavsdk-server); the symbol lives in exactly one, and the dev
+	// must put THAT one on the classpath/build to resolve the import. Empty
+	// means "the parent resolution's Coordinate" (the common case).
+	Artifact string `json:"artifact,omitempty"`
+
 	// Kind classifies the surface so the dev knows what shape to expect.
 	// Allowed values: "class" | "method" | "interface" | "function" |
 	// "config_field" | "constant" | "type" | "annotation".

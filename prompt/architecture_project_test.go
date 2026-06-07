@@ -29,6 +29,8 @@ func TestProjectArchitecture_CarriesUpstreamAndComponentFacts(t *testing.T) {
 			UsedBy:     []string{"driver"},
 			APIs: []workflow.APISurface{{
 				Symbol:    "System.connect",
+				Import:    "io.mavsdk.System",
+				Artifact:  "io.mavsdk:mavsdk-server:3.16.0",
 				Kind:      "method",
 				Signature: "void connect(String url)",
 				Citation:  "https://example/javadoc",
@@ -49,9 +51,16 @@ func TestProjectArchitecture_CarriesUpstreamAndComponentFacts(t *testing.T) {
 
 	// The dev/reviewer-facing formatter must surface the build-manifest
 	// coordinate and the symbol — the facts that stop dep hallucination.
+	if proj.Upstreams[0].APIs[0].Import != "io.mavsdk.System" {
+		t.Fatalf("API import dropped by projection: %+v", proj.Upstreams[0].APIs[0])
+	}
 	out := prompt.FormatUpstreamResolutions(proj.Upstreams)
 	mustContainStr(t, out, "io.mavsdk:mavsdk:3.16.0", "dev needs the exact resolved coordinate")
 	mustContainStr(t, out, "System.connect", "dev needs the resolved API symbol")
+	// The verified fully-qualified import + artifact must reach the dev so it
+	// pastes them instead of guessing the package (2026-06-07 javap-thrash fix).
+	mustContainStr(t, out, "import: `io.mavsdk.System`", "dev needs the verified fully-qualified import")
+	mustContainStr(t, out, "io.mavsdk:mavsdk-server:3.16.0", "dev needs the artifact the symbol resolves in")
 
 	// The full architecture context must surface the component→upstream link.
 	full := prompt.FormatArchitectureContext(proj)
