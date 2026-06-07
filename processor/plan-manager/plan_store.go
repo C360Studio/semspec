@@ -348,72 +348,70 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	}
 	entityID := workflow.PlanEntityID(plan.Slug)
 
+	// Single-valued scalars use UpdateTriple (remove+add upsert) so the entity
+	// holds the LATEST value per predicate instead of accumulating every
+	// historical value — graph-ingest AddTriple is append-only, so plain
+	// WriteTriple on every plan mutation grew the entity past the 1 MiB KV cap
+	// (2026-06-07 plan-prep wedge). Multi-valued lists use ReplaceTripleList.
+
 	// Core identity
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanSlug, plan.Slug)
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanTitle, plan.Title)
-	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, plan.Title)
-	if err := tw.WriteTriple(ctx, entityID, semspec.PredicatePlanStatus, string(plan.EffectiveStatus())); err != nil {
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanSlug, plan.Slug)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanTitle, plan.Title)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, plan.Title)
+	if err := tw.UpdateTriple(ctx, entityID, semspec.PredicatePlanStatus, string(plan.EffectiveStatus())); err != nil {
 		return fmt.Errorf("write plan status: %w", err)
 	}
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanCreatedAt, plan.CreatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanCreatedAt, plan.CreatedAt.Format(time.RFC3339))
 
 	// Project association
 	if plan.ProjectID != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanProject, plan.ProjectID)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanProject, plan.ProjectID)
 	}
 
 	// Plan content
 	if plan.Goal != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanGoal, plan.Goal)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanGoal, plan.Goal)
 	}
 	if plan.Context != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanContext, plan.Context)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanContext, plan.Context)
 	}
 
 	// Approval
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanApproved, fmt.Sprintf("%t", plan.Approved))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanApproved, fmt.Sprintf("%t", plan.Approved))
 	if plan.ApprovedAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanApprovedAt, plan.ApprovedAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanApprovedAt, plan.ApprovedAt.Format(time.RFC3339))
 	}
 
 	// Review
 	if plan.ReviewVerdict != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewVerdict, plan.ReviewVerdict)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewVerdict, plan.ReviewVerdict)
 	}
 	if plan.ReviewSummary != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewSummary, plan.ReviewSummary)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewSummary, plan.ReviewSummary)
 	}
 	if plan.ReviewedAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewedAt, plan.ReviewedAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewedAt, plan.ReviewedAt.Format(time.RFC3339))
 	}
 	if plan.ReviewFormattedFindings != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewFormattedFindings, plan.ReviewFormattedFindings)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewFormattedFindings, plan.ReviewFormattedFindings)
 	}
 	if plan.ReviewIteration > 0 {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanReviewIteration, plan.ReviewIteration)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewIteration, plan.ReviewIteration)
 	}
 
 	// Error annotations
 	if plan.LastError != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanLastError, plan.LastError)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanLastError, plan.LastError)
 	}
 	if plan.LastErrorAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339))
 	}
 
-	// Scope (atomic triples — one per entry to avoid JSON objects as KV keys)
-	for _, inc := range plan.Scope.Include {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeInclude, inc)
-	}
-	for _, exc := range plan.Scope.Exclude {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeExclude, exc)
-	}
-	for _, dnt := range plan.Scope.DoNotTouch {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeProtected, dnt)
-	}
-	for _, cr := range plan.Scope.Create {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanScopeCreate, cr)
-	}
+	// Scope (atomic triples — replace the whole list each write)
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeInclude, plan.Scope.Include)
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeExclude, plan.Scope.Exclude)
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeProtected, plan.Scope.DoNotTouch)
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeCreate, plan.Scope.Create)
 
 	// ADR-040: Exploration snapshot + open question audit trail. The
 	// individual Capability entities are written by writeChildTriples;
@@ -421,17 +419,13 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	// finds the exploration without traversing to capabilities.
 	if plan.Exploration != nil {
 		if blob, err := json.Marshal(plan.Exploration); err == nil {
-			_ = tw.WriteTriple(ctx, entityID, semspec.PlanExploration, string(blob))
+			_ = tw.UpdateTriple(ctx, entityID, semspec.PlanExploration, string(blob))
 		}
-		for _, q := range plan.Exploration.OpenQuestions {
-			_ = tw.WriteTriple(ctx, entityID, semspec.PlanOpenQuestions, q)
-		}
+		_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanOpenQuestions, plan.Exploration.OpenQuestions)
 	}
 
-	// Execution trace IDs (one triple per ID — avoid JSON arrays as KV keys)
-	for _, traceID := range plan.ExecutionTraceIDs {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanExecutionTraceID, traceID)
-	}
+	// Execution trace IDs (replace the whole list each write)
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanExecutionTraceID, plan.ExecutionTraceIDs)
 
 	// Requirements and Scenarios — write individual entity triples so the graph
 	// stays consistent when the plan is updated.
