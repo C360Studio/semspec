@@ -520,6 +520,11 @@ func architectureSchema() map[string]any {
 							"type":        "string",
 							"description": "URL or file path proving the coordinate is valid (sonatype page, package-lock entry, github release tag URL).",
 						},
+						"resolution_kind": map[string]any{
+							"type":        []any{"string", "null"},
+							"description": "How the dev consumes a CODE artifact, which the SYSTEM re-verifies. 'maven_central' = published jar (coordinate must resolve on Maven Central; gradle GROUP + git tag is NOT proof). 'source_build' = no published jar, dev clones+builds from source (source_ref must be a resolvable git repo/tag). 'kmp_multiplatform' = Kotlin Multiplatform, the -jvm artifact resolves on Central. 'unresolved' = code artifact searched for but none consumable (honest outcome — never fabricate a coordinate). null for non-code entries (e.g. an integration_target service/endpoint like a SITL or broker that has no jar/package). A maven_central coordinate that returns 0 results on Central is rejected.",
+							"enum":        []any{"maven_central", "source_build", "kmp_multiplatform", "unresolved", nil},
+						},
 						"apis": map[string]any{
 							"type":        "array",
 							"description": "Specific symbols the dev will integrate against (constructors, methods, config fields). At least one entry is the architect's normal contribution — without any APIs this resolution is just a build-manifest pin with no usage guidance, which the reviewer flags as incomplete (criterion 7a).",
@@ -529,6 +534,14 @@ func architectureSchema() map[string]any {
 									"symbol": map[string]any{
 										"type":        "string",
 										"description": "Name as the dev will reference it in code. For methods include the qualifier: 'Connection.send' not 'send'.",
+									},
+									"import": map[string]any{
+										"type":        []any{"string", "null"},
+										"description": "Fully-qualified, paste-ready reference the dev imports — REQUIRED for code-symbol kinds (class, interface, type, function, annotation, constant), verified against the artifact (jar tf / unzip / source). Example: 'io.mavsdk.System', not bare 'System'. null only for config_field. A bare or empty import for a code symbol is rejected by ValidateUpstreamImports at parse time.",
+									},
+									"artifact": map[string]any{
+										"type":        []any{"string", "null"},
+										"description": "The coordinate the symbol actually resolves in, when it differs from the parent resolution's coordinate (a library split across artifacts, e.g. mavsdk-server vs mavsdk). null when the symbol lives in the parent coordinate (the common case).",
 									},
 									"kind": map[string]any{
 										"type":        "string",
@@ -552,7 +565,7 @@ func architectureSchema() map[string]any {
 										"description": "File path or URL where the architect verified this surface. REQUIRED. An uncited surface is a guess; reviewer will reject.",
 									},
 								},
-								"required":             []string{"symbol", "kind", "signature", "lifecycle", "notes", "citation"},
+								"required":             []string{"symbol", "import", "artifact", "kind", "signature", "lifecycle", "notes", "citation"},
 								"additionalProperties": false,
 							},
 						},
@@ -567,7 +580,7 @@ func architectureSchema() map[string]any {
 							"enum":        []string{"build_dep", "runtime_dep", "integration_target"},
 						},
 					},
-					"required":             []string{"name", "coordinate", "source_ref", "apis", "used_by", "role"},
+					"required":             []string{"name", "coordinate", "source_ref", "resolution_kind", "apis", "used_by", "role"},
 					"additionalProperties": false,
 				},
 			},
