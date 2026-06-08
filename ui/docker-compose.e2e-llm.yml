@@ -110,6 +110,18 @@ services:
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - SPARKY_API_KEY=${SPARKY_API_KEY:-}
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+      # Per-tier backend timeouts/retries. taskfiles/e2e.yml sets these as task
+      # env for hard/mavlink-hard tiers, but they were NOT forwarded into the
+      # container, so configs/e2e-*.json fell back to its :-3600 default — on a
+      # 2026-06-08 mavlink-hard run the requirement-executor used 1h instead of
+      # the intended 2h and 3 still-progressing requirements were killed. Bare
+      # passthrough forwards each when set; when unset the config's own default
+      # applies (so non-llm/default runs are unaffected).
+      - SEMSPEC_REQ_EXECUTOR_TIMEOUT_SECONDS
+      - SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS
+      - SEMSPEC_SCENARIO_ORCH_TIMEOUT
+      - SEMSPEC_RECOVERY_TIMEOUT_SECONDS
+      - SEMSPEC_MAX_REQUIREMENT_RETRIES
     depends_on:
       sandbox:
         condition: service_healthy
