@@ -516,33 +516,54 @@ var codeSymbolImportKinds = map[string]bool{
 	"function": true, "annotation": true, "constant": true,
 }
 
-// ValidateUpstreamImports rejects an upstream resolution APISurface whose
-// `import` is a bare, unqualified symbol for a code-symbol kind — a provably
-// wrong value the developer cannot actually import (a real import names a
+// ValidateUpstreamImports rejects an upstream resolution APISurface for a
+// code-symbol kind whose `import` is missing OR bare. A code symbol the dev must
+// import is useless without a fully-qualified reference (a real import names a
 // package: it contains ".", "/", or "::"). This is the deterministic,
 // non-gameable backstop for the 2026-06-07 wedge where only the bare symbol
 // "System" was resolved and the dev burned 3.4M tokens rediscovering
 // io.mavsdk.System via javap.
 //
-// EMPTY imports are intentionally NOT rejected here: the architect prompt + the
-// plan-reviewer rule 7a-c2 own the presence judgment, which a deterministic
-// presence gate would Goodhart into fabricated package paths. This check fires
-// only when an import IS present but is just the bare symbol again.
+// EMPTY imports are now rejected too (hardened 2026-06-07). #125 originally
+// deferred the presence judgment to the architect prompt + plan-reviewer rule
+// 7a-c2 to avoid a Goodhart presence gate, but a paid mavlink-hard run proved
+// the soft path can't force convergence: the architect omitted imports, the R2
+// reviewer flagged them every round (40×), the revision cap fired, recovery
+// looped architecture_revise, and the re-architect omitted them again — never
+// reaching execution. A HARD in-phase gate forces the architect to resolve the
+// import where it already has the artifact + bash (we observed it run
+// `jar tf | grep System.class`). The Goodhart risk — a fabricated qualified
+// path — is caught downstream when the dev's code fails to compile, a far
+// cheaper failure than an unbounded recovery loop.
+//
+// All offending surfaces are reported together so the architect fixes every
+// import in one cycle rather than one-per-retry.
 func ValidateUpstreamImports(resolutions []UpstreamResolution) error {
+	var missing, bare []string
 	for _, u := range resolutions {
 		for _, a := range u.APIs {
 			if !codeSymbolImportKinds[a.Kind] {
 				continue
 			}
 			imp := strings.TrimSpace(a.Import)
-			if imp == "" {
-				continue
-			}
-			if !strings.ContainsAny(imp, "./") && !strings.Contains(imp, "::") {
-				return fmt.Errorf("%w: upstream resolution %q api %q has a bare import %q with no package qualifier — the dev cannot import it; provide the fully-qualified reference (e.g. io.mavsdk.System) verified against the artifact",
-					ErrInvalidStoryStructure, u.Name, a.Symbol, imp)
+			switch {
+			case imp == "":
+				missing = append(missing, fmt.Sprintf("%s.%s (%s)", u.Name, a.Symbol, a.Kind))
+			case !strings.ContainsAny(imp, "./") && !strings.Contains(imp, "::"):
+				bare = append(bare, fmt.Sprintf("%s.%s import=%q", u.Name, a.Symbol, imp))
 			}
 		}
 	}
-	return nil
+	if len(missing) == 0 && len(bare) == 0 {
+		return nil
+	}
+	var b strings.Builder
+	b.WriteString("code-symbol API surfaces need a fully-qualified, paste-ready import the dev can use verbatim — resolve each against the actual artifact (you have bash: jar tf / unzip / javap, or read the source under /sources/), do NOT leave it empty or repeat the bare symbol")
+	if len(missing) > 0 {
+		fmt.Fprintf(&b, ". MISSING import (%d): %s", len(missing), strings.Join(missing, "; "))
+	}
+	if len(bare) > 0 {
+		fmt.Fprintf(&b, ". BARE import — no package qualifier (%d): %s (e.g. use io.mavsdk.System, not System)", len(bare), strings.Join(bare, "; "))
+	}
+	return fmt.Errorf("%w: %s", ErrInvalidStoryStructure, b.String())
 }

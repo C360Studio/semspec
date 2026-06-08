@@ -752,9 +752,9 @@ func TestValidateComponentImplementationFiles(t *testing.T) {
 }
 
 // TestValidateUpstreamImports pins the deterministic non-gameable backstop: a
-// code-symbol API whose import lacks a package qualifier is rejected (the
-// 2026-06-07 bare-"System" wedge), while qualified imports, empty imports, and
-// non-code-symbol kinds pass.
+// code-symbol API whose import is missing OR lacks a package qualifier is
+// rejected (the 2026-06-07 bare-"System" wedge + the empty-import recovery loop),
+// while qualified imports and non-code-symbol kinds pass.
 func TestValidateUpstreamImports(t *testing.T) {
 	mk := func(kind, imp string) []UpstreamResolution {
 		return []UpstreamResolution{{Name: "MAVSDK", APIs: []APISurface{{Symbol: "System", Kind: kind, Import: imp}}}}
@@ -768,7 +768,9 @@ func TestValidateUpstreamImports(t *testing.T) {
 		{"qualified java import ok", mk("class", "io.mavsdk.System"), false},
 		{"qualified go import ok", mk("type", "github.com/foo/bar.Client"), false},
 		{"qualified c++ import ok", mk("class", "mavsdk::System"), false},
-		{"empty import not rejected (LLM-reviewer owns presence)", mk("class", ""), false},
+		{"empty import on code symbol rejected (hard gate 2026-06-07)", mk("class", ""), true},
+		{"empty import on non-code-symbol kind ok", mk("message", ""), false},
+		{"empty import on config_field ok", mk("config_field", ""), false},
 		{"bare import on non-code-symbol kind ok", mk("message", "HEARTBEAT"), false},
 		{"bare import on config_field ok", mk("config_field", "timeout_ms"), false},
 		{"nil resolutions ok", nil, false},
