@@ -1377,6 +1377,8 @@ BEFORE submit_work:
 
 7. For EVERY component in component_boundaries that depends on an external library: populate component_boundaries[].upstream_refs with the names of the matching upstream_resolutions entries. Bidirectional with upstream_resolutions[].used_by — both sides must agree.
 
+7b. Map EVERY analyst capability to a component via component_boundaries[].capability_indices — the 0-based indices from the "## Capabilities (from analyst)" block in your prompt. Reference capabilities by INDEX, never re-type their names: a paraphrased name (typed-control-streams → typed-controlstreams, or a renamed raw-mavlink-io → raw-mavlink-fallback) fails coverage and the system rejects it. The system resolves your indices to the canonical names. Every capability index must appear in at least one component's capability_indices, and one component MAY cover several (use multiple indices); an index outside the list's range is rejected.
+
 8. Every entry in technology_choices MUST be either:
    (a) the choice declared by a manifest you read in step 2 OR by a quality gate you read in step 3, with rationale citing the file path, OR
    (b) a greenfield choice, with rationale stating "no existing manifest; picking X because Y".
@@ -1412,7 +1414,7 @@ Do NOT instruct the developer to "explore the upstream codebase" or "research th
     {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework (workspace/requirements.txt:3)"}
   ],
   "component_boundaries": [
-    {"name": "driver", "responsibility": "Meshtastic protocol handler", "dependencies": [], "upstream_refs": ["OpenSensorHub Core", "Meshtastic Java"]}
+    {"name": "driver", "responsibility": "Meshtastic protocol handler", "dependencies": [], "upstream_refs": ["OpenSensorHub Core", "Meshtastic Java"], "implementation_files": ["src/main/java/org/sensorhub/driver/Driver.java"], "capability_indices": [0, 1]}
   ],
   "data_flow": "Mesh node -> Meshtastic Java client -> driver -> OSH SensorHub event bus",
   "decisions": [

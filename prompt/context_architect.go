@@ -2,12 +2,16 @@ package prompt
 
 // ArchitectPromptContext carries data for the architect user-prompt fragment.
 type ArchitectPromptContext struct {
-	Goal            string
-	PlanContext     string
-	ScopeInclude    []string
-	ScopeExclude    []string
-	ScopeProtected  []string
-	Requirements    []ExistingRequirementSummary
+	Goal           string
+	PlanContext    string
+	ScopeInclude   []string
+	ScopeExclude   []string
+	ScopeProtected []string
+	Requirements   []ExistingRequirementSummary
+	// Capabilities is the analyst's capability list, rendered to the architect
+	// with 0-based indices. The architect references these by capability_index
+	// in component_boundaries (2026-06-07) instead of re-typing names.
+	Capabilities    []CapabilityCard
 	HarnessProfiles []HarnessProfileCard
 	PreviousError   string
 	ReviewFindings  string

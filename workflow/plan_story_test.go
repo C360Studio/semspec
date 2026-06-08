@@ -543,6 +543,55 @@ func TestValidateStoryFileOwnership(t *testing.T) {
 	})
 }
 
+func TestResolveCapabilityIndices(t *testing.T) {
+	exp := &Exploration{Capabilities: []Capability{
+		{Name: "mavsdk-lifecycle"}, {Name: "typed-control-streams"}, {Name: "raw-mavlink-io"},
+	}}
+
+	t.Run("indices resolve to canonical names (mismatch-proof)", func(t *testing.T) {
+		comps := []ComponentDef{{Name: "driver", CapabilityIndices: []int{0, 2}}}
+		if err := ResolveCapabilityIndices(exp, comps); err != nil {
+			t.Fatal(err)
+		}
+		got := comps[0].Capabilities
+		if len(got) != 2 || got[0] != "mavsdk-lifecycle" || got[1] != "raw-mavlink-io" {
+			t.Fatalf("got %v, want canonical names from indices", got)
+		}
+		// And coverage now sees canonical names — no paraphrase possible.
+		comps2 := []ComponentDef{{Name: "driver", CapabilityIndices: []int{0, 1, 2}}}
+		_ = ResolveCapabilityIndices(exp, comps2)
+		if err := ValidateCapabilityCoverage(exp, comps2); err != nil {
+			t.Fatalf("full index coverage should pass: %v", err)
+		}
+	})
+
+	t.Run("out-of-range index rejected", func(t *testing.T) {
+		comps := []ComponentDef{{Name: "driver", CapabilityIndices: []int{0, 5}}}
+		err := ResolveCapabilityIndices(exp, comps)
+		if err == nil || !errors.Is(err, ErrInvalidStoryStructure) {
+			t.Fatalf("expected out-of-range rejection, got %v", err)
+		}
+	})
+
+	t.Run("dedups repeated indices", func(t *testing.T) {
+		comps := []ComponentDef{{Name: "driver", CapabilityIndices: []int{1, 1, 1}}}
+		_ = ResolveCapabilityIndices(exp, comps)
+		if len(comps[0].Capabilities) != 1 {
+			t.Fatalf("expected dedup to 1, got %v", comps[0].Capabilities)
+		}
+	})
+
+	t.Run("no indices leaves authored Capabilities untouched (back-compat)", func(t *testing.T) {
+		comps := []ComponentDef{{Name: "driver", Capabilities: []string{"legacy-name"}}}
+		if err := ResolveCapabilityIndices(exp, comps); err != nil {
+			t.Fatal(err)
+		}
+		if len(comps[0].Capabilities) != 1 || comps[0].Capabilities[0] != "legacy-name" {
+			t.Fatalf("back-compat authored names should be preserved, got %v", comps[0].Capabilities)
+		}
+	})
+}
+
 func TestValidateCapabilityCoverage(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -668,12 +717,19 @@ func TestValidateComponentImplementationFiles(t *testing.T) {
 			errPhrase: "only documentation files",
 		},
 		{
-			name: "empty capabilities rejected",
+			name: "no capability (neither indices nor names) rejected",
 			components: []ComponentDef{
 				{Name: "a", ImplementationFiles: []string{"src/a.go"}, Capabilities: nil},
 			},
 			wantErr:   ErrInvalidStoryStructure,
-			errPhrase: "empty capabilities",
+			errPhrase: "empty capability_indices",
+		},
+		{
+			name: "capability via indices (no names yet) is accepted",
+			components: []ComponentDef{
+				{Name: "a", ImplementationFiles: []string{"src/a.go"}, CapabilityIndices: []int{0}},
+			},
+			wantErr: nil,
 		},
 	}
 	for _, tc := range cases {
