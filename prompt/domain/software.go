@@ -1429,19 +1429,39 @@ Do NOT instruct the developer to "explore the upstream codebase" or "research th
   "upstream_resolutions": [
     {
       "name": "OpenSensorHub Core",
-      "coordinate": "org.sensorhub:sensorhub-core:2.0.0",
-      "source_ref": "https://central.sonatype.com/artifact/org.sensorhub/sensorhub-core/2.0.0",
-      "resolution_kind": "maven_central",
+      "coordinate": "github.com/opensensorhub/osh-core@v2.0.0",
+      "source_ref": "https://github.com/opensensorhub/osh-core/tree/v2.0.0",
+      "resolution_kind": "source_build",
       "apis": [
         {
           "symbol": "AbstractSensorModule",
           "import": "org.sensorhub.api.module.AbstractSensorModule",
-          "artifact": "org.sensorhub:sensorhub-core:2.0.0",
+          "artifact": null,
           "kind": "class",
           "signature": "protected AbstractSensorModule(SensorConfig config)",
           "lifecycle": "init(config) -> start() -> stop()",
-          "notes": "Subclasses must call super.init(config) before any IO",
+          "notes": "OSH is not on Maven Central — clone+build from source; import read from the source tree, not a jar",
           "citation": "https://github.com/opensensorhub/osh-core/blob/v2.0.0/sensorhub-core/src/main/java/org/sensorhub/api/module/AbstractSensorModule.java#L45-L52"
+        }
+      ],
+      "used_by": ["driver"],
+      "role": "runtime_dep"
+    },
+    {
+      "name": "MAVSDK Java",
+      "coordinate": "io.mavsdk:mavsdk:1.4.0",
+      "source_ref": "https://central.sonatype.com/artifact/io.mavsdk/mavsdk/1.4.0",
+      "resolution_kind": "maven_central",
+      "apis": [
+        {
+          "symbol": "System",
+          "import": "io.mavsdk.System",
+          "artifact": null,
+          "kind": "class",
+          "signature": "public class System",
+          "lifecycle": "new System() -> connect -> plugins",
+          "notes": "Verified via jar tf; lives in io.mavsdk",
+          "citation": "https://search.maven.org/artifact/io.mavsdk/mavsdk/1.4.0/jar"
         }
       ],
       "used_by": ["driver"],
@@ -1451,9 +1471,12 @@ Do NOT instruct the developer to "explore the upstream codebase" or "research th
       "name": "PX4 SITL",
       "coordinate": "mavlink:px4-sitl",
       "source_ref": "https://docs.px4.io/main/en/simulation/",
+      "resolution_kind": null,
       "apis": [
         {
           "symbol": "HEARTBEAT",
+          "import": null,
+          "artifact": null,
           "kind": "message",
           "signature": "MAVLink HEARTBEAT",
           "lifecycle": "SITL start -> heartbeat -> MAVSDK connected",
