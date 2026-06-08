@@ -783,7 +783,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"loop_id", loop.ID,
 			"outcome", loop.Outcome,
 			"error", loopErrorMsg)
-		c.retryOrFail(ctx, slug, loopErrorMsg)
+		c.retryOrFail(ctx, slug, loopErrorMsg, "")
 		return
 	}
 
@@ -795,7 +795,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"slug", slug,
 			"loop_id", loop.ID,
 			"error", err)
-		c.retryOrFail(ctx, slug, parseErrorMsg)
+		c.retryOrFail(ctx, slug, parseErrorMsg, "")
 		return
 	}
 
@@ -822,7 +822,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		c.generationsFailed.Add(1)
 		c.logger.Warn("Architecture rejected by ADR-043 validator",
 			"slug", slug, "loop_id", loop.ID, "rule", rule, "error", msg)
-		c.retryOrFail(ctx, slug, msg)
+		// Pass the rejected architecture so the retry REVISES it (preserves the
+		// imports/coordinates/capabilities already resolved) instead of rewriting
+		// from scratch and regressing. ResolveCapabilityIndices already filled
+		// Capabilities from indices, so the revised base carries the mapping too.
+		var prevArchJSON string
+		if b, mErr := json.Marshal(architecture); mErr == nil {
+			prevArchJSON = string(b)
+		}
+		c.retryOrFail(ctx, slug, msg, prevArchJSON)
 		return
 	}
 
@@ -861,7 +869,16 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 //
 // On cold start (no in-memory retry entry), reconstruct from PLAN_STATES and
 // Track before Tick — the helper is unaware of NATS/KV by design.
-func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
+// retryOrFail re-dispatches architecture generation with the rejection as
+// feedback, or fails the plan when retries are exhausted. prevArchJSON, when
+// non-empty, is the just-rejected architecture (marshaled); it is stashed on the
+// plan so the next dispatch hands it to the architect as PreviousArchitectureJSON
+// — the architect REVISES it (preserving imports/coordinates/capabilities it
+// already resolved) instead of rewriting from scratch and regressing across
+// retries (2026-06-08: missing imports went 5→4→6 without this). Empty for the
+// loop-failure and parse-failure paths, which have no valid architecture to
+// revise. Mirrors the recovery/architecture_revise path + planner PreviousPlanJSON.
+func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg, prevArchJSON string) {
 	if _, ok := c.retry.Snapshot(slug); !ok {
 		plan, err := c.loadPlanFromKV(ctx, slug)
 		if err != nil {
@@ -897,10 +914,17 @@ func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
 		return
 	}
 
+	// Hand the architect its prior design so it revises rather than rewrites
+	// (preserves resolved imports/coordinates/capabilities across retries).
+	if prevArchJSON != "" && plan != nil {
+		plan.PreviousArchitectureJSON = prevArchJSON
+	}
+
 	c.logger.Info("Retrying architecture generation",
 		"slug", slug,
 		"attempt", entry.Count,
 		"max", c.config.MaxGenerationRetries,
+		"has_previous_architecture", plan != nil && plan.PreviousArchitectureJSON != "",
 		"previous_error", errorMsg)
 
 	c.dispatchArchitectureGenerator(ctx, plan, errorMsg)
