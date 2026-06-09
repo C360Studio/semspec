@@ -14,25 +14,27 @@ import (
 // helpers
 // ---------------------------------------------------------------------------
 
-// commitResponse builds a GraphQL response containing a commit entity
-// with the given SHA.
+// commitResponse builds a graph-gateway entitiesByPredicate response in the
+// real wire shape: {"data":{"entitiesByPredicate":{"entities":[<id>...]}}}.
+// semsource builds the commit entity ID with the SHORT 7-char sha, so the ID
+// suffix is ".commit.<sha7>" regardless of the full SHA the gate is handed.
 func commitResponse(sha string) []byte {
-	return []byte(fmt.Sprintf(`{
-		"data": {
-			"entitiesByPredicate": [{
-				"id": "acme.semsource.git.repo.commit.%s",
-				"predicates": [
-					{"predicate": "source.git.commit.sha", "object": %q},
-					{"predicate": "source.git.commit.subject", "object": "feat: something"}
-				]
-			}]
-		}
-	}`, sha[:7], sha))
+	return []byte(fmt.Sprintf(
+		`{"data":{"entitiesByPredicate":{"entities":["acme.semsource.git.repo.commit.%s"]}}}`,
+		sha[:7]))
 }
 
-// emptyResponse builds a GraphQL response with no matching entities.
+// emptyResponse builds a response with no matching entities (object shape).
 func emptyResponse() []byte {
-	return []byte(`{"data": {"entitiesByPredicate": []}}`)
+	return []byte(`{"data":{"entitiesByPredicate":{"entities":[]}}}`)
+}
+
+// bareArrayResponse builds the legacy/introspection [String] shape:
+// {"data":{"entitiesByPredicate":[<id>...]}} — exercised by the parser fallback.
+func bareArrayResponse(sha string) []byte {
+	return []byte(fmt.Sprintf(
+		`{"data":{"entitiesByPredicate":["acme.semsource.git.repo.commit.%s"]}}`,
+		sha[:7]))
 }
 
 func newTestGate(srv *httptest.Server) *IndexingGate {
@@ -63,12 +65,13 @@ func TestNewIndexingGate_EmptyURL(t *testing.T) {
 }
 
 func TestNewIndexingGate_ValidURL(t *testing.T) {
-	g := NewIndexingGate("http://localhost:8082", nil)
+	const url = "http://localhost:8080/graph-gateway"
+	g := NewIndexingGate(url, nil)
 	if g == nil {
 		t.Fatal("expected non-nil gate for valid URL")
 	}
-	if g.graphGatewayURL != "http://localhost:8082" {
-		t.Errorf("gatewayURL = %q, want http://localhost:8082", g.graphGatewayURL)
+	if g.graphGatewayURL != url {
+		t.Errorf("gatewayURL = %q, want %q", g.graphGatewayURL, url)
 	}
 }
 
@@ -232,8 +235,46 @@ func TestContainsCommitSHA_EmptyResponse(t *testing.T) {
 	}
 }
 
+// The live graph-gateway returns {"entities":null} (not []) when nothing
+// matches the value filter — captured from a real probe.
+func TestContainsCommitSHA_NullEntities(t *testing.T) {
+	body := []byte(`{"data":{"entitiesByPredicate":{"entities":null}}}`)
+	if containsCommitSHA(body, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef") {
+		t.Error("expected false for null entities (live empty-match shape)")
+	}
+}
+
 func TestContainsCommitSHA_MalformedJSON(t *testing.T) {
 	if containsCommitSHA([]byte(`{bad json`), "anything") {
 		t.Error("expected false for malformed JSON")
+	}
+}
+
+// The gate is handed a FULL 40-char SHA but the entity ID embeds only the
+// short 7-char sha; the match must normalize.
+func TestContainsCommitSHA_FullSHAMatchesShortID(t *testing.T) {
+	full := "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+	if !containsCommitSHA(commitResponse(full), full) {
+		t.Error("expected full SHA to match the short-sha entity ID suffix")
+	}
+}
+
+// A different commit's full SHA must not match (different 7-char prefix).
+func TestContainsCommitSHA_DifferentCommitNotFound(t *testing.T) {
+	indexed := "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+	other := "fedcba9876543210fedcba9876543210fedcba98"
+	if containsCommitSHA(commitResponse(indexed), other) {
+		t.Error("expected a non-indexed commit to not match")
+	}
+}
+
+// The parser must also handle the bare [String] array shape.
+func TestContainsCommitSHA_BareArrayShape(t *testing.T) {
+	sha := "abc123def456abc123def456abc123def456abc1"
+	if !containsCommitSHA(bareArrayResponse(sha), sha) {
+		t.Error("expected true for bare-array entitiesByPredicate shape")
+	}
+	if containsCommitSHA(bareArrayResponse(sha), "fedcba9876543210fedcba9876543210fedcba98") {
+		t.Error("expected false for non-matching SHA in bare-array shape")
 	}
 }
