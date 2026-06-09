@@ -20,6 +20,7 @@
 package executionmanager
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -2320,9 +2321,14 @@ func (c *Component) mergeWorktree(exec *taskExecution) error {
 	// gate only fires when FilesModified is non-empty.
 	exec.MergeCommit = result.Commit
 
-	// Wait for semsource to index the merge commit so dependent tasks
-	// get fresh graph context. Soft gate: proceeds with warning on timeout.
-	c.awaitIndexing(result.Commit, exec.TaskID)
+	// Wait for semsource to index this task's work so dependent tasks get fresh
+	// graph context. Soft gate: proceeds with warning on timeout. Gate on
+	// WorkCommit (the worktree's own regular commit), NOT result.Commit (the
+	// --no-ff merge commit) — semsource walks `git log --no-merges`, so it never
+	// indexes the merge commit and a gate keyed on it could never pass. cmp.Or
+	// falls back to the merge commit when the sandbox didn't report a work commit
+	// (older sandbox), preserving prior behavior rather than silently skipping.
+	c.awaitIndexing(cmp.Or(result.WorkCommit, result.Commit), exec.TaskID)
 	return nil
 }
 

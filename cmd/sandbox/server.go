@@ -447,8 +447,18 @@ type mergeRequest struct {
 // (silent work-drop). String-matching the Note field is the legacy path
 // and must not be relied on.
 type mergeResponse struct {
-	Status          string           `json:"status"`
-	Commit          string           `json:"commit,omitempty"`
+	Status string `json:"status"`
+	Commit string `json:"commit,omitempty"`
+
+	// WorkCommit is the SHA of the worktree's own commit (the agent's actual
+	// work), captured before the --no-ff merge. Commit, by contrast, is the
+	// MERGE commit that --no-ff always creates. semsource walks `git log
+	// --no-merges`, so it never indexes the merge commit — only WorkCommit is
+	// a regular commit reachable from main and therefore indexed. The indexing
+	// gate must wait on WorkCommit, not Commit, or it can never observe the
+	// commit and always times out. Empty in the nothing-to-commit case.
+	WorkCommit string `json:"work_commit,omitempty"`
+
 	Note            string           `json:"note,omitempty"`
 	NothingToCommit bool             `json:"nothing_to_commit,omitempty"`
 	FilesChanged    []fileChangeInfo `json:"files_changed,omitempty"`
@@ -945,6 +955,7 @@ func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req
 				return mergeResponse{
 					Status:         "merged",
 					Commit:         mergeHash,
+					WorkCommit:     hash,
 					FilesChanged:   filesChanged,
 					RecoveryNote:   recovered.note,
 					DiscardedPaths: recovered.discarded,
@@ -997,6 +1008,7 @@ func (s *Server) mergeIntoMainRepo(ctx context.Context, taskID, hash string, req
 	return mergeResponse{
 		Status:       "merged",
 		Commit:       mergeHash,
+		WorkCommit:   hash,
 		FilesChanged: filesChanged,
 	}, nil
 }

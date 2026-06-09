@@ -878,7 +878,7 @@
         "max_tdd_cycles": 5,
         "timeout_seconds": ${SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS:-3600},
         "sandbox_url": "http://sandbox:8090",
-        "graph_gateway_url": "http://localhost:8082",
+        "graph_gateway_url": "",
         "indexing_budget": "60s",
         "enable_positive_lessons": true
       }

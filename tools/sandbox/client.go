@@ -184,8 +184,16 @@ func (c *Client) DeleteWorktree(ctx context.Context, taskID string) error {
 // `Commit == ""`. An empty Commit without NothingToCommit==true means the
 // sandbox response was malformed or the contract was violated.
 type MergeResult struct {
-	Status          string           `json:"status"`
-	Commit          string           `json:"commit,omitempty"`
+	Status string `json:"status"`
+	Commit string `json:"commit,omitempty"`
+
+	// WorkCommit is the worktree's own commit SHA (the agent's work), captured
+	// before the --no-ff merge. Commit is the MERGE commit. semsource indexes
+	// via `git log --no-merges`, so only WorkCommit (a regular commit) ever
+	// becomes a graph entity — the indexing gate must wait on WorkCommit, not
+	// the merge Commit. Empty in the nothing-to-commit case.
+	WorkCommit string `json:"work_commit,omitempty"`
+
 	Note            string           `json:"note,omitempty"`
 	NothingToCommit bool             `json:"nothing_to_commit,omitempty"`
 	FilesChanged    []FileChangeInfo `json:"files_changed,omitempty"`
