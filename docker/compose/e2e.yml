@@ -27,9 +27,11 @@ services:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../../docker/semsource.json:/etc/semsource/semsource.json:ro
-      # Bind-mount a gitconfig that marks every repo as safe. Without this, git
-      # refuses host-owned repos when semsource runs as root and initial clone
-      # retries for 2m30s before succeeding on subsequent attempts.
+      # Bind-mount a gitconfig that marks every repo as safe. The git source
+      # reads /workspace IN PLACE (path-based, no clone — see semsource.json),
+      # running `git rev-parse`/`git log` as root against a host-owned repo;
+      # without safe.directory=* git refuses those reads. (This also covered the
+      # old clone path's 2m30s safe.directory retry, now eliminated.)
       - ../../docker/semsource.gitconfig:/root/.gitconfig:ro
       - ../../test/e2e/workspace:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
