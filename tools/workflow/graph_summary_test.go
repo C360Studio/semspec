@@ -76,6 +76,13 @@ func TestGraphQueryDescription_TeachesGraphQLNotSPARQL(t *testing.T) {
 // that exposed the manifest-vs-tool-description conflict. The fix
 // follows the semdragon pattern: drop literal examples from tool
 // descriptions, let the manifest carry truth.
+//
+// NOTE (2026-06-09): both the graph manifest (graphManifestMuted, see
+// manifest.go) and the graph_query tool itself (no role allows graph_* —
+// prompt.DefaultToolFilters) are currently DORMANT, so this contract is not
+// live. Retained intentionally as insurance: if graph query tools return
+// (e.g. semstreams research_graph), the description must still point at the
+// manifest rather than a fabricated literal. Do not delete with the mute.
 func TestGraphQueryDescription_NoLiteralFakeNamespaceExample(t *testing.T) {
 	exec := &GraphExecutor{}
 	var graphQuery *agentic.ToolDefinition
