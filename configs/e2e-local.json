@@ -224,6 +224,21 @@
         "fallback": [
           "qwen3-14b"
         ]
+      },
+      "plan_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for plan-manager escalations (revision-cap exhaustion, plan-review wedges)",
+        "preferred": ["qwen3-14b"],
+        "fallback": ["qwen3-14b"]
+      },
+      "execution_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for execution-manager escalations (TDD-cycle exhaustion, tool-loop wedges, fixable-rejection cascades)",
+        "preferred": ["qwen3-14b"],
+        "fallback": ["qwen3-14b"]
+      },
+      "coordinator_recovery": {
+        "description": "ADR-037 stage 2 coordinator recovery agent for QA failures and cross-phase wedges",
+        "preferred": ["qwen3-14b"],
+        "fallback": ["qwen3-14b"]
       }
     },
     "defaults": {
@@ -304,7 +319,7 @@
         "content_bucket": "AGENT_CONTENT",
         "trajectory_detail": "full",
         "consumer": {
-          "ack_wait": "5m",
+          "ack_wait": "1200s",
           "heartbeat_interval": "2m",
           "max_deliver": 2
         }
@@ -316,7 +331,23 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "900s"
+        "timeout": "900s",
+        "ports": {
+          "inputs": [
+            {
+              "name": "agent.request",
+              "type": "jetstream",
+              "subject": "agent.request.>",
+              "stream_name": "AGENT",
+              "required": true,
+              "config": { "ack_wait": "1200s", "heartbeat_interval": "240s" }
+            }
+          ],
+          "outputs": [
+            { "name": "agent.response", "type": "jetstream", "subject": "agent.response.*", "stream_name": "AGENT", "required": true },
+            { "name": "agent.stream", "type": "nats", "subject": "agent.stream.*", "required": false }
+          ]
+        }
       }
     },
     "agentic-tools": {
@@ -608,7 +639,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_tdd_cycles": 3,
+        "max_tdd_cycles": 5,
         "timeout_seconds": 900,
         "sandbox_url": "http://sandbox:8090"
       }
@@ -725,9 +756,9 @@
         "enable_structural": true,
         "pivot_count": 16,
         "max_hop_distance": 10,
-        "enable_anomaly_detection": true,
+        "enable_anomaly_detection": false,
         "anomaly_config": {
-          "enabled": true,
+          "enabled": false,
           "max_anomalies_per_run": 100,
           "core_anomaly": {
             "enabled": true,
