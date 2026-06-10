@@ -86,9 +86,13 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
-          memory: 2G
-          pids: 256
+          # Sized for parallel OSH-from-source gradle builds (WITH_EPIC hard tiers).
+          # The 2G/2cpu/256pid cap starved 8 concurrent dev-loop builds in the
+          # 2026-06-10 mavlink-hard run — sandbox pinned at 1.75/2 GiB with idle,
+          # memory-starved gradle daemons + zombie java procs → execution crawled.
+          cpus: "4"
+          memory: 8G
+          pids: 512
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
       interval: 5s
