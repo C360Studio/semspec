@@ -269,7 +269,11 @@ func (w *Writer) RotateLessonsForRole(ctx context.Context, role string, limit in
 	now := time.Now()
 	for i := range selected {
 		eid := agentgraph.LessonEntityID(selected[i].ID)
-		if err := w.TW.WriteTriple(ctx, eid, agentgraph.PredicateLessonLastInjectedAt, now.Format(time.RFC3339)); err != nil {
+		// Upsert (remove+add), not append: this fires on every injection cycle for
+		// the same lesson entity. Plain WriteTriple accumulated a LastInjectedAt
+		// triple per injection and grew lesson entities unboundedly during long
+		// executions (the same ENTITY_STATES leak class as the plan child triples).
+		if err := w.TW.UpdateTriple(ctx, eid, agentgraph.PredicateLessonLastInjectedAt, now.Format(time.RFC3339)); err != nil {
 			if w.Logger != nil {
 				w.Logger.Debug("Failed to bump LastInjectedAt — rotation degrades to recency",
 					"lesson_id", selected[i].ID, "error", err)

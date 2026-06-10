@@ -195,23 +195,31 @@ func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, re
 	}
 	entityID := RequirementEntityID(req.ID)
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementTitle, req.Title)
-	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, req.Title)
-	if err := tw.WriteTriple(ctx, entityID, semspec.RequirementStatus, string(req.Status)); err != nil {
+	// Upsert scalars (UpdateTriple = remove+add) and replace edge lists
+	// (ReplaceTripleList) so re-persisting the requirement on every plan
+	// mutation — which happens on every execution status update — does not
+	// accumulate duplicate triples. graph-ingest AddTriple is append-only, so
+	// plain WriteTriple here grew requirement entities unboundedly during
+	// execution (the #132 plan-entity bloat, same class, applied to requirements).
+	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementTitle, req.Title)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, req.Title)
+	if err := tw.UpdateTriple(ctx, entityID, semspec.RequirementStatus, string(req.Status)); err != nil {
 		return fmt.Errorf("write requirement status: %w", err)
 	}
-	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementPlan, req.PlanID)
-	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementCreatedAt, req.CreatedAt.Format(time.RFC3339))
-	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementUpdatedAt, req.UpdatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementPlan, req.PlanID)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementCreatedAt, req.CreatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementUpdatedAt, req.UpdatedAt.Format(time.RFC3339))
 	if req.Description != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDescription, req.Description)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementDescription, req.Description)
 	}
 
-	// Write each dependency as an individual triple (proper graph edges).
-	// Hash each dep ID so the stored value is the entity-ID suffix.
+	// Replace the full dependency edge set each persist. Hash each dep ID so the
+	// stored value is the entity-ID suffix.
+	deps := make([]string, 0, len(req.DependsOn))
 	for _, dep := range req.DependsOn {
-		_ = tw.WriteTriple(ctx, entityID, semspec.RequirementDependsOn, HashInstanceID(dep))
+		deps = append(deps, HashInstanceID(dep))
 	}
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.RequirementDependsOn, deps)
 
 	// ADR-043 Move 4 removed Requirement.FilesOwned. File-ownership triples
 	// (semspec.story.files_owned) now emit from the story-persistence path
@@ -230,5 +238,5 @@ func writeRequirementCapabilityTriple(ctx context.Context, tw *graphutil.TripleW
 	}
 	entityID := RequirementEntityID(req.ID)
 	capEntityID := CapabilityEntityID(planSlug, req.CapabilityName)
-	_ = tw.WriteTriple(ctx, entityID, semspec.RequirementCapability, capEntityID)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementCapability, capEntityID)
 }

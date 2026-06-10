@@ -58,27 +58,33 @@ func writeCapabilityTriples(ctx context.Context, tw *graphutil.TripleWriter, c *
 	}
 	entityID := CapabilityEntityID(slug, c.Name)
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityName, c.Name)
-	if err := tw.WriteTriple(ctx, entityID, semspec.CapabilityLifecycle, string(c.Lifecycle)); err != nil {
+	// Upsert scalars + replace edge lists so re-persisting on every plan
+	// mutation doesn't accumulate duplicate triples (graph-ingest AddTriple is
+	// append-only — the #132 plan-entity bloat class, applied to capabilities).
+	_ = tw.UpdateTriple(ctx, entityID, semspec.CapabilityName, c.Name)
+	if err := tw.UpdateTriple(ctx, entityID, semspec.CapabilityLifecycle, string(c.Lifecycle)); err != nil {
 		return fmt.Errorf("write capability lifecycle: %w", err)
 	}
 	if c.Description != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityDescription, c.Description)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.CapabilityDescription, c.Description)
 	}
-	_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityPlan, planEntityID)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.CapabilityPlan, planEntityID)
 
-	// Multi-valued depends_on — one triple per edge, value is the hashed
-	// instance ID of the prerequisite Capability (matches the entity-ID
-	// suffix scheme used by RequirementDependsOn).
+	// Multi-valued depends_on — value is the hashed instance ID of the
+	// prerequisite Capability (matches RequirementDependsOn's suffix scheme).
+	deps := make([]string, 0, len(c.DependsOn))
 	for _, dep := range c.DependsOn {
-		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilityDependsOn, HashInstanceID(slug, dep))
+		deps = append(deps, HashInstanceID(slug, dep))
 	}
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.CapabilityDependsOn, deps)
 
-	// Multi-valued surfaces (ADR-041 Move 2). One triple per declared surface;
-	// SurfaceUI is the gate for downstream @e2e scenario emission.
+	// Multi-valued surfaces (ADR-041 Move 2). SurfaceUI is the gate for
+	// downstream @e2e scenario emission.
+	surfaces := make([]string, 0, len(c.Surfaces))
 	for _, surface := range c.Surfaces {
-		_ = tw.WriteTriple(ctx, entityID, semspec.CapabilitySurface, string(surface))
+		surfaces = append(surfaces, string(surface))
 	}
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.CapabilitySurface, surfaces)
 	return nil
 }
 
