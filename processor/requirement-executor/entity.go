@@ -104,6 +104,11 @@ func (e *RequirementExecutionEntity) Triples() []message.Triple {
 	}
 
 	// Optional scalar predicates — only emit when non-empty or non-zero.
+	// NOTE: absent-when-empty means these predicates are NOT in RemoveTriples
+	// when the field is empty, so a value set in a prior publish and then
+	// cleared would leave a stale triple. All fields here are monotonically
+	// set-once (e.g. FailureReason is written once on terminal failure, never
+	// cleared), so this is benign; revisit if any field transitions set→empty.
 	if e.Phase != "" {
 		triples = append(triples, message.Triple{Subject: id, Predicate: wf.Phase, Object: e.Phase, Source: componentName, Timestamp: now, Confidence: 1.0})
 	}
