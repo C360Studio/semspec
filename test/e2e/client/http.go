@@ -2512,9 +2512,13 @@ func (c *HTTPClient) WaitForPlanApproveEligible(ctx context.Context, slug string
 			// Statuses that fail the promote gate. Anything else (reviewed,
 			// approved, generating_requirements, ...) is fair game — promote
 			// either succeeds or is idempotent against an already-approved
-			// plan.
+			// plan. "exploring"/"explored" are the ADR-040 analyst sub-phase
+			// statuses (added 2026-05-30) that sit between "created" and
+			// "drafting"; the planner sets Goal while in "exploring", so without
+			// them here the poll returns early and PromotePlan 409s
+			// ("Cannot approve plan in exploring status").
 			switch plan.Status {
-			case "", "created", "drafting", "drafted", "reviewing_draft":
+			case "", "created", "exploring", "explored", "drafting", "drafted", "reviewing_draft":
 				continue
 			}
 			return plan, nil
