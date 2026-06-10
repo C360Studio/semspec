@@ -41,39 +41,41 @@ func writeScenarioTriples(ctx context.Context, tw *graphutil.TripleWriter, s *Sc
 	}
 	entityID := ScenarioEntityID(s.ID)
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioGiven, s.Given)
-	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioWhen, s.When)
-	if err := tw.WriteTriple(ctx, entityID, semspec.ScenarioStatus, string(s.Status)); err != nil {
+	// Upsert scalars (UpdateTriple = remove+add) and replace edge lists
+	// (ReplaceTripleList) so re-persisting the scenario on every plan mutation —
+	// which happens on every execution status update via writeChildTriples — does
+	// not accumulate duplicate triples. graph-ingest AddTriple is append-only, so
+	// plain WriteTriple here grew scenario entities unboundedly during execution
+	// (the #132 plan-entity bloat, same class as requirements/capabilities/decisions).
+	// Scenarios are the most numerous child (N per requirement, each with several
+	// Then clauses), so this was the largest contributor to the ENTITY_STATES leak.
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioGiven, s.Given)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioWhen, s.When)
+	if err := tw.UpdateTriple(ctx, entityID, semspec.ScenarioStatus, string(s.Status)); err != nil {
 		return fmt.Errorf("write scenario status: %w", err)
 	}
-	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioRequirement, RequirementEntityID(s.RequirementID))
-	_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioCreatedAt, s.CreatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioRequirement, RequirementEntityID(s.RequirementID))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioCreatedAt, s.CreatedAt.Format(time.RFC3339))
 
 	title := s.When
 	if len(title) > 100 {
 		title = title[:97] + "..."
 	}
-	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, title)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, title)
 
-	// Write each Then clause as an individual triple (proper graph edges).
-	for _, clause := range s.Then {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioThen, clause)
-	}
+	// Multi-valued Then clauses — replace the full edge list each persist.
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.ScenarioThen, s.Then)
 
-	// Tier + facet tags (ADR-041 Move 1). Multi-valued; one triple per tag.
-	for _, tag := range s.Tags {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioTag, tag)
-	}
+	// Tier + facet tags (ADR-041 Move 1). Multi-valued; replace the full list.
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.ScenarioTag, s.Tags)
 
-	// Harness profile bindings (ADR-041 Move 1). Multi-valued; one triple per
-	// bound profile ID. Values are catalog profile IDs (e.g.
-	// "mavlink.px4-sitl.mavsdk-smoke"), not hashed entity IDs — these are
-	// cross-reference strings into the harnesscatalog, not graph edges to
-	// other entities. Plan-reviewer rule scenario.harness_id_unresolved
-	// (Move 4) validates each ID resolves into the catalog.
-	for _, id := range s.HarnessProfileIDs {
-		_ = tw.WriteTriple(ctx, entityID, semspec.ScenarioHarnessProfile, id)
-	}
+	// Harness profile bindings (ADR-041 Move 1). Multi-valued; replace the full
+	// list. Values are catalog profile IDs (e.g. "mavlink.px4-sitl.mavsdk-smoke"),
+	// not hashed entity IDs — these are cross-reference strings into the
+	// harnesscatalog, not graph edges to other entities. Plan-reviewer rule
+	// scenario.harness_id_unresolved (Move 4) validates each ID resolves into the
+	// catalog.
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.ScenarioHarnessProfile, s.HarnessProfileIDs)
 
 	return nil
 }
