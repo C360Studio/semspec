@@ -213,6 +213,21 @@
         "fallback": [
           "claude-sonnet"
         ]
+      },
+      "plan_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for plan-manager escalations (revision-cap exhaustion, plan-review wedges)",
+        "preferred": ["claude-opus"],
+        "fallback": ["claude-sonnet"]
+      },
+      "execution_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for execution-manager escalations (TDD-cycle exhaustion, tool-loop wedges, fixable-rejection cascades)",
+        "preferred": ["claude-opus"],
+        "fallback": ["claude-sonnet"]
+      },
+      "coordinator_recovery": {
+        "description": "ADR-037 stage 2 coordinator recovery agent for QA failures and cross-phase wedges",
+        "preferred": ["claude-opus"],
+        "fallback": ["claude-sonnet"]
       }
     },
     "defaults": {
@@ -288,6 +303,10 @@
       "config": {
         "max_iterations": 50,
         "timeout": "3600s",
+        "consumer": {
+          "ack_wait": "3900s",
+          "heartbeat_interval": "240s"
+        },
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
@@ -300,7 +319,23 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "3600s"
+        "timeout": "900s",
+        "ports": {
+          "inputs": [
+            {
+              "name": "agent.request",
+              "type": "jetstream",
+              "subject": "agent.request.>",
+              "stream_name": "AGENT",
+              "required": true,
+              "config": { "ack_wait": "1200s", "heartbeat_interval": "240s" }
+            }
+          ],
+          "outputs": [
+            { "name": "agent.response", "type": "jetstream", "subject": "agent.response.*", "stream_name": "AGENT", "required": true },
+            { "name": "agent.stream", "type": "nats", "subject": "agent.stream.*", "required": false }
+          ]
+        }
       }
     },
     "agentic-tools": {

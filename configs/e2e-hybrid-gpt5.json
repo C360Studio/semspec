@@ -271,6 +271,21 @@
         "fallback": [
           "gpt-5-5"
         ]
+      },
+      "plan_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for plan-manager escalations (revision-cap exhaustion, plan-review wedges)",
+        "preferred": ["gemini-pro"],
+        "fallback": ["gpt-5-5"]
+      },
+      "execution_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for execution-manager escalations (TDD-cycle exhaustion, tool-loop wedges, fixable-rejection cascades)",
+        "preferred": ["gemini-pro"],
+        "fallback": ["gpt-5-5"]
+      },
+      "coordinator_recovery": {
+        "description": "ADR-037 stage 2 coordinator recovery agent for QA failures and cross-phase wedges",
+        "preferred": ["gemini-pro"],
+        "fallback": ["gpt-5-5"]
       }
     },
     "defaults": {
@@ -346,6 +361,10 @@
       "config": {
         "max_iterations": 120,
         "timeout": "1800s",
+        "consumer": {
+          "ack_wait": "2100s",
+          "heartbeat_interval": "240s"
+        },
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
@@ -362,7 +381,23 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "900s"
+        "timeout": "900s",
+        "ports": {
+          "inputs": [
+            {
+              "name": "agent.request",
+              "type": "jetstream",
+              "subject": "agent.request.>",
+              "stream_name": "AGENT",
+              "required": true,
+              "config": { "ack_wait": "1200s", "heartbeat_interval": "240s" }
+            }
+          ],
+          "outputs": [
+            { "name": "agent.response", "type": "jetstream", "subject": "agent.response.*", "stream_name": "AGENT", "required": true },
+            { "name": "agent.stream", "type": "nats", "subject": "agent.stream.*", "required": false }
+          ]
+        }
       }
     },
     "agentic-tools": {
@@ -998,7 +1033,7 @@
         },
         "detection_interval": "30s",
         "batch_size": 100,
-        "enable_llm": true,
+        "enable_llm": false,
         "min_community_size": 2,
         "max_iterations": 100,
         "enable_structural": true,

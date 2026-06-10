@@ -52,7 +52,7 @@
         "tool_format": "openai",
         "stream": false,
         "reasoning_effort": "medium",
-        "request_timeout": "300s",
+        "request_timeout": "900s",
         "wire_backend": "wire"
       },
       "semembed": {
@@ -346,7 +346,7 @@
         "content_bucket": "AGENT_CONTENT",
         "trajectory_detail": "full",
         "consumer": {
-          "ack_wait": "1440s",
+          "ack_wait": "2100s",
           "heartbeat_interval": "240s"
         }
       }
@@ -357,7 +357,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "1800s",
+        "timeout": "900s",
         "ports": {
           "inputs": [
             {
@@ -367,7 +367,7 @@
               "stream_name": "AGENT",
               "required": true,
               "config": {
-                "ack_wait": "1440s",
+                "ack_wait": "1200s",
                 "heartbeat_interval": "240s"
               }
             }
@@ -681,7 +681,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_tdd_cycles": 7,
+        "max_tdd_cycles": 5,
         "timeout_seconds": ${SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS:-3600},
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "",

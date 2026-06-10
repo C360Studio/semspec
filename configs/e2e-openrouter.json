@@ -257,6 +257,21 @@
           "openrouter-llama-3-3-70b"
         ]
       },
+      "plan_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for plan-manager escalations (revision-cap exhaustion, plan-review wedges)",
+        "preferred": ["openrouter-qwen3-6-27b"],
+        "fallback": ["openrouter-llama-3-3-70b"]
+      },
+      "execution_wedge_recovery": {
+        "description": "ADR-037 stage 1 recovery agent for execution-manager escalations (TDD-cycle exhaustion, tool-loop wedges, fixable-rejection cascades)",
+        "preferred": ["openrouter-qwen3-6-27b"],
+        "fallback": ["openrouter-llama-3-3-70b"]
+      },
+      "coordinator_recovery": {
+        "description": "ADR-037 stage 2 coordinator recovery agent for QA failures and cross-phase wedges",
+        "preferred": ["openrouter-qwen3-6-27b"],
+        "fallback": ["openrouter-llama-3-3-70b"]
+      },
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
@@ -382,7 +397,7 @@
         "content_bucket": "AGENT_CONTENT",
         "trajectory_detail": "full",
         "consumer": {
-          "ack_wait": "720s",
+          "ack_wait": "1200s",
           "heartbeat_interval": "240s"
         }
       }
@@ -403,7 +418,7 @@
               "stream_name": "AGENT",
               "required": true,
               "config": {
-                "ack_wait": "720s",
+                "ack_wait": "1200s",
                 "heartbeat_interval": "240s"
               }
             }
