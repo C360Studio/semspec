@@ -49,26 +49,31 @@ func writePlanDecisionTriples(ctx context.Context, tw *graphutil.TripleWriter, p
 		title = string([]rune(title)[:97]) + "..."
 	}
 
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionTitle, p.Title)
-	_ = tw.WriteTriple(ctx, entityID, semspec.DCTitle, title)
-	if err := tw.WriteTriple(ctx, entityID, semspec.PlanDecisionStatus, string(p.Status)); err != nil {
+	// Upsert scalars + replace the affected-requirement edge list so re-persisting
+	// on every plan mutation doesn't accumulate duplicate triples (graph-ingest
+	// AddTriple is append-only — the #132 plan-entity bloat class).
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionTitle, p.Title)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, title)
+	if err := tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionStatus, string(p.Status)); err != nil {
 		return fmt.Errorf("write change proposal status: %w", err)
 	}
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionProposedBy, p.ProposedBy)
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionPlan, p.PlanID)
-	_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionCreatedAt, p.CreatedAt.Format(time.RFC3339))
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionProposedBy, p.ProposedBy)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionPlan, p.PlanID)
+	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionCreatedAt, p.CreatedAt.Format(time.RFC3339))
 
 	if p.Rationale != "" {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionRationale, p.Rationale)
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionRationale, p.Rationale)
 	}
 	if p.DecidedAt != nil {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionDecidedAt, p.DecidedAt.Format(time.RFC3339))
+		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanDecisionDecidedAt, p.DecidedAt.Format(time.RFC3339))
 	}
 
-	// Write each affected requirement ID as an individual triple (proper graph edges).
+	// Affected requirement IDs as edges (proper graph edges).
+	mutates := make([]string, 0, len(p.AffectedReqIDs))
 	for _, reqID := range p.AffectedReqIDs {
-		_ = tw.WriteTriple(ctx, entityID, semspec.PlanDecisionMutates, reqID)
+		mutates = append(mutates, reqID)
 	}
+	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanDecisionMutates, mutates)
 
 	return nil
 }
