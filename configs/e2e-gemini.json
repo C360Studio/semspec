@@ -810,9 +810,9 @@
         "enable_structural": true,
         "pivot_count": 16,
         "max_hop_distance": 10,
-        "enable_anomaly_detection": true,
+        "enable_anomaly_detection": false,
         "anomaly_config": {
-          "enabled": true,
+          "enabled": false,
           "max_anomalies_per_run": 100,
           "core_anomaly": {
             "enabled": true,
