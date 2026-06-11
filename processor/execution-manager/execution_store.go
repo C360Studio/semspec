@@ -8,12 +8,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
+
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	"github.com/c360studio/semstreams/natsclient"
-	sscache "github.com/c360studio/semstreams/pkg/cache"
 )
+
+// requirementExecutionEntityType is the message.Type used when writing
+// requirement-execution entities to ENTITY_STATES via UpsertEntityIfChanged.
+// The value mirrors RequirementExecutionPayloadType in the requirement-executor
+// package (workflow/requirement-execution/v1). Defined locally to avoid a
+// cross-package import cycle between execution-manager and requirement-executor.
+var requirementExecutionEntityType = message.Type{
+	Domain:   "workflow",
+	Category: "requirement-execution",
+	Version:  "v1",
+}
 
 // executionStore owns the lifecycle of execution entities in EXECUTION_STATES.
 // It follows the 3-layer manager pattern:
@@ -363,6 +376,25 @@ func (s *executionStore) reconcileReqsFromGraph(ctx context.Context) {
 // Graph triple writes
 // ---------------------------------------------------------------------------
 
+// writeTaskTriples writes the complete predicate set for a task execution to
+// ENTITY_STATES as a single atomic batch via UpsertEntityIfChanged (Phase 3a).
+//
+// Each task execution transitions through many phases (developing → validating
+// → reviewing → approved/rejected/escalated/error), each triggering a saveTask
+// call. The per-phase dirty-track gate skips re-persisting if only the
+// component.go per-triple UpdateTriple sites (not yet removed — deferred follow-up)
+// changed without a corresponding saveTask; on saveTask the full current field
+// set is captured here.
+//
+// OwnedPredicates lists the FULL set of predicates this writer owns, including
+// conditional ones that may be absent when their field is empty. This ensures
+// that when a field transitions set→empty (e.g. Feedback cleared between TDD
+// cycles, FilesModified emptied at start) the predicate still lands in
+// RemoveTriples and the stale value is stripped (C1 stale-on-empty contract).
+//
+// Foreign predicates written by other writers (RelPlan, RelTask, RelProject,
+// RelLoop from task_watcher.go / publishEntity) are NOT listed here — they are
+// preserved by the replace-own / preserve-foreign contract.
 func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.TaskExecution) error {
 	tw := s.tripleWriter
 	if tw == nil {
@@ -373,55 +405,101 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 		entityID = workflow.TaskExecutionEntityID(exec.Slug, exec.TaskID)
 	}
 
-	_ = tw.UpdateTriple(ctx, entityID, wf.Type, "task-execution")
-	_ = tw.UpdateTriple(ctx, entityID, wf.Slug, exec.Slug)
-	_ = tw.UpdateTriple(ctx, entityID, wf.TaskID, exec.TaskID)
-	_ = tw.UpdateTriple(ctx, entityID, wf.Title, exec.Title)
-	_ = tw.UpdateTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	if err := tw.UpdateTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
-		return fmt.Errorf("write phase: %w", err)
-	}
-	_ = tw.UpdateTriple(ctx, entityID, wf.TDDCycle, exec.TDDCycle)
-	_ = tw.UpdateTriple(ctx, entityID, wf.MaxTDDCycles, exec.MaxTDDCycles)
-	if exec.TraceID != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.TraceID, exec.TraceID)
-	}
-	if exec.WorktreePath != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.WorktreePath, exec.WorktreePath)
-	}
-	if exec.WorktreeBranch != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.WorktreeBranch, exec.WorktreeBranch)
-	}
-	// Files modified — replace the whole list (multi-valued, re-written each save).
-	_ = tw.ReplaceTripleList(ctx, entityID, wf.FilesModified, exec.FilesModified)
-	if exec.ValidationPassed {
-		_ = tw.UpdateTriple(ctx, entityID, wf.ValidationPassed, "true")
-	}
-	if exec.Verdict != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.Verdict, exec.Verdict)
-	}
-	if exec.Feedback != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.Feedback, exec.Feedback)
-	}
-	if exec.RejectionType != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.RejectionType, exec.RejectionType)
-	}
-	if exec.ErrorReason != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.ErrorReason, exec.ErrorReason)
-	}
-	if exec.EscalationReason != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.EscalationReason, exec.EscalationReason)
-	}
-	if exec.AgentID != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.AgentID, exec.AgentID)
-	}
-	if exec.Model != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.Model, exec.Model)
+	// Build the complete predicate set. Always-present scalars written
+	// unconditionally so they land in RemoveTriples on every save.
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: wf.Type, Object: "task-execution"},
+		{Subject: entityID, Predicate: wf.Slug, Object: exec.Slug},
+		{Subject: entityID, Predicate: wf.TaskID, Object: exec.TaskID},
+		{Subject: entityID, Predicate: wf.Title, Object: exec.Title},
+		{Subject: entityID, Predicate: wf.ProjectID, Object: exec.ProjectID},
+		{Subject: entityID, Predicate: wf.Phase, Object: exec.Stage},
+		{Subject: entityID, Predicate: wf.TDDCycle, Object: exec.TDDCycle},
+		{Subject: entityID, Predicate: wf.MaxTDDCycles, Object: exec.MaxTDDCycles},
 	}
 
+	// Conditional scalars — present when set.
+	if exec.TraceID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.TraceID, Object: exec.TraceID})
+	}
+	if exec.Model != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.Model, Object: exec.Model})
+	}
+	if exec.AgentID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.AgentID, Object: exec.AgentID})
+	}
+	if exec.WorktreePath != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.WorktreePath, Object: exec.WorktreePath})
+	}
+	if exec.WorktreeBranch != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.WorktreeBranch, Object: exec.WorktreeBranch})
+	}
+	if exec.ValidationPassed {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.ValidationPassed, Object: "true"})
+	}
+	if exec.Verdict != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.Verdict, Object: exec.Verdict})
+	}
+	if exec.RejectionType != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.RejectionType, Object: exec.RejectionType})
+	}
+	if exec.Feedback != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.Feedback, Object: exec.Feedback})
+	}
+	if exec.ErrorReason != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.ErrorReason, Object: exec.ErrorReason})
+	}
+	if exec.EscalationReason != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.EscalationReason, Object: exec.EscalationReason})
+	}
+
+	// Multi-valued list — emit all current values.
+	for _, f := range exec.FilesModified {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.FilesModified, Object: f})
+	}
+
+	// Single batched write. OwnedPredicates is the full set this writer may
+	// emit so that cleared fields still appear in RemoveTriples (C1 fix).
+	_, err := tw.UpsertEntityIfChanged(ctx, TaskExecutionPayloadType, entityID, triples, graphutil.UpsertOpts{
+		OwnedPredicates: []string{
+			wf.Type,
+			wf.Slug,
+			wf.TaskID,
+			wf.Title,
+			wf.ProjectID,
+			wf.Phase,
+			wf.TDDCycle,
+			wf.MaxTDDCycles,
+			wf.TraceID,
+			wf.Model,
+			wf.AgentID,
+			wf.WorktreePath,
+			wf.WorktreeBranch,
+			wf.ValidationPassed,
+			wf.Verdict,
+			wf.RejectionType,
+			wf.Feedback,
+			wf.ErrorReason,
+			wf.EscalationReason,
+			wf.FilesModified,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("write task-exec triples %s/%s: %w", exec.Slug, exec.TaskID, err)
+	}
 	return nil
 }
 
+// writeReqTriples writes the complete predicate set for a requirement execution
+// to ENTITY_STATES as a single atomic batch via UpsertEntityIfChanged (Phase 3a).
+//
+// CROSS-PROCESS NOTE: requirement-executor.publishEntity writes overlapping
+// predicates (Type, Slug, Phase, TraceID, NodeCount, ErrorReason) on the same
+// hashed subject. Per the deferred ownership decision, both writers coexist —
+// each UpsertEntityIfChanged only removes its own OwnedPredicates, preserving
+// what the other wrote. The rel-edge predicates (RelRequirement, RelProject,
+// RelLoop) and FailureReason are written only by requirement-executor and are
+// intentionally absent from OwnedPredicates here so they are never stripped.
 func (s *executionStore) writeReqTriples(ctx context.Context, exec *workflow.RequirementExecution) error {
 	tw := s.tripleWriter
 	if tw == nil {
@@ -432,26 +510,48 @@ func (s *executionStore) writeReqTriples(ctx context.Context, exec *workflow.Req
 		entityID = workflow.RequirementExecutionEntityID(exec.Slug, exec.RequirementID)
 	}
 
-	_ = tw.UpdateTriple(ctx, entityID, wf.Type, "requirement-execution")
-	_ = tw.UpdateTriple(ctx, entityID, wf.Slug, exec.Slug)
-	_ = tw.UpdateTriple(ctx, entityID, wf.RequirementID, exec.RequirementID)
-	_ = tw.UpdateTriple(ctx, entityID, wf.ProjectID, exec.ProjectID)
-	if err := tw.UpdateTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
-		return fmt.Errorf("write phase: %w", err)
-	}
-	if exec.TraceID != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.TraceID, exec.TraceID)
-	}
-	if exec.NodeCount > 0 {
-		_ = tw.UpdateTriple(ctx, entityID, wf.NodeCount, exec.NodeCount)
-	}
-	if exec.ErrorReason != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.ErrorReason, exec.ErrorReason)
-	}
-	if exec.ReviewVerdict != "" {
-		_ = tw.UpdateTriple(ctx, entityID, wf.Verdict, exec.ReviewVerdict)
+	// Build the complete predicate set this writer owns.
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: wf.Type, Object: "requirement-execution"},
+		{Subject: entityID, Predicate: wf.Slug, Object: exec.Slug},
+		{Subject: entityID, Predicate: wf.RequirementID, Object: exec.RequirementID},
+		{Subject: entityID, Predicate: wf.ProjectID, Object: exec.ProjectID},
+		{Subject: entityID, Predicate: wf.Phase, Object: exec.Stage},
 	}
 
+	if exec.TraceID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.TraceID, Object: exec.TraceID})
+	}
+	if exec.NodeCount > 0 {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.NodeCount, Object: exec.NodeCount})
+	}
+	if exec.ErrorReason != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.ErrorReason, Object: exec.ErrorReason})
+	}
+	if exec.ReviewVerdict != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: wf.Verdict, Object: exec.ReviewVerdict})
+	}
+
+	// Single batched write. OwnedPredicates covers the full set this writer may
+	// emit — including conditional ones that may be empty — so cleared fields
+	// still appear in RemoveTriples (C1 fix). Rel-edge predicates and FailureReason
+	// are intentionally excluded (owned by requirement-executor.publishEntity).
+	_, err := tw.UpsertEntityIfChanged(ctx, requirementExecutionEntityType, entityID, triples, graphutil.UpsertOpts{
+		OwnedPredicates: []string{
+			wf.Type,
+			wf.Slug,
+			wf.RequirementID,
+			wf.ProjectID,
+			wf.Phase,
+			wf.TraceID,
+			wf.NodeCount,
+			wf.ErrorReason,
+			wf.Verdict,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("write req-exec triples %s/%s: %w", exec.Slug, exec.RequirementID, err)
+	}
 	return nil
 }
 
