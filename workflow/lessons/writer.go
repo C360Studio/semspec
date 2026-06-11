@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
@@ -86,58 +88,69 @@ func (w *Writer) RecordLesson(ctx context.Context, lesson workflow.Lesson) error
 
 	eid := agentgraph.LessonEntityID(lesson.ID)
 
-	type triple struct {
-		predicate string
-		value     any
+	// Single metadata-bearing entity upsert: update_with_triples with a
+	// create_with_triples fallback on first write. This ensures the lesson node
+	// carries a MessageType (workflow.LessonEntityType) from its very first write
+	// and survives the incoming semstreams triple.add must-exist change — see
+	// docs/audit/mutation-api-graphable-bypass.md ("Impact" section) and
+	// issue #154 (slice #1).
+	if err := w.TW.UpsertEntity(ctx, workflow.LessonEntityType, eid, buildLessonTriples(eid, lesson)); err != nil {
+		return fmt.Errorf("lessons: upsert entity: %w", err)
 	}
-	triples := []triple{
-		{agentgraph.PredicateLessonID, lesson.ID},
-		{agentgraph.PredicateLessonSource, lesson.Source},
-		{agentgraph.PredicateLessonScenarioID, lesson.ScenarioID},
-		{agentgraph.PredicateLessonSummary, lesson.Summary},
-		{agentgraph.PredicateLessonRole, lesson.Role},
-		{agentgraph.PredicateLessonCreatedAt, lesson.CreatedAt.Format(time.RFC3339)},
+
+	return nil
+}
+
+// buildLessonTriples constructs the full []message.Triple for a lesson entity.
+// It is a pure function so it can be tested independently of NATS.
+//
+// Required scalars are always emitted. Optional ADR-033 fields are emitted only
+// when non-zero/non-nil to keep entities lean for legacy lessons. Multi-valued
+// fields (CategoryIDs, EvidenceSteps, EvidenceFiles) emit one triple per element —
+// never JSON-encoded — per feedback_no_json_in_triples.
+func buildLessonTriples(eid string, lesson workflow.Lesson) []message.Triple {
+	triples := []message.Triple{
+		{Subject: eid, Predicate: agentgraph.PredicateLessonID, Object: lesson.ID},
+		{Subject: eid, Predicate: agentgraph.PredicateLessonSource, Object: lesson.Source},
+		{Subject: eid, Predicate: agentgraph.PredicateLessonScenarioID, Object: lesson.ScenarioID},
+		{Subject: eid, Predicate: agentgraph.PredicateLessonSummary, Object: lesson.Summary},
+		{Subject: eid, Predicate: agentgraph.PredicateLessonRole, Object: lesson.Role},
+		{Subject: eid, Predicate: agentgraph.PredicateLessonCreatedAt, Object: lesson.CreatedAt.Format(time.RFC3339)},
 	}
 
 	// One triple per category ID — atomic, no JSON encoding.
 	for _, cat := range lesson.CategoryIDs {
-		triples = append(triples, triple{agentgraph.PredicateLessonCategories, cat})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonCategories, Object: cat})
 	}
 
-	// ADR-033 Phase 1+ optional fields — only written when set, to keep
+	// ADR-033 Phase 1+ optional fields — only emitted when set, to keep
 	// triple count small for legacy lessons.
 	if lesson.Detail != "" {
-		triples = append(triples, triple{agentgraph.PredicateLessonDetail, lesson.Detail})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonDetail, Object: lesson.Detail})
 	}
 	if lesson.InjectionForm != "" {
-		triples = append(triples, triple{agentgraph.PredicateLessonInjectionForm, lesson.InjectionForm})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonInjectionForm, Object: lesson.InjectionForm})
 	}
 	for _, step := range lesson.EvidenceSteps {
-		triples = append(triples, triple{agentgraph.PredicateLessonEvidenceSteps, encodeStepRef(step)})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonEvidenceSteps, Object: encodeStepRef(step)})
 	}
 	for _, file := range lesson.EvidenceFiles {
-		triples = append(triples, triple{agentgraph.PredicateLessonEvidenceFiles, encodeFileRef(file)})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonEvidenceFiles, Object: encodeFileRef(file)})
 	}
 	if lesson.RootCauseRole != "" {
-		triples = append(triples, triple{agentgraph.PredicateLessonRootCauseRole, lesson.RootCauseRole})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonRootCauseRole, Object: lesson.RootCauseRole})
 	}
 	if lesson.Positive {
-		triples = append(triples, triple{agentgraph.PredicateLessonPositive, "true"})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonPositive, Object: "true"})
 	}
 	if lesson.RetiredAt != nil {
-		triples = append(triples, triple{agentgraph.PredicateLessonRetiredAt, lesson.RetiredAt.Format(time.RFC3339)})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonRetiredAt, Object: lesson.RetiredAt.Format(time.RFC3339)})
 	}
 	if lesson.LastInjectedAt != nil {
-		triples = append(triples, triple{agentgraph.PredicateLessonLastInjectedAt, lesson.LastInjectedAt.Format(time.RFC3339)})
+		triples = append(triples, message.Triple{Subject: eid, Predicate: agentgraph.PredicateLessonLastInjectedAt, Object: lesson.LastInjectedAt.Format(time.RFC3339)})
 	}
 
-	for _, t := range triples {
-		if err := w.TW.WriteTriple(ctx, eid, t.predicate, t.value); err != nil {
-			return fmt.Errorf("lessons: write triple %s: %w", t.predicate, err)
-		}
-	}
-
-	return nil
+	return triples
 }
 
 // encodeStepRef serialises a StepRef as `<loop_id>|<step_index>`.

@@ -188,6 +188,17 @@ var DAGNodeEntityType = message.Type{
 	Version:  "v1",
 }
 
+// LessonEntityType is the message type for agent-lesson entity payloads.
+// The Domain "agent-lesson" mirrors the entity ID namespace
+// {prefix}.agent.lessons.lesson.{hash} (DomainAgent / SystemLessons / TypeLesson
+// from agentgraph/entities.go). Category and Version follow the uniform
+// entity-type convention used across all workflow/*EntityType declarations.
+var LessonEntityType = message.Type{
+	Domain:   "agent-lesson",
+	Category: "entity",
+	Version:  "v1",
+}
+
 // EntityPayload is the unified entity payload for all workflow graph entities
 // (plans, phases, approvals, tasks, questions). The message type is set at construction
 // via NewEntityPayload and returned by Schema().
@@ -266,6 +277,7 @@ var workflowEntityTypes = []struct {
 	{"plan-decision", "PlanDecision entity payload for graph ingestion", PlanDecisionEntityType},
 	{"dag-node", "DAG execution node entity payload for graph ingestion", DAGNodeEntityType},
 	{"capability", "Capability entity payload for graph ingestion", CapabilityEntityType},
+	{"agent-lesson", "Agent lesson entity payload for graph ingestion", LessonEntityType},
 }
 
 // RegisterPayloads registers every payload type owned by the workflow package
