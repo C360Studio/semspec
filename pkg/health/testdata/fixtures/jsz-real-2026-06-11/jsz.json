@@ -1,0 +1,1774 @@
+{
+  "memory": 30425624,
+  "storage": 25467559,
+  "reserved_memory": 73400320,
+  "reserved_storage": 104857600,
+  "accounts": 1,
+  "ha_assets": 0,
+  "api": {
+    "level": 3,
+    "total": 902,
+    "errors": 65
+  },
+  "server_id": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D",
+  "now": "2026-06-11T16:12:56.413621176Z",
+  "config": {
+    "max_memory": 18673330176,
+    "max_storage": 4950097920,
+    "store_dir": "/data/jetstream",
+    "sync_interval": 120000000000,
+    "strict": true
+  },
+  "limits": {},
+  "streams": 31,
+  "consumers": 63,
+  "messages": 12083,
+  "bytes": 55893183,
+  "account_details": [
+    {
+      "name": "$G",
+      "id": "$G",
+      "memory": 30425624,
+      "storage": 25467559,
+      "reserved_memory": 18446744073709551615,
+      "reserved_storage": 18446744073709551615,
+      "accounts": 0,
+      "ha_assets": 0,
+      "api": {
+        "level": 0,
+        "total": 902,
+        "errors": 65
+      },
+      "stream_detail": [
+        {
+          "name": "KV_PREDICATE_INDEX",
+          "created": "2026-06-11T16:12:22.235566716Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 35,
+            "bytes": 97814,
+            "first_seq": 30,
+            "first_ts": "2026-06-11T16:12:22.350246466Z",
+            "last_seq": 12915,
+            "last_ts": "2026-06-11T16:12:56.392643218Z",
+            "num_subjects": 35,
+            "num_deleted": 12851,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_semstreams_flows",
+          "created": "2026-06-11T16:12:27.811600927Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 1,
+            "bytes": 3609,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:27.914084969Z",
+            "last_seq": 1,
+            "last_ts": "2026-06-11T16:12:27.914084969Z",
+            "num_subjects": 1,
+            "consumer_count": 1
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_semstreams_flows",
+              "name": "jFHGIUgT",
+              "created": "2026-06-11T16:12:27.914360219Z",
+              "delivered": {
+                "consumer_seq": 1,
+                "stream_seq": 1,
+                "last_active": "2026-06-11T16:12:27.914452177Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 1,
+                "stream_seq": 1
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413646676Z"
+            }
+          ]
+        },
+        {
+          "name": "LOGS",
+          "created": "2026-06-11T16:12:22.096961049Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_QUESTIONS",
+          "created": "2026-06-11T16:12:22.099525716Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 1
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_QUESTIONS",
+              "name": "12Rf5mhG",
+              "created": "2026-06-11T16:12:22.230798591Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413649385Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_PLAN_STATES",
+          "created": "2026-06-11T16:12:22.228308758Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 8
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "J2zdNaA7",
+              "created": "2026-06-11T16:12:22.432062758Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413650718Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "UWfCmU2z",
+              "created": "2026-06-11T16:12:22.432201758Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.41365126Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "LaXx4t3r",
+              "created": "2026-06-11T16:12:22.432336758Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413651635Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "oOccvagu",
+              "created": "2026-06-11T16:12:22.432514091Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.41365226Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "YhhwS4vx",
+              "created": "2026-06-11T16:12:22.432852008Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413653426Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "jBaYJPiP",
+              "created": "2026-06-11T16:12:22.433145133Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413653885Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "Q8vruCcn",
+              "created": "2026-06-11T16:12:22.433349383Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413654135Z"
+            },
+            {
+              "stream_name": "KV_PLAN_STATES",
+              "name": "fVsMuHPn",
+              "created": "2026-06-11T16:12:22.433906424Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413654385Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_INCOMING_INDEX",
+          "created": "2026-06-11T16:12:22.232528924Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 269,
+            "bytes": 1218226,
+            "first_seq": 71,
+            "first_ts": "2026-06-11T16:12:30.76140597Z",
+            "last_seq": 90253,
+            "last_ts": "2026-06-11T16:12:56.413636551Z",
+            "num_subjects": 269,
+            "num_deleted": 89914,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_ALIAS_INDEX",
+          "created": "2026-06-11T16:12:22.234057924Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "METRICS",
+          "created": "2026-06-11T16:12:22.094563508Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "WORKFLOW",
+          "created": "2026-06-11T16:12:22.096645716Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 6
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "WORKFLOW",
+              "name": "plan-decision-handler",
+              "created": "2026-06-11T16:12:22.227041216Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.41365601Z"
+            },
+            {
+              "stream_name": "WORKFLOW",
+              "name": "recovery-agent",
+              "created": "2026-06-11T16:12:22.227137174Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413657926Z"
+            },
+            {
+              "stream_name": "WORKFLOW",
+              "name": "structural-validator",
+              "created": "2026-06-11T16:12:22.227154008Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413659176Z"
+            },
+            {
+              "stream_name": "WORKFLOW",
+              "name": "scenario-orchestrator",
+              "created": "2026-06-11T16:12:22.227175758Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413660593Z"
+            },
+            {
+              "stream_name": "WORKFLOW",
+              "name": "lesson-decomposer",
+              "created": "2026-06-11T16:12:22.227204299Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413661301Z"
+            },
+            {
+              "stream_name": "WORKFLOW",
+              "name": "qa-reviewer-qa-completed",
+              "created": "2026-06-11T16:12:22.227256174Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.41366226Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_EMBEDDING_DEDUP",
+          "created": "2026-06-11T16:12:22.233438966Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 512,
+            "bytes": 633759,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:22.439723258Z",
+            "last_seq": 512,
+            "last_ts": "2026-06-11T16:12:56.173149176Z",
+            "num_subjects": 512,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_semstreams_config",
+          "created": "2026-06-11T16:12:22.100500299Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 38,
+            "bytes": 14732,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:22.101510341Z",
+            "last_seq": 38,
+            "last_ts": "2026-06-11T16:12:22.104137591Z",
+            "num_subjects": 38,
+            "consumer_count": 10
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "OU6irmKp",
+              "created": "2026-06-11T16:12:22.104288091Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413663885Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "BcBjJij7",
+              "created": "2026-06-11T16:12:22.104520883Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413664218Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "ytu4npFC",
+              "created": "2026-06-11T16:12:22.104619008Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413664635Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "Ba1ESHPR",
+              "created": "2026-06-11T16:12:22.104720258Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413665801Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "KDmC8ZMU",
+              "created": "2026-06-11T16:12:22.104805841Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413666135Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "faDezAqn",
+              "created": "2026-06-11T16:12:27.807146135Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413666551Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "QZam1p1a",
+              "created": "2026-06-11T16:12:27.807363052Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413666885Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "ubn9Fbx7",
+              "created": "2026-06-11T16:12:27.807493302Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413667093Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "Nw6NQP95",
+              "created": "2026-06-11T16:12:27.80759951Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413667385Z"
+            },
+            {
+              "stream_name": "KV_semstreams_config",
+              "name": "4AFR73fR",
+              "created": "2026-06-11T16:12:27.807734469Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 38
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413667801Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_AGENT_LOOPS",
+          "created": "2026-06-11T16:12:22.227985091Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 11
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "El6nlSPk",
+              "created": "2026-06-11T16:12:22.230862341Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413668926Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "NuoAdA73",
+              "created": "2026-06-11T16:12:22.431376549Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413669343Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "ytvg46pk",
+              "created": "2026-06-11T16:12:22.431851258Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413669635Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "o5ZncDy6",
+              "created": "2026-06-11T16:12:22.431967924Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413670176Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "UsLLNnuL",
+              "created": "2026-06-11T16:12:22.432090841Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413670426Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "qw72uf2r",
+              "created": "2026-06-11T16:12:22.432153508Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413670718Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "VrgsH4eM",
+              "created": "2026-06-11T16:12:22.432348674Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413670968Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "pP4Yhe45",
+              "created": "2026-06-11T16:12:22.432461174Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413671301Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "mP6ZtuVl",
+              "created": "2026-06-11T16:12:22.432794133Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413671593Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "erEEFv1c",
+              "created": "2026-06-11T16:12:32.330248804Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413671968Z"
+            },
+            {
+              "stream_name": "KV_AGENT_LOOPS",
+              "name": "6z7xs0kA",
+              "created": "2026-06-11T16:12:32.332134429Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413672385Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_OUTGOING_INDEX",
+          "created": "2026-06-11T16:12:22.230119674Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 237,
+            "bytes": 1174611,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:30.739131303Z",
+            "last_seq": 1584,
+            "last_ts": "2026-06-11T16:12:56.390533593Z",
+            "num_subjects": 237,
+            "num_deleted": 1347,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "GRAPH",
+          "created": "2026-06-11T16:12:22.096091383Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 8032,
+            "bytes": 30311728,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:27.814189635Z",
+            "last_seq": 8032,
+            "last_ts": "2026-06-11T16:12:51.921610882Z",
+            "num_subjects": 4,
+            "consumer_count": 1
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "GRAPH",
+              "name": "graph-ingest-graph-ingest-entity",
+              "created": "2026-06-11T16:12:22.234563341Z",
+              "delivered": {
+                "consumer_seq": 1002,
+                "stream_seq": 1005,
+                "last_active": "2026-06-11T16:12:47.192963714Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 590,
+                "stream_seq": 593,
+                "last_active": "2026-06-11T16:12:56.295866468Z"
+              },
+              "num_ack_pending": 412,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 7027,
+              "ts": "2026-06-11T16:12:56.413674051Z"
+            }
+          ]
+        },
+        {
+          "name": "SOURCES",
+          "created": "2026-06-11T16:12:22.098464674Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_RESEARCH",
+          "created": "2026-06-11T16:12:22.099918258Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_EMBEDDINGS_CACHE",
+          "created": "2026-06-11T16:12:22.227779466Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_ENTITY_STATES",
+          "created": "2026-06-11T16:12:22.227922924Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 595,
+            "bytes": 16764937,
+            "first_seq": 5,
+            "first_ts": "2026-06-11T16:12:22.241389008Z",
+            "last_seq": 32917,
+            "last_ts": "2026-06-11T16:12:56.412957926Z",
+            "num_subjects": 595,
+            "num_deleted": 32318,
+            "consumer_count": 2
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_ENTITY_STATES",
+              "name": "2JAe2kwB",
+              "created": "2026-06-11T16:12:22.236289633Z",
+              "delivered": {
+                "consumer_seq": 32917,
+                "stream_seq": 32917,
+                "last_active": "2026-06-11T16:12:56.413071885Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 32917,
+                "stream_seq": 32917
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413675718Z"
+            },
+            {
+              "stream_name": "KV_ENTITY_STATES",
+              "name": "IWZ7ms7u",
+              "created": "2026-06-11T16:12:22.237538174Z",
+              "delivered": {
+                "consumer_seq": 32917,
+                "stream_seq": 32917,
+                "last_active": "2026-06-11T16:12:56.413057426Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 32917,
+                "stream_seq": 32917
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.41367601Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_COMPONENT_STATUS",
+          "created": "2026-06-11T16:12:22.228362091Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 5,
+            "bytes": 1261,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:22.230636424Z",
+            "last_seq": 82,
+            "last_ts": "2026-06-11T16:12:56.059174926Z",
+            "num_subjects": 5,
+            "num_deleted": 77,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "FLOWS",
+          "created": "2026-06-11T16:12:22.098269966Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 1,
+            "bytes": 316,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:27.91476826Z",
+            "last_seq": 1,
+            "last_ts": "2026-06-11T16:12:27.91476826Z",
+            "num_subjects": 1,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "COMPONENT_CAPABILITIES",
+          "created": "2026-06-11T16:12:22.223334841Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 29,
+            "bytes": 19612,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:52.224513841Z",
+            "last_seq": 29,
+            "last_ts": "2026-06-11T16:12:52.228432924Z",
+            "num_subjects": 29,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_EMBEDDING_INDEX",
+          "created": "2026-06-11T16:12:22.230746716Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 535,
+            "bytes": 721849,
+            "first_seq": 5,
+            "first_ts": "2026-06-11T16:12:22.440876174Z",
+            "last_seq": 43554,
+            "last_ts": "2026-06-11T16:12:56.404790676Z",
+            "num_subjects": 535,
+            "num_deleted": 43015,
+            "consumer_count": 2
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_EMBEDDING_INDEX",
+              "name": "2MJdFVhS",
+              "created": "2026-06-11T16:12:22.234630841Z",
+              "delivered": {
+                "consumer_seq": 43553,
+                "stream_seq": 43554,
+                "last_active": "2026-06-11T16:12:56.404807176Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 43553,
+                "stream_seq": 43554
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413679093Z"
+            },
+            {
+              "stream_name": "KV_EMBEDDING_INDEX",
+              "name": "xFXnY1lW",
+              "created": "2026-06-11T16:12:22.235244716Z",
+              "delivered": {
+                "consumer_seq": 43554,
+                "stream_seq": 43554,
+                "last_active": "2026-06-11T16:12:56.404801051Z"
+              },
+              "ack_floor": {
+                "consumer_seq": 43554,
+                "stream_seq": 43554
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.41367951Z"
+            }
+          ]
+        },
+        {
+          "name": "KV_CONTEXT_INDEX",
+          "created": "2026-06-11T16:12:22.236449966Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 1,
+            "bytes": 1048528,
+            "first_seq": 1350,
+            "first_ts": "2026-06-11T16:12:56.38200626Z",
+            "last_seq": 1350,
+            "last_ts": "2026-06-11T16:12:56.38200626Z",
+            "num_subjects": 1,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_PERSONAS",
+          "created": "2026-06-11T16:12:22.238796341Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_EXECUTION_STATES",
+          "created": "2026-06-11T16:12:22.227139341Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 7
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "M0kgH9Hi",
+              "created": "2026-06-11T16:12:22.230679049Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413681718Z"
+            },
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "HRW92D6m",
+              "created": "2026-06-11T16:12:22.432140758Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413682343Z"
+            },
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "gK0VKCJj",
+              "created": "2026-06-11T16:12:32.328855471Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413682635Z"
+            },
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "01QO4tj2",
+              "created": "2026-06-11T16:12:32.330318596Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413682968Z"
+            },
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "mT1OPXSi",
+              "created": "2026-06-11T16:12:32.332017429Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413683218Z"
+            },
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "hb1AUNOw",
+              "created": "2026-06-11T16:12:32.332176304Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413683551Z"
+            },
+            {
+              "stream_name": "KV_EXECUTION_STATES",
+              "name": "JRdzfiRn",
+              "created": "2026-06-11T16:12:32.333928387Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 0,
+              "num_pending": 0,
+              "push_bound": true,
+              "ts": "2026-06-11T16:12:56.413684176Z"
+            }
+          ]
+        },
+        {
+          "name": "AGENT",
+          "created": "2026-06-11T16:12:22.095719174Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 13
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-model-agent-request-all",
+              "created": "2026-06-11T16:12:22.227238049Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413685593Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-tools-tool-execute-all-semspec",
+              "created": "2026-06-11T16:12:22.227894591Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.41368651Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-dispatch-agent-complete",
+              "created": "2026-06-11T16:12:22.230962258Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413687301Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-dispatch-agent-created",
+              "created": "2026-06-11T16:12:22.232938299Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413688176Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-agent-task-any",
+              "created": "2026-06-11T16:12:22.233030716Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413688926Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-agent-response-all",
+              "created": "2026-06-11T16:12:22.234692799Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413689593Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-dispatch-agent-failed",
+              "created": "2026-06-11T16:12:22.235212174Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413690385Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-tool-result-all",
+              "created": "2026-06-11T16:12:22.235774133Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413690843Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-dispatch-agent-approval-pending",
+              "created": "2026-06-11T16:12:22.235892008Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413691385Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-agent-signal-any",
+              "created": "2026-06-11T16:12:22.236791549Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413691968Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-agent-approval_response-any",
+              "created": "2026-06-11T16:12:22.237401924Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.41369251Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-agent-toolcall-approved-all",
+              "created": "2026-06-11T16:12:22.237943216Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413693135Z"
+            },
+            {
+              "stream_name": "AGENT",
+              "name": "agentic-loop-agent-toolcall-rejected-all",
+              "created": "2026-06-11T16:12:22.238393133Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413694426Z"
+            }
+          ]
+        },
+        {
+          "name": "USER",
+          "created": "2026-06-11T16:12:22.096351674Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 1
+          },
+          "consumer_detail": [
+            {
+              "stream_name": "USER",
+              "name": "agentic-dispatch-user-message",
+              "created": "2026-06-11T16:12:22.230370841Z",
+              "delivered": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "ack_floor": {
+                "consumer_seq": 0,
+                "stream_seq": 0
+              },
+              "num_ack_pending": 0,
+              "num_redelivered": 0,
+              "num_waiting": 1,
+              "num_pending": 0,
+              "ts": "2026-06-11T16:12:56.413695301Z"
+            }
+          ]
+        },
+        {
+          "name": "HEALTH",
+          "created": "2026-06-11T16:12:22.098088591Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 240,
+            "bytes": 93968,
+            "first_seq": 1,
+            "first_ts": "2026-06-11T16:12:22.224930924Z",
+            "last_seq": 240,
+            "last_ts": "2026-06-11T16:12:52.9159298Z",
+            "num_subjects": 39,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "OBJ_AGENT_CONTENT",
+          "created": "2026-06-11T16:12:22.230445008Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 0,
+            "bytes": 0,
+            "first_seq": 0,
+            "first_ts": "0001-01-01T00:00:00Z",
+            "last_seq": 0,
+            "last_ts": "0001-01-01T00:00:00Z",
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "OBJ_MESSAGES",
+          "created": "2026-06-11T16:12:27.814226469Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 461,
+            "bytes": 3653051,
+            "first_seq": 21,
+            "first_ts": "2026-06-11T16:12:27.833874302Z",
+            "last_seq": 489,
+            "last_ts": "2026-06-11T16:12:30.581627137Z",
+            "num_subjects": 458,
+            "num_deleted": 8,
+            "consumer_count": 0
+          }
+        },
+        {
+          "name": "KV_ENTITY_SUFFIX_INDEX",
+          "created": "2026-06-11T16:12:22.232255674Z",
+          "cluster": {
+            "leader": "NAIMENSSZAHEZU7HDDELWVQ2WKXCA3KGGKS6QJGIR2QESBYTQPDDGO2D"
+          },
+          "state": {
+            "messages": 1092,
+            "bytes": 135182,
+            "first_seq": 2,
+            "first_ts": "2026-06-11T16:12:30.646279178Z",
+            "last_seq": 1198,
+            "last_ts": "2026-06-11T16:12:56.295589968Z",
+            "num_subjects": 1092,
+            "num_deleted": 105,
+            "consumer_count": 0
+          }
+        }
+      ]
+    }
+  ],
+  "total": 1
+}
