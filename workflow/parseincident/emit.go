@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"unicode/utf8"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/observability"
 )
 
@@ -58,6 +60,17 @@ type IncidentEvent struct {
 	RawResponse string   // Unmodified LLM output. Truncated at MaxRawResponseBytes by Emit; truncation flagged via a separate predicate.
 }
 
+// ParseIncidentEntityType is the message.Type for parse-incident entities.
+// Domain "parse-incident" names the entity class (the incident node IDs are
+// `<call_id>.parse.<checkpoint>`). Kept local to avoid touching
+// workflow/entity.go while nearby slices are editing it (issue #154); a future
+// pass may register it in workflowEntityTypes for parity with LessonEntityType.
+var ParseIncidentEntityType = message.Type{
+	Domain:   "parse-incident",
+	Category: "entity",
+	Version:  "v1",
+}
+
 // tripleWriter is the minimal interface Emit needs from the graph
 // write surface. graphutil.TripleWriter satisfies it implicitly. The
 // interface is unexported so a second implementation outside this
@@ -65,17 +78,19 @@ type IncidentEvent struct {
 // accident.
 type tripleWriter interface {
 	WriteTriple(ctx context.Context, entityID, predicate string, object any) error
+	UpsertEntity(ctx context.Context, entityType message.Type, entityID string, triples []message.Triple) error
 }
 
-// Emit writes the parse.incident triple set for a checkpoint result.
+// Emit writes the parse.incident entity for a checkpoint result.
 // Returns the incident node ID on success, or "" when no incident was
 // emitted (strict outcome or nil writer).
 //
-// Triple write order matters: the relation triple
-// `(call_id) -[parse.incident]-> (incident_node)` is written first so
-// a partial-write failure still leaves the relation findable. Each
-// attribute predicate (checkpoint, outcome, role, etc.) follows;
-// individual write failures bubble up after all writes are attempted.
+// The incident node is created via UpsertEntity (routes to
+// create_with_triples on first write, update_with_triples on retry),
+// which is metadata-bearing and survives the semstreams triple.add
+// must-exist change (issue #154, slice #2). call_id is carried as a
+// node attribute so the linkage to the agentic loop is preserved even
+// though the loop entity has no ENTITY_STATES graph node.
 //
 // Strict outcomes are no-ops — the audit's "tolerance is the
 // deviation worth recording" framing means strict parses don't need
@@ -109,77 +124,67 @@ func Emit(ctx context.Context, tw tripleWriter, ic IncidentContext, ev IncidentE
 
 	incidentID := fmt.Sprintf("%s.parse.%s", ic.CallID, ev.Checkpoint)
 
-	// Relation first so a partial write still leaves the incident
-	// findable from the call entity.
-	if err := tw.WriteTriple(ctx, ic.CallID, observability.Incident, incidentID); err != nil {
-		return "", fmt.Errorf("write parse.incident relation: %w", err)
-	}
-
-	// Required attribute predicates (always populated).
-	required := []predicateWrite{
-		{observability.Checkpoint, ev.Checkpoint},
-		{observability.Outcome, ev.Outcome},
-	}
-	for _, w := range required {
-		if err := tw.WriteTriple(ctx, incidentID, w.predicate, w.object); err != nil {
-			return incidentID, fmt.Errorf("write %s: %w", w.predicate, err)
-		}
-	}
-
-	// Optional attribute predicates — skipped on empty values so the
-	// graph doesn't accumulate sentinel-value triples that need a
-	// later cleanup pass.
-	optional := []predicateWrite{
-		{observability.Reason, ev.Reason},
-		{observability.Role, ic.Role},
-		{observability.Model, ic.Model},
-		{observability.PromptVersion, ic.PromptVersion},
-	}
-	for _, w := range optional {
-		if w.object == "" {
-			continue
-		}
-		if err := tw.WriteTriple(ctx, incidentID, w.predicate, w.object); err != nil {
-			return incidentID, fmt.Errorf("write %s: %w", w.predicate, err)
-		}
-	}
-
-	// Raw response — always retained on rejected/tolerated_quirk per
-	// ADR-035 §3, but capped at MaxRawResponseBytes with a separate
-	// truncation flag so readers know whether they're seeing the full
-	// or clipped text.
-	if ev.RawResponse != "" {
-		body, truncated := truncateUTF8Safe(ev.RawResponse, MaxRawResponseBytes)
-		if err := tw.WriteTriple(ctx, incidentID, observability.RawResponse, body); err != nil {
-			return incidentID, fmt.Errorf("write raw_response: %w", err)
-		}
-		if truncated {
-			if err := tw.WriteTriple(ctx, incidentID, observability.RawResponseTruncated, true); err != nil {
-				return incidentID, fmt.Errorf("write raw_response_truncated: %w", err)
-			}
-		}
-	}
-
-	// Multi-valued quirk predicates — one triple per fired quirk so
-	// the IncidentRateExceeded detector (ADR-035 step 5) can slice by
-	// individual quirk ID without parsing concatenated values.
-	for _, q := range ev.Quirks {
-		if q == "" {
-			continue
-		}
-		if err := tw.WriteTriple(ctx, incidentID, observability.Quirk, q); err != nil {
-			return incidentID, fmt.Errorf("write quirk %q: %w", q, err)
-		}
+	triples := buildIncidentTriples(incidentID, ic, ev)
+	if err := tw.UpsertEntity(ctx, ParseIncidentEntityType, incidentID, triples); err != nil {
+		return "", fmt.Errorf("parseincident: upsert entity: %w", err)
 	}
 
 	return incidentID, nil
 }
 
-// predicateWrite pairs a predicate constant with its object value for
-// table-driven writes inside Emit.
-type predicateWrite struct {
-	predicate string
-	object    any
+// buildIncidentTriples constructs the full []message.Triple for a parse-incident
+// entity. It is a pure function so it can be tested independently of NATS.
+//
+// Required scalars (Checkpoint, Outcome, CallID) are always emitted. Optional
+// fields (Reason, Role, Model, PromptVersion, RawResponse) are emitted only when
+// non-empty. Multi-valued fields (Quirks) emit one triple per element — never
+// JSON-encoded — per feedback_no_json_in_triples. RawResponse is capped at
+// MaxRawResponseBytes with a truncation flag when the original exceeds the cap.
+func buildIncidentTriples(incidentID string, ic IncidentContext, ev IncidentEvent) []message.Triple {
+	triples := []message.Triple{
+		{Subject: incidentID, Predicate: observability.Checkpoint, Object: ev.Checkpoint},
+		{Subject: incidentID, Predicate: observability.Outcome, Object: ev.Outcome},
+		// call_id is carried as an attribute so the linkage to the agentic loop
+		// is preserved even though the loop has no ENTITY_STATES graph node.
+		{Subject: incidentID, Predicate: observability.IncidentCallID, Object: ic.CallID},
+	}
+
+	// Optional attribute predicates — omit empty values so the graph does
+	// not accumulate sentinel-value triples that need a later cleanup pass.
+	if ev.Reason != "" {
+		triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.Reason, Object: ev.Reason})
+	}
+	if ic.Role != "" {
+		triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.Role, Object: ic.Role})
+	}
+	if ic.Model != "" {
+		triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.Model, Object: ic.Model})
+	}
+	if ic.PromptVersion != "" {
+		triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.PromptVersion, Object: ic.PromptVersion})
+	}
+
+	// Raw response — retained on rejected/tolerated_quirk per ADR-035 §3,
+	// capped at MaxRawResponseBytes with a separate truncation flag.
+	if ev.RawResponse != "" {
+		body, truncated := truncateUTF8Safe(ev.RawResponse, MaxRawResponseBytes)
+		triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.RawResponse, Object: body})
+		if truncated {
+			triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.RawResponseTruncated, Object: true})
+		}
+	}
+
+	// Multi-valued quirk predicates — one triple per fired quirk so the
+	// IncidentRateExceeded detector (ADR-035 step 5) can slice by individual
+	// quirk ID without parsing concatenated values.
+	for _, q := range ev.Quirks {
+		if q == "" {
+			continue
+		}
+		triples = append(triples, message.Triple{Subject: incidentID, Predicate: observability.Quirk, Object: q})
+	}
+
+	return triples
 }
 
 // EmitForResult is a convenience wrapper that derives the IncidentEvent

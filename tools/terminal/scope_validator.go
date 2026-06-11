@@ -9,6 +9,7 @@ import (
 
 	"github.com/c360studio/semspec/vocabulary/observability"
 	"github.com/c360studio/semspec/workflow/recoveryhint"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -52,10 +53,12 @@ func registerScopeValidatorMetrics(reg *metric.MetricsRegistry) error {
 
 // scopeValidatorTripleEmitter is the minimal interface needed to
 // emit a tool.recovery.incident triple for planner scope misses.
-// Identical to tools/bash's tripleEmitter; kept local to avoid a
-// cross-package import.
+// Mirrors tools/bash's tripleEmitter; kept local to avoid a
+// cross-package import. UpsertEntity added in issue #154 slice #2 —
+// recoveryhint.Emit migrated off triple.add must-exist.
 type scopeValidatorTripleEmitter interface {
 	WriteTriple(ctx context.Context, entityID, predicate string, object any) error
+	UpsertEntity(ctx context.Context, entityType message.Type, entityID string, triples []message.Triple) error
 }
 
 // extractScopeIncludePaths pulls the scope.include array from a plan

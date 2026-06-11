@@ -10,6 +10,7 @@ import (
 
 	"github.com/c360studio/semspec/vocabulary/observability"
 	"github.com/c360studio/semspec/workflow/recoveryhint"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -104,10 +105,11 @@ type pathMissEntry struct {
 
 // tripleEmitter is the minimal interface PathMissDetector needs to
 // emit a tool.recovery.incident triple. graphutil.TripleWriter
-// satisfies it via WriteTriple. recoveryhint.Emit takes the same
-// shape, so we pass through directly.
+// satisfies both methods. recoveryhint.Emit requires UpsertEntity
+// (added in issue #154 slice #2 — migration off triple.add must-exist).
 type tripleEmitter interface {
 	WriteTriple(ctx context.Context, entityID, predicate string, object any) error
+	UpsertEntity(ctx context.Context, entityType message.Type, entityID string, triples []message.Triple) error
 }
 
 // PathMissDetector tracks recent path-miss bash failures per task

@@ -8,6 +8,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/observability"
 )
 
@@ -19,51 +21,287 @@ import (
 // fails loudly at unit-test time instead of silently in production.
 var natsKVKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 
-// recordedTriple captures a single WriteTriple invocation for
-// table-driven assertions on the emitted triple set.
-type recordedTriple struct {
-	subject   string
-	predicate string
-	object    any
+// recordedUpsert captures a single UpsertEntity invocation.
+type recordedUpsert struct {
+	entityType message.Type
+	entityID   string
+	triples    []message.Triple
 }
 
-// recordingWriter implements tripleWriter by appending every call to
-// an in-memory slice. Tests assert on the slice's length, ordering,
-// and predicate/object pairs.
+// recordingWriter implements tripleWriter for tests. It records UpsertEntity
+// calls in upserts and WriteTriple calls in writeCalls. Tests assert that
+// Emit uses exactly one UpsertEntity and zero WriteTriple calls — the path
+// pin that confirms the migration off graph.mutation.triple.add.
 type recordingWriter struct {
-	triples []recordedTriple
-	failOn  string // when set, return an error on the matching predicate
+	upserts    []recordedUpsert
+	writeCalls int  // count of WriteTriple calls — must stay 0 after migration
+	failUpsert bool // when true, UpsertEntity returns an error
 }
 
-func (rw *recordingWriter) WriteTriple(_ context.Context, subject, predicate string, object any) error {
-	if rw.failOn != "" && rw.failOn == predicate {
-		return errors.New("recording-writer simulated failure")
-	}
-	rw.triples = append(rw.triples, recordedTriple{subject, predicate, object})
+func (rw *recordingWriter) WriteTriple(_ context.Context, _, _ string, _ any) error {
+	rw.writeCalls++
 	return nil
 }
 
-// findTriple returns the first triple matching subject+predicate, or nil.
-func (rw *recordingWriter) findTriple(subject, predicate string) *recordedTriple {
-	for i := range rw.triples {
-		if rw.triples[i].subject == subject && rw.triples[i].predicate == predicate {
-			return &rw.triples[i]
+func (rw *recordingWriter) UpsertEntity(_ context.Context, entityType message.Type, entityID string, triples []message.Triple) error {
+	if rw.failUpsert {
+		return errors.New("recording-writer simulated UpsertEntity failure")
+	}
+	rw.upserts = append(rw.upserts, recordedUpsert{entityType, entityID, triples})
+	return nil
+}
+
+// findTriple returns the first triple matching predicate in the most recent
+// upsert, or nil. Helpers mirror the old recordedTriple helpers so individual
+// predicate assertions read identically.
+func (rw *recordingWriter) findTriple(_, predicate string) *message.Triple {
+	if len(rw.upserts) == 0 {
+		return nil
+	}
+	last := rw.upserts[len(rw.upserts)-1]
+	for i := range last.triples {
+		if last.triples[i].Predicate == predicate {
+			return &last.triples[i]
 		}
 	}
 	return nil
 }
 
-func (rw *recordingWriter) findAll(subject, predicate string) []recordedTriple {
-	var out []recordedTriple
-	for _, t := range rw.triples {
-		if t.subject == subject && t.predicate == predicate {
+func (rw *recordingWriter) findAll(_, predicate string) []message.Triple {
+	if len(rw.upserts) == 0 {
+		return nil
+	}
+	last := rw.upserts[len(rw.upserts)-1]
+	var out []message.Triple
+	for _, t := range last.triples {
+		if t.Predicate == predicate {
 			out = append(out, t)
 		}
 	}
 	return out
 }
 
-func TestEmit_StrictOutcome_NoTriples(t *testing.T) {
+// ----- buildIncidentTriples — pure unit tests --------------------------------
+
+// TestBuildIncidentTriples_FullAttributeSet verifies the pure helper emits all
+// attributes including call_id, with optional fields present when non-empty and
+// quirks emitted one-per-triple. No NATS involved.
+func TestBuildIncidentTriples_FullAttributeSet(t *testing.T) {
+	ic := IncidentContext{
+		CallID:        "loop-build",
+		Role:          "planner",
+		Model:         "openrouter-qwen3-moe",
+		PromptVersion: "v3.2",
+	}
+	ev := IncidentEvent{
+		Checkpoint:  observability.CheckpointResponseParse,
+		Outcome:     observability.OutcomeToleratedQuirk,
+		Quirks:      []string{"fenced_json_wrapper", "trailing_commas"},
+		Reason:      "stripped fences",
+		RawResponse: "```json\n{\"x\":1,}\n```",
+	}
+	incidentID := "loop-build.parse.response_parse"
+
+	triples := buildIncidentTriples(incidentID, ic, ev)
+
+	// Helper to find by predicate value.
+	find := func(pred string) *message.Triple {
+		for i := range triples {
+			if triples[i].Predicate == pred {
+				return &triples[i]
+			}
+		}
+		return nil
+	}
+	findAll := func(pred string) []message.Triple {
+		var out []message.Triple
+		for _, t := range triples {
+			if t.Predicate == pred {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+
+	// Required always-present predicates.
+	required := map[string]any{
+		observability.Checkpoint:     observability.CheckpointResponseParse,
+		observability.Outcome:        observability.OutcomeToleratedQuirk,
+		observability.IncidentCallID: "loop-build",
+		observability.Reason:         "stripped fences",
+		observability.Role:           "planner",
+		observability.Model:          "openrouter-qwen3-moe",
+		observability.PromptVersion:  "v3.2",
+		observability.RawResponse:    "```json\n{\"x\":1,}\n```",
+	}
+	for pred, want := range required {
+		got := find(pred)
+		if got == nil {
+			t.Errorf("missing triple for predicate %q", pred)
+			continue
+		}
+		if got.Object != want {
+			t.Errorf("predicate %q object = %v, want %v", pred, got.Object, want)
+		}
+	}
+
+	// Quirks — one per fired quirk.
+	quirks := findAll(observability.Quirk)
+	if len(quirks) != 2 {
+		t.Errorf("expected 2 quirk triples, got %d", len(quirks))
+	}
+	gotQ := map[any]bool{}
+	for _, q := range quirks {
+		gotQ[q.Object] = true
+	}
+	if !gotQ["fenced_json_wrapper"] || !gotQ["trailing_commas"] {
+		t.Errorf("expected both fenced_json_wrapper and trailing_commas in quirks, got %v", gotQ)
+	}
+
+	// All subjects must equal incidentID.
+	for _, tr := range triples {
+		if tr.Subject != incidentID {
+			t.Errorf("triple subject = %q, want %q (predicate %q)", tr.Subject, incidentID, tr.Predicate)
+		}
+	}
+}
+
+// TestBuildIncidentTriples_OptionalAbsentWhenEmpty confirms empty optional
+// fields produce no triples — no sentinel-value pollution.
+func TestBuildIncidentTriples_OptionalAbsentWhenEmpty(t *testing.T) {
+	ic := IncidentContext{CallID: "loop-min"} // Role/Model/PromptVersion all empty
+	ev := IncidentEvent{
+		Checkpoint: observability.CheckpointResponseParse,
+		Outcome:    observability.OutcomeRejected,
+		// Reason, RawResponse empty
+	}
+	incidentID := "loop-min.parse.response_parse"
+
+	triples := buildIncidentTriples(incidentID, ic, ev)
+
+	find := func(pred string) *message.Triple {
+		for i := range triples {
+			if triples[i].Predicate == pred {
+				return &triples[i]
+			}
+		}
+		return nil
+	}
+
+	// Optional fields that were empty must not appear.
+	for _, pred := range []string{
+		observability.Reason,
+		observability.Role,
+		observability.Model,
+		observability.PromptVersion,
+		observability.RawResponse,
+		observability.RawResponseTruncated,
+	} {
+		if t2 := find(pred); t2 != nil {
+			t.Errorf("empty optional field %q must not generate a triple; got %+v", pred, t2)
+		}
+	}
+
+	// call_id is required even when other optionals are absent.
+	if t2 := find(observability.IncidentCallID); t2 == nil {
+		t.Error("call_id triple must always be present")
+	}
+}
+
+// TestBuildIncidentTriples_TruncationFlag pins that a response over the cap
+// produces a truncated body triple AND a raw_response_truncated triple.
+func TestBuildIncidentTriples_TruncationFlag(t *testing.T) {
+	huge := strings.Repeat("a", MaxRawResponseBytes*2)
+	ic := IncidentContext{CallID: "loop-big"}
+	ev := IncidentEvent{
+		Checkpoint:  observability.CheckpointResponseParse,
+		Outcome:     observability.OutcomeRejected,
+		RawResponse: huge,
+	}
+	incidentID := "loop-big.parse.response_parse"
+
+	triples := buildIncidentTriples(incidentID, ic, ev)
+
+	find := func(pred string) *message.Triple {
+		for i := range triples {
+			if triples[i].Predicate == pred {
+				return &triples[i]
+			}
+		}
+		return nil
+	}
+
+	rawT := find(observability.RawResponse)
+	if rawT == nil {
+		t.Fatal("missing raw_response triple")
+	}
+	rawStr, ok := rawT.Object.(string)
+	if !ok {
+		t.Fatalf("raw_response object is not a string: %T", rawT.Object)
+	}
+	if len(rawStr) > MaxRawResponseBytes {
+		t.Errorf("raw_response should be ≤%d bytes, got %d", MaxRawResponseBytes, len(rawStr))
+	}
+	truncT := find(observability.RawResponseTruncated)
+	if truncT == nil {
+		t.Fatal("missing raw_response_truncated flag")
+	}
+	if truncT.Object != true {
+		t.Errorf("raw_response_truncated = %v, want true", truncT.Object)
+	}
+}
+
+// ----- Emit — path-pin tests -------------------------------------------------
+
+// TestEmit_UsesUpsertEntity_NotWriteTriple is the genuine path pin for
+// slice #2: confirms Emit calls UpsertEntity exactly once and makes ZERO
+// WriteTriple calls. Slice #1 lacked this assertion.
+func TestEmit_UsesUpsertEntity_NotWriteTriple(t *testing.T) {
+	rw := &recordingWriter{}
+	ic := IncidentContext{CallID: "loop-pin", Role: "planner", Model: "m1"}
+	ev := IncidentEvent{
+		Checkpoint: observability.CheckpointResponseParse,
+		Outcome:    observability.OutcomeRejected,
+		Reason:     "no JSON",
+	}
+	id, err := Emit(context.Background(), rw, ic, ev)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id == "" {
+		t.Fatal("expected non-empty incident ID")
+	}
+	if len(rw.upserts) != 1 {
+		t.Errorf("expected 1 UpsertEntity call, got %d", len(rw.upserts))
+	}
+	if rw.writeCalls != 0 {
+		t.Errorf("expected 0 WriteTriple calls (relation write dropped), got %d", rw.writeCalls)
+	}
+	if rw.upserts[0].entityType != ParseIncidentEntityType {
+		t.Errorf("UpsertEntity entity type = %+v, want %+v", rw.upserts[0].entityType, ParseIncidentEntityType)
+	}
+	if rw.upserts[0].entityID != id {
+		t.Errorf("UpsertEntity entity ID = %q, want %q", rw.upserts[0].entityID, id)
+	}
+}
+
+// TestEmit_UpsertEntityFails_ReturnsEmptyID confirms Emit returns ("", err)
+// when UpsertEntity fails — no partial incident ID is returned because
+// the single-call model is atomic (either the node lands or it doesn't).
+func TestEmit_UpsertEntityFails_ReturnsEmptyID(t *testing.T) {
+	rw := &recordingWriter{failUpsert: true}
+	_, err := Emit(context.Background(), rw, IncidentContext{CallID: "x"}, IncidentEvent{
+		Checkpoint: observability.CheckpointResponseParse,
+		Outcome:    observability.OutcomeRejected,
+	})
+	if err == nil {
+		t.Error("expected error when UpsertEntity fails")
+	}
+}
+
+// ----- Existing guard tests (preserved, updated to new writer shape) ---------
+
+func TestEmit_StrictOutcome_NoOp(t *testing.T) {
 	rw := &recordingWriter{}
 	ic := IncidentContext{CallID: "loop-1", Role: "planner", Model: "test"}
 	ev := IncidentEvent{
@@ -77,8 +315,8 @@ func TestEmit_StrictOutcome_NoTriples(t *testing.T) {
 	if id != "" {
 		t.Errorf("incident ID should be empty for strict outcome, got %q", id)
 	}
-	if len(rw.triples) != 0 {
-		t.Errorf("strict outcome must emit ZERO triples; got %d: %+v", len(rw.triples), rw.triples)
+	if len(rw.upserts) != 0 {
+		t.Errorf("strict outcome must call ZERO UpsertEntity; got %d", len(rw.upserts))
 	}
 }
 
@@ -107,8 +345,8 @@ func TestEmit_EmptyOutcome_NoOp(t *testing.T) {
 	if id != "" {
 		t.Errorf("empty outcome should return empty ID, got %q", id)
 	}
-	if len(rw.triples) != 0 {
-		t.Errorf("empty outcome must emit ZERO triples; got %d", len(rw.triples))
+	if len(rw.upserts) != 0 {
+		t.Errorf("empty outcome must call ZERO UpsertEntity; got %d", len(rw.upserts))
 	}
 }
 
@@ -156,20 +394,16 @@ func TestEmit_RejectedOutcome_FullTripleSet(t *testing.T) {
 		t.Errorf("incident ID = %q, want %q", id, wantID)
 	}
 
-	// Relation first.
-	if len(rw.triples) == 0 || rw.triples[0].subject != "loop-rej" || rw.triples[0].predicate != observability.Incident {
-		t.Errorf("first write must be the parse.incident relation; got %+v", rw.triples)
-	}
-
-	// All required + optional populated predicates present.
+	// All required + optional populated predicates present in the upsert.
 	checks := map[string]any{
-		observability.Checkpoint:    observability.CheckpointResponseParse,
-		observability.Outcome:       observability.OutcomeRejected,
-		observability.Reason:        "no JSON found in result",
-		observability.Role:          "planner",
-		observability.Model:         "openrouter-qwen3-moe",
-		observability.PromptVersion: "v3.2",
-		observability.RawResponse:   "I'm not sure what to do here",
+		observability.Checkpoint:     observability.CheckpointResponseParse,
+		observability.Outcome:        observability.OutcomeRejected,
+		observability.IncidentCallID: "loop-rej",
+		observability.Reason:         "no JSON found in result",
+		observability.Role:           "planner",
+		observability.Model:          "openrouter-qwen3-moe",
+		observability.PromptVersion:  "v3.2",
+		observability.RawResponse:    "I'm not sure what to do here",
 	}
 	for pred, want := range checks {
 		got := rw.findTriple(wantID, pred)
@@ -177,8 +411,8 @@ func TestEmit_RejectedOutcome_FullTripleSet(t *testing.T) {
 			t.Errorf("missing triple for predicate %q", pred)
 			continue
 		}
-		if got.object != want {
-			t.Errorf("predicate %q object = %v, want %v", pred, got.object, want)
+		if got.Object != want {
+			t.Errorf("predicate %q object = %v, want %v", pred, got.Object, want)
 		}
 	}
 
@@ -208,15 +442,14 @@ func TestEmit_ToleratedQuirk_MultipleQuirkTriples(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// One quirk triple per fired quirk — RDF-correct multi-value, NOT
-	// a concatenated string.
+	// One quirk triple per fired quirk — RDF-correct multi-value.
 	quirks := rw.findAll(id, observability.Quirk)
 	if len(quirks) != 2 {
 		t.Errorf("expected 2 quirk triples, got %d: %+v", len(quirks), quirks)
 	}
 	gotQuirks := make(map[any]bool)
 	for _, q := range quirks {
-		gotQuirks[q.object] = true
+		gotQuirks[q.Object] = true
 	}
 	if !gotQuirks["fenced_json_wrapper"] || !gotQuirks["trailing_commas"] {
 		t.Errorf("expected both fenced_json_wrapper and trailing_commas, got %v", gotQuirks)
@@ -239,8 +472,7 @@ func TestEmit_EmptyOptionalFields_SkippedNotEmptyTriples(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Required predicates: Incident relation + Checkpoint + Outcome.
-	// Optional empty fields should NOT generate empty-string triples.
+	// Optional empty fields should NOT generate triples.
 	for _, pred := range []string{
 		observability.Reason,
 		observability.Role,
@@ -259,6 +491,9 @@ func TestEmit_EmptyOptionalFields_SkippedNotEmptyTriples(t *testing.T) {
 	}
 	if rw.findTriple(id, observability.Outcome) == nil {
 		t.Error("missing required Outcome triple")
+	}
+	if rw.findTriple(id, observability.IncidentCallID) == nil {
+		t.Error("missing required call_id triple")
 	}
 }
 
@@ -280,9 +515,9 @@ func TestEmit_LargeRawResponse_TruncatedWithFlag(t *testing.T) {
 	if rawTriple == nil {
 		t.Fatal("missing raw_response triple")
 	}
-	rawString, ok := rawTriple.object.(string)
+	rawString, ok := rawTriple.Object.(string)
 	if !ok {
-		t.Fatalf("raw_response object is not a string: %T", rawTriple.object)
+		t.Fatalf("raw_response object is not a string: %T", rawTriple.Object)
 	}
 	if len(rawString) > MaxRawResponseBytes {
 		t.Errorf("raw_response should be truncated to ≤%d bytes, got %d", MaxRawResponseBytes, len(rawString))
@@ -292,8 +527,8 @@ func TestEmit_LargeRawResponse_TruncatedWithFlag(t *testing.T) {
 	if truncFlag == nil {
 		t.Fatal("missing raw_response_truncated flag on truncated response")
 	}
-	if truncFlag.object != true {
-		t.Errorf("raw_response_truncated = %v, want true", truncFlag.object)
+	if truncFlag.Object != true {
+		t.Errorf("raw_response_truncated = %v, want true", truncFlag.Object)
 	}
 }
 
@@ -306,31 +541,31 @@ func TestEmitForResult_OutcomeBranches(t *testing.T) {
 		quirks      []string
 		parseErr    error
 		wantOutcome string
-		wantTriples bool
+		wantUpsert  bool
 	}{
 		{
 			name:        "parse failure → rejected",
 			parseErr:    errors.New("invalid JSON"),
 			wantOutcome: observability.OutcomeRejected,
-			wantTriples: true,
+			wantUpsert:  true,
 		},
 		{
 			name:        "quirks fired → tolerated_quirk",
 			quirks:      []string{"fenced_json_wrapper"},
 			wantOutcome: observability.OutcomeToleratedQuirk,
-			wantTriples: true,
+			wantUpsert:  true,
 		},
 		{
-			name:        "clean parse → strict (no triples)",
+			name:        "clean parse → strict (no upsert)",
 			wantOutcome: observability.OutcomeStrict,
-			wantTriples: false,
+			wantUpsert:  false,
 		},
 		{
 			name:        "parse error wins over quirks",
 			quirks:      []string{"fenced_json_wrapper"},
 			parseErr:    errors.New("typed unmarshal failed"),
 			wantOutcome: observability.OutcomeRejected,
-			wantTriples: true,
+			wantUpsert:  true,
 		},
 	}
 	for _, tt := range tests {
@@ -341,23 +576,26 @@ func TestEmitForResult_OutcomeBranches(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if tt.wantTriples {
+			if tt.wantUpsert {
 				if id == "" {
 					t.Error("expected non-empty incident ID")
+				}
+				if len(rw.upserts) != 1 {
+					t.Fatalf("expected 1 UpsertEntity, got %d", len(rw.upserts))
 				}
 				outcome := rw.findTriple(id, observability.Outcome)
 				if outcome == nil {
 					t.Fatal("missing outcome triple")
 				}
-				if outcome.object != tt.wantOutcome {
-					t.Errorf("outcome = %v, want %s", outcome.object, tt.wantOutcome)
+				if outcome.Object != tt.wantOutcome {
+					t.Errorf("outcome = %v, want %s", outcome.Object, tt.wantOutcome)
 				}
 			} else {
 				if id != "" {
 					t.Errorf("strict outcome should produce empty incident ID, got %q", id)
 				}
-				if len(rw.triples) != 0 {
-					t.Errorf("strict outcome should produce ZERO triples, got %d", len(rw.triples))
+				if len(rw.upserts) != 0 {
+					t.Errorf("strict outcome should produce ZERO UpsertEntity calls, got %d", len(rw.upserts))
 				}
 			}
 		})
@@ -397,20 +635,6 @@ func TestEmit_IncidentID_IsNATSKVSafe(t *testing.T) {
 	// Belt-and-suspenders — explicitly forbid the historical `:`.
 	if strings.Contains(id, ":") {
 		t.Errorf("incident ID %q must not contain ':' (NATS KV rejects with 'invalid key')", id)
-	}
-}
-
-func TestEmit_RelationWriteFails_ShortCircuits(t *testing.T) {
-	rw := &recordingWriter{failOn: observability.Incident}
-	_, err := Emit(context.Background(), rw, IncidentContext{CallID: "x"}, IncidentEvent{
-		Checkpoint: observability.CheckpointResponseParse,
-		Outcome:    observability.OutcomeRejected,
-	})
-	if err == nil {
-		t.Error("expected error when relation write fails")
-	}
-	if len(rw.triples) != 0 {
-		t.Errorf("no triples should land when relation write fails, got %d", len(rw.triples))
 	}
 }
 

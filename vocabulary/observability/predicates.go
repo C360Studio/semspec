@@ -55,6 +55,18 @@ const (
 	// absent) otherwise. Read RawResponse alongside this predicate to
 	// know whether you're seeing the full or truncated text.
 	RawResponseTruncated = "llm.parse.raw_response_truncated"
+
+	// IncidentCallID is the agentic loop ID (loop.ID) that produced the
+	// response that triggered this incident. Stored as a node attribute
+	// on the incident entity rather than as an inbound relation from the
+	// call entity, because the loop lives only in AGENT_LOOPS KV and has
+	// no ENTITY_STATES graph node (WriteSpawnIdentity conjures loop triples
+	// at runtime, but that path breaks under triple.add must-exist — a
+	// semstreams concern). The call_id attribute preserves the logical
+	// linkage and is queryable by the IncidentRateExceeded detector
+	// (ADR-035 step 5) without requiring a graph-traversal of the loop node.
+	// Also applies to tool.recovery.incident nodes (see vocabulary/observability/tool_recovery.go).
+	IncidentCallID = "llm.parse.call_id"
 )
 
 // Partition keys. Aggregating incidents by (Role, Model, PromptVersion)
@@ -165,6 +177,11 @@ func registerOutcomePredicates() {
 		vocabulary.WithDescription("True when the raw_response triple on this incident was truncated at the per-call size cap (4 KiB)"),
 		vocabulary.WithDataType("boolean"),
 		vocabulary.WithIRI(Namespace+"rawResponseTruncated"))
+
+	vocabulary.Register(IncidentCallID,
+		vocabulary.WithDescription("Agentic loop ID (loop.ID) that produced the response triggering this incident; stored as a node attribute because the loop has no ENTITY_STATES graph node"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"callId"))
 }
 
 func registerPartitionPredicates() {

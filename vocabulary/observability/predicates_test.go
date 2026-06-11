@@ -19,6 +19,7 @@ var allPredicates = []string{
 	Role,
 	Model,
 	PromptVersion,
+	IncidentCallID,
 }
 
 func TestPredicatesRegistered(t *testing.T) {
@@ -49,6 +50,7 @@ func TestPredicateDataTypes(t *testing.T) {
 		{Role, "string"},
 		{Model, "string"},
 		{PromptVersion, "string"},
+		{IncidentCallID, "string"},
 		// Relation — incident pointer is an entity_id.
 		{Incident, "entity_id"},
 	}
@@ -99,6 +101,7 @@ func TestPredicateIRIs(t *testing.T) {
 		{Role, Namespace + "role"},
 		{Model, Namespace + "model"},
 		{PromptVersion, Namespace + "promptVersion"},
+		{IncidentCallID, Namespace + "callId"},
 	}
 
 	for _, tt := range tests {

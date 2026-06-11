@@ -10,6 +10,7 @@ import (
 
 	"github.com/c360studio/semspec/vocabulary/observability"
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
 )
 
 func TestExtractScopeIncludePaths(t *testing.T) {
@@ -125,6 +126,18 @@ func (r *recordingTripleWriter) WriteTriple(_ context.Context, subject, predicat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.triples = append(r.triples, recordedTriple{subject, predicate, object})
+	return nil
+}
+
+func (r *recordingTripleWriter) UpsertEntity(_ context.Context, _ message.Type, _ string, triples []message.Triple) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	// Flatten upserted triples into the same recording slice so existing
+	// triple-value assertions continue working after the WriteTriple→UpsertEntity
+	// migration (issue #154 slice #2).
+	for _, t := range triples {
+		r.triples = append(r.triples, recordedTriple{t.Subject, t.Predicate, t.Object})
+	}
 	return nil
 }
 
