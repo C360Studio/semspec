@@ -742,8 +742,8 @@ func TestEvict_ClearsEntity(t *testing.T) {
 }
 
 // Evict on a nil map must not panic.
-func TestEvict_NilMapNoPanic(t *testing.T) {
-	tw := &TripleWriter{} // dirtyHashes is nil
+func TestEvict_NilMapNoPanic(_ *testing.T) {
+	tw := &TripleWriter{}    // dirtyHashes is nil
 	tw.Evict("ent.notexist") // must not panic
 }
 
