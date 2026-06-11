@@ -22,7 +22,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/cancellation"
 	"github.com/c360studio/semspec/workflow/cascade"
@@ -301,25 +300,20 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 		"affected_requirements", len(result.AffectedRequirementIDs),
 		"affected_scenarios", len(result.AffectedScenarioIDs))
 
-	// Build the entity once; both the inline triple-writer path (cross-component
-	// facts in ENTITY_STATES) and the publishEntity path (graph-ingest for
-	// relationship tracking) use the same EntityID. HashInstanceID-derived per
-	// entity.go — proposalIDs from recovery cascades contain dots and must not
-	// reach the part-6 segment.
+	// Build the entity once; publishEntity → UpsertEntity writes Phase, Type,
+	// Slug, CascadeProposalID, TraceID, CascadeAffectedRequirements,
+	// CascadeAffectedScenarios, and RelRequirement edges in a single atomic
+	// replace-own-predicates call to ENTITY_STATES. The former inline
+	// WriteTriple block for the same seven predicates was removed because
+	// UpsertEntity covers them with correct replace-not-append semantics —
+	// keeping both would cause a double-write on every cascade (transient
+	// stale window during the gap between the two calls).
+	//
+	// HashInstanceID-derived entityID: proposalIDs from recovery cascades
+	// contain dots and must not reach the 6-part segment boundary.
 	entity := NewCascadeEntity(req.ProposalID, req.Slug, req.TraceID,
 		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs)).
 		WithPhase("cascaded")
-	entityID := entity.EntityID()
-
-	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, "cascaded"); err != nil {
-		c.logger.Error("Failed to write cascade phase triple", "entity_id", entityID, "error", err)
-	}
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "cascade")
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, req.Slug)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeProposalID, req.ProposalID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, req.TraceID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedRequirements, len(result.AffectedRequirementIDs))
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedScenarios, len(result.AffectedScenarioIDs))
 
 	c.publishEntity(ctx, entity)
 

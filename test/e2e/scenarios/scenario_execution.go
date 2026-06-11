@@ -196,13 +196,15 @@ func (s *ScenarioExecutionScenario) stageWaitForDrafted(ctx context.Context, res
 		return fmt.Errorf("plan_slug not set by create-plan stage")
 	}
 
-	// This is a CRUD test — we don't need the planner to generate a goal.
-	// Wait briefly for drafted status; if no LLM is available the plan stays
-	// in "created" which is fine for CRUD verification.
-	shortCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	if _, err := s.http.WaitForPlanGoal(shortCtx, slug); err != nil {
-		result.AddWarning("planner did not generate goal (no LLM) — continuing with CRUD tests")
+	// The approve stage needs the plan in a promote-eligible status. With a
+	// planner LLM active (seminstruct in the component stack, mock in Tier 2),
+	// the planner claims the plan into the ADR-040 analyst sub-phase
+	// ("exploring"/"explored") and on through drafting/reviewing_draft before it
+	// reaches an approvable status — promoting mid-flight returns HTTP 409. Wait
+	// for approve-eligibility (same gate plan-workflow uses) rather than just
+	// goal-set, which the planner populates while still in "exploring".
+	if _, err := s.http.WaitForPlanApproveEligible(ctx, slug); err != nil {
+		return fmt.Errorf("wait for plan to become approve-eligible: %w", err)
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -18,11 +19,18 @@ import (
 // ---------------------------------------------------------------------------
 
 // newTestComponent creates a Component suitable for unit tests.
-// NATSClient is nil — publishQuestionEntity is a no-op, store is unset.
+// NATSClient is nil — publishQuestionEntity delegates to tripleWriter which
+// treats nil NATSClient as a no-op. Store is unset.
 func newTestComponent() *Component {
+	logger := slog.Default()
 	return &Component{
 		config: Config{Bucket: workflow.QuestionsBucket},
-		logger: slog.Default(),
+		logger: logger,
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    nil, // no-op guard in UpsertEntity
+			Logger:        logger,
+			ComponentName: componentName,
+		},
 	}
 }
 
@@ -331,10 +339,11 @@ func TestHandleAnswer_InvalidJSON(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestPublishQuestionEntity_NilNATSClient(t *testing.T) {
-	c := newTestComponent() // natsClient is nil
+	c := newTestComponent() // tripleWriter has nil NATSClient → UpsertEntity is a no-op
 	q := newTestQuestion("q-minimal")
 
-	// Should return nil (no-op) when NATSClient is nil.
+	// Should return nil (no-op) when NATSClient is nil — guard is inside
+	// graphutil.TripleWriter.UpsertEntity.
 	err := c.publishQuestionEntity(context.Background(), q)
 	if err != nil {
 		t.Errorf("publishQuestionEntity() = %v, want nil", err)
@@ -367,7 +376,8 @@ func TestPublishQuestionEntity_FullyPopulated(t *testing.T) {
 		Sources:       "ADR-001, RFC 6749",
 	}
 
-	// Should return nil (no-op) — natsClient is nil so PublishToStream is never called.
+	// Should return nil (no-op) — tripleWriter has nil NATSClient so UpsertEntity
+	// returns without sending any NATS requests.
 	err := c.publishQuestionEntity(context.Background(), q)
 	if err != nil {
 		t.Errorf("publishQuestionEntity() = %v, want nil", err)

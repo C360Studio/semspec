@@ -666,6 +666,12 @@ func (c *Component) applyParsedDAGLocked(ctx context.Context, exec *requirementE
 
 	// Publish each DAG node as a graph entity so the knowledge graph captures
 	// the full execution hierarchy. Best-effort: failure does not abort execution.
+	// TODO(#180-followup): move publish off-lock — all call sites of
+	// applyParsedDAGLocked hold exec.mu (via dispatchCurrentStoryLocked /
+	// advanceToNextStoryLocked), making a clean unlock/relock here tangled.
+	// The 2 s / zero-retry bound on UpsertEntity limits the worst-case hold
+	// to 2 s × N nodes; acceptable until a refactor extracts graph publish
+	// as a post-lock pass.
 	c.publishDAGNodes(ctx, exec)
 
 	// Dispatch the first node.
@@ -829,6 +835,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 // (Kind=ExecutionExhausted) is the right escalation path;
 // markFailedLocked surfaces it.
 func (c *Component) handleNodeFailureLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution, nodeID string) {
+	// TODO(#180-followup): publish off-lock; bounded at 2 s by UpsertEntity config.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
 
 	// Parse the failure stage out of the synthetic event payload so we
@@ -896,6 +903,7 @@ func (c *Component) parseNodeCompletionPayloadLocked(ctx context.Context, event 
 		return parsed, true
 	}
 
+	// TODO(#180-followup): publish off-lock; bounded at 2 s by UpsertEntity config.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
 	feedback := fmt.Sprintf(
 		"Node %q completed but its result payload was unrecoverable: %s. "+
@@ -946,6 +954,7 @@ func (c *Component) retryNodeAtRequirementLevelLocked(ctx context.Context, exec 
 // either advances to the next node or kicks off the requirement
 // reviewer when the DAG is complete. Caller must hold exec.mu.
 func (c *Component) recordNodeSuccessLocked(ctx context.Context, exec *requirementExecution, nodeID string, parsed *nodeResultPayload) {
+	// TODO(#180-followup): publish off-lock; bounded at 2 s by UpsertEntity config.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "completed")
 
 	nodeResult := NodeResult{NodeID: nodeID}
@@ -1438,6 +1447,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 	}
 
 	// Update the DAG node graph entity to reflect that execution has started.
+	// TODO(#180-followup): publish off-lock; bounded at 2 s by UpsertEntity config.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "executing")
 
 	// Dispatch to execution-manager for TDD pipeline processing via mutation.

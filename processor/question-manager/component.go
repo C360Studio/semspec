@@ -20,6 +20,7 @@ import (
 
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -47,11 +48,12 @@ type Config struct {
 
 // Component owns the QUESTIONS KV bucket and serves the Q&A HTTP API.
 type Component struct {
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	store      *workflow.QuestionStore
-	prefix     string // URL prefix set during HTTP registration
+	config       Config
+	natsClient   *natsclient.Client
+	tripleWriter *graphutil.TripleWriter
+	logger       *slog.Logger
+	store        *workflow.QuestionStore
+	prefix       string // URL prefix set during HTTP registration
 
 	running bool
 	mu      sync.RWMutex
@@ -68,10 +70,16 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		cfg.Bucket = workflow.QuestionsBucket
 	}
 
+	logger := deps.GetLogger()
 	return &Component{
 		config:     cfg,
 		natsClient: deps.NATSClient,
-		logger:     deps.GetLogger(),
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: componentName,
+		},
+		logger: logger,
 	}, nil
 }
 
@@ -534,8 +542,6 @@ func (c *Component) DataFlow() component.FlowMetrics { return component.FlowMetr
 // KV watcher → graph publish
 // ---------------------------------------------------------------------------
 
-const graphIngestSubject = "graph.ingest.entity"
-
 // watchQuestionUpdates watches the QUESTIONS KV bucket for all mutations and
 // publishes each question as a graph entity. This catches creation (ask_question
 // tool, gap handler), agent answers (answer_question tool), and human answers
@@ -584,14 +590,11 @@ func (c *Component) watchQuestionUpdates(ctx context.Context) {
 	}
 }
 
-// publishQuestionEntity publishes a question as a single batched graph entity.
-// All triples are bundled into one EntityPayload and published in a single NATS
-// message, matching the pattern used by plan-manager and execution-manager.
+// publishQuestionEntity publishes a question as a graph entity using replace-own-predicates
+// semantics via UpsertEntity. This prevents unbounded triple accumulation from repeated
+// publishes on every status mutation (see graphutil.TripleWriter.UpsertEntity for the
+// full rationale on the beta.90 append-merge regression).
 func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Question) error {
-	if c.natsClient == nil {
-		return nil
-	}
-
 	entityID := workflow.QuestionEntityID(q.ID)
 
 	triples := []message.Triple{
@@ -604,6 +607,11 @@ func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Quest
 		{Subject: entityID, Predicate: semspec.DCTitle, Object: truncateTitle(q.Question, 100)},
 	}
 
+	// NOTE: optional predicates are only emitted when non-empty, so they are
+	// absent from RemoveTriples when empty. A field that transitions from set →
+	// empty would leave a stale value in the graph. All fields below are
+	// currently monotonically set-once (set at creation, never cleared), so
+	// this is benign; revisit if any field can be cleared after being set.
 	if q.Context != "" {
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionContext, Object: q.Context})
 	}
@@ -645,17 +653,7 @@ func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Quest
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionSources, Object: q.Sources})
 	}
 
-	payload := workflow.NewEntityPayload(workflow.QuestionEntityType, entityID, triples)
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, componentName)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal question entity: %w", err)
-	}
-
-	if err := c.natsClient.PublishToStream(ctx, graphIngestSubject, data); err != nil {
-		return fmt.Errorf("publish question to graph: %w", err)
-	}
-	return nil
+	return c.tripleWriter.UpsertEntity(ctx, workflow.QuestionEntityType, entityID, triples)
 }
 
 // truncateTitle truncates a string to maxLen runes for use as a graph title.

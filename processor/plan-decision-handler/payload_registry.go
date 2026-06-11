@@ -64,43 +64,15 @@ func (p *CascadePayload) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
-// publishEntity publishes the entity's triples to the graph ingest subject.
-// Failures are logged as warnings but do not propagate — graph ingest is best-effort
-// for workflow state observability.
+// publishEntity publishes the entity's triples to the graph using replace-own-predicates
+// semantics via UpsertEntity. Failures are logged as warnings but do not propagate —
+// graph ingest is best-effort for workflow state observability.
 func (c *Component) publishEntity(ctx context.Context, entity interface {
 	EntityID() string
 	Triples() []message.Triple
 }) {
-	if c.natsClient == nil {
-		return
-	}
-
-	payload := &CascadePayload{
-		ID:         entity.EntityID(),
-		TripleData: entity.Triples(),
-		UpdatedAt:  time.Now(),
-	}
-
-	msg := message.NewBaseMessage(CascadePayloadType, payload, "plan-decision-handler")
-	data, err := json.Marshal(msg)
-	if err != nil {
-		c.logger.Warn("Failed to marshal entity for graph ingest",
-			"entity_id", entity.EntityID(), "error", err)
-		return
-	}
-
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		c.logger.Warn("Failed to get JetStream for entity publish",
-			"entity_id", entity.EntityID(), "error", err)
-		return
-	}
-
-	if _, err := js.Publish(ctx, graphIngestSubject, data); err != nil {
-		c.logger.Warn("Failed to publish entity to graph",
+	if err := c.tripleWriter.UpsertEntity(ctx, CascadePayloadType, entity.EntityID(), entity.Triples()); err != nil {
+		c.logger.Warn("Failed to upsert entity to graph",
 			"entity_id", entity.EntityID(), "error", err)
 	}
 }
-
-// graphIngestSubject is the NATS subject for graph entity ingestion.
-const graphIngestSubject = "graph.ingest.entity"

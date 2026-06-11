@@ -267,6 +267,264 @@ func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string,
 	return result, nil
 }
 
+// subjectEntityUpdateWithTriples is the NATS request/reply subject for the
+// atomic update-entity-with-triples handler in graph-ingest.
+// Source: semstreams processor/graph-ingest/mutations.go SubjectEntityUpdateWithTriples.
+const subjectEntityUpdateWithTriples = "graph.mutation.entity.update_with_triples"
+
+// subjectEntityCreateWithTriples is the NATS request/reply subject for the
+// atomic create-entity-with-triples handler in graph-ingest.
+// Source: semstreams processor/graph-ingest/mutations.go SubjectEntityCreateWithTriples.
+const subjectEntityCreateWithTriples = "graph.mutation.entity.create_with_triples"
+
+// upsertOutcome is a typed result from the internal send helpers, used to
+// drive the create/retry loop without mixing response parsing with flow logic.
+// Extracted as a type so the routing in upsertEntityVia is unit-testable
+// without a live NATS server.
+type upsertOutcome int
+
+const (
+	upsertDone        upsertOutcome = iota // Success (or Degraded-committed) — caller is done.
+	upsertNeedCreate                       // update returned entity_not_found — fall back to create.
+	upsertRetryUpdate                      // create returned entity_already_exists — retry update.
+)
+
+// String returns the name of the outcome for human-readable error messages.
+func (o upsertOutcome) String() string {
+	switch o {
+	case upsertDone:
+		return "done"
+	case upsertNeedCreate:
+		return "need_create"
+	case upsertRetryUpdate:
+		return "retry_update"
+	default:
+		return fmt.Sprintf("upsertOutcome(%d)", int(o))
+	}
+}
+
+// upsertSender is a seam for unit-testing the routing logic in upsertEntityVia
+// without a live NATS connection. The production path wires in
+// sendUpdateWithTriples / sendCreateWithTriples; tests inject stubs.
+type upsertSender struct {
+	update func(ctx context.Context, req graph.UpdateEntityWithTriplesRequest) (upsertOutcome, error)
+	create func(ctx context.Context, req graph.CreateEntityWithTriplesRequest) (upsertOutcome, error)
+}
+
+// UpsertEntity writes a full set of triples for an entity using the
+// replace-own-predicates, preserve-foreign semantics.
+//
+// WHY this exists: semstreams beta.90 (PR #180) changed graph.ingest.entity's
+// handler from CreateEntity (full-replace Put) to MergeEntity, which does a
+// raw append: existing.Triples = append(existing.Triples, entity.Triples...).
+// Components that republish the same mutable entity on every phase or status
+// change therefore accumulate unbounded duplicate triples, and stale single-valued
+// predicates (e.g. status) coexist with new ones — the rule engine reads
+// first-match while lifecycle reads last-match, so the divergence is a silent
+// correctness bug.
+//
+// The correct primitive at beta.103 is graph.mutation.entity.update_with_triples,
+// whose handler runs inside a single UpdateWithRetry CAS. The ACTUAL mechanism
+// (mutations.go ExpectedRevision=0 path): for each retry the handler reads the
+// current entity, drops any triple whose predicate appears in RemoveTriples,
+// then raw-appends AddTriples. Callers must send a COMPLETE, CURRENT value set
+// with ONE triple per scalar predicate — duplicate predicates in a single
+// publish would BOTH be appended. RemoveTriples is derived as the distinct set
+// of predicates present in triples, so the net effect is that each republish
+// replaces the caller's own predicates while leaving predicates written by
+// other writers (hierarchy inference, rules) intact.
+//
+// NOTE: optional predicates omitted when their field is empty are absent from
+// RemoveTriples. A field that transitions from set → empty will leave a stale
+// value in the graph. Today all such fields are monotonically set-once, so
+// this is benign; revisit if any field can be cleared after being set.
+//
+// Create fallback: update_with_triples returns ErrorCodeEntityNotFound when the
+// entity is absent. UpsertEntity falls back to create_with_triples. If that
+// returns ErrorCodeEntityExists (concurrent writer), UpsertEntity retries the
+// update once. All other non-Success codes are returned as errors.
+//
+// Best-effort: returns nil when NATSClient is nil (matches WriteTriple guard).
+// NATS calls use a 2 s timeout with zero retries — these are observability
+// mirrors of authoritative KV state. A dropped write is self-healing: the
+// next whole-entity republish overwrites it. This bound prevents UpsertEntity
+// from ever blocking a phase transition for longer than 2 s, even when called
+// inside a held mutex (e.g. requirement-executor's exec.mu critical section).
+func (tw *TripleWriter) UpsertEntity(ctx context.Context, entityType message.Type, entityID string, triples []message.Triple) error {
+	if tw.NATSClient == nil {
+		return nil
+	}
+	s := upsertSender{
+		update: tw.sendUpdateWithTriples,
+		create: tw.sendCreateWithTriples,
+	}
+	return upsertEntityVia(ctx, s, entityType, entityID, triples)
+}
+
+// upsertEntityVia contains the routing logic for UpsertEntity, separated from
+// the NATS transport so it can be exercised by unit tests that inject stubs.
+func upsertEntityVia(ctx context.Context, s upsertSender, entityType message.Type, entityID string, triples []message.Triple) error {
+	// Derive the distinct predicate set from the caller's triples.
+	// This is the "replace own, preserve foreign" contract: we only
+	// remove predicates we are about to write, leaving everything else.
+	removePredicates := distinctPredicates(triples)
+
+	entity := &graph.EntityState{
+		ID:          entityID,
+		MessageType: entityType,
+	}
+
+	updateReq := graph.UpdateEntityWithTriplesRequest{
+		Entity:        entity,
+		AddTriples:    triples,
+		RemoveTriples: removePredicates,
+		// ExpectedRevision zero → internal UpdateWithRetry merge path (no caller-side CAS).
+	}
+
+	outcome, err := s.update(ctx, updateReq)
+	if err != nil {
+		return err
+	}
+
+	switch outcome {
+	case upsertDone:
+		return nil
+	case upsertNeedCreate:
+		// Entity absent — try create first.
+		createReq := graph.CreateEntityWithTriplesRequest{
+			Entity:  entity,
+			Triples: triples,
+		}
+		createOutcome, err := s.create(ctx, createReq)
+		if err != nil {
+			return err
+		}
+		switch createOutcome {
+		case upsertDone:
+			return nil
+		case upsertRetryUpdate:
+			// Concurrent writer created the entity between our update and create attempts.
+			// Retry the update once; if it fails again, surface the error.
+			retryOutcome, err := s.update(ctx, updateReq)
+			if err != nil {
+				return err
+			}
+			if retryOutcome != upsertDone {
+				return fmt.Errorf("upsert entity %s: unexpected outcome after create-exists retry: %s", entityID, retryOutcome)
+			}
+			return nil
+		default:
+			return fmt.Errorf("upsert entity %s: unexpected create outcome: %s", entityID, createOutcome)
+		}
+	default:
+		return fmt.Errorf("upsert entity %s: unexpected update outcome: %s", entityID, outcome)
+	}
+}
+
+// decideUpdateOutcome maps an UpdateEntityWithTriplesResponse to a upsertOutcome.
+// Extracted for unit-testability: no NATS required.
+func decideUpdateOutcome(resp graph.UpdateEntityWithTriplesResponse) (upsertOutcome, error) {
+	if resp.Success {
+		return upsertDone, nil
+	}
+	// Degraded=true means the write committed but read-back failed; treat as success.
+	// Per MutationResponse docs: do NOT retry on Degraded — the write is durable.
+	if resp.Degraded {
+		return upsertDone, nil
+	}
+	switch resp.ErrorCode {
+	case graph.ErrorCodeEntityNotFound:
+		return upsertNeedCreate, nil
+	default:
+		return 0, fmt.Errorf("update_with_triples rejected (code=%s): %s", resp.ErrorCode, resp.Error)
+	}
+}
+
+// decideCreateOutcome maps a CreateEntityWithTriplesResponse to a upsertOutcome.
+// Extracted for unit-testability: no NATS required.
+func decideCreateOutcome(resp graph.CreateEntityWithTriplesResponse) (upsertOutcome, error) {
+	if resp.Success {
+		return upsertDone, nil
+	}
+	if resp.Degraded {
+		return upsertDone, nil
+	}
+	switch resp.ErrorCode {
+	case graph.ErrorCodeEntityExists:
+		return upsertRetryUpdate, nil
+	default:
+		return 0, fmt.Errorf("create_with_triples rejected (code=%s): %s", resp.ErrorCode, resp.Error)
+	}
+}
+
+// upsertRetryConfig is the retry configuration for UpsertEntity NATS calls.
+// Zero retries + 2 s timeout: these publishes are best-effort observability
+// mirrors of authoritative KV state; a dropped write self-heals on the next
+// whole-entity republish. Zero retries ensures UpsertEntity never blocks a
+// phase transition for more than 2 s even when called inside a held mutex
+// (e.g. requirement-executor's exec.mu DAG-node loop).
+var upsertRetryConfig = natsclient.RetryConfig{MaxRetries: 0}
+
+// sendUpdateWithTriples marshals the request, sends via NATS request/reply,
+// and parses the response into a upsertOutcome.
+func (tw *TripleWriter) sendUpdateWithTriples(ctx context.Context, req graph.UpdateEntityWithTriplesRequest) (upsertOutcome, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("marshal update_with_triples request: %w", err)
+	}
+
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, subjectEntityUpdateWithTriples, data, 2*time.Second, upsertRetryConfig)
+	if err != nil {
+		tw.Logger.Warn("update_with_triples request failed",
+			"entity_id", req.Entity.ID, "error", err)
+		return 0, fmt.Errorf("update_with_triples request: %w", err)
+	}
+
+	var resp graph.UpdateEntityWithTriplesResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return 0, fmt.Errorf("unmarshal update_with_triples response: %w", err)
+	}
+
+	return decideUpdateOutcome(resp)
+}
+
+// sendCreateWithTriples marshals the request, sends via NATS request/reply,
+// and parses the response into a upsertOutcome.
+func (tw *TripleWriter) sendCreateWithTriples(ctx context.Context, req graph.CreateEntityWithTriplesRequest) (upsertOutcome, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return 0, fmt.Errorf("marshal create_with_triples request: %w", err)
+	}
+
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, subjectEntityCreateWithTriples, data, 2*time.Second, upsertRetryConfig)
+	if err != nil {
+		tw.Logger.Warn("create_with_triples request failed",
+			"entity_id", req.Entity.ID, "error", err)
+		return 0, fmt.Errorf("create_with_triples request: %w", err)
+	}
+
+	var resp graph.CreateEntityWithTriplesResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return 0, fmt.Errorf("unmarshal create_with_triples response: %w", err)
+	}
+
+	return decideCreateOutcome(resp)
+}
+
+// distinctPredicates returns the sorted, deduplicated set of predicate strings
+// found in the given triples. Used to build RemoveTriples for UpsertEntity.
+func distinctPredicates(triples []message.Triple) []string {
+	seen := make(map[string]struct{}, len(triples))
+	for _, t := range triples {
+		seen[t.Predicate] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	return out
+}
+
 // ReadEntitiesByPrefixMulti fetches all entities matching an ID prefix from
 // ENTITY_STATES via graph-ingest. Returns a map of entityID → predicate →
 // []values, preserving every value written for multi-valued predicates (e.g.

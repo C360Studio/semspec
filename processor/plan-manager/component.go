@@ -278,9 +278,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.startTime = time.Now()
 	c.mu.Unlock()
 
-	// Start question graph publisher (watches QUESTIONS KV bucket).
-	go c.handleQuestionUpdates(childCtx, js)
-
 	// Start mutation request handlers (plan.mutation.* — generators return results here).
 	if err := c.startMutationHandler(childCtx); err != nil {
 		cancel()
