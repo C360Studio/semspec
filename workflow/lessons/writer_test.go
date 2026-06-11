@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
@@ -478,6 +480,226 @@ func lessonIDs(ls []workflow.Lesson) []string {
 		out[i] = l.ID
 	}
 	return out
+}
+
+// ---------------------------------------------------------------------------
+// Slice #1 (issue #154): RecordLesson must create the lesson entity via the
+// metadata-bearing UpsertEntity path (update_with_triples + create_with_triples
+// fallback), not through a sequence of bare triple.add writes.
+//
+// The seam is buildLessonTriples — a pure helper that constructs the
+// []message.Triple slice RecordLesson hands to UpsertEntity. Exercising it
+// directly lets the test assert the full predicate set in one place without
+// needing a live NATS connection.
+// ---------------------------------------------------------------------------
+
+// indexTriplesByPred builds a predicate → []string map from a triple slice.
+// All triple Objects must be strings; non-string Objects are skipped and
+// reported as test failures. The returned map is safe to use directly in
+// assertion helpers.
+func indexTriplesByPred(t *testing.T, eid string, triples []message.Triple) map[string][]string {
+	t.Helper()
+	byPred := make(map[string][]string)
+	for _, tr := range triples {
+		if tr.Subject != eid {
+			t.Errorf("triple subject %q != entity ID %q", tr.Subject, eid)
+		}
+		val, ok := tr.Object.(string)
+		if !ok {
+			t.Errorf("predicate %q: Object is %T, want string", tr.Predicate, tr.Object)
+			continue
+		}
+		byPred[tr.Predicate] = append(byPred[tr.Predicate], val)
+	}
+	return byPred
+}
+
+// TestBuildLessonTriples_RequiredAndCategory verifies that buildLessonTriples
+// emits all required scalar predicates and one triple per CategoryID. This
+// test fails (won't compile) until buildLessonTriples is implemented.
+func TestBuildLessonTriples_RequiredAndCategory(t *testing.T) {
+	eid := "semspec.local.agent.lessons.lesson.abcdef"
+	lesson := workflow.Lesson{
+		ID:          "lesson-1",
+		Source:      "reviewer-feedback",
+		ScenarioID:  "task-42",
+		Summary:     "Missing error handling",
+		Role:        "developer",
+		CategoryIDs: []string{"missing_tests", "sop_violation"},
+	}
+	lesson.CreatedAt = time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+
+	byPred := indexTriplesByPred(t, eid, buildLessonTriples(eid, lesson))
+
+	require := func(pred, want string) {
+		t.Helper()
+		vals := byPred[pred]
+		if len(vals) == 0 {
+			t.Errorf("predicate %q absent from triples", pred)
+			return
+		}
+		if vals[0] != want {
+			t.Errorf("predicate %q = %q, want %q", pred, vals[0], want)
+		}
+	}
+
+	require(agentgraph.PredicateLessonID, "lesson-1")
+	require(agentgraph.PredicateLessonSource, "reviewer-feedback")
+	require(agentgraph.PredicateLessonScenarioID, "task-42")
+	require(agentgraph.PredicateLessonSummary, "Missing error handling")
+	require(agentgraph.PredicateLessonRole, "developer")
+	require(agentgraph.PredicateLessonCreatedAt, lesson.CreatedAt.Format(time.RFC3339))
+
+	cats := byPred[agentgraph.PredicateLessonCategories]
+	if len(cats) != 2 {
+		t.Errorf("CategoryIDs: %d triples, want 2", len(cats))
+	} else if cats[0] != "missing_tests" || cats[1] != "sop_violation" {
+		t.Errorf("CategoryIDs = %v, want [missing_tests sop_violation]", cats)
+	}
+}
+
+// TestBuildLessonTriples_OptionalAndEvidence verifies that ADR-033 optional
+// fields (Detail, InjectionForm, RootCauseRole, Positive, RetiredAt,
+// LastInjectedAt) and multi-valued evidence (EvidenceSteps, EvidenceFiles)
+// are each emitted as individual triples when set.
+func TestBuildLessonTriples_OptionalAndEvidence(t *testing.T) {
+	retired := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	lastInj := time.Date(2026, 4, 30, 9, 0, 0, 0, time.UTC)
+
+	eid := "semspec.local.agent.lessons.lesson.abcdef"
+	lesson := workflow.Lesson{
+		ID:            "lesson-1",
+		Source:        "s",
+		Detail:        "long-form root-cause narrative",
+		InjectionForm: "case study form",
+		EvidenceSteps: []workflow.StepRef{
+			{LoopID: "l1", StepIndex: 3},
+			{LoopID: "l2", StepIndex: 7},
+		},
+		EvidenceFiles: []workflow.FileRef{
+			{Path: "main.go", LineStart: 10, LineEnd: 20, CommitSHA: "deadbeef"},
+		},
+		RootCauseRole:  "architect",
+		Positive:       true,
+		RetiredAt:      &retired,
+		LastInjectedAt: &lastInj,
+	}
+	lesson.CreatedAt = time.Now()
+
+	byPred := indexTriplesByPred(t, eid, buildLessonTriples(eid, lesson))
+
+	require := func(pred, want string) {
+		t.Helper()
+		vals := byPred[pred]
+		if len(vals) == 0 {
+			t.Errorf("predicate %q absent from triples", pred)
+			return
+		}
+		if vals[0] != want {
+			t.Errorf("predicate %q = %q, want %q", pred, vals[0], want)
+		}
+	}
+
+	require(agentgraph.PredicateLessonDetail, "long-form root-cause narrative")
+	require(agentgraph.PredicateLessonInjectionForm, "case study form")
+	require(agentgraph.PredicateLessonRootCauseRole, "architect")
+	require(agentgraph.PredicateLessonPositive, "true")
+	require(agentgraph.PredicateLessonRetiredAt, retired.Format(time.RFC3339))
+	require(agentgraph.PredicateLessonLastInjectedAt, lastInj.Format(time.RFC3339))
+
+	steps := byPred[agentgraph.PredicateLessonEvidenceSteps]
+	if len(steps) != 2 {
+		t.Errorf("EvidenceSteps: %d triples, want 2", len(steps))
+	} else {
+		if steps[0] != encodeStepRef(lesson.EvidenceSteps[0]) {
+			t.Errorf("EvidenceSteps[0] = %q, want %q", steps[0], encodeStepRef(lesson.EvidenceSteps[0]))
+		}
+		if steps[1] != encodeStepRef(lesson.EvidenceSteps[1]) {
+			t.Errorf("EvidenceSteps[1] = %q, want %q", steps[1], encodeStepRef(lesson.EvidenceSteps[1]))
+		}
+	}
+	files := byPred[agentgraph.PredicateLessonEvidenceFiles]
+	if len(files) != 1 {
+		t.Errorf("EvidenceFiles: %d triples, want 1", len(files))
+	} else if files[0] != encodeFileRef(lesson.EvidenceFiles[0]) {
+		t.Errorf("EvidenceFiles[0] = %q, want %q", files[0], encodeFileRef(lesson.EvidenceFiles[0]))
+	}
+}
+
+// TestBuildLessonTriples_OptionalFieldsAbsent verifies that absent optional
+// fields produce no triples so the entity stays lean.
+func TestBuildLessonTriples_OptionalFieldsAbsent(t *testing.T) {
+	eid := "semspec.local.agent.lessons.lesson.xyz"
+	lesson := workflow.Lesson{
+		ID:         "lesson-2",
+		Source:     "decomposer",
+		ScenarioID: "task-10",
+		Summary:    "some finding",
+		Role:       "developer",
+		// Positive=false (zero), RetiredAt=nil, LastInjectedAt=nil,
+		// Detail="", InjectionForm="", RootCauseRole="",
+		// CategoryIDs=nil, EvidenceSteps=nil, EvidenceFiles=nil.
+	}
+	lesson.CreatedAt = time.Now()
+
+	triples := buildLessonTriples(eid, lesson)
+
+	byPred := make(map[string]int)
+	for _, tr := range triples {
+		byPred[tr.Predicate]++
+	}
+
+	optional := []string{
+		agentgraph.PredicateLessonDetail,
+		agentgraph.PredicateLessonInjectionForm,
+		agentgraph.PredicateLessonRootCauseRole,
+		agentgraph.PredicateLessonPositive,
+		agentgraph.PredicateLessonRetiredAt,
+		agentgraph.PredicateLessonLastInjectedAt,
+		agentgraph.PredicateLessonCategories,
+		agentgraph.PredicateLessonEvidenceSteps,
+		agentgraph.PredicateLessonEvidenceFiles,
+	}
+	for _, pred := range optional {
+		if byPred[pred] > 0 {
+			t.Errorf("optional predicate %q should be absent when field is zero/nil, got %d triple(s)", pred, byPred[pred])
+		}
+	}
+}
+
+// TestRecordLesson_UsesEntityUpsert exercises RecordLesson end-to-end against a
+// nil-NATS TripleWriter and asserts it returns nil. NOTE this only pins the
+// no-op contract: both UpsertEntity and the old WriteTriple short-circuit to nil
+// when NATSClient == nil, so this test cannot by itself distinguish the create
+// path. The triple SHAPE is pinned by TestBuildLessonTriples_RequiredAndCategory
+// and TestBuildLessonTriples_OptionalAndEvidence; the structural guarantee that
+// the create uses UpsertEntity (not triple.add) is delivered by the
+// buildLessonTriples extraction + the absence of WriteTriple in RecordLesson. A
+// genuine path assertion needs an upserter-interface seam on Writer.TW — deferred
+// to the write-API taxonomy work (audit fix-point 5, issue #154).
+func TestRecordLesson_UsesEntityUpsert(t *testing.T) {
+	w := &Writer{TW: nilTripleWriter(), Logger: testLogger()}
+
+	now := time.Now()
+	lesson := workflow.Lesson{
+		Source:        "reviewer-feedback",
+		Summary:       "seam test — must use UpsertEntity",
+		Role:          "developer",
+		EvidenceSteps: []workflow.StepRef{{LoopID: "l1", StepIndex: 1}},
+		EvidenceFiles: []workflow.FileRef{{Path: "x.go", LineStart: 1, LineEnd: 2, CommitSHA: "abc"}},
+		// Exercise every optional field so buildLessonTriples coverage is maximal.
+		CategoryIDs:    []string{"sop_violation"},
+		Detail:         "narrative",
+		InjectionForm:  "case study",
+		RootCauseRole:  "architect",
+		Positive:       true,
+		RetiredAt:      &now,
+		LastInjectedAt: &now,
+	}
+
+	if err := w.RecordLesson(context.Background(), lesson); err != nil {
+		t.Fatalf("RecordLesson must succeed when TW.UpsertEntity is a no-op, got: %v", err)
+	}
 }
 
 func TestRotateLessonsForRole_ErrorsWithNoNATS(t *testing.T) {

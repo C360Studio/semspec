@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/observability"
 )
 
@@ -16,39 +18,60 @@ import (
 // because graph-ingest stores them via CAS write.
 var natsKVKeyPattern = regexp.MustCompile(`^[a-zA-Z0-9_./=-]+$`)
 
-// recordedTriple captures a single WriteTriple invocation.
-type recordedTriple struct {
-	subject, predicate string
-	object             any
+// recordedUpsert captures a single UpsertEntity invocation.
+type recordedUpsert struct {
+	entityType message.Type
+	entityID   string
+	triples    []message.Triple
 }
 
+// recordingWriter implements tripleWriter for tests. It records UpsertEntity
+// calls in upserts and WriteTriple calls in writeCalls. Tests assert that
+// Emit uses exactly one UpsertEntity and zero WriteTriple calls — the path
+// pin that confirms the migration off graph.mutation.triple.add.
 type recordingWriter struct {
-	triples []recordedTriple
-	failOn  string
+	upserts    []recordedUpsert
+	writeCalls int  // count of WriteTriple calls — must stay 0 after migration
+	failUpsert bool // when true, UpsertEntity returns an error
 }
 
-func (rw *recordingWriter) WriteTriple(_ context.Context, subject, predicate string, object any) error {
-	if rw.failOn != "" && rw.failOn == predicate {
-		return errors.New("simulated failure")
-	}
-	rw.triples = append(rw.triples, recordedTriple{subject, predicate, object})
+func (rw *recordingWriter) WriteTriple(_ context.Context, _, _ string, _ any) error {
+	rw.writeCalls++
 	return nil
 }
 
-func (rw *recordingWriter) findAll(subject, predicate string) []recordedTriple {
-	var out []recordedTriple
-	for _, t := range rw.triples {
-		if t.subject == subject && t.predicate == predicate {
+func (rw *recordingWriter) UpsertEntity(_ context.Context, entityType message.Type, entityID string, triples []message.Triple) error {
+	if rw.failUpsert {
+		return errors.New("simulated UpsertEntity failure")
+	}
+	rw.upserts = append(rw.upserts, recordedUpsert{entityType, entityID, triples})
+	return nil
+}
+
+// findAll returns all triples matching predicate in the most recent upsert.
+func (rw *recordingWriter) findAll(_, predicate string) []message.Triple {
+	if len(rw.upserts) == 0 {
+		return nil
+	}
+	last := rw.upserts[len(rw.upserts)-1]
+	var out []message.Triple
+	for _, t := range last.triples {
+		if t.Predicate == predicate {
 			out = append(out, t)
 		}
 	}
 	return out
 }
 
-func (rw *recordingWriter) findOne(subject, predicate string) *recordedTriple {
-	for i := range rw.triples {
-		if rw.triples[i].subject == subject && rw.triples[i].predicate == predicate {
-			return &rw.triples[i]
+// findOne returns the first triple matching predicate in the most recent upsert.
+func (rw *recordingWriter) findOne(_, predicate string) *message.Triple {
+	if len(rw.upserts) == 0 {
+		return nil
+	}
+	last := rw.upserts[len(rw.upserts)-1]
+	for i := range last.triples {
+		if last.triples[i].Predicate == predicate {
+			return &last.triples[i]
 		}
 	}
 	return nil
@@ -110,7 +133,157 @@ func TestSuggest_StableOnTies(t *testing.T) {
 	}
 }
 
-// ----- Emit -----------------------------------------------------------
+// ----- buildIncidentTriples — pure unit tests --------------------------------
+
+// TestBuildIncidentTriples_FullAttributeSet verifies the pure helper emits all
+// attributes including call_id, with optional fields present when non-empty and
+// candidates emitted one-per-triple. No NATS involved.
+func TestBuildIncidentTriples_FullAttributeSet(t *testing.T) {
+	rc := RecoveryContext{
+		CallID:   "loop-build",
+		Role:     "developer",
+		Model:    "openrouter-qwen3-moe",
+		ToolName: "graph_query",
+	}
+	re := RecoveryEvent{
+		Outcome:       observability.ToolRecoveryOutcomeSuggested,
+		OriginalQuery: `{ entity(id: "semspec.semsource.code.workspace.file.main-go") }`,
+		Candidates:    []string{"semspec.semsource.golang.workspace.file.main-go", "semspec.semsource.code.workspace.folder.internal-auth"},
+	}
+	incidentID := "loop-build.tool-recovery.graph_query.deadbeef"
+
+	triples := buildIncidentTriples(incidentID, rc, re)
+
+	find := func(pred string) *message.Triple {
+		for i := range triples {
+			if triples[i].Predicate == pred {
+				return &triples[i]
+			}
+		}
+		return nil
+	}
+	findAll := func(pred string) []message.Triple {
+		var out []message.Triple
+		for _, t := range triples {
+			if t.Predicate == pred {
+				out = append(out, t)
+			}
+		}
+		return out
+	}
+
+	// Required always-present predicates.
+	required := map[string]any{
+		observability.ToolRecoveryOutcome:       observability.ToolRecoveryOutcomeSuggested,
+		observability.ToolRecoveryToolName:      "graph_query",
+		observability.IncidentCallID:            "loop-build",
+		observability.ToolRecoveryOriginalQuery: re.OriginalQuery,
+		observability.ToolRecoveryRole:          "developer",
+		observability.ToolRecoveryModel:         "openrouter-qwen3-moe",
+	}
+	for pred, want := range required {
+		got := find(pred)
+		if got == nil {
+			t.Errorf("missing triple for predicate %q", pred)
+			continue
+		}
+		if got.Object != want {
+			t.Errorf("predicate %q object = %v, want %v", pred, got.Object, want)
+		}
+	}
+
+	// Candidates — one per suggested ID.
+	cands := findAll(observability.ToolRecoveryCandidate)
+	if len(cands) != 2 {
+		t.Errorf("expected 2 candidate triples, got %d", len(cands))
+	}
+	gotCands := map[any]bool{}
+	for _, c := range cands {
+		gotCands[c.Object] = true
+	}
+	for _, want := range re.Candidates {
+		if !gotCands[want] {
+			t.Errorf("missing candidate triple %q", want)
+		}
+	}
+
+	// All subjects must equal incidentID.
+	for _, tr := range triples {
+		if tr.Subject != incidentID {
+			t.Errorf("triple subject = %q, want %q (predicate %q)", tr.Subject, incidentID, tr.Predicate)
+		}
+	}
+}
+
+// TestBuildIncidentTriples_OptionalAbsentWhenEmpty confirms empty optional
+// fields produce no triples — no sentinel-value pollution.
+func TestBuildIncidentTriples_OptionalAbsentWhenEmpty(t *testing.T) {
+	rc := RecoveryContext{CallID: "loop-min", ToolName: "graph_query"} // Role/Model empty
+	re := RecoveryEvent{Outcome: observability.ToolRecoveryOutcomeNotSuggested}
+	incidentID := "loop-min.tool-recovery.graph_query.00000000"
+
+	triples := buildIncidentTriples(incidentID, rc, re)
+
+	find := func(pred string) *message.Triple {
+		for i := range triples {
+			if triples[i].Predicate == pred {
+				return &triples[i]
+			}
+		}
+		return nil
+	}
+
+	for _, pred := range []string{
+		observability.ToolRecoveryOriginalQuery,
+		observability.ToolRecoveryRole,
+		observability.ToolRecoveryModel,
+		observability.ToolRecoveryCandidate,
+	} {
+		if t2 := find(pred); t2 != nil {
+			t.Errorf("empty optional field %q must not generate a triple; got %+v", pred, t2)
+		}
+	}
+
+	// call_id always present.
+	if t2 := find(observability.IncidentCallID); t2 == nil {
+		t.Error("call_id triple must always be present")
+	}
+}
+
+// ----- Emit — path-pin tests -------------------------------------------------
+
+// TestEmit_UsesUpsertEntity_NotWriteTriple is the genuine path pin for
+// slice #2: confirms Emit calls UpsertEntity exactly once and makes ZERO
+// WriteTriple calls. Slice #1 lacked this assertion.
+func TestEmit_UsesUpsertEntity_NotWriteTriple(t *testing.T) {
+	rw := &recordingWriter{}
+	rc := RecoveryContext{CallID: "loop-pin", Role: "developer", Model: "m1", ToolName: "graph_query"}
+	re := RecoveryEvent{
+		Outcome:       observability.ToolRecoveryOutcomeSuggested,
+		OriginalQuery: "some query",
+	}
+	id, err := Emit(context.Background(), rw, rc, re)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id == "" {
+		t.Fatal("expected non-empty incident ID")
+	}
+	if len(rw.upserts) != 1 {
+		t.Errorf("expected 1 UpsertEntity call, got %d", len(rw.upserts))
+	}
+	if rw.writeCalls != 0 {
+		t.Errorf("expected 0 WriteTriple calls (relation write dropped), got %d", rw.writeCalls)
+	}
+	if rw.upserts[0].entityType != RecoveryIncidentEntityType {
+		t.Errorf("UpsertEntity entity type = %+v, want %+v", rw.upserts[0].entityType, RecoveryIncidentEntityType)
+	}
+	if rw.upserts[0].entityID != id {
+		t.Errorf("UpsertEntity entity ID = %q, want %q", rw.upserts[0].entityID, id)
+	}
+}
+
+// ----- Existing guard tests (preserved, updated to new writer shape) ---------
 
 func TestEmit_NilWriter_NoOp(t *testing.T) {
 	id, err := Emit(context.Background(), nil, RecoveryContext{CallID: "x", ToolName: "graph_query"}, RecoveryEvent{
@@ -130,7 +303,7 @@ func TestEmit_EmptyOutcome_NoOp(t *testing.T) {
 	if err != nil {
 		t.Errorf("empty outcome should be no-op, got error: %v", err)
 	}
-	if id != "" || len(rw.triples) != 0 {
+	if id != "" || len(rw.upserts) != 0 {
 		t.Errorf("empty outcome must emit nothing")
 	}
 }
@@ -182,15 +355,11 @@ func TestEmit_Suggested_FullTripleSet(t *testing.T) {
 		t.Errorf("incident ID %q contains chars NATS KV won't accept (allowed: [a-zA-Z0-9_./=-])", id)
 	}
 
-	// Relation written FIRST (subject is the call ID).
-	if len(rw.triples) == 0 || rw.triples[0].subject != "loop-rec" || rw.triples[0].predicate != observability.ToolRecoveryIncident {
-		t.Errorf("first write must be the tool.recovery.incident relation; got %+v", rw.triples[0])
-	}
-
 	// All required + populated optional predicates present.
 	checks := map[string]any{
 		observability.ToolRecoveryOutcome:       observability.ToolRecoveryOutcomeSuggested,
 		observability.ToolRecoveryToolName:      "graph_query",
+		observability.IncidentCallID:            "loop-rec",
 		observability.ToolRecoveryOriginalQuery: re.OriginalQuery,
 		observability.ToolRecoveryRole:          "developer",
 		observability.ToolRecoveryModel:         "openrouter-qwen3-moe",
@@ -201,8 +370,8 @@ func TestEmit_Suggested_FullTripleSet(t *testing.T) {
 			t.Errorf("missing triple for %q", pred)
 			continue
 		}
-		if got.object != want {
-			t.Errorf("predicate %q object = %v, want %v", pred, got.object, want)
+		if got.Object != want {
+			t.Errorf("predicate %q object = %v, want %v", pred, got.Object, want)
 		}
 	}
 
@@ -213,7 +382,7 @@ func TestEmit_Suggested_FullTripleSet(t *testing.T) {
 	}
 	gotCands := map[any]bool{}
 	for _, c := range cands {
-		gotCands[c.object] = true
+		gotCands[c.Object] = true
 	}
 	for _, want := range re.Candidates {
 		if !gotCands[want] {
@@ -238,7 +407,7 @@ func TestEmit_NotSuggested_NoCandidateTriples(t *testing.T) {
 	}
 	// Outcome triple still written.
 	out := rw.findOne(id, observability.ToolRecoveryOutcome)
-	if out == nil || out.object != observability.ToolRecoveryOutcomeNotSuggested {
+	if out == nil || out.Object != observability.ToolRecoveryOutcomeNotSuggested {
 		t.Error("missing or wrong outcome triple")
 	}
 }
@@ -250,7 +419,7 @@ func TestEmit_DeterministicIDOnSameQuery(t *testing.T) {
 	rc := RecoveryContext{CallID: "loop-d", ToolName: "graph_query"}
 	re := RecoveryEvent{Outcome: observability.ToolRecoveryOutcomeSuggested, OriginalQuery: "same query"}
 	id1, _ := Emit(context.Background(), rw, rc, re)
-	rw.triples = nil // reset
+	rw.upserts = nil // reset
 	id2, _ := Emit(context.Background(), rw, rc, re)
 	if id1 != id2 {
 		t.Errorf("expected deterministic IDs, got %q and %q", id1, id2)
@@ -278,13 +447,11 @@ func TestEmit_DifferentQueries_DifferentIDs(t *testing.T) {
 	}
 }
 
-// Mid-write failure (e.g. on the ToolName attribute) should still
-// return the partial incident ID — the relation triple landed
-// successfully, so a graph reader can find the partial-state node.
-// Documents the partial-write contract called out in Emit's
-// godoc at emit.go:46-48.
-func TestEmit_MidAttributeWriteFails_ReturnsPartialID(t *testing.T) {
-	rw := &recordingWriter{failOn: observability.ToolRecoveryToolName}
+// TestEmit_UpsertEntityFails_ReturnsError confirms Emit propagates UpsertEntity
+// errors and returns empty ID (single-call atomic model — either the node lands
+// or it doesn't, no partial state).
+func TestEmit_UpsertEntityFails_ReturnsError(t *testing.T) {
+	rw := &recordingWriter{failUpsert: true}
 	rc := RecoveryContext{CallID: "loop-mid", ToolName: "graph_query"}
 	re := RecoveryEvent{
 		Outcome:       observability.ToolRecoveryOutcomeSuggested,
@@ -292,30 +459,10 @@ func TestEmit_MidAttributeWriteFails_ReturnsPartialID(t *testing.T) {
 	}
 	id, err := Emit(context.Background(), rw, rc, re)
 	if err == nil {
-		t.Error("expected error when mid-attribute write fails")
+		t.Error("expected error when UpsertEntity fails")
 	}
-	if id == "" {
-		t.Error("expected partial incident ID when relation already landed")
-	}
-	if !strings.HasPrefix(id, "loop-mid.tool-recovery.graph_query.") {
-		t.Errorf("partial ID prefix wrong: %q", id)
-	}
-	// Relation triple should still be in the writer's recorded set.
-	if rw.findOne("loop-mid", observability.ToolRecoveryIncident) == nil {
-		t.Error("relation triple should have landed before the mid-write failure")
-	}
-}
-
-func TestEmit_RelationWriteFails_ShortCircuits(t *testing.T) {
-	rw := &recordingWriter{failOn: observability.ToolRecoveryIncident}
-	_, err := Emit(context.Background(), rw, RecoveryContext{CallID: "x", ToolName: "graph_query"}, RecoveryEvent{
-		Outcome: observability.ToolRecoveryOutcomeSuggested,
-	})
-	if err == nil {
-		t.Error("expected error when relation write fails")
-	}
-	if len(rw.triples) != 0 {
-		t.Errorf("no triples should land when relation write fails; got %d", len(rw.triples))
+	if id != "" {
+		t.Errorf("expected empty ID on upsert failure, got %q", id)
 	}
 }
 

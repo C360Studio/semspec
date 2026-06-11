@@ -8,10 +8,26 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
+
+// projectConfigEntityType is the message.Type for project-config entities.
+// Domain mirrors the entity ID namespace {prefix}.wf.project.config.{hash}.
+// All three config entities (project, checklist, standards) share this type —
+// they are distinguished by the semspec.ProjectConfigType predicate value
+// ("project" / "checklist" / "standards").
+//
+// Kept local to this package per issue #154 slice #3; DO NOT add to workflow/entity.go
+// (another slice edits nearby).
+var projectConfigEntityType = message.Type{
+	Domain:   "project-config",
+	Category: "entity",
+	Version:  "v1",
+}
 
 // projectStore owns the lifecycle of project configuration entities
 // (project.json, checklist.json, standards.json).
@@ -218,76 +234,142 @@ func (s *projectStore) saveStandards(ctx context.Context, st *workflow.Standards
 // Triple writers
 // ----------------------------------------------------------------------------
 
-// writeConfigTriples writes individual predicates + full JSON blob for project config.
+// writeConfigTriples persists the project config entity via a single
+// metadata-bearing UpsertEntity call (update_with_triples + create_with_triples
+// fallback). This ensures the entity carries a MessageType from its very first
+// write and survives the semstreams triple.add must-exist change (issue #154
+// slice #3).
 func (s *projectStore) writeConfigTriples(ctx context.Context, pc *workflow.ProjectConfig) error {
-	tw := s.tripleWriter
-	if tw == nil {
+	if s.tripleWriter == nil {
 		return nil
 	}
 	entityID := workflow.ProjectConfigEntityID("project")
-
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigType, "project")
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.ProjectConfigFile)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigName, pc.Name)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigOrg, pc.Org)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigPlatform, pc.Platform)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, pc.UpdatedAt.Format(time.RFC3339))
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApproved, pc.ApprovedAt != nil)
-	if pc.ApprovedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, pc.ApprovedAt.Format(time.RFC3339))
-	}
-
-	jsonBlob, err := json.Marshal(pc)
-	if err != nil {
-		return err
-	}
-	return tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
+	return s.tripleWriter.UpsertEntity(ctx, projectConfigEntityType, entityID, buildConfigTriples(entityID, pc))
 }
 
-// writeChecklistTriples writes triples for checklist config.
+// writeChecklistTriples persists the checklist config entity via a single
+// metadata-bearing UpsertEntity call (issue #154 slice #3).
 func (s *projectStore) writeChecklistTriples(ctx context.Context, cl *workflow.Checklist) error {
-	tw := s.tripleWriter
-	if tw == nil {
+	if s.tripleWriter == nil {
 		return nil
 	}
 	entityID := workflow.ProjectConfigEntityID("checklist")
-
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigType, "checklist")
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.ChecklistFile)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, cl.UpdatedAt.Format(time.RFC3339))
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApproved, cl.ApprovedAt != nil)
-	if cl.ApprovedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, cl.ApprovedAt.Format(time.RFC3339))
-	}
-
-	jsonBlob, err := json.Marshal(cl)
-	if err != nil {
-		return err
-	}
-	return tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
+	return s.tripleWriter.UpsertEntity(ctx, projectConfigEntityType, entityID, buildChecklistTriples(entityID, cl))
 }
 
-// writeStandardsTriples writes triples for standards config.
+// writeStandardsTriples persists the standards config entity via a single
+// metadata-bearing UpsertEntity call (issue #154 slice #3).
 func (s *projectStore) writeStandardsTriples(ctx context.Context, st *workflow.Standards) error {
-	tw := s.tripleWriter
-	if tw == nil {
+	if s.tripleWriter == nil {
 		return nil
 	}
 	entityID := workflow.ProjectConfigEntityID("standards")
+	return s.tripleWriter.UpsertEntity(ctx, projectConfigEntityType, entityID, buildStandardsTriples(entityID, st))
+}
 
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigType, "standards")
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigFile, workflow.StandardsFile)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, st.UpdatedAt.Format(time.RFC3339))
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApproved, st.ApprovedAt != nil)
+// ----------------------------------------------------------------------------
+// Pure triple builders (testable without NATS)
+// ----------------------------------------------------------------------------
+
+// buildConfigTriples constructs the full []message.Triple for a project config entity.
+// It is a pure function so it can be unit-tested without a NATS connection.
+//
+// Every predicate emitted by the old per-predicate UpdateTriple fan-out is preserved
+// with identical gating. ProjectConfigApproved is always present ("true"/"false").
+// ProjectConfigApprovedAt is conditional on ApprovedAt != nil, matching the original
+// behavior. ProjectConfigJSON is always present so the reconcile path can round-trip.
+//
+// TODO(#154): ProjectConfigJSON is a JSON-blob-in-triple; evaluate dropping once
+// reconcile no longer needs it (requires verifying reconcileConfig/reconcileChecklist/
+// reconcileStandards no longer read it).
+func buildConfigTriples(eid string, pc *workflow.ProjectConfig) []message.Triple {
+	approved := "false"
+	if pc.ApprovedAt != nil {
+		approved = "true"
+	}
+
+	// JSON blob for round-trip reconciliation. The error is intentionally
+	// ignored: ProjectConfig is a plain JSON-marshalable struct (no chan/func/
+	// cyclic fields), so Marshal cannot fail here. The graph write is a
+	// best-effort mirror anyway — the .semspec/*.json file is the durable copy.
+	jsonBlob, _ := json.Marshal(pc)
+
+	triples := []message.Triple{
+		{Subject: eid, Predicate: semspec.ProjectConfigType, Object: "project"},
+		{Subject: eid, Predicate: semspec.ProjectConfigFile, Object: workflow.ProjectConfigFile},
+		{Subject: eid, Predicate: semspec.ProjectConfigName, Object: pc.Name},
+		{Subject: eid, Predicate: semspec.ProjectConfigOrg, Object: pc.Org},
+		{Subject: eid, Predicate: semspec.ProjectConfigPlatform, Object: pc.Platform},
+		{Subject: eid, Predicate: semspec.ProjectConfigUpdatedAt, Object: pc.UpdatedAt.Format(time.RFC3339)},
+		{Subject: eid, Predicate: semspec.ProjectConfigApproved, Object: approved},
+		{Subject: eid, Predicate: semspec.ProjectConfigJSON, Object: string(jsonBlob)},
+	}
+	if pc.ApprovedAt != nil {
+		triples = append(triples, message.Triple{
+			Subject:   eid,
+			Predicate: semspec.ProjectConfigApprovedAt,
+			Object:    pc.ApprovedAt.Format(time.RFC3339),
+		})
+	}
+	return triples
+}
+
+// buildChecklistTriples constructs the full []message.Triple for a checklist entity.
+// Same invariants as buildConfigTriples.
+//
+// TODO(#154): ProjectConfigJSON is a JSON-blob-in-triple; evaluate dropping once
+// reconcile no longer needs it.
+func buildChecklistTriples(eid string, cl *workflow.Checklist) []message.Triple {
+	approved := "false"
+	if cl.ApprovedAt != nil {
+		approved = "true"
+	}
+	jsonBlob, _ := json.Marshal(cl)
+
+	triples := []message.Triple{
+		{Subject: eid, Predicate: semspec.ProjectConfigType, Object: "checklist"},
+		{Subject: eid, Predicate: semspec.ProjectConfigFile, Object: workflow.ChecklistFile},
+		{Subject: eid, Predicate: semspec.ProjectConfigUpdatedAt, Object: cl.UpdatedAt.Format(time.RFC3339)},
+		{Subject: eid, Predicate: semspec.ProjectConfigApproved, Object: approved},
+		{Subject: eid, Predicate: semspec.ProjectConfigJSON, Object: string(jsonBlob)},
+	}
+	if cl.ApprovedAt != nil {
+		triples = append(triples, message.Triple{
+			Subject:   eid,
+			Predicate: semspec.ProjectConfigApprovedAt,
+			Object:    cl.ApprovedAt.Format(time.RFC3339),
+		})
+	}
+	return triples
+}
+
+// buildStandardsTriples constructs the full []message.Triple for a standards entity.
+// Same invariants as buildConfigTriples.
+//
+// TODO(#154): ProjectConfigJSON is a JSON-blob-in-triple; evaluate dropping once
+// reconcile no longer needs it.
+func buildStandardsTriples(eid string, st *workflow.Standards) []message.Triple {
+	approved := "false"
 	if st.ApprovedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigApprovedAt, st.ApprovedAt.Format(time.RFC3339))
+		approved = "true"
 	}
+	jsonBlob, _ := json.Marshal(st)
 
-	jsonBlob, err := json.Marshal(st)
-	if err != nil {
-		return err
+	triples := []message.Triple{
+		{Subject: eid, Predicate: semspec.ProjectConfigType, Object: "standards"},
+		{Subject: eid, Predicate: semspec.ProjectConfigFile, Object: workflow.StandardsFile},
+		{Subject: eid, Predicate: semspec.ProjectConfigUpdatedAt, Object: st.UpdatedAt.Format(time.RFC3339)},
+		{Subject: eid, Predicate: semspec.ProjectConfigApproved, Object: approved},
+		{Subject: eid, Predicate: semspec.ProjectConfigJSON, Object: string(jsonBlob)},
 	}
-	return tw.UpdateTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
+	if st.ApprovedAt != nil {
+		triples = append(triples, message.Triple{
+			Subject:   eid,
+			Predicate: semspec.ProjectConfigApprovedAt,
+			Object:    st.ApprovedAt.Format(time.RFC3339),
+		})
+	}
+	return triples
 }
 
 // ----------------------------------------------------------------------------
