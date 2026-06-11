@@ -7,84 +7,123 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
-// writePlanTriples writes all Plan fields as individual triples to ENTITY_STATES.
-// Same pattern as execution-orchestrator: one WriteTriple call per field.
+// writePlanTriples persists all Plan fields to ENTITY_STATES as a single
+// metadata-bearing entity upsert: update_with_triples with a create_with_triples
+// fallback on first write. This ensures the plan node carries a MessageType
+// (PlanEntityType) from its very first write and survives the incoming semstreams
+// triple.add must-exist change — see docs/audit/mutation-api-graphable-bypass.md
+// ("Impact" section) and issue #154 (slice #4).
+//
+// NOTE: this is the test-seed path only (called by CreateProjectPlan, which has
+// zero production callers). Production plan creation goes through
+// processor/plan-manager planStore.writePlanTriples which already uses
+// UpsertEntityIfChanged.
 func writePlanTriples(ctx context.Context, tw *graphutil.TripleWriter, plan *Plan) error {
 	if tw == nil {
 		return nil
 	}
 	entityID := PlanEntityID(plan.Slug)
-
-	// Single-valued scalars upsert (UpdateTriple = remove+add) so the entity
-	// holds the latest value per predicate; graph-ingest AddTriple is
-	// append-only, so plain WriteTriple on every mutation accumulates history and
-	// eventually exceeds the 1 MiB KV value cap. Lists use ReplaceTripleList.
-
-	// Core identity
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanSlug, plan.Slug)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanTitle, plan.Title)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, plan.Title)
-	if err := tw.UpdateTriple(ctx, entityID, semspec.PredicatePlanStatus, string(plan.EffectiveStatus())); err != nil {
-		return fmt.Errorf("write plan status: %w", err)
+	if err := tw.UpsertEntity(ctx, PlanEntityType, entityID, buildPlanTriples(entityID, plan)); err != nil {
+		return fmt.Errorf("write plan triples: %w", err)
 	}
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanCreatedAt, plan.CreatedAt.Format(time.RFC3339))
+	return nil
+}
 
-	// Project association
+// buildPlanTriples constructs the full []message.Triple for a plan entity.
+// It is a pure function so it can be unit-tested independently of NATS.
+//
+// Required scalars (PlanSlug, PlanTitle, DCTitle, PredicatePlanStatus,
+// PlanCreatedAt, PlanApproved) are always emitted. Conditional scalars
+// (ProjectID, Goal, Context, ApprovedAt, the five Review fields, the two
+// Error fields) are emitted only when their Plan fields are non-zero/non-nil
+// to keep entities lean. List predicates (PlanScopeInclude/Exclude/Protected/
+// Create, PlanExecutionTraceID) emit one triple per element — never
+// JSON-encoded — per feedback_no_json_in_triples. UpsertEntity's
+// RemoveTriples = distinctPredicates(addTriples) replaces the whole list,
+// which is the same net effect as the prior ReplaceTripleList calls.
+func buildPlanTriples(entityID string, plan *Plan) []message.Triple {
+	t := func(pred, obj string) message.Triple {
+		return message.Triple{Subject: entityID, Predicate: pred, Object: obj}
+	}
+
+	triples := []message.Triple{
+		t(semspec.PlanSlug, plan.Slug),
+		t(semspec.PlanTitle, plan.Title),
+		t(semspec.DCTitle, plan.Title),
+		t(semspec.PredicatePlanStatus, string(plan.EffectiveStatus())),
+		t(semspec.PlanCreatedAt, plan.CreatedAt.Format(time.RFC3339)),
+		t(semspec.PlanApproved, fmt.Sprintf("%t", plan.Approved)),
+	}
+
+	// Project association.
 	if plan.ProjectID != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanProject, plan.ProjectID)
+		triples = append(triples, t(semspec.PlanProject, plan.ProjectID))
 	}
 
-	// Plan content
+	// Plan content.
 	if plan.Goal != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanGoal, plan.Goal)
+		triples = append(triples, t(semspec.PlanGoal, plan.Goal))
 	}
 	if plan.Context != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanContext, plan.Context)
+		triples = append(triples, t(semspec.PlanContext, plan.Context))
 	}
 
-	// Approval
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanApproved, fmt.Sprintf("%t", plan.Approved))
+	// Approval timestamp.
 	if plan.ApprovedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanApprovedAt, plan.ApprovedAt.Format(time.RFC3339))
+		triples = append(triples, t(semspec.PlanApprovedAt, plan.ApprovedAt.Format(time.RFC3339)))
 	}
 
-	// Review
+	// Review fields.
 	if plan.ReviewVerdict != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewVerdict, plan.ReviewVerdict)
+		triples = append(triples, t(semspec.PlanReviewVerdict, plan.ReviewVerdict))
 	}
 	if plan.ReviewSummary != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewSummary, plan.ReviewSummary)
+		triples = append(triples, t(semspec.PlanReviewSummary, plan.ReviewSummary))
 	}
 	if plan.ReviewedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewedAt, plan.ReviewedAt.Format(time.RFC3339))
+		triples = append(triples, t(semspec.PlanReviewedAt, plan.ReviewedAt.Format(time.RFC3339)))
 	}
 	if plan.ReviewFormattedFindings != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewFormattedFindings, plan.ReviewFormattedFindings)
+		triples = append(triples, t(semspec.PlanReviewFormattedFindings, plan.ReviewFormattedFindings))
 	}
 	if plan.ReviewIteration > 0 {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewIteration, plan.ReviewIteration)
+		triples = append(triples, t(semspec.PlanReviewIteration, strconv.Itoa(plan.ReviewIteration)))
 	}
 
-	// Error annotations
+	// Error annotations.
 	if plan.LastError != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanLastError, plan.LastError)
+		triples = append(triples, t(semspec.PlanLastError, plan.LastError))
 	}
 	if plan.LastErrorAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339))
+		triples = append(triples, t(semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339)))
 	}
 
-	// Scope + execution trace IDs (replace the whole list each write)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeInclude, plan.Scope.Include)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeExclude, plan.Scope.Exclude)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeProtected, plan.Scope.DoNotTouch)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeCreate, plan.Scope.Create)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanExecutionTraceID, plan.ExecutionTraceIDs)
+	// Scope lists — one triple per element (no JSON encoding).
+	for _, v := range plan.Scope.Include {
+		triples = append(triples, t(semspec.PlanScopeInclude, v))
+	}
+	for _, v := range plan.Scope.Exclude {
+		triples = append(triples, t(semspec.PlanScopeExclude, v))
+	}
+	for _, v := range plan.Scope.DoNotTouch {
+		triples = append(triples, t(semspec.PlanScopeProtected, v))
+	}
+	for _, v := range plan.Scope.Create {
+		triples = append(triples, t(semspec.PlanScopeCreate, v))
+	}
 
-	return nil
+	// Execution trace IDs — one triple per ID.
+	for _, v := range plan.ExecutionTraceIDs {
+		triples = append(triples, t(semspec.PlanExecutionTraceID, v))
+	}
+
+	return triples
 }
 
 // PlanFromTripleMap reconstructs a Plan from a predicate→value map.
