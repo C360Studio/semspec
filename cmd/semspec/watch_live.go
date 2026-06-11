@@ -307,6 +307,7 @@ func liveDetectors() []health.Detector {
 		health.RapidShallowToolCalls{},
 		health.GraphToolFailure{},
 		health.RepeatToolFailure{},
+		health.Redelivery{},
 	}
 }
 

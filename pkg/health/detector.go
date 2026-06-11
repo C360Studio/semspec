@@ -80,6 +80,10 @@ const (
 	// EvidencePlanState cites a PLAN_STATES KV entry.
 	// EvidenceRef.ID holds the plan slug.
 	EvidencePlanState EvidenceKind = "plan_state"
+	// EvidenceJetStreamConsumer cites a JetStream consumer from the /jsz
+	// snapshot. EvidenceRef.ID holds the consumer name; Field names the
+	// consumer stat the detector read (e.g. "num_redelivered").
+	EvidenceJetStreamConsumer EvidenceKind = "jetstream_consumer"
 )
 
 // IsValid reports whether k is one of the known evidence-kind values.
@@ -88,7 +92,8 @@ const (
 func (k EvidenceKind) IsValid() bool {
 	switch k {
 	case EvidenceAgentResponse, EvidenceAgentRequest, EvidenceMetricSample,
-		EvidenceLoopEntry, EvidenceLogLine, EvidencePlanState:
+		EvidenceLoopEntry, EvidenceLogLine, EvidencePlanState,
+		EvidenceJetStreamConsumer:
 		return true
 	}
 	return false
