@@ -6,6 +6,8 @@ import (
 	"path"
 	"strings"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
@@ -49,42 +51,60 @@ func SaveCapabilities(ctx context.Context, tw *graphutil.TripleWriter, explorati
 	return nil
 }
 
-// writeCapabilityTriples writes the predicate set for a single Capability.
-// Hash each depends_on name into the same EntityID suffix scheme so the
-// stored object resolves back to the corresponding Capability entity.
+// writeCapabilityTriples writes the complete predicate set for a single
+// Capability as a single atomic batch via UpsertEntityIfChanged (Phase 3a).
+//
+// Capabilities are near-immutable post-exploration: they are written once
+// during the explored→requirements_generated transition and rarely change
+// thereafter. The dirty-track skip-rate for capabilities during execution is
+// near-100%, effectively eliminating their contribution to ENTITY_STATES churn.
+//
+// DependsOn values are stored as hashed EntityID suffixes (matching the scheme
+// used by RequirementDependsOn) so graph traversals resolve correctly.
 func writeCapabilityTriples(ctx context.Context, tw *graphutil.TripleWriter, c *Capability, slug, planEntityID string) error {
 	if tw == nil {
 		return nil
 	}
 	entityID := CapabilityEntityID(slug, c.Name)
 
-	// Upsert scalars + replace edge lists so re-persisting on every plan
-	// mutation doesn't accumulate duplicate triples (graph-ingest AddTriple is
-	// append-only — the #132 plan-entity bloat class, applied to capabilities).
-	_ = tw.UpdateTriple(ctx, entityID, semspec.CapabilityName, c.Name)
-	if err := tw.UpdateTriple(ctx, entityID, semspec.CapabilityLifecycle, string(c.Lifecycle)); err != nil {
-		return fmt.Errorf("write capability lifecycle: %w", err)
+	// Build the complete predicate set.
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.CapabilityName, Object: c.Name},
+		{Subject: entityID, Predicate: semspec.CapabilityLifecycle, Object: string(c.Lifecycle)},
+		{Subject: entityID, Predicate: semspec.CapabilityPlan, Object: planEntityID},
 	}
+
 	if c.Description != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.CapabilityDescription, c.Description)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.CapabilityDescription, Object: c.Description})
 	}
-	_ = tw.UpdateTriple(ctx, entityID, semspec.CapabilityPlan, planEntityID)
 
-	// Multi-valued depends_on — value is the hashed instance ID of the
-	// prerequisite Capability (matches RequirementDependsOn's suffix scheme).
-	deps := make([]string, 0, len(c.DependsOn))
+	// Multi-valued depends_on — hashed EntityID suffix.
 	for _, dep := range c.DependsOn {
-		deps = append(deps, HashInstanceID(slug, dep))
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.CapabilityDependsOn, Object: HashInstanceID(slug, dep)})
 	}
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.CapabilityDependsOn, deps)
 
-	// Multi-valued surfaces (ADR-041 Move 2). SurfaceUI is the gate for
-	// downstream @e2e scenario emission.
-	surfaces := make([]string, 0, len(c.Surfaces))
+	// Multi-valued surfaces (ADR-041 Move 2).
 	for _, surface := range c.Surfaces {
-		surfaces = append(surfaces, string(surface))
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.CapabilitySurface, Object: string(surface)})
 	}
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.CapabilitySurface, surfaces)
+
+	// Single batched write — skips if content unchanged, replaces own predicates.
+	// OwnedPredicates covers Description (clearable) and DependsOn/Surface lists
+	// (may shrink to empty) so those predicates are always included in RemoveTriples
+	// (C1 stale-on-empty fix).
+	_, err := tw.UpsertEntityIfChanged(ctx, CapabilityEntityType, entityID, triples, graphutil.UpsertOpts{
+		OwnedPredicates: []string{
+			semspec.CapabilityName,
+			semspec.CapabilityLifecycle,
+			semspec.CapabilityPlan,
+			semspec.CapabilityDescription,
+			semspec.CapabilityDependsOn,
+			semspec.CapabilitySurface,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("write capability %s: %w", c.Name, err)
+	}
 	return nil
 }
 

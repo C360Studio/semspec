@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
@@ -177,66 +179,87 @@ func SaveRequirements(ctx context.Context, tw *graphutil.TripleWriter, requireme
 		if requirements[i].PlanID == "" {
 			requirements[i].PlanID = planEntityID
 		}
-		if err := writeRequirementTriples(ctx, tw, &requirements[i]); err != nil {
+		// writeRequirementTriples now folds in the capability edge (ADR-040) so
+		// the whole requirement predicate set — including semspec.RequirementCapability
+		// — is written in a single UpsertEntityIfChanged call. This ensures the
+		// capability predicate is covered by RemoveTriples and the dirty-hash.
+		if err := writeRequirementTriples(ctx, tw, &requirements[i], slug); err != nil {
 			return fmt.Errorf("save requirement %s: %w", requirements[i].ID, err)
 		}
-		// ADR-040: emit requirement → capability edge when CapabilityName
-		// is set (empty for legacy plans with no Exploration).
-		writeRequirementCapabilityTriple(ctx, tw, &requirements[i], slug)
 	}
 
 	return nil
 }
 
-// writeRequirementTriples writes all Requirement fields as individual triples.
-func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, req *Requirement) error {
+// writeRequirementTriples writes all Requirement fields — including the
+// requirement→capability edge (ADR-040) — as a single atomic batch to
+// ENTITY_STATES via UpsertEntityIfChanged.
+//
+// The capability edge (semspec.RequirementCapability) is folded into the same
+// triple slice so it is covered by the derived RemoveTriples and by the
+// content-hash. Previously it was emitted in a separate
+// writeRequirementCapabilityTriple call, which (a) produced a second NATS
+// round-trip to the same entity and (b) left the predicate outside the
+// dirty-hash gate.
+//
+// semspec.RequirementUpdatedAt is excluded from the content-hash via the
+// volatilePredicates parameter — it is incremented on every mutation without a
+// semantic change and would otherwise defeat dirty-track by always differing.
+// The predicate is still written to the graph; it just does not gate dirtiness.
+func writeRequirementTriples(ctx context.Context, tw *graphutil.TripleWriter, req *Requirement, planSlug string) error {
 	if tw == nil {
 		return nil
 	}
 	entityID := RequirementEntityID(req.ID)
 
-	// Upsert scalars (UpdateTriple = remove+add) and replace edge lists
-	// (ReplaceTripleList) so re-persisting the requirement on every plan
-	// mutation — which happens on every execution status update — does not
-	// accumulate duplicate triples. graph-ingest AddTriple is append-only, so
-	// plain WriteTriple here grew requirement entities unboundedly during
-	// execution (the #132 plan-entity bloat, same class, applied to requirements).
-	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementTitle, req.Title)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, req.Title)
-	if err := tw.UpdateTriple(ctx, entityID, semspec.RequirementStatus, string(req.Status)); err != nil {
-		return fmt.Errorf("write requirement status: %w", err)
+	// Build the complete predicate set for this entity.
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.RequirementTitle, Object: req.Title},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: req.Title},
+		{Subject: entityID, Predicate: semspec.RequirementStatus, Object: string(req.Status)},
+		{Subject: entityID, Predicate: semspec.RequirementPlan, Object: req.PlanID},
+		{Subject: entityID, Predicate: semspec.RequirementCreatedAt, Object: req.CreatedAt.Format(time.RFC3339)},
+		// RequirementUpdatedAt is written but excluded from the hash (see volatilePredicates below).
+		{Subject: entityID, Predicate: semspec.RequirementUpdatedAt, Object: req.UpdatedAt.Format(time.RFC3339)},
 	}
-	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementPlan, req.PlanID)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementCreatedAt, req.CreatedAt.Format(time.RFC3339))
-	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementUpdatedAt, req.UpdatedAt.Format(time.RFC3339))
+
 	if req.Description != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementDescription, req.Description)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDescription, Object: req.Description})
 	}
 
-	// Replace the full dependency edge set each persist. Hash each dep ID so the
-	// stored value is the entity-ID suffix.
-	deps := make([]string, 0, len(req.DependsOn))
+	// Dependency edges — hash each dep ID to the entity-ID suffix form.
 	for _, dep := range req.DependsOn {
-		deps = append(deps, HashInstanceID(dep))
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDependsOn, Object: HashInstanceID(dep)})
 	}
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.RequirementDependsOn, deps)
 
-	// ADR-043 Move 4 removed Requirement.FilesOwned. File-ownership triples
-	// (semspec.story.files_owned) now emit from the story-persistence path
-	// in plan-manager when Sarah's Stories land.
+	// ADR-040: requirement→capability edge. Folded here (was writeRequirementCapabilityTriple)
+	// so the predicate is covered by RemoveTriples and the dirty-hash in one call.
+	if req.CapabilityName != "" && planSlug != "" {
+		capEntityID := CapabilityEntityID(planSlug, req.CapabilityName)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementCapability, Object: capEntityID})
+	}
 
+	// Single batched write. RequirementUpdatedAt is volatile (excluded from hash);
+	// OwnedPredicates ensures clearable fields — Description (clearable via PATCH)
+	// and DependsOn/Capability (list shrinks to empty) — are included in
+	// RemoveTriples even when the current value is absent from the triples slice
+	// (C1 stale-on-empty fix).
+	_, err := tw.UpsertEntityIfChanged(ctx, RequirementEntityType, entityID, triples, graphutil.UpsertOpts{
+		VolatilePredicates: []string{semspec.RequirementUpdatedAt},
+		OwnedPredicates: []string{
+			semspec.RequirementTitle,
+			semspec.DCTitle,
+			semspec.RequirementStatus,
+			semspec.RequirementPlan,
+			semspec.RequirementCreatedAt,
+			semspec.RequirementUpdatedAt,
+			semspec.RequirementDescription,
+			semspec.RequirementDependsOn,
+			semspec.RequirementCapability,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("write requirement %s: %w", req.ID, err)
+	}
 	return nil
-}
-
-// writeRequirementCapabilityTriple emits the requirement→capability edge.
-// Separate from writeRequirementTriples because it needs the plan slug
-// (to derive the Capability's 6-part EntityID). Called from SaveRequirements
-// after the per-requirement triples land.
-func writeRequirementCapabilityTriple(ctx context.Context, tw *graphutil.TripleWriter, req *Requirement, planSlug string) {
-	if tw == nil || req.CapabilityName == "" || planSlug == "" {
-		return
-	}
-	entityID := RequirementEntityID(req.ID)
-	capEntityID := CapabilityEntityID(planSlug, req.CapabilityName)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.RequirementCapability, capEntityID)
 }

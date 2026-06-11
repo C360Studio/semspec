@@ -343,5 +343,14 @@ func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
+	// Evict the deleted scenario from the dirty-hash map so a same-ID recreate
+	// re-persists its graph entity rather than being silently skipped (M1).
+	c.mu.RLock()
+	tw := c.tripleWriter
+	c.mu.RUnlock()
+	if tw != nil {
+		tw.Evict(workflow.ScenarioEntityID(scenarioID))
+	}
+
 	w.WriteHeader(http.StatusNoContent)
 }

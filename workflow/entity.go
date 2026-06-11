@@ -146,6 +146,20 @@ var QuestionEntityType = message.Type{
 	Version:  "v1",
 }
 
+// PlanEntityType is the message type for plan entity payloads.
+var PlanEntityType = message.Type{
+	Domain:   "plan",
+	Category: "entity",
+	Version:  "v1",
+}
+
+// CapabilityEntityType is the message type for capability entity payloads.
+var CapabilityEntityType = message.Type{
+	Domain:   "capability",
+	Category: "entity",
+	Version:  "v1",
+}
+
 // RequirementEntityType is the message type for requirement entity payloads.
 var RequirementEntityType = message.Type{
 	Domain:   "requirement",
@@ -238,6 +252,10 @@ var workflowEntityTypes = []struct {
 	description string
 	msgType     message.Type
 }{
+	// NOTE: The legacy "plan" domain entry covers PlanEntityType as well — both share
+	// Domain:"plan"/Category:"entity"/Version:"v1" and the registry key is the tuple.
+	// PlanEntityType is defined as a named alias for clarity at call sites (Phase 3a
+	// batch writers) but is not re-registered here to avoid a duplicate-key error.
 	{"plan", "Plan entity payload for graph ingestion", EntityType},
 	{"phase", "Phase entity payload for graph ingestion", PhaseEntityType},
 	{"approval", "Approval entity payload for graph ingestion", ApprovalEntityType},
@@ -247,6 +265,7 @@ var workflowEntityTypes = []struct {
 	{"scenario", "Scenario entity payload for graph ingestion", ScenarioEntityType},
 	{"plan-decision", "PlanDecision entity payload for graph ingestion", PlanDecisionEntityType},
 	{"dag-node", "DAG execution node entity payload for graph ingestion", DAGNodeEntityType},
+	{"capability", "Capability entity payload for graph ingestion", CapabilityEntityType},
 }
 
 // RegisterPayloads registers every payload type owned by the workflow package
