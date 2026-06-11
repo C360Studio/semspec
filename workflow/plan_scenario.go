@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
@@ -34,49 +36,78 @@ func SaveScenarios(ctx context.Context, tw *graphutil.TripleWriter, scenarios []
 	return nil
 }
 
-// writeScenarioTriples writes all Scenario fields as individual triples.
+// writeScenarioTriples writes all Scenario fields as a single atomic batch to
+// ENTITY_STATES via UpsertEntityIfChanged. The whole predicate set for the
+// entity is built first, then passed to UpsertEntityIfChanged which:
+//  1. Computes a content-hash over (predicate, object) pairs (Phase 3a Lever 1).
+//     If the hash matches the last successful write, the NATS call is skipped
+//     entirely — suppressing the ~19 unchanged-child re-persists that were the
+//     dominant contributor to the ENTITY_STATES write-amplification leak.
+//  2. Collapses the per-triple fan-out into one atomic CAS call
+//     (graph.mutation.entity.update_with_triples, Phase 3a Lever 2).
+//
+// RemoveTriples is derived automatically from the distinct predicates in the
+// slice (replace-own / preserve-foreign contract). Multi-valued predicates
+// (Then, Tags, HarnessProfileIDs) include ALL current values each write; the
+// UpsertEntity handler removes the old set and appends the new one atomically.
 func writeScenarioTriples(ctx context.Context, tw *graphutil.TripleWriter, s *Scenario) error {
 	if tw == nil {
 		return nil
 	}
 	entityID := ScenarioEntityID(s.ID)
 
-	// Upsert scalars (UpdateTriple = remove+add) and replace edge lists
-	// (ReplaceTripleList) so re-persisting the scenario on every plan mutation —
-	// which happens on every execution status update via writeChildTriples — does
-	// not accumulate duplicate triples. graph-ingest AddTriple is append-only, so
-	// plain WriteTriple here grew scenario entities unboundedly during execution
-	// (the #132 plan-entity bloat, same class as requirements/capabilities/decisions).
-	// Scenarios are the most numerous child (N per requirement, each with several
-	// Then clauses), so this was the largest contributor to the ENTITY_STATES leak.
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioGiven, s.Given)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioWhen, s.When)
-	if err := tw.UpdateTriple(ctx, entityID, semspec.ScenarioStatus, string(s.Status)); err != nil {
-		return fmt.Errorf("write scenario status: %w", err)
-	}
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioRequirement, RequirementEntityID(s.RequirementID))
-	_ = tw.UpdateTriple(ctx, entityID, semspec.ScenarioCreatedAt, s.CreatedAt.Format(time.RFC3339))
-
 	title := s.When
 	if len(title) > 100 {
 		title = title[:97] + "..."
 	}
-	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, title)
 
-	// Multi-valued Then clauses — replace the full edge list each persist.
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.ScenarioThen, s.Then)
+	// Build the complete predicate set for this entity.
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.ScenarioGiven, Object: s.Given},
+		{Subject: entityID, Predicate: semspec.ScenarioWhen, Object: s.When},
+		{Subject: entityID, Predicate: semspec.ScenarioStatus, Object: string(s.Status)},
+		{Subject: entityID, Predicate: semspec.ScenarioRequirement, Object: RequirementEntityID(s.RequirementID)},
+		{Subject: entityID, Predicate: semspec.ScenarioCreatedAt, Object: s.CreatedAt.Format(time.RFC3339)},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: title},
+	}
 
-	// Tier + facet tags (ADR-041 Move 1). Multi-valued; replace the full list.
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.ScenarioTag, s.Tags)
+	// Multi-valued Then clauses — include the full current list each write.
+	for _, then := range s.Then {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ScenarioThen, Object: then})
+	}
 
-	// Harness profile bindings (ADR-041 Move 1). Multi-valued; replace the full
-	// list. Values are catalog profile IDs (e.g. "mavlink.px4-sitl.mavsdk-smoke"),
-	// not hashed entity IDs — these are cross-reference strings into the
-	// harnesscatalog, not graph edges to other entities. Plan-reviewer rule
-	// scenario.harness_id_unresolved (Move 4) validates each ID resolves into the
-	// catalog.
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.ScenarioHarnessProfile, s.HarnessProfileIDs)
+	// Tier + facet tags (ADR-041 Move 1). Multi-valued.
+	for _, tag := range s.Tags {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ScenarioTag, Object: tag})
+	}
 
+	// Harness profile bindings (ADR-041 Move 1). Multi-valued.
+	for _, hpID := range s.HarnessProfileIDs {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ScenarioHarnessProfile, Object: hpID})
+	}
+
+	// Single batched write — skips if content unchanged, replaces own predicates.
+	// OwnedPredicates lists every predicate this writer may emit, including the
+	// multi-valued ones whose lists may be empty on a given save. Without them,
+	// a set→empty transition (Then=[], Tags=[], HarnessProfileIDs=[]) would emit
+	// zero triples for that predicate, leaving it absent from RemoveTriples and
+	// therefore NOT stripped from the graph (C1 stale-on-empty fix).
+	_, err := tw.UpsertEntityIfChanged(ctx, ScenarioEntityType, entityID, triples, graphutil.UpsertOpts{
+		OwnedPredicates: []string{
+			semspec.ScenarioGiven,
+			semspec.ScenarioWhen,
+			semspec.ScenarioStatus,
+			semspec.ScenarioRequirement,
+			semspec.ScenarioCreatedAt,
+			semspec.DCTitle,
+			semspec.ScenarioThen,
+			semspec.ScenarioTag,
+			semspec.ScenarioHarnessProfile,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("write scenario %s: %w", s.ID, err)
+	}
 	return nil
 }
 

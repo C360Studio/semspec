@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 )
 
@@ -312,6 +313,15 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 	}
 	plan.Requirements = remaining
 
+	// Collect the scenario IDs being deleted BEFORE modifying plan.Scenarios
+	// so the eviction loop below has access to them.
+	var deletedScenarioIDs []string
+	for _, s := range plan.Scenarios {
+		if toRemove[s.RequirementID] {
+			deletedScenarioIDs = append(deletedScenarioIDs, s.ID)
+		}
+	}
+
 	// Cascade: remove scenarios for deleted requirements.
 	survivingScenarios := plan.Scenarios[:0]
 	for _, s := range plan.Scenarios {
@@ -327,14 +337,22 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Write tombstones to the graph for each removed requirement and its scenarios.
+	// Write tombstones to the graph for each removed requirement, then evict
+	// dirty-hash entries for requirements and their cascaded scenarios so a
+	// same-ID recreate re-persists rather than being silently skipped (M1).
 	c.mu.RLock()
 	tw := c.tripleWriter
 	c.mu.RUnlock()
 	if tw != nil {
 		for id := range toRemove {
 			entityID := workflow.RequirementEntityID(id)
-			_ = tw.WriteTriple(r.Context(), entityID, "semspec:requirement:status", "deleted")
+			// Use the dotted constant — the previous "semspec:requirement:status"
+			// (colon separator) landed under an unread predicate (inline bug fix).
+			_ = tw.WriteTriple(r.Context(), entityID, semspec.RequirementStatus, "deleted")
+			tw.Evict(entityID)
+		}
+		for _, scenarioID := range deletedScenarioIDs {
+			tw.Evict(workflow.ScenarioEntityID(scenarioID))
 		}
 	}
 

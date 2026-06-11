@@ -7,9 +7,13 @@ package graphutil
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/c360studio/semstreams/graph"
@@ -31,10 +35,257 @@ import (
 //	if err := tw.WriteTriple(ctx, entityID, wf.Phase, "generating"); err != nil {
 //	    // handle error
 //	}
+//
+// Phase 3a dirty-tracking: UpsertEntityIfChanged uses the dirtyHashes map to
+// skip re-persisting an entity whose content-hash has not changed since the
+// last successful write. This is the primary lever for suppressing ENTITY_STATES
+// write-amplification. The map is nil-safe: a nil map (zero-value TripleWriter)
+// means "always persist", matching the best-effort observability contract.
 type TripleWriter struct {
 	NATSClient    *natsclient.Client
 	Logger        *slog.Logger
 	ComponentName string
+
+	// dirtyHashes tracks the sha256 content-hash of the last successfully
+	// persisted triple set per entity. Protected by dirtyMu. nil means "always
+	// persist" (zero-value safe, first-write always persists).
+	dirtyMu     sync.Mutex
+	dirtyHashes map[string]string // entityID → last-persisted content hash
+}
+
+// upsertResult is returned by the internal upsertEntityWithResult, exposing
+// the Degraded flag so UpsertEntityIfChanged can avoid marking the cache clean
+// on a degraded write (where the mirror state is uncertain).
+type upsertResult struct {
+	// Degraded is true when the write committed but the read-back confirmation
+	// failed. The write is durable, but we cannot be sure what the graph holds,
+	// so UpsertEntityIfChanged should leave the entity dirty for a future retry.
+	Degraded bool
+}
+
+// Evict removes entityID from the dirty-hash map so the next
+// UpsertEntityIfChanged call re-persists regardless of content.
+// Must be called on the delete path to avoid a stale-skip after deletion
+// and re-creation of the same entity ID.
+func (tw *TripleWriter) Evict(entityID string) {
+	tw.dirtyMu.Lock()
+	delete(tw.dirtyHashes, entityID)
+	tw.dirtyMu.Unlock()
+}
+
+// tripleContentHash computes a stable sha256 hash over the semantic content of
+// a triple set: (predicate, canonical-object) pairs only — deliberately
+// excluding Triple.Timestamp, .Source, and .Confidence which are stamped fresh
+// on every build and would make every hash unique (defeating dirty-track).
+//
+// Canonicalisation:
+//   - Each predicate is paired with the canonical string form of its object
+//     (string as-is; int/int64 as "%d"; float64 as "%g"; bool as "%t"; else
+//     json.Marshal).
+//   - For predicates that appear more than once (multi-valued), all values for
+//     that predicate are collected and sorted so set-order churn does not flip
+//     the hash.
+//   - The predicate names are then sorted ascending so insertion-order churn
+//     does not flip the hash.
+//   - Any predicate listed in excludePredicates is excluded from the hash (it
+//     is still written to the graph; it just does not gate dirtiness). Use this
+//     for volatile predicates like semspec.RequirementUpdatedAt that increment
+//     on every mutation without a semantic change.
+func tripleContentHash(triples []message.Triple, excludePredicates ...string) string {
+	// Build exclusion set.
+	excluded := make(map[string]struct{}, len(excludePredicates))
+	for _, p := range excludePredicates {
+		excluded[p] = struct{}{}
+	}
+
+	// Collect canonical (predicate, value) pairs — one pair per triple value.
+	type pv struct{ pred, val string }
+	var pairs []pv
+	for _, t := range triples {
+		if _, skip := excluded[t.Predicate]; skip {
+			continue
+		}
+		pairs = append(pairs, pv{pred: t.Predicate, val: canonicalObjectString(t.Object)})
+	}
+
+	// Group by predicate, sort values within each group (set semantics).
+	byPred := make(map[string][]string, len(pairs))
+	for _, p := range pairs {
+		byPred[p.pred] = append(byPred[p.pred], p.val)
+	}
+	for pred := range byPred {
+		sort.Strings(byPred[pred])
+	}
+
+	// Collect predicate names, sort ascending.
+	preds := make([]string, 0, len(byPred))
+	for pred := range byPred {
+		preds = append(preds, pred)
+	}
+	sort.Strings(preds)
+
+	// Build the canonical byte stream: "pred\x00val\x01pred\x00val\x01…"
+	// using NUL as pred/val separator and SOH as entry separator.
+	h := sha256.New()
+	for _, pred := range preds {
+		for _, val := range byPred[pred] {
+			h.Write([]byte(pred))
+			h.Write([]byte{0x00})
+			h.Write([]byte(val))
+			h.Write([]byte{0x01})
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// canonicalObjectString converts a triple object to a stable string
+// representation for hashing. The rules mirror the human-readable formatting
+// used in ReadEntity / ReadEntitiesByPrefix for consistency.
+func canonicalObjectString(obj any) string {
+	switch v := obj.(type) {
+	case string:
+		return v
+	case int:
+		return fmt.Sprintf("%d", v)
+	case int64:
+		return fmt.Sprintf("%d", v)
+	case float64:
+		// Preserve integer-valued floats as integers (matches ReadEntity).
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v))
+		}
+		return fmt.Sprintf("%g", v)
+	case bool:
+		return fmt.Sprintf("%t", v)
+	default:
+		data, _ := json.Marshal(v)
+		return string(data)
+	}
+}
+
+// UpsertOpts carries options for UpsertEntityIfChanged.
+//
+// VolatilePredicates lists predicates that are written to the graph but
+// excluded from the content-hash. Use for timestamps (e.g.
+// semspec.RequirementUpdatedAt) that change on every mutation without a
+// semantic difference — they would otherwise defeat dirty-track by always
+// differing.
+//
+// OwnedPredicates is the FULL set of predicates this writer owns, including
+// any that may be absent from the triples slice when the corresponding field is
+// empty. These are unioned into RemoveTriples on every write so that a
+// set→empty transition (e.g. Then=[], DependsOn=[]) causes the old values to
+// be stripped from the graph rather than left stale. Predicates already present
+// in triples are covered by distinctPredicates and need not be repeated here,
+// but listing the complete owned set is safe and recommended.
+type UpsertOpts struct {
+	VolatilePredicates []string
+	OwnedPredicates    []string
+}
+
+// upsertEntityCore is the internal write primitive shared by UpsertEntity and
+// UpsertEntityIfChanged. It takes an explicit removePredicates set so callers
+// can union in predicates that own lists which may currently be empty (the C1
+// stale-on-empty fix): graph-ingest removes every predicate in removePredicates
+// before appending addTriples, so an empty list still strips old values.
+//
+// The public UpsertEntity calls this with removePredicates = distinctPredicates(triples),
+// preserving the existing "replace-own / preserve-foreign" contract.
+func (tw *TripleWriter) upsertEntityCore(ctx context.Context, entityType message.Type, entityID string, addTriples []message.Triple, removePredicates []string) (upsertResult, error) {
+	if tw.NATSClient == nil {
+		return upsertResult{}, nil
+	}
+	s := upsertSenderWithDegraded{
+		update: tw.sendUpdateWithTriplesWithDegraded,
+		create: tw.sendCreateWithTriplesWithDegraded,
+	}
+	degraded, err := upsertEntityViaWithTriplesCore(ctx, s, entityType, entityID, addTriples, removePredicates)
+	return upsertResult{Degraded: degraded}, err
+}
+
+// UpsertEntityIfChanged writes a full set of triples for an entity using the
+// replace-own-predicates, preserve-foreign semantics — but ONLY if the
+// content-hash of triples has changed since the last successful persist.
+//
+// Dirty-tracking (Phase 3a Lever 1): on every plan mutation the whole plan and
+// ~20 children are currently re-persisted even when only one entity changed.
+// This method gates each entity's write on a sha256 content hash of its
+// (predicate, object) pairs, suppressing the ~19 unchanged writes and reducing
+// ENTITY_STATES write-amplification by ~20×.
+//
+// Hash semantics:
+//   - Only (predicate, canonical-object) is hashed — NOT the full Triple struct,
+//     which carries a fresh Timestamp on every build that would defeat dirty-track.
+//   - opts.VolatilePredicates are excluded from the hash (still written). Use for
+//     timestamps that increment on every mutation without a semantic change.
+//   - Multi-valued predicates: values are sorted before hashing so insertion-order
+//     churn does not flip the hash (set semantics).
+//   - First write (entity absent from map) always persists.
+//
+// RemoveTriples = union(distinctPredicates(triples), opts.OwnedPredicates).
+// Listing the full owned predicate set in opts.OwnedPredicates ensures that
+// predicates whose lists have emptied (e.g. Then=[], DependsOn=[]) are stripped
+// from the graph even though they emit zero triples (C1 stale-on-empty fix).
+//
+// Mark-clean contract: the entity is only marked clean when the write returns
+// nil AND the write was not Degraded. A degraded write (committed but read-back
+// failed) leaves the entity dirty so the next save retries.
+//
+// Returns (true, nil) when the entity was persisted, (false, nil) when skipped.
+func (tw *TripleWriter) UpsertEntityIfChanged(ctx context.Context, entityType message.Type, entityID string, triples []message.Triple, opts UpsertOpts) (persisted bool, err error) {
+	hash := tripleContentHash(triples, opts.VolatilePredicates...)
+
+	// Check if we already have a clean write for this hash.
+	tw.dirtyMu.Lock()
+	prev, seen := tw.dirtyHashes[entityID]
+	tw.dirtyMu.Unlock()
+
+	if seen && prev == hash {
+		// Content unchanged — skip.
+		return false, nil
+	}
+
+	// Build the remove-predicates set: union of what is written plus the full
+	// owned set. This ensures predicates for emptied lists are still removed
+	// from the graph (set→empty stale-value fix).
+	removePredicates := unionPredicates(distinctPredicates(triples), opts.OwnedPredicates)
+
+	// Content changed (or first write) — persist.
+	result, err := tw.upsertEntityCore(ctx, entityType, entityID, triples, removePredicates)
+	if err != nil {
+		return false, err
+	}
+
+	// Mark clean only on a clean (non-degraded) success.
+	if !result.Degraded {
+		tw.dirtyMu.Lock()
+		if tw.dirtyHashes == nil {
+			tw.dirtyHashes = make(map[string]string)
+		}
+		tw.dirtyHashes[entityID] = hash
+		tw.dirtyMu.Unlock()
+	}
+
+	return true, nil
+}
+
+// unionPredicates returns the sorted, deduplicated union of a and b.
+// Used to merge distinctPredicates(written) with the caller's OwnedPredicates
+// so that empty-list predicates are still present in RemoveTriples.
+func unionPredicates(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	for _, p := range a {
+		seen[p] = struct{}{}
+	}
+	for _, p := range b {
+		seen[p] = struct{}{}
+	}
+	out := make([]string, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // WriteTriple sends an AddTripleRequest to graph-ingest via NATS request/reply.
@@ -361,6 +612,80 @@ func (tw *TripleWriter) UpsertEntity(ctx context.Context, entityType message.Typ
 	return upsertEntityVia(ctx, s, entityType, entityID, triples)
 }
 
+// upsertSenderWithDegraded is a variant of upsertSender whose functions return
+// the Degraded flag alongside the routing outcome. Used exclusively by
+// upsertEntityViaWithDegraded so the dirty-track logic in UpsertEntityIfChanged
+// can avoid marking an entity clean on a degraded write.
+//
+// The existing upsertSender + upsertEntityVia are kept unchanged so all
+// existing tests and callers are unaffected.
+type upsertSenderWithDegraded struct {
+	update func(ctx context.Context, req graph.UpdateEntityWithTriplesRequest) (upsertOutcome, bool, error)
+	create func(ctx context.Context, req graph.CreateEntityWithTriplesRequest) (upsertOutcome, bool, error)
+}
+
+// upsertEntityViaWithTriplesCore is the low-level routing function that accepts
+// an explicit removePredicates slice. This allows callers to union in predicates
+// for owned lists that may currently be empty (C1 stale-on-empty fix): the
+// graph-ingest handler removes every predicate in RemoveTriples before
+// appending AddTriples, so an empty-list predicate is still stripped.
+//
+// Used by upsertEntityCore (backing UpsertEntityIfChanged) and by
+// upsertEntityViaWithDegraded (backwards-compat thin wrapper).
+func upsertEntityViaWithTriplesCore(ctx context.Context, s upsertSenderWithDegraded, entityType message.Type, entityID string, addTriples []message.Triple, removePredicates []string) (degraded bool, err error) {
+	entity := &graph.EntityState{
+		ID:          entityID,
+		MessageType: entityType,
+	}
+	updateReq := graph.UpdateEntityWithTriplesRequest{
+		Entity:        entity,
+		AddTriples:    addTriples,
+		RemoveTriples: removePredicates,
+	}
+
+	outcome, deg, err := s.update(ctx, updateReq)
+	if err != nil {
+		return false, err
+	}
+	switch outcome {
+	case upsertDone:
+		return deg, nil
+	case upsertNeedCreate:
+		createReq := graph.CreateEntityWithTriplesRequest{
+			Entity:  entity,
+			Triples: addTriples,
+		}
+		createOutcome, createDeg, err := s.create(ctx, createReq)
+		if err != nil {
+			return false, err
+		}
+		switch createOutcome {
+		case upsertDone:
+			return createDeg, nil
+		case upsertRetryUpdate:
+			retryOutcome, retryDeg, err := s.update(ctx, updateReq)
+			if err != nil {
+				return false, err
+			}
+			if retryOutcome != upsertDone {
+				return false, fmt.Errorf("upsert entity %s: unexpected outcome after create-exists retry: %s", entityID, retryOutcome)
+			}
+			return retryDeg, nil
+		default:
+			return false, fmt.Errorf("upsert entity %s: unexpected create outcome: %s", entityID, createOutcome)
+		}
+	default:
+		return false, fmt.Errorf("upsert entity %s: unexpected update outcome: %s", entityID, outcome)
+	}
+}
+
+// upsertEntityViaWithDegraded is a thin wrapper around upsertEntityViaWithTriplesCore
+// that derives removePredicates from distinctPredicates(triples). Kept for the
+// test seam (TestUpsertEntityViaWithDegraded_* tests call this directly).
+func upsertEntityViaWithDegraded(ctx context.Context, s upsertSenderWithDegraded, entityType message.Type, entityID string, triples []message.Triple) (degraded bool, err error) {
+	return upsertEntityViaWithTriplesCore(ctx, s, entityType, entityID, triples, distinctPredicates(triples))
+}
+
 // upsertEntityVia contains the routing logic for UpsertEntity, separated from
 // the NATS transport so it can be exercised by unit tests that inject stubs.
 func upsertEntityVia(ctx context.Context, s upsertSender, entityType message.Type, entityID string, triples []message.Triple) error {
@@ -509,6 +834,64 @@ func (tw *TripleWriter) sendCreateWithTriples(ctx context.Context, req graph.Cre
 	}
 
 	return decideCreateOutcome(resp)
+}
+
+// sendUpdateWithTriplesWithDegraded is the Degraded-aware variant of
+// sendUpdateWithTriples. It returns (outcome, degraded, error) so the routing
+// in upsertEntityViaWithDegraded can propagate the Degraded flag to
+// UpsertEntityIfChanged's mark-clean decision.
+func (tw *TripleWriter) sendUpdateWithTriplesWithDegraded(ctx context.Context, req graph.UpdateEntityWithTriplesRequest) (upsertOutcome, bool, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return 0, false, fmt.Errorf("marshal update_with_triples request: %w", err)
+	}
+
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, subjectEntityUpdateWithTriples, data, 2*time.Second, upsertRetryConfig)
+	if err != nil {
+		tw.Logger.Warn("update_with_triples request failed",
+			"entity_id", req.Entity.ID, "error", err)
+		return 0, false, fmt.Errorf("update_with_triples request: %w", err)
+	}
+
+	var resp graph.UpdateEntityWithTriplesResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return 0, false, fmt.Errorf("unmarshal update_with_triples response: %w", err)
+	}
+
+	if resp.Degraded {
+		// Write committed but read-back failed. Route as done but surface degraded
+		// so the caller can skip marking the entity clean.
+		return upsertDone, true, nil
+	}
+	outcome, err := decideUpdateOutcome(resp)
+	return outcome, false, err
+}
+
+// sendCreateWithTriplesWithDegraded is the Degraded-aware variant of
+// sendCreateWithTriples. Same contract as sendUpdateWithTriplesWithDegraded.
+func (tw *TripleWriter) sendCreateWithTriplesWithDegraded(ctx context.Context, req graph.CreateEntityWithTriplesRequest) (upsertOutcome, bool, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return 0, false, fmt.Errorf("marshal create_with_triples request: %w", err)
+	}
+
+	respData, err := tw.NATSClient.RequestWithRetry(ctx, subjectEntityCreateWithTriples, data, 2*time.Second, upsertRetryConfig)
+	if err != nil {
+		tw.Logger.Warn("create_with_triples request failed",
+			"entity_id", req.Entity.ID, "error", err)
+		return 0, false, fmt.Errorf("create_with_triples request: %w", err)
+	}
+
+	var resp graph.CreateEntityWithTriplesResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return 0, false, fmt.Errorf("unmarshal create_with_triples response: %w", err)
+	}
+
+	if resp.Degraded {
+		return upsertDone, true, nil
+	}
+	outcome, err := decideCreateOutcome(resp)
+	return outcome, false, err
 }
 
 // distinctPredicates returns the sorted, deduplicated set of predicate strings

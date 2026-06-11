@@ -8,11 +8,13 @@ import (
 	"sort"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	sscache "github.com/c360studio/semstreams/pkg/cache"
-	"github.com/nats-io/nats.go/jetstream"
 )
 
 // planStore owns the lifecycle of plan data entities (wf.plan.plan.*).
@@ -331,6 +333,14 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 		return fmt.Errorf("write delete tombstone: %w", err)
 	}
 
+	// Evict the plan entity from the dirty-hash map so a re-created plan with
+	// the same slug re-persists its graph entity rather than being silently
+	// skipped by dirty-track (UpsertEntityIfChanged would see a hash match on
+	// the "deleted" content and skip the first real write after re-creation).
+	if s.tripleWriter != nil {
+		s.tripleWriter.Evict(workflow.PlanEntityID(slug))
+	}
+
 	s.cache.Delete(slug) //nolint:errcheck // cache delete is best-effort
 	if s.kvBucket != nil {
 		_ = s.kvBucket.Delete(ctx, slug)
@@ -338,9 +348,19 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 	return nil
 }
 
-// writeTriples writes all plan fields as individual triples to ENTITY_STATES.
-// This is the durable write-through to the global graph. Unchanged from the
-// previous implementation.
+// writeTriples writes the plan parent entity to ENTITY_STATES as a single
+// atomic batch via UpsertEntityIfChanged (Phase 3a Levers 1+2), then writes
+// all child entities (requirements, scenarios, capabilities, decisions).
+//
+// During execution, plan children (requirements, scenarios, capabilities) are
+// static — only the plan parent's status/lastError fields change. In that case
+// the child dirty-track gates skip all ~19 unchanged children, yielding ≈0
+// ENTITY_STATES writes for them. On a pure SSE/convergence bump where only a
+// non-triple-mapped field changes (e.g. ExecutionSummary), the plan parent's
+// hash also does not change → ZERO ENTITY_STATES writes total. The "plan parent
+// re-persists on every mutation" framing is only true when a triple-mirrored
+// field actually changes. Combined reduction on a typical execution save:
+// ~20× fewer writes, ~14.5× fewer NATS round-trips.
 func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error {
 	tw := s.tripleWriter
 	if tw == nil {
@@ -348,87 +368,117 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	}
 	entityID := workflow.PlanEntityID(plan.Slug)
 
-	// Single-valued scalars use UpdateTriple (remove+add upsert) so the entity
-	// holds the LATEST value per predicate instead of accumulating every
-	// historical value — graph-ingest AddTriple is append-only, so plain
-	// WriteTriple on every plan mutation grew the entity past the 1 MiB KV cap
-	// (2026-06-07 plan-prep wedge). Multi-valued lists use ReplaceTripleList.
-
-	// Core identity
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanSlug, plan.Slug)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanTitle, plan.Title)
-	_ = tw.UpdateTriple(ctx, entityID, semspec.DCTitle, plan.Title)
-	if err := tw.UpdateTriple(ctx, entityID, semspec.PredicatePlanStatus, string(plan.EffectiveStatus())); err != nil {
-		return fmt.Errorf("write plan status: %w", err)
+	// Build the complete predicate set for the plan parent entity.
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.PlanSlug, Object: plan.Slug},
+		{Subject: entityID, Predicate: semspec.PlanTitle, Object: plan.Title},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: plan.Title},
+		{Subject: entityID, Predicate: semspec.PredicatePlanStatus, Object: string(plan.EffectiveStatus())},
+		{Subject: entityID, Predicate: semspec.PlanCreatedAt, Object: plan.CreatedAt.Format(time.RFC3339)},
+		// Approval (bool written unconditionally so it lands in RemoveTriples).
+		{Subject: entityID, Predicate: semspec.PlanApproved, Object: fmt.Sprintf("%t", plan.Approved)},
 	}
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanCreatedAt, plan.CreatedAt.Format(time.RFC3339))
 
-	// Project association
 	if plan.ProjectID != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanProject, plan.ProjectID)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanProject, Object: plan.ProjectID})
 	}
-
-	// Plan content
 	if plan.Goal != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanGoal, plan.Goal)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanGoal, Object: plan.Goal})
 	}
 	if plan.Context != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanContext, plan.Context)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContext, Object: plan.Context})
 	}
-
-	// Approval
-	_ = tw.UpdateTriple(ctx, entityID, semspec.PlanApproved, fmt.Sprintf("%t", plan.Approved))
 	if plan.ApprovedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanApprovedAt, plan.ApprovedAt.Format(time.RFC3339))
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanApprovedAt, Object: plan.ApprovedAt.Format(time.RFC3339)})
 	}
-
-	// Review
 	if plan.ReviewVerdict != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewVerdict, plan.ReviewVerdict)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanReviewVerdict, Object: plan.ReviewVerdict})
 	}
 	if plan.ReviewSummary != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewSummary, plan.ReviewSummary)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanReviewSummary, Object: plan.ReviewSummary})
 	}
 	if plan.ReviewedAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewedAt, plan.ReviewedAt.Format(time.RFC3339))
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanReviewedAt, Object: plan.ReviewedAt.Format(time.RFC3339)})
 	}
 	if plan.ReviewFormattedFindings != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewFormattedFindings, plan.ReviewFormattedFindings)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanReviewFormattedFindings, Object: plan.ReviewFormattedFindings})
 	}
 	if plan.ReviewIteration > 0 {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanReviewIteration, plan.ReviewIteration)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanReviewIteration, Object: plan.ReviewIteration})
 	}
-
-	// Error annotations
 	if plan.LastError != "" {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanLastError, plan.LastError)
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanLastError, Object: plan.LastError})
 	}
 	if plan.LastErrorAt != nil {
-		_ = tw.UpdateTriple(ctx, entityID, semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339))
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanLastErrorAt, Object: plan.LastErrorAt.Format(time.RFC3339)})
 	}
 
-	// Scope (atomic triples — replace the whole list each write)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeInclude, plan.Scope.Include)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeExclude, plan.Scope.Exclude)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeProtected, plan.Scope.DoNotTouch)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanScopeCreate, plan.Scope.Create)
+	// Scope lists (replace-as-a-set — emit full current list each write).
+	for _, v := range plan.Scope.Include {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanScopeInclude, Object: v})
+	}
+	for _, v := range plan.Scope.Exclude {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanScopeExclude, Object: v})
+	}
+	for _, v := range plan.Scope.DoNotTouch {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanScopeProtected, Object: v})
+	}
+	for _, v := range plan.Scope.Create {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanScopeCreate, Object: v})
+	}
 
-	// ADR-040: Exploration snapshot + open question audit trail. The
-	// individual Capability entities are written by writeChildTriples;
-	// this block surfaces plan-level facts so a graph query on the plan
-	// finds the exploration without traversing to capabilities.
+	// ADR-040: Exploration snapshot (JSON blob + open questions list).
 	if plan.Exploration != nil {
 		if blob, err := json.Marshal(plan.Exploration); err == nil {
-			_ = tw.UpdateTriple(ctx, entityID, semspec.PlanExploration, string(blob))
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanExploration, Object: string(blob)})
 		}
-		_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanOpenQuestions, plan.Exploration.OpenQuestions)
+		for _, q := range plan.Exploration.OpenQuestions {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanOpenQuestions, Object: q})
+		}
 	}
 
-	// Execution trace IDs (replace the whole list each write)
-	_ = tw.ReplaceTripleList(ctx, entityID, semspec.PlanExecutionTraceID, plan.ExecutionTraceIDs)
+	// Execution trace IDs.
+	for _, traceID := range plan.ExecutionTraceIDs {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanExecutionTraceID, Object: traceID})
+	}
 
-	// Requirements and Scenarios — write individual entity triples so the graph
-	// stays consistent when the plan is updated.
+	// Single batched write for the plan parent — skips if content unchanged.
+	// OwnedPredicates covers the full set of predicates this writer may emit,
+	// including list predicates that may be empty on a given save (C1 fix).
+	if _, err := tw.UpsertEntityIfChanged(ctx, workflow.PlanEntityType, entityID, triples, graphutil.UpsertOpts{
+		OwnedPredicates: []string{
+			semspec.PlanSlug,
+			semspec.PlanTitle,
+			semspec.DCTitle,
+			semspec.PredicatePlanStatus,
+			semspec.PlanCreatedAt,
+			semspec.PlanApproved,
+			semspec.PlanProject,
+			semspec.PlanGoal,
+			semspec.PlanContext,
+			semspec.PlanApprovedAt,
+			semspec.PlanReviewVerdict,
+			semspec.PlanReviewSummary,
+			semspec.PlanReviewedAt,
+			semspec.PlanReviewFormattedFindings,
+			semspec.PlanReviewIteration,
+			semspec.PlanLastError,
+			semspec.PlanLastErrorAt,
+			semspec.PlanScopeInclude,
+			semspec.PlanScopeExclude,
+			semspec.PlanScopeProtected,
+			semspec.PlanScopeCreate,
+			semspec.PlanExploration,
+			semspec.PlanOpenQuestions,
+			semspec.PlanExecutionTraceID,
+		},
+	}); err != nil {
+		return fmt.Errorf("write plan triples: %w", err)
+	}
+
+	// Write child entities (requirements, scenarios, capabilities, decisions).
+	// Each child uses its own UpsertEntityIfChanged gate — only dirty children
+	// produce NATS calls.
 	s.writeChildTriples(ctx, tw, plan)
 	return nil
 }
