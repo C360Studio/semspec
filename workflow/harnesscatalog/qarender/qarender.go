@@ -6,8 +6,9 @@
 // larger qa.yml document. The renderer reads catalog metadata only (no docker,
 // no plan state, no filesystem). Profiles whose Orchestration is anything other
 // than `services` are intentionally skipped — testcontainers and pure-fixture
-// profiles do not get qa-runner service blocks; their integration concerns live
+// profiles do not get services blocks in qa.yml; their integration concerns live
 // in agent test code (testcontainers) or in-process fixtures (pure-fixture).
+// The emitted qa.yml is consumed by the operator's CI, not by semspec itself.
 package qarender
 
 import (
@@ -102,7 +103,7 @@ func profileHeadComment(p harnesscatalog.Profile) string {
 	b.WriteString("Profile: ")
 	b.WriteString(strings.TrimSpace(p.ID))
 	if len(p.Readiness) > 0 {
-		b.WriteString("\nReadiness (operator must enforce in qa-runner; not emitted as docker healthcheck):")
+		b.WriteString("\nReadiness (operator's CI must enforce; not emitted as docker healthcheck):")
 		for _, r := range p.Readiness {
 			b.WriteString("\n  - ")
 			b.WriteString(strings.TrimSpace(r))

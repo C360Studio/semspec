@@ -32,9 +32,9 @@ func WaitForKVBucket(ctx context.Context, js jetstream.JetStream, bucket string)
 
 // WaitForStream retries looking up a JetStream stream until it exists or ctx
 // is cancelled. Use this before setting up a consumer on a stream owned by
-// another component (e.g., sandbox / qa-runner subscribing to WORKFLOW which
-// plan-manager creates). Same retry budget as WaitForKVBucket — ~30 attempts,
-// exponential backoff capped at 2s — so the caller blocks at most ~45s.
+// another component (e.g., sandbox subscribing to WORKFLOW which plan-manager
+// creates). Same retry budget as WaitForKVBucket — ~30 attempts, exponential
+// backoff capped at 2s — so the caller blocks at most ~45s.
 func WaitForStream(ctx context.Context, js jetstream.JetStream, name string) (jetstream.Stream, error) {
 	return retry.DoWithResult(ctx, retry.Config{
 		MaxAttempts:  30,

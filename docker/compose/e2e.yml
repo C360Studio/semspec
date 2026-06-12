@@ -135,9 +135,9 @@ services:
     depends_on:
       nats:
         condition: service_healthy
-      # Same WORKFLOW-stream race as qa-runner — sandbox's qa-unit subscriber
-      # exits with code 1 if the stream isn't ready within ~60s of NATS
-      # connect. Gate on semspec health so the stream exists by then.
+      # sandbox's qa-unit subscriber exits with code 1 if the WORKFLOW stream
+      # isn't ready within ~60s of NATS connect. Gate on semspec health so
+      # the stream exists by then.
       semspec:
         condition: service_healthy
     deploy:

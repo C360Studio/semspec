@@ -104,9 +104,10 @@ type UserSignalErrorEvent struct {
 }
 
 // QA phase events — target-project test execution gate between implementing
-// and complete. Executor is selected by Mode: sandbox for unit, qa-runner
-// (act-based) for integration and full. qa-reviewer is always the verdict
-// gate, consuming QACompletedEvent and emitting QAVerdictEvent.
+// and complete. The sandbox executes unit-level tests; heavier tiers
+// (integration, full) run in the operator's CI via the emitted qa.yml
+// (ADR-045). qa-reviewer is always the verdict gate, consuming
+// QACompletedEvent and emitting QAVerdictEvent.
 
 // QARequestedEvent is published by plan-manager when a unit-level plan enters
 // ready_for_qa, so the sandbox runs the project's test suite before
@@ -122,7 +123,7 @@ type QARequestedEvent struct {
 	TraceID        string  `json:"trace_id,omitempty"`
 }
 
-// QAFailure describes a single test or job failure surfaced by qa-runner.
+// QAFailure describes a single test or job failure surfaced by the QA executor.
 // qa-reviewer consumes these to produce targeted PlanDecisions.
 type QAFailure struct {
 	JobName    string `json:"job_name"`
@@ -140,10 +141,10 @@ type QAArtifactRef struct {
 	Purpose string `json:"purpose,omitempty"` // e.g., "playwright flow X failure"
 }
 
-// QACompletedEvent is published by the QA executor (sandbox for unit mode,
-// qa-runner for integration/full) after test execution. qa-reviewer consumes
-// it and produces a QAVerdictEvent. plan-manager does NOT consume this event
-// directly.
+// QACompletedEvent is published by the QA executor (sandbox for unit mode;
+// integration/full run in the operator's CI via the emitted qa.yml) after
+// test execution. qa-reviewer consumes it and produces a QAVerdictEvent.
+// plan-manager does NOT consume this event directly.
 type QACompletedEvent struct {
 	Slug        string          `json:"slug"`
 	PlanID      string          `json:"plan_id"`
@@ -229,9 +230,10 @@ var (
 	UserSignalError = natsclient.NewSubject[UserSignalErrorEvent](
 		"user.signal.error")
 
-	// QA phase events — qa-runner / sandbox publish QACompletedEvent; qa-reviewer
-	// delivers its verdict via request/reply mutation plan.mutation.qa.verdict
-	// (see processor/plan-manager/mutations.go) rather than a fire-and-forget event.
+	// QA phase events — the sandbox (unit) or operator's CI (integration/full)
+	// publishes QACompletedEvent; qa-reviewer delivers its verdict via
+	// request/reply mutation plan.mutation.qa.verdict (see
+	// processor/plan-manager/mutations.go) rather than a fire-and-forget event.
 	QARequested = natsclient.NewSubject[QARequestedEvent](
 		"workflow.events.qa.requested")
 	QACompleted = natsclient.NewSubject[QACompletedEvent](

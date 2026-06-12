@@ -142,8 +142,9 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// verifies only that the architect's harness_profile_selections
 	// resolve in the catalog. Binding correctness (the test actually
 	// exercises the bound harness) is enforced by the LLM reviewer +
-	// qa-runner runtime — see ADR-041 Move 5 amendment for why the
-	// literal-substring sub-checks were retired.
+	// operator's CI runtime — see ADR-041 Move 5 amendment for why the
+	// literal-substring sub-checks were retired (qa-runner enforcement
+	// removed ADR-045).
 	// Loads selections from .semspec/plans/<slug>/plan.json on disk;
 	// greenfield projects (no architecture) trivially pass.
 	if len(filterTestFiles(trigger.FilesModified)) > 0 {
@@ -163,7 +164,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 			// checks were retired (goodhart-able); the simplified check
 			// just verifies the architect's selections resolve in the
 			// catalog. Binding correctness is enforced by LLM reviewer +
-			// qa-runner runtime.
+			// operator's CI runtime (ADR-045).
 			results = append(results, CheckHarnessProfileDiscipline(selections, catalog))
 		}
 	}

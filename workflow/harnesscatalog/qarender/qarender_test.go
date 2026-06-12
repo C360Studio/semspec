@@ -55,7 +55,7 @@ func TestRenderServicesProfileWithoutPortOffset(t *testing.T) {
 		t.Fatalf("RenderYAML() error = %v", err)
 	}
 	const want = `# Profile: mavlink.px4-sitl.mavsdk-smoke
-# Readiness (operator must enforce in qa-runner; not emitted as docker healthcheck):
+# Readiness (operator's CI must enforce; not emitted as docker healthcheck):
 #   - Wait for MAVLink HEARTBEAT frames on UDP 14540.
 #   - Wait for MAVSDK connection state to become connected.
 mavlink-px4-sitl-mavsdk-smoke:

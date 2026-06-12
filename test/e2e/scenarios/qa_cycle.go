@@ -37,18 +37,12 @@ type QACycleScenario struct {
 	nats    *client.NATSClient
 	mockLLM *client.MockLLMClient
 
-	// qaLevel selects the executor path: "unit" routes to sandbox (go test),
-	// "integration" routes to qa-runner (act on .github/workflows/qa.yml).
+	// qaLevel is always "unit" — the only sandbox-executed QA level.
+	// Heavier tiers (integration, full) run in the operator's CI via the
+	// emitted qa.yml and have no in-process e2e scenario (ADR-045).
 	qaLevel string
 	// name is the scenario name; also the mock-llm fixture subdirectory.
 	name string
-	// customQAYAML, when non-empty, pre-seeds the workspace qa.yml during
-	// stageSetupWorkspace so the project-manager auto-scaffold leaves it
-	// untouched (EnsureQAWorkflow only writes when no file exists). Used by
-	// the qa-cycle-services variant to ship a services-enriched qa.yml that
-	// exercises act's sibling-container spawn via the mounted Docker socket
-	// (ADR-039 Phase 1b).
-	customQAYAML string
 }
 
 // NewQACycleScenario creates a new QA cycle scenario at qa_level=unit.
@@ -58,64 +52,9 @@ func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
 }
 
 // NOTE: the qa-cycle-integration and qa-cycle-services scenarios were removed
-// with the qa-runner executor (BMAD realignment Phase 3). Integration/services
+// with the qa-runner executor (BMAD realignment / ADR-045). Integration/services
 // tiers now run in the operator's CI, not via a semspec executor, so there is
-// no in-process path for an e2e scenario to exercise. The remaining
-// customQAYAML / servicesEnrichedQAYAML plumbing below is dead and is swept in
-// Phase 4.
-
-// servicesEnrichedQAYAML is the Phase 1b proof workflow. It declares one
-// service (nginx:alpine, port 80) and probes its reachability before running
-// integration tests. If qa-runner's Docker socket mount or act's services
-// support is broken, the readiness probe fails and the workflow exits non-
-// zero — qa-runner reports QACompletedEvent.Passed=false and the scenario
-// fails in stageAssertQACompleted with diagnostic logs in the act archive.
-//
-// Why the `container:` block: nektos/act creates a per-job bridge network
-// for service containers but only attaches the JOB container to that
-// network when the job declares a `container:` block (see act
-// pkg/runner/run_context.go networkName()/jobContainer() — the
-// `containerImage(ctx) != ""` branch). Without it, the job falls back to
-// `network=host` and can't resolve service names by DNS. Empirically
-// validated 2026-05-28 during ADR-039 Phase 1b: omitting `container:` made
-// `wget --spider http://nginx-service:80` time out from inside the job.
-// This is a load-bearing finding for Phase 1c — the catalog renderer must
-// emit a `container:` block alongside any `services:` block.
-//
-// Phase 1c will replace this hand-authored yaml with output from
-// workflow/harnesscatalog/qarender; for now the literal yaml stays in scope.
-const servicesEnrichedQAYAML = `name: QA
-on: [push, pull_request]
-jobs:
-  integration:
-    runs-on: ubuntu-latest
-    container:
-      image: catthehacker/ubuntu:act-latest
-    services:
-      nginx-service:
-        image: nginx:alpine
-        ports:
-          - 80
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.25'
-          cache: false
-      - name: Wait for nginx-service sibling container
-        run: |
-          for i in $(seq 1 30); do
-            if wget -q --spider http://nginx-service:80; then
-              echo "[OK] nginx-service reachable on attempt $i"
-              exit 0
-            fi
-            sleep 1
-          done
-          echo "[FAIL] nginx-service unreachable after 30 attempts"
-          exit 1
-      - name: Integration tests
-        run: go test ./... -tags=integration -v
-`
+// no in-process path for an e2e scenario to exercise them.
 
 // Name implements Scenario.
 func (s *QACycleScenario) Name() string { return s.name }
@@ -167,15 +106,10 @@ func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 		return time.Duration(normalSec) * time.Second
 	}
 
-	// qaBudget is the per-stage timeout for stages that wait on the executor
-	// (reviewing_qa / qa.completed assertions / complete). Integration runs go
-	// through act which pulls a ~1GB runner image on first invocation and
-	// spawns a test container — a couple orders of magnitude slower than the
-	// sandbox unit path.
+	// qaBudget is the per-stage timeout for stages that wait on the QA executor
+	// (reviewing_qa / qa.completed assertions / complete). Only unit is executed
+	// in-process via the sandbox; heavier tiers run in the operator's CI.
 	qaBudget := func(unitNormal, unitFast int) time.Duration {
-		if s.qaLevel == "integration" {
-			return t(600, 600)
-		}
 		return t(unitNormal, unitFast)
 	}
 
@@ -248,25 +182,6 @@ func (s *QACycleScenario) stageSetupWorkspace(_ context.Context, result *Result)
 		"cmd/server/main.go": "// Package main is the QA cycle project entry point.\npackage main\n\nimport \"fmt\"\n\nfunc main() { fmt.Println(\"QA cycle server\") }\n",
 		// Makefile satisfies structural-validator make-based checks.
 		"Makefile": "test:\n\tgo test ./...\n\nbuild:\n\tgo build ./...\n\nlint:\n\tgo vet ./...\n",
-	}
-
-	if s.qaLevel == "integration" {
-		// integration-tagged test so `go test ./... -tags=integration -v` finds
-		// at least one test and returns zero. Without the tag the default
-		// qa.yml integration job would report "no tests to run".
-		files["pkg/math/math_integration_test.go"] = "//go:build integration\n\npackage math\n\nimport \"testing\"\n\nfunc TestAddIntegration(t *testing.T) {\n\tif got := Add(10, 20); got != 30 {\n\t\tt.Errorf(\"Add(10, 20) = %d; want 30\", got)\n\t}\n}\n"
-		// qa.yml is auto-scaffolded by plan-manager.publishQARequestIfNeeded
-		// before the QARequestedEvent is published (project-manager.EnsureQAWorkflow
-		// templates a Go workflow because project.json's primary language is Go).
-		// The scenario relies on that auto-scaffold — pre-seeding here was the
-		// pre-2026-05-15 shape, removed to exercise the real wiring end-to-end.
-	}
-
-	// qa-cycle-services pre-seeds a services-enriched qa.yml so the auto-
-	// scaffold leaves it alone (EnsureQAWorkflow respects existing files).
-	// See servicesEnrichedQAYAML for the substrate-proof rationale.
-	if s.customQAYAML != "" {
-		files[".github/workflows/qa.yml"] = s.customQAYAML
 	}
 
 	for path, content := range files {
@@ -343,9 +258,9 @@ func (s *QACycleScenario) stageInitProject(ctx context.Context, result *Result) 
 // Stage: set-qa-level
 // ---------------------------------------------------------------------------
 
-// stageSetQALevel patches the project config to set the scenario's qa_level.
-// Plans created after this point snapshot the level and trigger the matching
-// executor (sandbox at unit, qa-runner at integration/full).
+// stageSetQALevel patches the project config to set qa_level=unit.
+// Plans created after this point snapshot the level and trigger the sandbox
+// executor at implementing convergence.
 func (s *QACycleScenario) stageSetQALevel(ctx context.Context, result *Result) error {
 	qaLevel := s.qaLevel
 	reqBody := map[string]*string{"qa_level": &qaLevel}

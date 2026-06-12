@@ -48,14 +48,15 @@ const (
 	// StatusChanged indicates requirements were deprecated via a change proposal
 	// and the plan is awaiting partial requirement regeneration.
 	StatusChanged Status = "changed"
-	// StatusReadyForQA indicates the plan is waiting for the QA executor (sandbox at
-	// level=unit, qa-runner at level=integration or full) to run project tests.
-	// Entered at implementing convergence when qa.level ≥ unit; skipped for
-	// level=synthesis (which goes straight to reviewing_qa) and level=none.
+	// StatusReadyForQA indicates the plan is waiting for the sandbox to run
+	// project tests at level=unit. Entered at implementing convergence when
+	// qa.level=unit; skipped for level=synthesis (which goes straight to
+	// reviewing_qa) and level=none. Integration/full tiers run in the
+	// operator's CI via the emitted qa.yml and do not use this status.
 	StatusReadyForQA Status = "ready_for_qa"
 	// StatusReviewingQA indicates qa-reviewer is producing the release-readiness
 	// verdict. Entered for all non-"none" levels. Inputs vary by level:
-	// synthesis reads plan+impl only; unit/integration/full add test results.
+	// synthesis reads plan+impl only; unit adds sandbox test results.
 	StatusReviewingQA Status = "reviewing_qa"
 
 	// In-progress statuses — claimed by watchers via plan.mutation.claim before
@@ -329,8 +330,8 @@ func (s Status) CanTransitionTo(target Status) bool {
 		return target == StatusAwaitingReview ||
 			target == StatusComplete || target == StatusRejected
 	case StatusReadyForQA:
-		// ready_for_qa → reviewing_qa (qa-runner claims the plan)
-		// ready_for_qa → rejected (qa-runner cannot execute — missing workflow, infrastructure error)
+		// ready_for_qa → reviewing_qa (sandbox completes unit tests)
+		// ready_for_qa → rejected (sandbox cannot execute — infrastructure error)
 		return target == StatusReviewingQA || target == StatusRejected
 	case StatusReviewingQA:
 		// reviewing_qa → complete (QA passed, auto_approve_review=true, no GitHub)

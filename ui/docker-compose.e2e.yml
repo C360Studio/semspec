@@ -8,13 +8,13 @@ services:
   # the parent semspec repo as drift.
   #
   # The intermediate WORKSPACE_HOST_PATH tmpdir is a host bind-mount (not a
-  # Docker named volume) for one specific reason: qa-runner spawns `act`
-  # sibling containers via the docker socket, and act --bind needs a HOST
-  # filesystem path that the docker daemon recognizes for sibling-container
-  # mounts. Named volumes have no usable host path on Docker Desktop. The
+  # Docker named volume) so that act (when invoked by the operator's CI or
+  # Testcontainers tests via the docker socket) can use a HOST filesystem
+  # path that the docker daemon recognizes for sibling-container mounts.
+  # Named volumes have no usable host path on Docker Desktop. The
   # bind-mount tmpdir gives us snapshot isolation (init container cp's
   # fixture → tmpdir, agents and project-manager write to tmpdir not
-  # fixture) AND a host path qa-runner / act can use.
+  # fixture) AND a host path act can use.
   #
   # `find -delete; cp -a` makes the snapshot deterministic per stack-up so
   # the fixture-as-snapshot invariant holds regardless of what agents (or
@@ -23,9 +23,9 @@ services:
     image: alpine:3.19
     # chown after cp so the sandbox user (uid SANDBOX_UID:1000 — runs git
     # ops in /workspace and trips git's "dubious ownership" guard otherwise)
-    # owns the snapshot. semspec + qa-runner run as root and can rw any
-    # uid via root's normal access; only the sandbox user needs to be the
-    # nominal owner for git to operate.
+    # owns the snapshot. semspec runs as root and can rw any uid via root's
+    # normal access; only the sandbox user needs to be the nominal owner
+    # for git to operate.
     command:
       - sh
       - -c

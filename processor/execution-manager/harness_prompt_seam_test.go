@@ -11,8 +11,9 @@ import (
 // catalog→prompt-context seam. A regression that dropped Profile.Orchestration
 // from the constructed ResolvedHarnessProfileContext would silently feed the
 // developer agent profiles without the orchestration directive, leaving the
-// agent to guess whether qa-runner brings services up or the test fixture
-// owns the stack. ADR-039 Phase 1a depends on this propagating end-to-end.
+// agent to guess whether the operator's CI brings services up or the test
+// fixture owns the stack. ADR-039 Phase 1a depends on this propagating
+// end-to-end.
 func TestResolvedHarnessProfilesToPromptPropagatesOrchestration(t *testing.T) {
 	cat, err := harnesscatalog.LoadBuiltIn()
 	if err != nil {

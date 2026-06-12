@@ -31,8 +31,9 @@ const (
 )
 
 const (
-	// OrchestrationServices profiles declare an invariant integration stack the
-	// qa-runner renders into qa.yml services from images/ports/env/readiness.
+	// OrchestrationServices profiles declare an invariant integration stack that
+	// semspec renders into qa.yml services from images/ports/env/readiness for
+	// the operator's CI to bring up.
 	OrchestrationServices = "services"
 	// OrchestrationTestcontainers profiles need per-test or dynamic stack
 	// orchestration the dev agent expresses with testcontainers-go (or an
@@ -67,10 +68,11 @@ type Profile struct {
 	Env                map[string]string   `yaml:"env" json:"env,omitempty"`
 	Readiness          []string            `yaml:"readiness" json:"readiness,omitempty"`
 	TestGuidance       []string            `yaml:"test_guidance" json:"test_guidance,omitempty"`
-	// Orchestration declares how the qa-runner brings up this profile's
-	// integration stack. Empty defaults to OrchestrationServices when Images
-	// is non-empty and OrchestrationPureFixture otherwise; callers should read
-	// EffectiveOrchestration() rather than this raw field.
+	// Orchestration declares how the operator's CI (via the emitted qa.yml)
+	// brings up this profile's integration stack. Empty defaults to
+	// OrchestrationServices when Images is non-empty and OrchestrationPureFixture
+	// otherwise; callers should read EffectiveOrchestration() rather than this
+	// raw field.
 	Orchestration string `yaml:"orchestration" json:"orchestration,omitempty"`
 }
 

@@ -30,7 +30,7 @@ profiles:
       - act
     cost: medium
     constraints:
-      - qa-runner brings up px4io/px4-sitl as a qa.yml service from this profile; tests connect to mavlink-udp at the rendered host port.
+      - The operator's CI brings up px4io/px4-sitl as a qa.yml service from this profile; tests connect to mavlink-udp at the rendered host port.
       - Tests must not start their own SITL container — the rendered service is authoritative for this profile.
       - Gate control assertions on MAVSDK health/connection state before issuing commands.
     required_assertions:
@@ -57,7 +57,7 @@ profiles:
       - Wait for MAVLink HEARTBEAT frames on UDP 14540.
       - Wait for MAVSDK connection state to become connected.
     test_guidance:
-      - Read the SITL endpoint from the env/host the qa-runner injects rather than hard-coding localhost or a fixed port.
+      - Read the SITL endpoint from the env/host the operator's CI injects rather than hard-coding localhost or a fixed port.
       - Record the profile ID near the integration test setup so structural validation can bind evidence to the catalog entry.
 
   - id: mavlink.ardupilot-sitl.compat
@@ -80,7 +80,7 @@ profiles:
       - act
     cost: medium
     constraints:
-      - qa-runner brings up ardupilot/ardupilot as a qa.yml service from this profile; tests connect to the rendered endpoint.
+      - The operator's CI brings up ardupilot/ardupilot as a qa.yml service from this profile; tests connect to the rendered endpoint.
       - Run as an optional compatibility suite unless the architecture explicitly depends on ArduPilot behavior.
     required_assertions:
       - Observe an ArduPilot MAVLink heartbeat.
@@ -127,7 +127,7 @@ profiles:
       - pure-unit-fixture
     cost: low
     constraints:
-      - qa-runner renders no services for this profile; the test fixture owns the MAVLink peer (captured frames or an in-process peer).
+      - No services are rendered in qa.yml for this profile; the test fixture owns the MAVLink peer (captured frames or an in-process peer).
       - If a test needs a live SITL peer for autopilot-state-dependent behavior, select a services-orchestrated profile instead of widening this one.
     required_assertions:
       - Decode HEARTBEAT from a real or captured MAVLink frame.
@@ -150,7 +150,7 @@ profiles:
     orchestration: services
     proves:
       - Peripheral-heavy plugins behave with simulator-backed camera/gimbal/sensor traffic.
-      - Higher-cost data streams can be exercised without changing qa-runner orchestration.
+      - Higher-cost data streams can be exercised without changing the qa.yml services orchestration.
     covers:
       integration_targets:
         - PX4 SITL
@@ -165,7 +165,7 @@ profiles:
       - dedicated-ci-runner
     cost: high
     constraints:
-      - qa-runner brings up px4io/px4-sitl with peripheral support as a qa.yml service from this profile.
+      - The operator's CI brings up px4io/px4-sitl with peripheral support as a qa.yml service from this profile.
       - Requires substantially more CPU/GPU and wall-clock than the default smoke profile.
       - Do not require this profile by default for ordinary MAVLink driver work.
     required_assertions:
