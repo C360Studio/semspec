@@ -145,6 +145,46 @@ func TestFilterByM2NStoryReservations_EmptyStoriesNoOp(t *testing.T) {
 	}
 }
 
+// TestFilterByBranchPrereqCompletion_DefersUntilStoryEdgePrereqComplete is the
+// regression guard for the load-bearing race the adversarial review surfaced:
+// the file-overlap edge lives ONLY on Story.DependsOn (b1's Requirement.DependsOn
+// is empty), so the Requirement.DependsOn gate (filterReadyRequirements) lets b1
+// pass. Branch derivation forks b1 from semspec/requirement-a1, so b1 must NOT
+// dispatch until a1 (story.A's owner) completes — otherwise it forks from a
+// missing/empty branch and the assembly conflict returns. b1 is releasable only
+// once a1 is in completedReqIDs.
+func TestFilterByBranchPrereqCompletion_DefersUntilStoryEdgePrereqComplete(t *testing.T) {
+	stories := []workflow.Story{
+		{ID: "story.A", RequirementIDs: []string{"a1", "a2"}, Status: workflow.StoryStatusReady},
+		{ID: "story.B", RequirementIDs: []string{"b1"}, DependsOn: []string{"story.A"}, Status: workflow.StoryStatusReady},
+	}
+	// b1's Requirement.DependsOn is empty — only the Story edge gates it.
+	b1 := workflow.Requirement{ID: "b1"}
+	ready := []workflow.Requirement{b1}
+
+	// a1 not complete -> b1 deferred.
+	if got := filterByBranchPrereqCompletion(ready, stories, map[string]bool{}); len(got) != 0 {
+		t.Errorf("b1 must be deferred while owner a1 is incomplete; got %v", got)
+	}
+
+	// a1 complete -> b1 releasable.
+	got := filterByBranchPrereqCompletion(ready, stories, map[string]bool{"a1": true})
+	if len(got) != 1 || got[0].ID != "b1" {
+		t.Errorf("b1 must dispatch once owner a1 is complete; got %v", got)
+	}
+}
+
+// TestFilterByBranchPrereqCompletion_NoStoriesNoOp pins back-compat: without
+// Stories the resolved union reduces to Requirement.DependsOn (already gated by
+// filterReadyRequirements), so this gate is a pass-through.
+func TestFilterByBranchPrereqCompletion_NoStoriesNoOp(t *testing.T) {
+	reqs := []workflow.Requirement{makeReq("r1"), {ID: "r2", DependsOn: []string{"r1"}}}
+	got := filterByBranchPrereqCompletion(reqs, nil, map[string]bool{})
+	if len(got) != 2 {
+		t.Errorf("no Stories should pass through unchanged, got %d", len(got))
+	}
+}
+
 // ---------------------------------------------------------------------------
 // filterReadyRequirements — root requirements (no deps)
 // ---------------------------------------------------------------------------

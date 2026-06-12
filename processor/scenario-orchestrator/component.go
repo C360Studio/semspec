@@ -45,6 +45,12 @@ type Component struct {
 	repoRoot     string
 	tripleWriter *graphutil.TripleWriter
 
+	// sandbox resolves the per-requirement branch-derivation base. Nil when
+	// SandboxURL is unset (tests / plans whose branch base is just the plan
+	// base) — resolveRequirementBase then needs a sandbox only for the >1
+	// prerequisite merge and fails loud if asked to merge without one.
+	sandbox sandboxClient
+
 	// completedReqs caches RequirementExecutionCompleteEvent data keyed by
 	// RequirementID. Populated at startup via reconcileCompletedRequirements and
 	// kept current by the completion event consumer. Prerequisite context for
@@ -109,6 +115,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     deps.GetLogger(),
 		decoder:    message.NewDecoder(deps.PayloadRegistry),
 		repoRoot:   repoRoot,
+		sandbox:    newSandboxClient(config.SandboxURL),
 	}, nil
 }
 
@@ -329,13 +336,20 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 	toDispatch := filterReadyRequirements(requirements, completedReqIDs)
 	preStoryGateCount := len(toDispatch)
 	toDispatch = filterByM2NStoryReservations(toDispatch, trigger.Stories)
+	postStoryGateCount := len(toDispatch)
+	// Branch-derivation gate: a dependent whose branch must fork from a
+	// prerequisite owner's branch (including the cross-Story file-overlap edges
+	// that live only on Story.DependsOn) is held until that owner completes, so
+	// resolveRequirementBase never forks from a missing/empty branch.
+	toDispatch = filterByBranchPrereqCompletion(toDispatch, trigger.Stories, completedReqIDs)
 
 	c.logger.Info("requirement DAG gating applied",
 		"plan_slug", trigger.PlanSlug,
 		"total_requirements", len(requirements),
 		"ready_count", len(toDispatch),
 		"blocked_by_deps", len(requirements)-preStoryGateCount,
-		"blocked_by_m_n_story_reservation", preStoryGateCount-len(toDispatch))
+		"blocked_by_m_n_story_reservation", preStoryGateCount-postStoryGateCount,
+		"blocked_by_branch_prereq", postStoryGateCount-len(toDispatch))
 
 	if len(toDispatch) == 0 {
 		return nil
@@ -370,10 +384,7 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 				return
 			}
 
-			if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, r, sc, deps); err != nil {
-				c.logger.Error("failed to trigger requirement execution",
-					"requirement_id", r.ID,
-					"error", err)
+			if err := c.dispatchRequirement(ctx, trigger, r, sc, deps); err != nil {
 				errs <- err
 			} else {
 				c.requirementsTriggered.Add(1)
@@ -391,6 +402,34 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		}
 	}
 	return firstErr
+}
+
+// dispatchRequirement resolves a requirement's DependsOn-derived branch base
+// and triggers its execution. Branch derivation runs here (not in the executor)
+// so the >1-prerequisite reqbase merge happens before the mutation and the
+// executor sees a single ready base. A resolution failure (e.g. a missing
+// prereq branch) is fatal for this requirement — dispatching it anyway would
+// fork from the wrong base and collide at plan-level assembly, the exact bug
+// this fix removes.
+func (c *Component) dispatchRequirement(
+	ctx context.Context,
+	trigger *OrchestratorTrigger,
+	req workflow.Requirement,
+	scenarios []workflow.Scenario,
+	prereqs []payloads.PrereqContext,
+) error {
+	base, err := c.resolveRequirementBase(ctx, req, trigger.Stories, trigger.PlanBranch)
+	if err != nil {
+		c.logger.Error("failed to resolve requirement branch base",
+			"requirement_id", req.ID, "error", err)
+		return err
+	}
+	if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs); err != nil {
+		c.logger.Error("failed to trigger requirement execution",
+			"requirement_id", req.ID, "error", err)
+		return err
+	}
+	return nil
 }
 
 // buildPrereqContext assembles PrereqContext for a requirement's DependsOn list
@@ -434,7 +473,7 @@ func (c *Component) buildPrereqContext(req workflow.Requirement, allReqs []workf
 // decomposition.
 func (c *Component) triggerRequirementExecution(
 	ctx context.Context,
-	planSlug, traceID, planBranch string,
+	planSlug, traceID, planBranch, baseBranch string,
 	req workflow.Requirement,
 	scenarios []workflow.Scenario,
 	prereqs []payloads.PrereqContext,
@@ -448,6 +487,7 @@ func (c *Component) triggerRequirementExecution(
 		"depends_on":     prereqs,
 		"trace_id":       traceID,
 		"plan_branch":    planBranch,
+		"base_branch":    baseBranch,
 	}
 
 	data, err := json.Marshal(mutReq)

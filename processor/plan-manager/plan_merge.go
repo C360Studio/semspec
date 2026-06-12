@@ -38,22 +38,24 @@ func (c *Component) assembleRequirementBranches(ctx context.Context, plan *workf
 		return nil
 	}
 
-	// Order requirements by their DependsOn graph so that a requirement
-	// branch is merged after any prerequisites. Without this, merge order
-	// is whatever plan-manager's write order happens to be — a hand
-	// grenade at plan sizes where overlapping file edits exist. Ties (no
-	// dependency relationship) break by the original slice order so the
-	// result is deterministic and reproducible. Cycles fall back to slice
-	// order with a warning — the decomposer shouldn't produce them, but
-	// we won't wedge the merge if it does.
-	orderedIDs := topoSortRequirementsByDependsOn(plan.Requirements)
-	if len(orderedIDs) != len(plan.Requirements) {
-		c.logger.Warn("Requirement topological sort produced unexpected length — falling back to slice order",
-			"slug", plan.Slug, "sorted_len", len(orderedIDs), "requirements_len", len(plan.Requirements))
-		orderedIDs = orderedIDs[:0]
-		for _, r := range plan.Requirements {
-			orderedIDs = append(orderedIDs, r.ID)
-		}
+	// Enumerate the requirement branches to assemble, ordered so a dependent
+	// merges after the prerequisites it forked from (every merge is then a
+	// fast-forward). Under ADR-044 M:N only a Story's OWNER carries commits, so
+	// we merge owner branches (one per Story) + Story-less requirements —
+	// deduped — not every "semspec/requirement-*" branch (product call P2).
+	// Order follows the SAME resolved branch-derivation union the orchestrator
+	// used to derive the bases (design §3), so merge order matches derivation
+	// order. Cycles fall back to slice order with a warning — the decomposer
+	// shouldn't produce them, but we won't wedge the merge if it does.
+	orderedIDs, usedFallback := assemblyBranchOrder(plan.Requirements, plan.Stories)
+	if usedFallback {
+		c.logger.Warn("Requirement assembly order fell back to slice order — dependency cycle in the derived branch graph",
+			"slug", plan.Slug, "nodes", len(orderedIDs))
+	}
+	if len(orderedIDs) == 0 {
+		c.logger.Debug("Plan-level merge skipped — no owner requirement branches to assemble",
+			"slug", plan.Slug)
+		return nil
 	}
 	branches := make([]string, 0, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -73,6 +75,15 @@ func (c *Component) assembleRequirementBranches(ctx context.Context, plan *workf
 		// with %w so callers upstream can errors.Is-match the sentinel
 		// (Phase 5's infra_health vs plan_conflict classification keys off it).
 		if errors.Is(err, sandbox.ErrMergeBranchesConflict) && result != nil {
+			// Name the shared files (conflicting paths) so the recovery /
+			// terminal diagnostic is actionable: with correct branch
+			// derivation a surviving conflict means two truly-parallel
+			// requirements edited the same file with no DependsOn edge — a
+			// planning-partition defect, not an infra blip (design §5).
+			if len(result.ConflictingPaths) > 0 {
+				return fmt.Errorf("requirement branch %q conflicts with prior branches on target %q over files [%s]: %w",
+					result.ConflictingBranch, target, strings.Join(result.ConflictingPaths, ", "), sandbox.ErrMergeBranchesConflict)
+			}
 			return fmt.Errorf("requirement branch %q conflicts with prior branches on target %q: %w",
 				result.ConflictingBranch, target, sandbox.ErrMergeBranchesConflict)
 		}
@@ -180,14 +191,15 @@ func (c *Component) deleteQAWorktree(ctx context.Context, slug string) {
 	}
 }
 
-// pruneRequirementBranches deletes every "semspec/requirement-<id>" branch
-// belonging to the plan. Implements invariant D3 of the Task-11 audit:
-// without explicit pruning, per-requirement branches accumulate across
-// every plan cycle and eventually make branch-based UI lookups noisy.
-// Called from the archive path after the plan status has transitioned
-// successfully — archiving must not fail because the sandbox is down, so
-// every error is logged and swallowed. The AssembledBranch is NOT pruned;
-// it stays as the durable reviewable artifact.
+// pruneRequirementBranches deletes every per-requirement work branch belonging
+// to the plan — "semspec/requirement-<id>" AND the "semspec/reqbase-<id>"
+// derivation bases the orchestrator builds for >1-prerequisite requirements
+// (design §6). Implements invariant D3 of the Task-11 audit: without explicit
+// pruning these accumulate across every plan cycle and eventually make
+// branch-based UI lookups noisy. Called from the archive path after the plan
+// status has transitioned successfully — archiving must not fail because the
+// sandbox is down, so every error is logged and swallowed. The AssembledBranch
+// is NOT pruned; it stays as the durable reviewable artifact.
 func (c *Component) pruneRequirementBranches(ctx context.Context, plan *workflow.Plan) {
 	if c.sandbox == nil {
 		return
@@ -197,88 +209,171 @@ func (c *Component) pruneRequirementBranches(ctx context.Context, plan *workflow
 	}
 	pruned := 0
 	for _, r := range plan.Requirements {
-		branch := "semspec/requirement-" + r.ID
-		if err := c.sandbox.DeleteBranch(ctx, branch); err != nil {
-			// Split by severity: a 404 is the benign case (branch never
-			// existed — requirement not dispatched, or already pruned
-			// from a prior archive) and goes to Debug so archive-unarchive
-			// cycles don't spam. Any other error (sandbox 5xx, unreachable,
-			// 503 needs_reconciliation) indicates a live problem an
-			// operator would want to see — goes to Warn so default-level
-			// logs surface the "branches accumulating because prune keeps
-			// failing against live infra" signal.
-			if strings.Contains(err.Error(), "server error 404") {
-				c.logger.Debug("Requirement branch already absent during prune",
-					"slug", plan.Slug, "branch", branch)
-				continue
-			}
-			c.logger.Warn("Failed to delete requirement branch during prune",
-				"slug", plan.Slug, "branch", branch, "error", err)
-			continue
+		if c.pruneBranch(ctx, plan.Slug, "semspec/requirement-"+r.ID) {
+			pruned++
 		}
-		pruned++
+		// reqbase-<id> only exists for >1-prerequisite requirements; the 404
+		// branch of pruneBranch handles the common "never created" case quietly.
+		if c.pruneBranch(ctx, plan.Slug, "semspec/reqbase-"+r.ID) {
+			pruned++
+		}
 	}
 	if pruned > 0 {
-		c.logger.Info("Pruned requirement branches on plan archive",
-			"slug", plan.Slug, "pruned", pruned, "total", len(plan.Requirements))
+		c.logger.Info("Pruned per-requirement branches on plan archive",
+			"slug", plan.Slug, "pruned", pruned, "requirements", len(plan.Requirements))
 	}
 }
 
-// topoSortRequirementsByDependsOn returns requirement IDs in an order where
-// every prerequisite appears before its dependents. Requirements without any
-// DependsOn entry — or with dependencies pointing outside the plan — are
-// treated as roots. Ties are broken by original slice position so the
-// output is deterministic.
-//
-// A cycle in the DependsOn graph produces a short result (fewer IDs than
-// input); the caller falls back to slice order when that happens.
-func topoSortRequirementsByDependsOn(reqs []workflow.Requirement) []string {
-	if len(reqs) == 0 {
-		return nil
+// pruneBranch deletes one branch, classifying the outcome by severity, and
+// reports whether it was actually deleted. A 404 is the benign case (branch
+// never existed — requirement not dispatched, no reqbase needed, or already
+// pruned) and goes to Debug so archive-unarchive cycles don't spam. Any other
+// error (sandbox 5xx, unreachable, 503 needs_reconciliation) indicates a live
+// problem an operator would want to see — Warn so default-level logs surface
+// the "branches accumulating because prune keeps failing" signal.
+func (c *Component) pruneBranch(ctx context.Context, slug, branch string) bool {
+	if err := c.sandbox.DeleteBranch(ctx, branch); err != nil {
+		if strings.Contains(err.Error(), "server error 404") {
+			c.logger.Debug("Branch already absent during prune", "slug", slug, "branch", branch)
+			return false
+		}
+		c.logger.Warn("Failed to delete branch during prune", "slug", slug, "branch", branch, "error", err)
+		return false
 	}
-	type node struct {
-		id       string
-		deps     []string
-		position int // index in original slice for tie-breaking
-	}
-	nodes := make(map[string]*node, len(reqs))
-	order := make([]string, 0, len(reqs))
-	for i, r := range reqs {
-		nodes[r.ID] = &node{id: r.ID, deps: r.DependsOn, position: i}
-		order = append(order, r.ID)
-	}
+	return true
+}
 
-	// In-plan dependency count — dependencies pointing outside the plan are
-	// ignored (treat them as already-satisfied).
-	indegree := make(map[string]int, len(nodes))
-	for _, n := range nodes {
-		for _, d := range n.deps {
-			if _, ok := nodes[d]; ok {
-				indegree[n.id]++
-			}
+// assemblyBranchOrder computes the requirement IDs whose branches plan-level
+// assembly must merge, in an order where a dependent merges AFTER the
+// prerequisites it forked from (so every merge fast-forwards once the
+// orchestrator has derived each branch from its prereqs).
+//
+// Nodes (M:N, product call P2): the DeterministicStoryOwner of each Story plus
+// every requirement covered by no Story (legacy/mock plans). Non-owner covered
+// requirements are skipped — they fast-complete with no commits, so their
+// branches are empty and the owner branch already carries the whole Story's
+// work. With no Stories every requirement is its own node, reducing to the
+// pre-M:N behavior (and keeping existing assembly tests green).
+//
+// Order: a node's prerequisites are ResolveRequirementBranchPrereqs (the SAME
+// resolved union that drove branch derivation — design §3), restricted to the
+// node set. Kahn's algorithm scans the requirement-slice order each pass so
+// ties break deterministically by plan-position. A cycle yields a short result;
+// usedFallback is then true and the IDs are returned in slice order so the
+// merge still runs.
+func assemblyBranchOrder(reqs []workflow.Requirement, stories []workflow.Story) (ids []string, usedFallback bool) {
+	if len(reqs) == 0 {
+		return nil, false
+	}
+	nodeOrder, nodeSet := assemblyNodes(reqs, stories)
+
+	reqByID := make(map[string]workflow.Requirement, len(reqs))
+	for _, r := range reqs {
+		reqByID[r.ID] = r
+	}
+	depsOf, indegree := assemblyDepGraph(nodeOrder, nodeSet, reqByID, stories)
+
+	result := kahnTopoSort(nodeOrder, depsOf, indegree)
+	if len(result) != len(nodeOrder) {
+		return nodeOrder, true // cycle -> slice order
+	}
+	return result, false
+}
+
+// assemblyNodes returns the requirement IDs whose branches assembly merges, in
+// requirement-slice order (stable tie-break position): each Story's owner plus
+// every requirement covered by no Story. Non-owner covered requirements are
+// excluded (empty fast-complete branches). With no Stories every requirement is
+// its own node.
+func assemblyNodes(reqs []workflow.Requirement, stories []workflow.Story) (order []string, set map[string]struct{}) {
+	storyOwners := make(map[string]struct{}, len(stories))
+	for _, s := range stories {
+		if o := workflow.DeterministicStoryOwner(s); o != "" {
+			storyOwners[o] = struct{}{}
+		}
+	}
+	covered := make(map[string]bool)
+	for _, s := range stories {
+		for _, rid := range s.RequirementIDs {
+			covered[rid] = true
 		}
 	}
 
-	// Kahn's algorithm, scanning the original slice order on every pass so
-	// ties break deterministically by plan-position rather than map iteration.
-	result := make([]string, 0, len(reqs))
-	remaining := make(map[string]bool, len(nodes))
-	for id := range nodes {
+	set = make(map[string]struct{})
+	order = make([]string, 0, len(reqs))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		if _, ok := set[id]; ok {
+			return
+		}
+		set[id] = struct{}{}
+		order = append(order, id)
+	}
+	for _, r := range reqs {
+		if _, isOwner := storyOwners[r.ID]; isOwner || !covered[r.ID] {
+			add(r.ID)
+		}
+	}
+	// A story owner absent from plan.Requirements (shouldn't happen given the
+	// story.requirement_orphan rule) is deliberately NOT added: it was never
+	// dispatched, so semspec/requirement-<owner> does not exist and merging it
+	// would fail the whole assembly. Iterating storyOwners (a map) to append it
+	// would also be nondeterministic. Skipping keeps the node set exactly the
+	// branches that exist, in slice order.
+	return order, set
+}
+
+// assemblyDepGraph builds the prerequisite edges between assembly nodes using
+// the resolved branch-derivation union (the SAME edges that drove branch
+// derivation — design §3), restricted to the node set (out-of-set prereqs are
+// already-satisfied roots and ignored).
+func assemblyDepGraph(
+	nodeOrder []string,
+	nodeSet map[string]struct{},
+	reqByID map[string]workflow.Requirement,
+	stories []workflow.Story,
+) (depsOf map[string][]string, indegree map[string]int) {
+	depsOf = make(map[string][]string, len(nodeOrder))
+	indegree = make(map[string]int, len(nodeOrder))
+	for _, id := range nodeOrder {
+		req, ok := reqByID[id]
+		if !ok {
+			req = workflow.Requirement{ID: id}
+		}
+		for _, p := range workflow.ResolveRequirementBranchPrereqs(req, stories) {
+			if _, inSet := nodeSet[p]; inSet && p != id {
+				depsOf[id] = append(depsOf[id], p)
+				indegree[id]++
+			}
+		}
+	}
+	return depsOf, indegree
+}
+
+// kahnTopoSort orders nodeOrder so every prerequisite precedes its dependents,
+// scanning nodeOrder on each pass so ties break deterministically by position.
+// A cycle yields a short result (fewer than len(nodeOrder)); the caller falls
+// back to slice order.
+func kahnTopoSort(nodeOrder []string, depsOf map[string][]string, indegree map[string]int) []string {
+	result := make([]string, 0, len(nodeOrder))
+	remaining := make(map[string]bool, len(nodeOrder))
+	for _, id := range nodeOrder {
 		remaining[id] = true
 	}
 	for len(remaining) > 0 {
 		progressed := false
-		for _, id := range order {
+		for _, id := range nodeOrder {
 			if !remaining[id] || indegree[id] > 0 {
 				continue
 			}
 			result = append(result, id)
 			delete(remaining, id)
-			// Decrement indegree of everyone depending on this node.
-			for _, m := range nodes {
-				for _, d := range m.deps {
+			for _, m := range nodeOrder {
+				for _, d := range depsOf[m] {
 					if d == id {
-						indegree[m.id]--
+						indegree[m]--
 					}
 				}
 			}

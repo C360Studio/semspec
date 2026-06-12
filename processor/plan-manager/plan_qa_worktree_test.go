@@ -257,6 +257,7 @@ func TestHandleConvergenceAllSucceeded_ConflictDoesNotAdvanceToQA(t *testing.T) 
 	stub.mergeBody = map[string]any{
 		"status": "conflict", "target": "semspec/plan-demo",
 		"conflicting_branch": "semspec/requirement-r2",
+		"conflicting_paths":  []string{"README.md"},
 	}
 	c := setupTestComponent(t)
 	c.sandbox = sandbox.NewClient(stub.server.URL)
@@ -276,10 +277,20 @@ func TestHandleConvergenceAllSucceeded_ConflictDoesNotAdvanceToQA(t *testing.T) 
 		t.Errorf("status = %q, want implementing (must not advance to QA on conflict)", stored.Status)
 	}
 	if recovery == nil {
-		t.Error("expected RecoveryRequested on pre-QA merge conflict")
+		t.Fatal("expected RecoveryRequested on pre-QA merge conflict")
 	}
 	if len(stub.createCalls) != 0 {
 		t.Errorf("QA worktree staged despite conflict: %v", stub.createCalls)
+	}
+	// Slice 4a end-to-end: the conflicting shared path must survive the whole
+	// chain (sandbox 409 → assembleRequirementBranches error → routeAssemblyConflict)
+	// into both the plan's LastError and the recovery feedback, so the diagnostic
+	// names the file two requirements collided on rather than a bare "merge failed".
+	if !strings.Contains(stored.LastError, "README.md") {
+		t.Errorf("plan.LastError = %q, want it to name the conflicting path README.md", stored.LastError)
+	}
+	if !strings.Contains(recovery.LastFailureFeedback, "README.md") {
+		t.Errorf("recovery.LastFailureFeedback = %q, want it to name the conflicting path README.md", recovery.LastFailureFeedback)
 	}
 }
 

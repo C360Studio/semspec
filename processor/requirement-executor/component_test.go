@@ -31,6 +31,10 @@ type stubSandbox struct {
 	createdWorktreeIDs []string
 	deletedBranchNames []string
 	createdBranchNames []string
+	// createdBranchBases records the base ref passed to each CreateBranch call,
+	// positionally aligned with createdBranchNames — so tests can assert the
+	// requirement branch forks from the resolved DependsOn base, not plan/HEAD.
+	createdBranchBases []string
 	deleteWorktreeErr  error
 	createBranchErr    error
 	// createBranchErrOnce, when set, is returned on the FIRST CreateBranch
@@ -54,10 +58,11 @@ func (s *stubSandbox) DeleteWorktree(_ context.Context, taskID string) error {
 	return s.deleteWorktreeErr
 }
 
-func (s *stubSandbox) CreateBranch(_ context.Context, branch, _ string) error {
+func (s *stubSandbox) CreateBranch(_ context.Context, branch, base string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.createdBranchNames = append(s.createdBranchNames, branch)
+	s.createdBranchBases = append(s.createdBranchBases, base)
 	if s.createBranchErrOnce != nil {
 		err := s.createBranchErrOnce
 		s.createBranchErrOnce = nil
@@ -838,7 +843,7 @@ func TestInitReqExecution_CreateBranchFailure_MarksError(t *testing.T) {
 	}
 	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
 
-	c.initReqExecution(context.Background(), exec, "semspec/plan-main")
+	c.initReqExecution(context.Background(), exec, "semspec/plan-main", "")
 
 	if !exec.terminated {
 		t.Error("exec.terminated should be true after CreateBranch failure")
@@ -903,7 +908,9 @@ func TestInitReqExecution_StaleBranchFromPriorAttempt_DeletesAndRecreates(t *tes
 	}
 	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
 
-	c.initReqExecution(context.Background(), exec, "semspec/plan-main")
+	// Pass a non-empty resolved base — §9.F: the stale-branch reset must
+	// recreate from the (possibly MOVED) prerequisite base, not plan-main.
+	c.initReqExecution(context.Background(), exec, "semspec/plan-main", "semspec/requirement-a1")
 
 	// ADR-043 PR 4g — initReqExecution synthesizes the DAG synchronously
 	// and marks the exec failed when no plan exists in PLAN_STATES (the
@@ -923,9 +930,51 @@ func TestInitReqExecution_StaleBranchFromPriorAttempt_DeletesAndRecreates(t *tes
 	if len(stub.createdBranchNames) != 2 {
 		t.Errorf("createdBranchNames = %v, want 2 calls (fail + retry)", stub.createdBranchNames)
 	}
+	// Both attempts must target the RESOLVED base, proving the recreate forks
+	// from the prerequisite (moved across attempts), not the plan base.
+	for i, base := range stub.createdBranchBases {
+		if base != "semspec/requirement-a1" {
+			t.Errorf("CreateBranch attempt %d base = %q, want resolved base semspec/requirement-a1", i, base)
+		}
+	}
 	// Expect: DeleteBranch called once between the two CreateBranch calls.
 	if len(stub.deletedBranchNames) != 1 || stub.deletedBranchNames[0] != "semspec/requirement-req-retry" {
 		t.Errorf("deletedBranchNames = %v, want [semspec/requirement-req-retry]", stub.deletedBranchNames)
+	}
+}
+
+// TestInitReqExecution_ForksFromResolvedBase closes the §9.A seam the review
+// flagged: selectReqBranchBase precedence is unit-tested, but nothing asserts
+// the chosen base actually reaches CreateBranch. Here the resolved base wins
+// over the plan base — proving a dependent forks from its prerequisite's branch.
+func TestInitReqExecution_ForksFromResolvedBase(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	exec := &requirementExecution{
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.plan-fork-req-b1",
+		Slug:           "plan-fork",
+		RequirementID:  "b1",
+		Prompt:         "do the thing",
+		Role:           "developer",
+		Model:          "gpt-4",
+		CurrentNodeIdx: -1,
+		VisitedNodes:   make(map[string]bool),
+		storeKey:       workflow.RequirementExecutionKey("plan-fork", "b1"),
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	c.initReqExecution(context.Background(), exec, "semspec/plan-fork", "semspec/requirement-a1")
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.createdBranchNames) != 1 || stub.createdBranchNames[0] != "semspec/requirement-b1" {
+		t.Fatalf("createdBranchNames = %v, want [semspec/requirement-b1]", stub.createdBranchNames)
+	}
+	if len(stub.createdBranchBases) != 1 || stub.createdBranchBases[0] != "semspec/requirement-a1" {
+		t.Errorf("CreateBranch base = %v, want [semspec/requirement-a1] — dependent must fork from its prereq, not the plan base",
+			stub.createdBranchBases)
 	}
 }
 

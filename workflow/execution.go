@@ -162,6 +162,16 @@ type RequirementExecution struct {
 	Role       string          `json:"role,omitempty"`
 	PlanBranch string          `json:"plan_branch,omitempty"`
 
+	// BaseBranch is the resolved git ref this requirement's branch must derive
+	// FROM, computed by the scenario-orchestrator at dispatch via
+	// ResolveRequirementBranchPrereqs (DependsOn-driven branch derivation). When
+	// set it takes precedence over PlanBranch/HEAD as the CreateBranch base so a
+	// dependent requirement forks from its prerequisites' work (which already
+	// contains their shared-file edits) — making plan-level assembly a
+	// fast-forward instead of a conflict. Empty for DAG roots, where the
+	// executor falls back to PlanBranch/HEAD.
+	BaseBranch string `json:"base_branch,omitempty"`
+
 	// Story sequencing (ADR-043 PR 4h — per-Story dispatch)
 	SortedStoryIDs  []string `json:"sorted_story_ids,omitempty"`
 	CurrentStoryIdx int      `json:"current_story_idx,omitempty"`

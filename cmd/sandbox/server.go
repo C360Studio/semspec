@@ -1117,7 +1117,12 @@ type mergeBranchesResponse struct {
 	Target            string                `json:"target"`
 	MergeCommits      []mergeBranchesCommit `json:"merge_commits,omitempty"`
 	ConflictingBranch string                `json:"conflicting_branch,omitempty"`
-	Error             string                `json:"error,omitempty"`
+	// ConflictingPaths are the unmerged files (git diff --diff-filter=U) at the
+	// moment the conflict was detected — the shared files two requirements
+	// edited in parallel. Surfaced so plan-manager can name them in the recovery
+	// / terminal diagnostic.
+	ConflictingPaths []string `json:"conflicting_paths,omitempty"`
+	Error            string   `json:"error,omitempty"`
 }
 
 // ancestryRequest is the JSON body for POST /git/ancestry.
@@ -1184,6 +1189,17 @@ func (s *Server) handleMergeBranchesConflict(
 	commits []mergeBranchesCommit,
 	mergeErr error,
 ) {
+	// Capture the unmerged paths BEFORE aborting — once `git merge --abort`
+	// runs, the conflicted index is gone. These are the files two requirements
+	// edited in parallel; plan-manager surfaces them so a human (or the
+	// re-partition recovery) knows exactly which shared file forced the
+	// conflict, instead of a bare "merge failed". Best-effort: a diff failure
+	// just yields no paths, never blocks the conflict response.
+	var conflictingPaths []string
+	if diffOut, diffErr := gitOutput(ctx, s.repoPath, "diff", "--name-only", "--diff-filter=U"); diffErr == nil {
+		conflictingPaths = splitLines(diffOut)
+	}
+
 	if abortErr := runGit(ctx, s.repoPath, "merge", "--abort"); abortErr != nil {
 		if healErr := s.selfHealAfterFailedRestore(ctx, origBranch, abortErr); healErr != nil {
 			s.needsReconciliation.Store(true)
@@ -1207,6 +1223,7 @@ func (s *Server) handleMergeBranchesConflict(
 		Target:            target,
 		MergeCommits:      commits,
 		ConflictingBranch: conflictingBranch,
+		ConflictingPaths:  conflictingPaths,
 		Error:             mergeErr.Error(),
 	})
 }

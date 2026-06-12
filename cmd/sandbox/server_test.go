@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -2117,6 +2118,12 @@ func TestMergeBranches_ConflictSelfHealsAndReturns409(t *testing.T) {
 	}
 	if got.ConflictingBranch != "semspec/requirement-rC" {
 		t.Errorf("conflicting_branch = %q, want semspec/requirement-rC", got.ConflictingBranch)
+	}
+	// The conflicting shared file must be surfaced (captured before merge
+	// --abort) so plan-manager can name it in the recovery / terminal
+	// diagnostic instead of a bare "merge failed".
+	if !slices.Contains(got.ConflictingPaths, "shared.txt") {
+		t.Errorf("conflicting_paths = %v, want it to contain shared.txt", got.ConflictingPaths)
 	}
 	if len(got.MergeCommits) != 1 || got.MergeCommits[0].Branch != "semspec/requirement-rB" {
 		t.Errorf("expected first req to have merged before conflict; merge_commits=%v", got.MergeCommits)

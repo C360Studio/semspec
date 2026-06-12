@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/c360studio/semspec/tools/sandbox"
@@ -57,6 +58,41 @@ func newStubMergeBranchesServer(t *testing.T, status int, body any) *stubMergeBr
 	}))
 	t.Cleanup(s.server.Close)
 	return s
+}
+
+// TestAssembleRequirementBranches_OwnerOnlyUnderMN pins product call P2: with
+// ADR-044 Stories present, plan-level assembly merges only OWNER branches (one
+// per Story) — never the empty non-owner branches — ordered by the resolved
+// branch-derivation union (story.B depends on story.A => a1 before b1).
+func TestAssembleRequirementBranches_OwnerOnlyUnderMN(t *testing.T) {
+	stub := newStubMergeBranchesServer(t, http.StatusOK, map[string]any{
+		"status":        "merged",
+		"target":        "semspec/plan-mn",
+		"merge_commits": []map[string]string{},
+	})
+	c := newTestComponentWithSandbox(t, stub.server.URL)
+
+	plan := &workflow.Plan{
+		Slug: "mn",
+		Requirements: []workflow.Requirement{
+			{ID: "a1"}, {ID: "a2"}, {ID: "b1"}, {ID: "b2"},
+		},
+		Stories: []workflow.Story{
+			{ID: "story.A", RequirementIDs: []string{"a1", "a2"}},
+			{ID: "story.B", RequirementIDs: []string{"b1", "b2"}, DependsOn: []string{"story.A"}},
+		},
+	}
+
+	if err := c.assembleRequirementBranches(context.Background(), plan); err != nil {
+		t.Fatalf("assembleRequirementBranches: unexpected error: %v", err)
+	}
+
+	// Owners are a1 and b1; a2/b2 are non-owner covered reqs (empty branches)
+	// and must NOT be merged. b1 derives from a1 => a1 first.
+	want := []string{"semspec/requirement-a1", "semspec/requirement-b1"}
+	if !reflect.DeepEqual(stub.gotRequest.Branches, want) {
+		t.Errorf("merged branches = %v, want owner-only ordered %v", stub.gotRequest.Branches, want)
+	}
 }
 
 func TestAssembleRequirementBranches_Success(t *testing.T) {
@@ -180,6 +216,38 @@ func TestAssembleRequirementBranches_ConflictErrorIsWrapped(t *testing.T) {
 	}
 }
 
+// TestAssembleRequirementBranches_ConflictNamesPath pins slice 4a: the
+// conflicting shared file(s) the sandbox surfaced must appear in the error so
+// the recovery / terminal diagnostic names exactly which file two parallel
+// requirements collided on (the planning-partition signal), not just "merge
+// failed".
+func TestAssembleRequirementBranches_ConflictNamesPath(t *testing.T) {
+	stub := newStubMergeBranchesServer(t, http.StatusConflict, map[string]any{
+		"status":             "conflict",
+		"target":             "semspec/plan-demo",
+		"conflicting_branch": "semspec/requirement-r2",
+		"conflicting_paths":  []string{"README.md"},
+	})
+	c := newTestComponentWithSandbox(t, stub.server.URL)
+	plan := &workflow.Plan{
+		Slug: "demo",
+		Requirements: []workflow.Requirement{
+			{ID: "r1"},
+			{ID: "r2"},
+		},
+	}
+	err := c.assembleRequirementBranches(context.Background(), plan)
+	if err == nil {
+		t.Fatal("expected conflict error, got nil")
+	}
+	if !errors.Is(err, sandbox.ErrMergeBranchesConflict) {
+		t.Errorf("error must errors.Is ErrMergeBranchesConflict; got %v", err)
+	}
+	if msg := err.Error(); !contains(msg, "README.md") {
+		t.Errorf("error should name the conflicting path README.md; got %q", msg)
+	}
+}
+
 func TestAssembleRequirementBranches_Conflict(t *testing.T) {
 	stub := newStubMergeBranchesServer(t, http.StatusConflict, map[string]any{
 		"status":             "conflict",
@@ -256,10 +324,12 @@ func TestAssembleRequirementBranches_NoRequirements(t *testing.T) {
 	// response would have produced an error above.
 }
 
-// TestPruneRequirementBranches_DeletesPerRequirement verifies invariant D3:
-// after a plan archives, every semspec/requirement-<id> branch is deleted
-// so branch lists stay tidy across plan cycles. The AssembledBranch is not
-// in the plan.Requirements slice so is implicitly preserved.
+// TestPruneRequirementBranches_DeletesPerRequirement verifies invariant D3 +
+// design §6: after a plan archives, every per-requirement work branch is
+// deleted — both semspec/requirement-<id> AND the semspec/reqbase-<id>
+// derivation base (attempted for every req; 404 is benign when no reqbase was
+// built) — so branch lists stay tidy across plan cycles. The AssembledBranch is
+// not in the plan.Requirements slice so is implicitly preserved.
 func TestPruneRequirementBranches_DeletesPerRequirement(t *testing.T) {
 	var deleted []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -287,7 +357,12 @@ func TestPruneRequirementBranches_DeletesPerRequirement(t *testing.T) {
 
 	c.pruneRequirementBranches(context.Background(), plan)
 
-	want := []string{"semspec/requirement-r1", "semspec/requirement-r2", "semspec/requirement-r3"}
+	// Per requirement, prune attempts the work branch then its reqbase base.
+	want := []string{
+		"semspec/requirement-r1", "semspec/reqbase-r1",
+		"semspec/requirement-r2", "semspec/reqbase-r2",
+		"semspec/requirement-r3", "semspec/reqbase-r3",
+	}
 	if len(deleted) != len(want) {
 		t.Fatalf("deleted = %v, want %v", deleted, want)
 	}

@@ -29,6 +29,14 @@ type Config struct {
 	// MaxConcurrent limits parallel scenario executions triggered per cycle.
 	MaxConcurrent int `json:"max_concurrent" schema:"type:int,description:Maximum parallel scenario executions per cycle,category:advanced,default:5,min:1,max:20"`
 
+	// SandboxURL is the base URL of the sandbox server. When set, the
+	// orchestrator resolves each dispatched requirement's branch-derivation base
+	// (DependsOn-driven): for a requirement with >1 prerequisite it merges the
+	// prerequisite owner branches into a per-requirement "semspec/reqbase-<id>"
+	// branch so the executor forks from one ready ref. Empty in tests / when
+	// branch derivation is delegated to the plan base.
+	SandboxURL string `json:"sandbox_url" schema:"type:string,description:Sandbox server URL for branch-derivation base resolution,category:advanced"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

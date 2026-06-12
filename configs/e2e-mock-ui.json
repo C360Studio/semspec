@@ -591,7 +591,8 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
-        "execution_timeout": "120s"
+        "execution_timeout": "120s",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "question-manager": {
