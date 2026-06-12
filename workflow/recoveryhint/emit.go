@@ -2,13 +2,12 @@ package recoveryhint
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 
 	"github.com/c360studio/semstreams/message"
 
 	"github.com/c360studio/semspec/vocabulary/observability"
+	"github.com/c360studio/semspec/workflow"
 )
 
 // RecoveryContext carries the per-call context that distinguishes
@@ -35,9 +34,10 @@ type RecoveryEvent struct {
 
 // RecoveryIncidentEntityType is the message.Type for tool-recovery-incident
 // entities. Domain "tool-recovery-incident" names the entity class (the incident
-// node IDs are `<call_id>.tool-recovery.<tool>.<hash>`). Kept local to avoid
-// touching workflow/entity.go while nearby slices are editing it (issue #154); a
-// future pass may register it in workflowEntityTypes for parity with LessonEntityType.
+// node IDs are the canonical 6-part form `org.platform.obs.recovery.incident.<hash>`).
+// Kept local to avoid touching workflow/entity.go while nearby slices are editing
+// it (issue #154); a future pass may register it in workflowEntityTypes for parity
+// with LessonEntityType.
 var RecoveryIncidentEntityType = message.Type{
 	Domain:   "tool-recovery-incident",
 	Category: "entity",
@@ -62,18 +62,18 @@ type tripleWriter interface {
 // node attribute so the linkage to the agentic loop is preserved even
 // though the loop entity has no ENTITY_STATES graph node.
 //
-// Incident node IDs are deterministic — the suffix is a SHA-256 of
-// the OriginalQuery so retry replays of the same loop on the same
-// failed query produce idempotent SKG state. This matters more here
-// than for parse incidents because a single loop can trigger many
-// recoveries on different IDs (today's wedge: 28 occurrences in one
-// loop), so a checkpoint-style fixed suffix would collide.
+// Incident node IDs are deterministic — the instance segment is
+// HashInstanceID(CallID, ToolName, OriginalQuery), so retry replays of
+// the same loop on the same failed query produce idempotent SKG state.
+// This matters more here than for parse incidents because a single loop
+// can trigger many recoveries on different IDs (today's wedge: 28
+// occurrences in one loop), and folding the query into the hash keeps
+// each distinct query a distinct ID rather than colliding.
 //
-// Separator is `.` (period) because NATS KV keys allow only
-// [a-zA-Z0-9_-./=]. The original `:` choice shipped alongside
-// parseincident.Emit and was caught on first real-LLM run when
-// graph-ingest CAS writes failed with "invalid key". See
-// parseincident.Emit godoc for the cross-cutting rationale.
+// The ID is the canonical 6-part entity ID
+// (org.platform.obs.recovery.incident.<hash>) so it passes
+// Component.validateEntityID and survives graph-ingest CAS writes. The
+// earlier hand-rolled 4-part form failed validation on every emit.
 func Emit(ctx context.Context, tw tripleWriter, rc RecoveryContext, re RecoveryEvent) (string, error) {
 	if tw == nil {
 		return "", nil
@@ -88,8 +88,16 @@ func Emit(ctx context.Context, tw tripleWriter, rc RecoveryContext, re RecoveryE
 		return "", fmt.Errorf("recoveryhint: ToolName required")
 	}
 
-	hash := sha256.Sum256([]byte(re.OriginalQuery))
-	incidentID := fmt.Sprintf("%s.tool-recovery.%s.%s", rc.CallID, rc.ToolName, hex.EncodeToString(hash[:8]))
+	// Canonical 6-part entity ID: org.platform.obs.recovery.incident.<instance>.
+	// Parts 1-5 are fixed; the dot-free instance segment hashes (CallID,
+	// ToolName, OriginalQuery) so retry replays of the same loop on the same
+	// failed query produce idempotent SKG state while distinct queries within a
+	// single loop get distinct IDs (a wedge can trigger many recoveries on
+	// different IDs). CallID/ToolName/query stay queryable as triples (below),
+	// not as ID segments — per the entity-ID convention (logical IDs as triples).
+	// The pre-2026-06 form `<call_id>.tool-recovery.<tool>.<hash>` was only 4
+	// parts and failed Component.validateEntityID on every emit.
+	incidentID := fmt.Sprintf("%s.obs.recovery.incident.%s", workflow.EntityPrefix(), workflow.HashInstanceID(rc.CallID, rc.ToolName, re.OriginalQuery))
 
 	triples := buildIncidentTriples(incidentID, rc, re)
 	if err := tw.UpsertEntity(ctx, RecoveryIncidentEntityType, incidentID, triples); err != nil {
