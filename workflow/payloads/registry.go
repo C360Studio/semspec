@@ -72,8 +72,8 @@ func registerRequestPayloads(reg *payloadregistry.Registry) error {
 		{GitHubPRCreatedEventType, "GitHub PR created event", func() any { return &GitHubPRCreatedEvent{} }},
 		{GitHubPRFeedbackRequestType, "GitHub PR feedback request from review", func() any { return &GitHubPRFeedbackRequest{} }},
 		// QA phase payloads
-		{QARequestedType, "QA execution request dispatched to sandbox (unit) or qa-runner (integration/full)", func() any { return &QARequestedPayload{} }},
-		{QACompletedType, "QA execution result event published by sandbox or qa-runner", func() any { return &QACompletedPayload{} }},
+		{QARequestedType, "QA execution request dispatched to sandbox (unit); integration/full run in the operator's CI via the emitted qa.yml", func() any { return &QARequestedPayload{} }},
+		{QACompletedType, "QA execution result event published by the sandbox (unit) or operator's CI (integration/full)", func() any { return &QACompletedPayload{} }},
 		// Lesson decomposition (ADR-033 Phase 2+)
 		{LessonDecomposeRequestedType, "Reviewer rejection signalled to lesson-decomposer for evidence-cited lesson production", func() any { return &LessonDecomposeRequested{} }},
 		// Wedge recovery (ADR-037 stage 1)

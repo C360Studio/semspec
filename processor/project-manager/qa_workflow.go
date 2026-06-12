@@ -20,9 +20,9 @@ import (
 // Called from:
 //   - processor/project-manager HTTP /init: at project initialization.
 //   - processor/plan-manager.publishQARequestIfNeeded: just before
-//     publishing a QARequestedEvent so qa-runner finds the workflow even
-//     when the project was hand-authored (e2e fixtures) rather than
-//     init-ed via project-manager.
+//     publishing a QARequestedEvent so the operator's CI finds the
+//     workflow even when the project was hand-authored (e2e fixtures)
+//     rather than init-ed via project-manager.
 func EnsureQAWorkflow(workspacePath string, projectConfig *workflow.ProjectConfig, logger Logger) error {
 	workflowPath := filepath.Join(workspacePath, ".github", "workflows", "qa.yml")
 	if fileExists(workflowPath) {
@@ -57,16 +57,15 @@ type Logger interface {
 // most build tools available, so the wrong language template at worst
 // produces a "no tests found" rather than a hard fail).
 //
-// All variants emit two jobs: `integration` (run at qa_level=integration
-// AND qa_level=full) and `e2e` (run at qa_level=full only via the
-// absence of --job filter). qa-runner uses --job integration at
-// qa_level=integration to skip the e2e job for faster feedback.
+// All variants emit two jobs: `integration` and `e2e`. These jobs are
+// executed by the operator's CI (e.g. GitHub Actions), not by semspec.
+// Semspec only emits this file; the operator's CI runs it (ADR-045).
 //
 // Note: harness profiles split into three orchestration types (see
 // prompt/domain/software_render.go:harnessProfilesIntro and ADR-039):
-//   - services: qa-runner renders services: blocks into qa.yml from
+//   - services: plan-manager renders services: blocks into qa.yml from
 //     the catalog (images/ports/env/readiness). Tests are consumers
-//     that read the endpoint from the env qa-runner injects.
+//     that read the endpoint from the env the operator's CI injects.
 //   - testcontainers: dev's test code spins up containers via the
 //     Testcontainers library, which uses the docker socket act mounts
 //     into runner containers. No qa.yml-level services: needed.
@@ -283,25 +282,22 @@ func goQAWorkflow(pc *workflow.ProjectConfig) string {
 	cmd := testCommand(pc, "go test ./... -tags=integration -v")
 	return fmt.Sprintf(`name: QA
 # Default QA workflow scaffolded by semspec project-manager.
+# Run by YOUR CI (e.g. GitHub Actions) — semspec emits this file but
+# does not execute it (ADR-045).
 #
 # Two jobs:
-#   - integration: run at qa_level=integration and qa_level=full
-#   - e2e:        run at qa_level=full (Playwright browser flows)
-#
-# qa-runner invokes this file via nektos/act, passing --job integration at
-# qa_level=integration so the e2e job is skipped for faster feedback. At
-# qa_level=full act runs the full workflow, exercising both jobs.
+#   - integration: tagged integration tests, run by your CI
+#   - e2e:         Playwright browser flows, run by your CI
 #
 # Harness profiles split into three orchestration types (ADR-039):
-#   - services: qa-runner renders services: blocks into this file from
+#   - services: plan-manager renders services: blocks into this file from
 #     the catalog (e.g. PX4 SITL via mavlink.px4-sitl.mavsdk-smoke).
-#     Tests are consumers; they read the endpoint from the env qa-runner
+#     Tests are consumers; they read the endpoint from the env your CI
 #     injects, never start the service themselves.
 #   - testcontainers: tests spawn containers via the Testcontainers
 #     library (uses the docker socket act mounts into runner containers).
 #   - pure-fixture: tests hold the fixture directly.
-# qa-runner, act, and GitHub-hosted runners all execute the same rendered
-# file — services-class blocks come from plan-manager rendering the
+# Services-class blocks come from plan-manager rendering the
 # architecture's harness_profiles[]; testcontainers and pure-fixture stay
 # in the project test suite.
 on: [push, pull_request]

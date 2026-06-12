@@ -137,8 +137,8 @@ plan at creation so policy changes don't retroactively affect in-flight work.
 | `none` | — | No QA gate; plan goes straight to `complete` | Doc-only hotfixes |
 | `synthesis` | qa-reviewer only | LLM verdict on plan artifacts, no test execution | Default; fast, content-based check |
 | `unit` | sandbox | `go test ./...` (or language default) against the merged worktree | Most projects |
-| `integration` | qa-runner + `act` | `.github/workflows/qa.yml` job `integration` — tagged integration tests against real service dependencies. Per ADR-039 the catalog `services`-class profiles render as qa.yml `services:` blocks brought up by qa-runner; `testcontainers` and `pure-fixture` profiles are started by the test code itself. | Projects with integration suites |
-| `full` | qa-runner + `act` | Both `integration` + `e2e` jobs — adds Playwright browser flows | Projects with UI + browser tests |
+| `integration` | operator's CI | `.github/workflows/qa.yml` job `integration` — tagged integration tests against real service dependencies. Per ADR-039 the catalog `services`-class profiles render as qa.yml `services:` blocks; the operator's CI brings the stack up. `testcontainers` and `pure-fixture` profiles are started by the test code itself. Semspec emits the qa.yml; it does not execute it (ADR-045). Values of `integration` in `qa_level` are coerced to `synthesis` at runtime. | Projects with integration suites (operator-CI-only) |
+| `full` | operator's CI | Both `integration` + `e2e` jobs — adds Playwright browser flows. Semspec emits the qa.yml; the operator's CI executes it (ADR-045). Values of `full` in `qa_level` are coerced to `synthesis` at runtime. | Projects with UI + browser tests (operator-CI-only) |
 
 **MVP scope:** use `synthesis` for hard-scenario demos unless the project already owns a reliable integration command.
 Scenario tags and harness profile IDs remain planning/review metadata, but semspec-managed harness routing and full/e2e
@@ -164,11 +164,9 @@ curl -X PATCH http://localhost:8080/project-manager/config \
 ```
 
 **Sandbox** (level=unit) runs the project's native test command in the same
-container semspec uses for per-task structural validation. **qa-runner**
-(level=integration/full) invokes nektos/act against `.github/workflows/qa.yml`
-using the host Docker daemon via a mounted socket — tests run in real GitHub
-Actions runner images (catthehacker/ubuntu:act-latest). The qa.yml template is
-scaffolded by `POST /project-manager/init` when missing.
+container semspec uses for per-task structural validation. The qa.yml template is
+scaffolded by `POST /project-manager/init` when missing, for the operator's CI
+to consume. Semspec does not execute `qa.yml` itself (ADR-045).
 
 Catalog-backed **test environment profiles** split into three orchestration
 types (`harnesscatalog.Profile.Orchestration` in code, per ADR-039):
@@ -176,9 +174,9 @@ types (`harnesscatalog.Profile.Orchestration` in code, per ADR-039):
 - **`services`** — heavy or persistent integration peers (e.g. PX4 SITL via
   `mavlink.px4-sitl.mavsdk-smoke`). Plan-manager renders `services:` blocks
   into qa.yml from the catalog entry's `images`, `ports`, `env`, and
-  `readiness` fields. qa-runner brings the stack up; **tests are consumers**
-  that read the endpoint from the env qa-runner injects and never start the
-  service themselves.
+  `readiness` fields. The operator's CI brings the stack up; **tests are
+  consumers** that read the endpoint from the env the CI injects and never
+  start the service themselves.
 - **`testcontainers`** — lightweight per-test fixtures the test code spins
   up via the Testcontainers library (uses the docker socket act mounts into
   runner containers). No qa.yml-level `services:` blocks needed.

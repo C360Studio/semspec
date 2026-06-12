@@ -16,9 +16,9 @@ import (
 // selections, operator opt-out, catalog load failure) so the caller writes
 // the language-aware scaffold instead.
 //
-// Render failures log a warning and return false — qa-runner will surface a
-// clearer error against whichever qa.yml is on disk than a silent partial
-// write would.
+// Render failures log a warning and return false — the operator's CI will
+// surface a clearer error against whichever qa.yml is on disk than a silent
+// partial write would.
 func (c *Component) maybeRenderQAWithServices(plan *workflow.Plan, pc *workflow.ProjectConfig) bool {
 	if plan == nil || plan.Architecture == nil || len(plan.Architecture.HarnessProfiles) == 0 {
 		return false
