@@ -1,6 +1,6 @@
 # QA Gate Data-Plane Fix — Implementation Design
 
-Status: Phase A IMPLEMENTED (branch fix/qa-data-plane-assemble-before-qa); Phase B pending
+Status: Phase A + Phase B IMPLEMENTED (branch fix/qa-data-plane-assemble-before-qa, commits 5416bfba + 3183a3be). Remaining: e2e regression scenario (depends on #151 mock-coder fixture) + stale qa-runner doc cleanup.
 Author: architect
 Scope: `processor/plan-manager`, `processor/qa-reviewer`, `processor/requirement-executor`, `cmd/sandbox`, `workflow`
 Related: ADR-045 (BMAD story gate + operator-executed tiers), `docs/audit/task-11-worktree-invariants.md` (invariant B1), CLAUDE.md (3-layer manager pattern, plan-manager single-writer)
