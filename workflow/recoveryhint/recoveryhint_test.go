@@ -10,6 +10,7 @@ import (
 	"github.com/c360studio/semstreams/message"
 
 	"github.com/c360studio/semspec/vocabulary/observability"
+	"github.com/c360studio/semspec/workflow"
 )
 
 // natsKVKeyPattern matches the character set NATS JetStream KV
@@ -150,7 +151,7 @@ func TestBuildIncidentTriples_FullAttributeSet(t *testing.T) {
 		OriginalQuery: `{ entity(id: "semspec.semsource.code.workspace.file.main-go") }`,
 		Candidates:    []string{"semspec.semsource.golang.workspace.file.main-go", "semspec.semsource.code.workspace.folder.internal-auth"},
 	}
-	incidentID := "loop-build.tool-recovery.graph_query.deadbeef"
+	incidentID := "semspec.local.obs.recovery.incident.deadbeefcafe0001"
 
 	triples := buildIncidentTriples(incidentID, rc, re)
 
@@ -220,7 +221,7 @@ func TestBuildIncidentTriples_FullAttributeSet(t *testing.T) {
 func TestBuildIncidentTriples_OptionalAbsentWhenEmpty(t *testing.T) {
 	rc := RecoveryContext{CallID: "loop-min", ToolName: "graph_query"} // Role/Model empty
 	re := RecoveryEvent{Outcome: observability.ToolRecoveryOutcomeNotSuggested}
-	incidentID := "loop-min.tool-recovery.graph_query.00000000"
+	incidentID := "semspec.local.obs.recovery.incident.0000000000000000"
 
 	triples := buildIncidentTriples(incidentID, rc, re)
 
@@ -346,9 +347,11 @@ func TestEmit_Suggested_FullTripleSet(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Deterministic ID shape.
-	if !strings.HasPrefix(id, "loop-rec.tool-recovery.graph_query.") {
-		t.Errorf("incident ID prefix wrong: %q", id)
+	// Deterministic ID shape — canonical 6-part entity ID
+	// (org.platform.obs.recovery.incident.<hash>).
+	wantPrefix := workflow.EntityPrefix() + ".obs.recovery.incident."
+	if !strings.HasPrefix(id, wantPrefix) {
+		t.Errorf("incident ID prefix = %q, want prefix %q", id, wantPrefix)
 	}
 	// NATS KV key safety — see natsKVKeyPattern godoc.
 	if !natsKVKeyPattern.MatchString(id) {
