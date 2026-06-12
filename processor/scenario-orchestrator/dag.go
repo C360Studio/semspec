@@ -1,8 +1,6 @@
 package scenarioorchestrator
 
 import (
-	"sort"
-
 	"github.com/c360studio/semspec/workflow"
 )
 
@@ -115,7 +113,7 @@ func filterByM2NStoryReservations(ready []workflow.Requirement, stories []workfl
 	for _, req := range ready {
 		gated := false
 		for _, s := range storiesByReq[req.ID] {
-			if storyOwner(s) == req.ID {
+			if workflow.DeterministicStoryOwner(s) == req.ID {
 				continue // we own this Story — dispatch normally
 			}
 			if s.Status == workflow.StoryStatusComplete {
@@ -130,19 +128,6 @@ func filterByM2NStoryReservations(ready []workflow.Requirement, stories []workfl
 		}
 	}
 	return out
-}
-
-// storyOwner returns the deterministic "owning" requirement ID for a Story
-// under the ADR-044 M:N reservation pattern. The lexicographically smallest
-// req ID in Story.RequirementIDs wins. Stable across re-evaluations so the
-// owner picked on one orchestration sweep is the same on the next.
-func storyOwner(s workflow.Story) string {
-	if len(s.RequirementIDs) == 0 {
-		return ""
-	}
-	ids := append([]string(nil), s.RequirementIDs...)
-	sort.Strings(ids)
-	return ids[0]
 }
 
 // depsComplete returns true when every requirement listed in req.DependsOn is

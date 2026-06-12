@@ -42,6 +42,18 @@ func ValidateSlug(slug string) error {
 	return nil
 }
 
+// QAWorktreeID returns the deterministic sandbox task_id of the per-plan QA
+// worktree — a throwaway checkout of the assembled plan branch
+// ("semspec/plan-<slug>") that both the unit-test runner and the release-gate
+// Murat loop inspect, so QA evaluates the merged implementation rather than the
+// pre-implementation main HEAD. Determinism lets plan-manager (creator),
+// qa-reviewer (release loop), and the sandbox unit runner converge on the same
+// worktree without extra plumbing. The slug is already path-safe (ValidateSlug),
+// so the "qa-" prefix yields a safe task_id token.
+func QAWorktreeID(slug string) string {
+	return "qa-" + slug
+}
+
 // CreatePlan creates a new plan in draft mode (Approved=false).
 // Plans are created in the default project at .semspec/projects/default/plans/{slug}/.
 func CreatePlan(ctx context.Context, tw *graphutil.TripleWriter, slug, title string) (*Plan, error) {

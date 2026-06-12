@@ -521,6 +521,19 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 	// in execution-manager for rationale.
 	qaTools := prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer)
 
+	// Point Murat's bash inspection at the per-plan QA worktree (a checkout of
+	// the assembled plan branch holding the merged per-requirement
+	// implementation), staged by plan-manager at convergence and ensured at
+	// review start. Fall back to the repo root ("main") only when there is no
+	// assembled branch — a plan that reached review before the assemble-before-QA
+	// path existed. Gating on AssembledBranch avoids a 404 storm: the sandbox's
+	// exec endpoint hard-fails every command when a named worktree is absent,
+	// unlike the unit runner which degrades gracefully.
+	qaTaskID := "main"
+	if plan.AssembledBranch != "" {
+		qaTaskID = workflow.QAWorktreeID(plan.Slug)
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID: taskID,
 		Role:   agentic.RoleReviewer,
@@ -546,7 +559,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 		Metadata: map[string]any{
 			"plan_slug":        plan.Slug,
 			"qa_level":         string(plan.EffectiveQALevel()),
-			"task_id":          "main",
+			"task_id":          qaTaskID,
 			"deliverable_type": "qa-review",
 			// role + model for SKG tool.recovery.incident partitioning.
 			"role":  string(prompt.RoleQA),

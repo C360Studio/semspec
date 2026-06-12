@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 // TestResumeTerminalForRecoveryLocked covers the new branch added 2026-05-28
@@ -88,4 +90,53 @@ func TestResumeTerminalForRecoveryLocked_RecordsReasonBeforeResume(t *testing.T)
 	if gotReason != want {
 		t.Errorf("recoveryReason after resume = %q, want %q", gotReason, want)
 	}
+}
+
+// TestStoriesToReopenForRecovery pins the M:N owner/complete gating: a
+// QA-recovery resume reopens only the Stories the requirement OWNS and that are
+// currently complete. Reopening a non-owned Story would invert the M:N
+// reservation (a non-owner would run the dev loop); reopening a non-complete
+// Story is meaningless.
+func TestStoriesToReopenForRecovery(t *testing.T) {
+	plan := &workflow.Plan{Stories: []workflow.Story{
+		// owner = r1 (smallest), complete → reopen candidate for r1
+		{ID: "s1", Status: workflow.StoryStatusComplete, RequirementIDs: []string{"r1", "r2"}},
+		// owner = r2, complete → reopen candidate for r2 only
+		{ID: "s2", Status: workflow.StoryStatusComplete, RequirementIDs: []string{"r2", "r3"}},
+		// owner = r1 but NOT complete → never a reopen candidate
+		{ID: "s3", Status: workflow.StoryStatusExecuting, RequirementIDs: []string{"r1"}},
+	}}
+
+	tests := []struct {
+		name  string
+		plan  *workflow.Plan
+		reqID string
+		want  []string
+	}{
+		{"owner_complete_reopens", plan, "r1", []string{"s1"}},
+		{"non_owner_excluded", plan, "r2", []string{"s2"}}, // r2 covers s1 but doesn't own it
+		{"covers_but_not_owner", plan, "r3", nil},          // r3 covers s2 but r2 owns it
+		{"nil_plan", nil, "r1", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := storiesToReopenForRecovery(tt.plan, tt.reqID)
+			if !equalStringSlices(got, tt.want) {
+				t.Errorf("storiesToReopenForRecovery(%q) = %v, want %v", tt.reqID, got, tt.want)
+			}
+		})
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

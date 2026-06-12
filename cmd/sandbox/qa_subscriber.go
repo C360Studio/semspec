@@ -149,6 +149,22 @@ func (h *qaHandler) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"passed", completed.Passed, "duration_ms", completed.DurationMs)
 }
 
+// selectQAWorkDir resolves the directory the unit test command runs in: the
+// dedicated QA worktree when plan-manager created one and it resolves, else the
+// repo root. resolve mirrors Server.worktreeFor — it returns "" when the
+// worktree is absent. fellBack is true only when a workspace was requested but
+// could not be resolved (the caller WARN-logs so the regression to the unmerged
+// baseline is visible rather than silent).
+func selectQAWorkDir(repoPath, workspace string, resolve func(string) string) (dir string, fellBack bool) {
+	if workspace == "" {
+		return repoPath, false
+	}
+	if wt := resolve(workspace); wt != "" {
+		return wt, false
+	}
+	return repoPath, true
+}
+
 // runUnitQA executes the test command and assembles the QACompletedEvent.
 func (h *qaHandler) runUnitQA(
 	ctx context.Context,
@@ -182,9 +198,17 @@ func (h *qaHandler) runUnitQA(
 		}
 	}
 
-	// Run the test command from the workspace root (repoPath).
+	// Run the test command in the QA worktree (a checkout of the assembled plan
+	// branch, holding the merged per-requirement implementation) when plan-manager
+	// provided one; otherwise fall back to the repo root. Without this, unit QA
+	// runs against the pre-implementation main HEAD and is meaningless.
+	workDir, fellBack := selectQAWorkDir(h.srv.repoPath, evt.Workspace, h.srv.worktreeFor)
+	if fellBack {
+		h.logger.Warn("QA worktree not found — running unit tests against repo root (may be the unmerged baseline)",
+			"slug", evt.Slug, "workspace", evt.Workspace)
+	}
 	stdout, stderr, exitCode, timedOut := execCommand(
-		ctx, h.srv.repoPath, evt.TestCommand, timeout, h.srv.maxOutputBytes)
+		ctx, workDir, evt.TestCommand, timeout, h.srv.maxOutputBytes)
 
 	combined := stdout
 	if stderr != "" {

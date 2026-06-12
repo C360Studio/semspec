@@ -1275,6 +1275,11 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
+	// Cold-path safety net: guarantee the QA worktree (staged at convergence)
+	// exists before qa-reviewer dispatches Murat, so the release-gate loop
+	// inspects the assembled implementation rather than the repo root.
+	c.ensureQAWorktree(ctx, plan)
+
 	level := plan.EffectiveQALevel()
 	c.logger.Info("QA review started",
 		"slug", req.Slug, "level", level, "has_qa_run", req.QARun != nil)
@@ -1409,31 +1414,41 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
-	// Fire phase-local recovery for non-approved verdicts. Mirrors the
-	// revision-cap-exhaustion path at handleRevisionEscalationMutation —
-	// every other wedge-shaped state transition published RecoveryRequested
-	// except this one until 2026-05-28 (verified on the gemini mavlink-
-	// decode run where qa-reviewer correctly diagnosed flaky time.Sleep
-	// timing but the plan terminated at rejected with no retry).
-	//
-	// EscalationReason carries the verdict kind so recovery-agent's prompt
-	// can distinguish "the tests failed and we should try again" from
-	// "the plan is structurally unsalvageable." LastFailureFeedback carries
-	// the qa-reviewer's actionable summary so the recovery agent sees the
-	// concrete diagnosis (e.g., "replace time.Sleep with active polling").
-	if req.Verdict == workflow.QAVerdictNeedsChanges || req.Verdict == workflow.QAVerdictRejected {
-		c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
-			RecoveryID:             uuid.New().String(),
-			Layer:                  payloads.RecoveryLayerPhaseLocal,
-			Slug:                   req.Slug,
-			EscalationReason:       fmt.Sprintf("QA verdict %s at level %s", req.Verdict, req.Level),
-			LastFailureFeedback:    req.Summary,
-			TraceID:                req.TraceID,
-			AffectedRequirementIDs: c.collectActiveRequirementIDsForRecovery(plan, req.Verdict),
-		})
-	}
+	// The plan has left the QA gate (approved → complete/awaiting_review, or
+	// rejected → recovery). Drop the per-plan QA worktree; a recovery re-run
+	// re-stages a fresh one at the next convergence. Best-effort.
+	c.deleteQAWorktree(ctx, req.Slug)
+
+	c.fireQAVerdictRecovery(ctx, plan, req)
 
 	return MutationResponse{Success: true}
+}
+
+// fireQAVerdictRecovery emits phase-local RecoveryRequested for non-approved QA
+// verdicts. Mirrors the revision-cap-exhaustion path at
+// handleRevisionEscalationMutation — every other wedge-shaped state transition
+// published RecoveryRequested except this one until 2026-05-28 (verified on the
+// gemini mavlink-decode run where qa-reviewer correctly diagnosed flaky
+// time.Sleep timing but the plan terminated at rejected with no retry).
+//
+// EscalationReason carries the verdict kind so recovery-agent's prompt can
+// distinguish "the tests failed and we should try again" from "the plan is
+// structurally unsalvageable." LastFailureFeedback carries the qa-reviewer's
+// actionable summary so the recovery agent sees the concrete diagnosis (e.g.,
+// "replace time.Sleep with active polling"). No-op for approved verdicts.
+func (c *Component) fireQAVerdictRecovery(ctx context.Context, plan *workflow.Plan, req workflow.QAVerdictEvent) {
+	if req.Verdict != workflow.QAVerdictNeedsChanges && req.Verdict != workflow.QAVerdictRejected {
+		return
+	}
+	c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
+		RecoveryID:             uuid.New().String(),
+		Layer:                  payloads.RecoveryLayerPhaseLocal,
+		Slug:                   req.Slug,
+		EscalationReason:       fmt.Sprintf("QA verdict %s at level %s", req.Verdict, req.Level),
+		LastFailureFeedback:    req.Summary,
+		TraceID:                req.TraceID,
+		AffectedRequirementIDs: c.collectActiveRequirementIDsForRecovery(plan, req.Verdict),
+	})
 }
 
 // handleReviewApproveMutation handles plan.mutation.review.approve — transitions

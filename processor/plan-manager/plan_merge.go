@@ -92,6 +92,94 @@ func (c *Component) assembleRequirementBranches(ctx context.Context, plan *workf
 	return nil
 }
 
+// assembleAndStageQAWorktree merges the completed requirement branches into the
+// plan branch (invariant B1) and stages a fresh QA worktree checked out from it.
+// Both downstream QA paths — the sandbox unit-test runner and the release-gate
+// Murat loop — address that worktree by its deterministic id (QAWorktreeID), so
+// QA evaluates the merged implementation rather than the pre-implementation main
+// HEAD. Called at implementing convergence BEFORE the plan advances to
+// ready_for_qa.
+//
+// Idempotent for recovery re-convergence: assembleRequirementBranches uses
+// `checkout -B`, and the worktree is delete-then-create so it always reflects
+// the freshly assembled branch (a stale worktree would point at the prior
+// commit). Returns the underlying error unwrapped so the caller can
+// errors.Is-match sandbox.ErrMergeBranchesConflict to route conflicts to
+// recovery. Only the merge step (assembleRequirementBranches) can produce that
+// sentinel; a worktree-staging failure is wrapped as a plain error, so the
+// caller correctly classifies staging failures as infra (stall), not as a
+// planning-scope conflict. A no-op (no AssembledBranch) when there is no sandbox
+// or no requirements — the QA paths then fall back to repoPath, preserving
+// legacy behavior for tests that mock less of the world.
+func (c *Component) assembleAndStageQAWorktree(ctx context.Context, plan *workflow.Plan) error {
+	if err := c.assembleRequirementBranches(ctx, plan); err != nil {
+		return err
+	}
+	if c.sandbox == nil || plan.AssembledBranch == "" {
+		return nil
+	}
+
+	qaID := workflow.QAWorktreeID(plan.Slug)
+	// Best-effort delete first: the sandbox tolerates a missing worktree (returns
+	// success) and removes any stale branch, so this is safe on first convergence
+	// and required on recovery re-convergence to drop the prior commit's checkout.
+	if err := c.sandbox.DeleteWorktree(ctx, qaID); err != nil {
+		c.logger.Debug("Pre-stage QA worktree delete returned error (benign if absent)",
+			"slug", plan.Slug, "worktree", qaID, "error", err)
+	}
+	if _, err := c.sandbox.CreateWorktree(ctx, qaID, sandbox.WithBaseBranch(plan.AssembledBranch)); err != nil {
+		return fmt.Errorf("stage QA worktree %q on %q: %w", qaID, plan.AssembledBranch, err)
+	}
+	c.logger.Info("Staged QA worktree on assembled branch",
+		"slug", plan.Slug, "worktree", qaID, "branch", plan.AssembledBranch)
+	return nil
+}
+
+// ensureQAWorktree guarantees the per-plan QA worktree exists and is checked out
+// from the assembled plan branch, re-staging it if missing. Called when the plan
+// enters active review (ready_for_qa → reviewing_qa) so the release-gate Murat
+// loop's bash inspection lands on the merged implementation even on cold paths
+// where convergence-time staging did not run (e.g. a plan already at
+// ready_for_qa across a deploy). Best-effort: a sandbox failure here degrades QA
+// to the repo root (the sandbox returns 404 for the missing worktree and the
+// loop falls back) rather than blocking the verdict, and is logged. No-op
+// without a sandbox client or an assembled branch.
+func (c *Component) ensureQAWorktree(ctx context.Context, plan *workflow.Plan) {
+	if c.sandbox == nil || plan.AssembledBranch == "" {
+		return
+	}
+	qaID := workflow.QAWorktreeID(plan.Slug)
+	if exists, err := c.sandbox.WorktreeExists(ctx, qaID); err == nil && exists {
+		return
+	}
+	// Best-effort delete before create: the worktree dir is absent (checked
+	// above) but a stale "agent/qa-<slug>" branch may survive from a partial
+	// prune, and `git worktree add -b` fails if the branch already exists. The
+	// delete clears both, so the re-stage can't wedge on a leftover branch.
+	if err := c.sandbox.DeleteWorktree(ctx, qaID); err != nil {
+		c.logger.Debug("QA worktree pre-ensure delete returned error (benign if absent)",
+			"slug", plan.Slug, "worktree", qaID, "error", err)
+	}
+	if _, err := c.sandbox.CreateWorktree(ctx, qaID, sandbox.WithBaseBranch(plan.AssembledBranch)); err != nil {
+		c.logger.Warn("Failed to ensure QA worktree at review start — QA may inspect repo root",
+			"slug", plan.Slug, "worktree", qaID, "branch", plan.AssembledBranch, "error", err)
+	}
+}
+
+// deleteQAWorktree removes the per-plan QA worktree once the plan leaves the QA
+// gate (verdict in, or archive). Best-effort + idempotent: a missing worktree is
+// benign, and a recovery re-run re-stages a fresh one at the next convergence.
+// No-op without a sandbox client.
+func (c *Component) deleteQAWorktree(ctx context.Context, slug string) {
+	if c.sandbox == nil {
+		return
+	}
+	if err := c.sandbox.DeleteWorktree(ctx, workflow.QAWorktreeID(slug)); err != nil {
+		c.logger.Debug("QA worktree cleanup returned error (benign if absent)",
+			"slug", slug, "error", err)
+	}
+}
+
 // pruneRequirementBranches deletes every "semspec/requirement-<id>" branch
 // belonging to the plan. Implements invariant D3 of the Task-11 audit:
 // without explicit pruning, per-requirement branches accumulate across

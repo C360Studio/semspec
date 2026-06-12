@@ -1,6 +1,26 @@
 package workflow
 
-import "time"
+import (
+	"sort"
+	"time"
+)
+
+// DeterministicStoryOwner returns the "owning" requirement ID for a Story under
+// the ADR-044 M:N reservation pattern: the lexicographically smallest req ID in
+// Story.RequirementIDs. Stable across re-evaluations so the owner picked on one
+// sweep is the same on the next. The owner is the sole requirement that runs the
+// dev loop for a Story; non-owners gate behind Story.Status==complete. Shared by
+// the scenario-orchestrator reservation filter and the requirement-executor's
+// QA-recovery story reopen so the two cannot drift. Empty when the Story covers
+// no requirements.
+func DeterministicStoryOwner(s Story) string {
+	if len(s.RequirementIDs) == 0 {
+		return ""
+	}
+	ids := append([]string(nil), s.RequirementIDs...)
+	sort.Strings(ids)
+	return ids[0]
+}
 
 // Story is a Sarah-authored unit of dev-ready work anchored to a single
 // architectural component (ADR-044). Under M:N coverage, a Story covers

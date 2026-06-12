@@ -212,6 +212,13 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 	exec.CurrentNodeTaskID = ""
 	exec.VisitedNodes = make(map[string]bool)
 	exec.NodeResults = nil
+	// Re-run the requirement's Stories from the start on recovery resume. Without
+	// this, a multi-Story requirement keeps a stale CurrentStoryIdx and re-runs
+	// only a subset; clearing SortedStoryIDs makes dispatchSynthesizerLocked
+	// re-derive the story topo order from current plan Stories. Applies to both
+	// QA-recovery (completed req) and iteration-exhaustion resumes.
+	exec.CurrentStoryIdx = 0
+	exec.SortedStoryIDs = nil
 	// KV NodeResults is append-only via handleReqNodeMutation; the in-memory
 	// wipe above must be mirrored to KV or the stale entries reappear on
 	// rebuildExecFromKV after the next restart. Closes Pass-1 H4 for the

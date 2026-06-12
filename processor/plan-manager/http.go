@@ -1077,6 +1077,9 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 		// plan branch (semspec/plan-<slug>) is NOT pruned: it's the
 		// human-reviewable artifact the rest of the audit trail points at.
 		c.pruneRequirementBranches(r.Context(), plan)
+		// Also drop the per-plan QA worktree if one is still staged (e.g. archive
+		// straight from a QA state). Best-effort, same rationale as the prune.
+		c.deleteQAWorktree(r.Context(), slug)
 		c.logger.Info("Plan archived via REST API", "slug", slug)
 	} else {
 		// Hard delete — graph tombstone + cache/KV eviction.
@@ -1089,6 +1092,8 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 			http.Error(w, "Failed to delete plan", http.StatusInternalServerError)
 			return
 		}
+		// Drop any staged QA worktree so a hard delete mid-QA doesn't leak it.
+		c.deleteQAWorktree(r.Context(), slug)
 		c.logger.Info("Plan deleted via REST API", "slug", slug)
 	}
 

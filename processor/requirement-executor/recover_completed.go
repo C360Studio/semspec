@@ -146,7 +146,74 @@ func (c *Component) resumeTerminalForRecoveryLocked(ctx context.Context, exec *r
 		"prior_stage", "terminal",
 		"proposal_id", proposalID,
 	)
+	// Re-open the M:N Stories this requirement owns so the resumed dev loop
+	// re-does work instead of skipping ("Story already complete"). Without this,
+	// QA-recovery on an M:N-complete plan is a no-op: the req re-dispatches, every
+	// Story is skipped, the req re-marks complete, and the plan bounces back to QA
+	// unchanged. Must run BEFORE resumeFromRecoveryLocked so the reset stories are
+	// visible when dispatchSynthesizerLocked reloads the plan from KV.
+	c.reopenOwnedStoriesForRecoveryLocked(ctx, exec)
 	c.resumeFromRecoveryLocked(ctx, exec)
+}
+
+// storiesToReopenForRecovery returns the IDs of complete Stories covering reqID
+// that reqID owns (the deterministic M:N owner). These are the Stories a
+// QA-recovery resume must reset complete → ready so the dev loop re-runs rather
+// than skipping. Non-owned Stories are excluded — resetting one would let a
+// non-owner run the dev loop, inverting the M:N reservation; the non-owner
+// instead re-skips (Story stays complete) and fast-completes via Tier-1 dedup
+// once the owner re-ships. Non-complete Stories are excluded (nothing to
+// re-open). Pure function — the side-effecting reopen lives in
+// reopenOwnedStoriesForRecoveryLocked.
+func storiesToReopenForRecovery(plan *workflow.Plan, reqID string) []string {
+	if plan == nil {
+		return nil
+	}
+	var ids []string
+	for _, s := range plan.StoriesForRequirement(reqID) {
+		if s.Status == workflow.StoryStatusComplete && workflow.DeterministicStoryOwner(s) == reqID {
+			ids = append(ids, s.ID)
+		}
+	}
+	return ids
+}
+
+// reopenOwnedStoriesForRecoveryLocked resets the owner's complete M:N Stories to
+// ready via the cross-component story-status mutation. No-op without a NATS
+// client (unit-test substrate) or when the plan can't be loaded. Idempotent
+// across recovery cycles: candidates are pre-filtered to complete Stories, so a
+// re-run reopens nothing once a Story has already moved on to ready/executing.
+func (c *Component) reopenOwnedStoriesForRecoveryLocked(ctx context.Context, exec *requirementExecution) {
+	if c.natsClient == nil {
+		return
+	}
+	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
+	if err != nil || plan == nil {
+		c.logger.Warn("QA-recovery: could not load plan to reopen owned stories",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID, "error", err)
+		return
+	}
+	ids := storiesToReopenForRecovery(plan, exec.RequirementID)
+	reopened := 0
+	for _, storyID := range ids {
+		if workflow.ClaimStoryStatus(ctx, c.natsClient, exec.Slug, storyID, workflow.StoryStatusReady, c.logger) {
+			reopened++
+		}
+	}
+	switch {
+	case len(ids) > 0 && reopened < len(ids):
+		// A reopen was expected but did not fully land (NATS error or a rejected
+		// mutation). Proceeding lets the un-reopened stories re-skip and the
+		// requirement re-complete without work — silently resurrecting the no-op
+		// this function exists to fix. Surface it so it's diagnosable.
+		c.logger.Warn("QA-recovery: not all owned stories reopened — recovery may be a partial no-op",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"reopened", reopened, "candidates", len(ids))
+	case reopened > 0:
+		c.logger.Info("QA-recovery: reopened owned M:N stories for re-execution",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"reopened", reopened, "candidates", len(ids))
+	}
 }
 
 // isKVNotFound returns true when err is the soft "no entry" shape returned
