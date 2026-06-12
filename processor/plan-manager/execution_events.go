@@ -9,6 +9,7 @@ import (
 	"time"
 
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
@@ -296,31 +297,7 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 
 	// All requirements are terminal.
 	if failedCount == 0 {
-		// Branch on the plan's QA level (snapshotted at plan creation).
-		level := plan.EffectiveQALevel()
-		target := c.targetForQALevel(level, plan, slug)
-
-		c.logger.Info("All requirements completed — transitioning to review",
-			"slug", slug,
-			"completed", completedCount,
-			"qa_level", level,
-			"target", target)
-
-		if err := c.setPlanStatusCached(ctx, plan, target); err != nil {
-			// Safety fallback: route to awaiting_review or complete based on config.
-			c.logger.Warn("Review transition failed, routing based on review gate config",
-				"slug", slug, "error", err)
-			fallback := workflow.StatusComplete
-			if c.shouldGateReview(plan) {
-				fallback = workflow.StatusAwaitingReview
-			}
-			if err := c.setPlanStatusCached(ctx, plan, fallback); err != nil {
-				c.logger.Error("Failed to transition plan", "slug", slug, "target", fallback, "error", err)
-			}
-			return
-		}
-		// If we routed to ready_for_qa, fire the executor dispatch.
-		c.publishQARequestIfNeeded(ctx, plan)
+		c.handleConvergenceAllSucceeded(ctx, plan, slug, completedCount)
 		return
 	}
 
@@ -370,6 +347,101 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 	}
 }
 
+// handleConvergenceAllSucceeded runs the implementing-convergence success arm:
+// all requirements reached terminal-success, so assemble their branches, stage
+// the QA worktree, and advance the plan to its QA target. Split out of
+// checkPlanConvergence to keep each function focused (and under the length cap).
+func (c *Component) handleConvergenceAllSucceeded(ctx context.Context, plan *workflow.Plan, slug string, completedCount int) {
+	// Branch on the plan's QA level (snapshotted at plan creation).
+	level := plan.EffectiveQALevel()
+	target := c.targetForQALevel(level, plan, slug)
+
+	// Assemble the per-requirement branches into the plan branch and stage a
+	// dedicated QA worktree from it BEFORE QA runs, so both the unit-test runner
+	// and the release-gate Murat loop inspect the merged implementation instead
+	// of the pre-implementation main HEAD (the data-plane fix). Only when QA will
+	// actually run (ready_for_qa); the none/gated path goes straight to
+	// complete/awaiting_review and relies on the approve-time assemble. On
+	// conflict/failure we route to recovery or stall and do NOT advance to QA
+	// against an unmerged tree.
+	if target == workflow.StatusReadyForQA {
+		if err := c.assembleAndStageQAWorktree(ctx, plan); err != nil {
+			c.routeAssemblyConflict(ctx, plan, err)
+			return
+		}
+	}
+
+	c.logger.Info("All requirements completed — transitioning to review",
+		"slug", slug,
+		"completed", completedCount,
+		"qa_level", level,
+		"target", target,
+		"assembled_branch", plan.AssembledBranch)
+
+	if err := c.setPlanStatusCached(ctx, plan, target); err != nil {
+		// Safety fallback: route to awaiting_review or complete based on config.
+		c.logger.Warn("Review transition failed, routing based on review gate config",
+			"slug", slug, "error", err)
+		fallback := workflow.StatusComplete
+		if c.shouldGateReview(plan) {
+			fallback = workflow.StatusAwaitingReview
+		}
+		if err := c.setPlanStatusCached(ctx, plan, fallback); err != nil {
+			c.logger.Error("Failed to transition plan", "slug", slug, "target", fallback, "error", err)
+		}
+		return
+	}
+	// If we routed to ready_for_qa, fire the executor dispatch.
+	c.publishQARequestIfNeeded(ctx, plan)
+}
+
+// routeAssemblyConflict handles a failed pre-QA assemble/stage. The plan never
+// advanced out of implementing, so it stays there with a surfaced LastError —
+// we must NOT proceed to QA against an unmerged tree (the exact bug being
+// fixed). A merge conflict (two requirements edited the same file) is a
+// planning-scope problem that architecture_revise / re-partition must resolve,
+// so it fires phase-local recovery (PRODUCT CALL 4a — reuse RecoveryRequested,
+// no new plan status). Any other failure (sandbox unreachable, worktree
+// staging) is a transient stall: surface LastError and bump the SSE revision so
+// the UI shows the stall; an operator retry or the next execution event
+// re-drives convergence. We deliberately do NOT emit a plan-scope recovery for
+// an infra blip.
+func (c *Component) routeAssemblyConflict(ctx context.Context, plan *workflow.Plan, assembleErr error) {
+	// Runs from the EXECUTION_STATES watcher (checkPlanConvergence), which is
+	// lock-free like the sibling stall/infra-critical saves here. The
+	// implementing-status guard keeps the overlap with concurrent qa.start/verdict
+	// mutations narrow; a rare interleave is last-writer-wins on LastError, not
+	// state corruption.
+	now := time.Now()
+	plan.LastError = fmt.Sprintf("pre-QA assembly failed: %v", assembleErr)
+	plan.LastErrorAt = &now
+
+	if saveErr := c.savePlanCached(ctx, plan); saveErr != nil {
+		c.logger.Error("Failed to persist LastError after pre-QA assembly failure",
+			"slug", plan.Slug, "error", saveErr)
+	}
+
+	if errors.Is(assembleErr, sandbox.ErrMergeBranchesConflict) {
+		c.logger.Warn("Pre-QA plan-level merge conflict — firing recovery, plan stays implementing",
+			"slug", plan.Slug, "error", assembleErr)
+		c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
+			RecoveryID:          uuid.New().String(),
+			Layer:               payloads.RecoveryLayerPhaseLocal,
+			Slug:                plan.Slug,
+			EscalationReason:    "plan-level merge conflict assembling requirement branches before QA",
+			LastFailureFeedback: assembleErr.Error(),
+			// There is no QA verdict yet; the verdict arg only affects an
+			// internal warn-log branch (zero active reqs), which can't fire here
+			// since convergence implies active reqs.
+			AffectedRequirementIDs: c.collectActiveRequirementIDsForRecovery(plan, workflow.QAVerdictNeedsChanges),
+		})
+		return
+	}
+
+	c.logger.Error("Pre-QA assembly failed (non-conflict) — plan stalls in implementing pending retry",
+		"slug", plan.Slug, "error", assembleErr)
+}
+
 // publishQARequestIfNeeded fires when a plan is routed to ready_for_qa. For
 // unit-level QA it publishes a QARequestedEvent so the sandbox runs the
 // project's test suite before qa-reviewer interprets. synthesis/none don't
@@ -406,6 +478,7 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 			Slug:        plan.Slug,
 			PlanID:      plan.ID,
 			Mode:        level,
+			Workspace:   workflow.QAWorktreeID(plan.Slug),
 			TestCommand: pc.EffectiveTestCommand(),
 			TraceID:     uuid.New().String(),
 		},

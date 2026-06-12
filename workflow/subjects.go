@@ -114,12 +114,18 @@ type UserSignalErrorEvent struct {
 // straight to reviewing_qa) and level=none skips QA entirely. Heavier tiers
 // run in the operator's CI, not via a semspec executor.
 type QARequestedEvent struct {
-	Slug           string  `json:"slug"`
-	PlanID         string  `json:"plan_id"`
-	Mode           QALevel `json:"mode"`                   // unit (the only sandbox-executed level)
-	TestCommand    string  `json:"test_command,omitempty"` // project-configured command, e.g. "go test ./..."
-	TimeoutSeconds int     `json:"timeout_seconds,omitempty"`
-	TraceID        string  `json:"trace_id,omitempty"`
+	Slug   string  `json:"slug"`
+	PlanID string  `json:"plan_id"`
+	Mode   QALevel `json:"mode"` // unit (the only sandbox-executed level)
+	// Workspace is the sandbox task_id of the per-plan QA worktree (see
+	// QAWorktreeID) — a checkout of the assembled plan branch that holds the
+	// merged per-requirement implementation. The sandbox runs the test command
+	// there so unit QA evaluates real work, not the pre-implementation main HEAD.
+	// Empty (legacy / cold path) means run against the repo root.
+	Workspace      string `json:"workspace,omitempty"`
+	TestCommand    string `json:"test_command,omitempty"` // project-configured command, e.g. "go test ./..."
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	TraceID        string `json:"trace_id,omitempty"`
 }
 
 // QAFailure describes a single test or job failure surfaced by qa-runner.

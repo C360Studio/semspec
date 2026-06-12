@@ -3,6 +3,7 @@ package payloads
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
@@ -41,6 +42,15 @@ func (p *QARequestedPayload) Validate() error {
 	// heavier tiers run in the operator's CI, not via a semspec executor.
 	if p.Mode != workflow.QALevelUnit {
 		return fmt.Errorf("mode must be unit, got %q", p.Mode)
+	}
+	// Workspace, when present, is the QA worktree's sandbox task_id. Reject
+	// path-traversal-shaped values so a malformed event cannot escape the
+	// sandbox worktree root when worktreeFor joins it onto worktreeRoot.
+	if p.Workspace != "" &&
+		(strings.Contains(p.Workspace, "..") ||
+			strings.Contains(p.Workspace, "/") ||
+			strings.Contains(p.Workspace, "\\")) {
+		return fmt.Errorf("workspace contains path separators: %q", p.Workspace)
 	}
 	return nil
 }

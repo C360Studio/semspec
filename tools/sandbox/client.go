@@ -176,6 +176,30 @@ func (c *Client) DeleteWorktree(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// WorktreeExists reports whether the sandbox currently has a worktree for
+// taskID. Unlike the generic do* helpers it treats 404 as a normal "absent"
+// answer rather than an error, so callers can self-heal a missing worktree.
+// Server route: GET /worktree/{taskID} → 200 present, 404 absent.
+func (c *Client) WorktreeExists(ctx context.Context, taskID string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/worktree/"+taskID, nil)
+	if err != nil {
+		return false, fmt.Errorf("build worktree-exists request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("worktree-exists http: %w", err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound:
+		return false, nil
+	default:
+		return false, fmt.Errorf("worktree-exists check: server error %d", resp.StatusCode)
+	}
+}
+
 // MergeResult holds the outcome of a worktree merge.
 //
 // NothingToCommit is the typed signal that the worktree was empty AND its
