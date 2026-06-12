@@ -12,7 +12,7 @@ yet, the doc says so.
 
 | Tier | Wallclock | Loop count | Recommended models | Verified runs |
 |------|-----------|-----------:|--------------------|--------------:|
-| `easy` | ~9 min | ~24 | Single frontier provider (Claude, Gemini, or comparable) | N=1 (2026-05-22) |
+| `easy` | ~9 min | ~24–41 | Single frontier provider (Claude, Gemini, or comparable) | N=4 (latest 2026-06-11, post-beta.103) |
 | `medium` | not yet measured | — | — | N=0 |
 | `hard` | ~78 min | ~50 | Frontier hybrid (two providers, one for orchestration + one for developer) | N=1 (2026-05-16) |
 
@@ -123,8 +123,9 @@ sponsor pack documents the full forensic dig.
 | 2026-05-22 | easy | 8.7 min, 8/8, ~24 loops | `task e2e:watch:llm -- gemini easy` bundle (extracted to `/tmp/semspec-watch-gemini-easy-*/bundle.tar.gz`) |
 | 2026-05-30 | easy | 6.7 min, 8/8 (post-ADR-040) | Mary analyst sub-phase + capability rules + dual OpenSpec emission |
 | 2026-05-31 | easy | 7.5 min, 8/8, 39 loops (post-ADR-041) | First validation after all six ADR-041 PRs land. Mary surfaces + Bob tier-tags + reviewer tier-aware contract all fire in trajectories. `/tmp/semspec-watch-gemini-easy-20260531-131619/` |
+| 2026-06-11 | easy | 9.3 min, 8/8, 41 loops (post-ADR-044 + beta.103) | First verified-green run after the semstreams beta.103 migration, ADR-044 M:N stories, and the contention fixes (ack_wait/redelivery, triple-write storm, graph-clustering). `errors=0`, zero watch ALERTs, clean teardown; `gemini-3-flash-preview`. `/tmp/semspec-watch-gemini-easy-20260611-195329/bundle.tar.gz` |
 
-Four data points. All N=1 each.
+Five data points. All N=1 each.
 
 ## 5. What we don't yet know
 
