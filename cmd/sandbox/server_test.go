@@ -1977,6 +1977,96 @@ func TestMergeBranches_HappyPath(t *testing.T) {
 	}
 }
 
+// TestMergeBranches_ParallelSharedFileConflicts documents the BUG the
+// branch-derivation fix targets: when two requirement branches each fork from
+// the plan base and both edit the same shared file (e.g. the README "coverage
+// matrix"), assembly cannot merge them — a 409 conflict. This is the failure the
+// costly mavlink-hard run rediscovered; reproduced here deterministically in
+// ~0.3s, no LLM.
+func TestMergeBranches_ParallelSharedFileConflicts(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	seedFromBase := func(branch, readme string) {
+		run(t, srv.repoPath, "git", "checkout", "-B", branch, base)
+		if err := os.WriteFile(filepath.Join(srv.repoPath, "README.md"), []byte(readme), 0o644); err != nil {
+			t.Fatalf("write README on %s: %v", branch, err)
+		}
+		run(t, srv.repoPath, "git", "add", "README.md")
+		run(t, srv.repoPath, "git", "commit", "-m", "docs: "+branch)
+	}
+	seedFromBase("semspec/requirement-a1", "# Test\n\n## Coverage\n- a1\n")
+	seedFromBase("semspec/requirement-b1", "# Test\n\n## Coverage\n- b1\n")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	resp := doRequest(t, ts, http.MethodPost, "/git/merge-branches", mergeBranchesRequest{
+		Target:   "semspec/plan-demo",
+		Base:     base,
+		Branches: []string{"semspec/requirement-a1", "semspec/requirement-b1"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("parallel shared-file merge: got %d, want 409 (reproduces the bug); body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestMergeBranches_StackedChainFastForwards proves the branch-derivation
+// PRINCIPLE behind the DependsOn fix: when a dependent requirement branch is
+// created FROM its prerequisite's branch (not the plan base), the two stack
+// cleanly and assembly is a conflict-free chain — even though both edit the same
+// shared file. This is exactly what ResolveRequirementBranchPrereqs + the
+// base-derivation wiring deliver: a DependsOn edge makes the dependent fork from
+// its prerequisite, so shared-file edits stack instead of diverging.
+func TestMergeBranches_StackedChainFastForwards(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+
+	// A forks from the plan base and appends its README section.
+	run(t, srv.repoPath, "git", "checkout", "-B", "semspec/requirement-a1", base)
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "README.md"), []byte("# Test\n\n## Coverage\n- a1\n"), 0o644); err != nil {
+		t.Fatalf("write README a1: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "README.md")
+	run(t, srv.repoPath, "git", "commit", "-m", "docs: a1")
+
+	// B DERIVES FROM A (the fix): created off a1's branch, so it already contains
+	// a1's README and stacks its own section on top.
+	run(t, srv.repoPath, "git", "checkout", "-B", "semspec/requirement-b1", "semspec/requirement-a1")
+	if err := os.WriteFile(filepath.Join(srv.repoPath, "README.md"), []byte("# Test\n\n## Coverage\n- a1\n- b1\n"), 0o644); err != nil {
+		t.Fatalf("write README b1: %v", err)
+	}
+	run(t, srv.repoPath, "git", "add", "README.md")
+	run(t, srv.repoPath, "git", "commit", "-m", "docs: b1")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	// Assembly merges a1 then b1 — b1 is a descendant of a1, so this is a clean
+	// chain, NOT a conflict.
+	resp := doRequest(t, ts, http.MethodPost, "/git/merge-branches", mergeBranchesRequest{
+		Target:   "semspec/plan-demo",
+		Base:     base,
+		Branches: []string{"semspec/requirement-a1", "semspec/requirement-b1"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("stacked chain: got %d, want 200 (derived branch stacks cleanly); body=%s", resp.StatusCode, body)
+	}
+
+	// The assembled README contains BOTH sections, stacked.
+	run(t, srv.repoPath, "git", "checkout", "semspec/plan-demo")
+	readme, err := os.ReadFile(filepath.Join(srv.repoPath, "README.md"))
+	if err != nil {
+		t.Fatalf("read assembled README: %v", err)
+	}
+	for _, want := range []string{"- a1", "- b1"} {
+		if !strings.Contains(string(readme), want) {
+			t.Errorf("assembled README missing %q; got:\n%s", want, readme)
+		}
+	}
+	run(t, srv.repoPath, "git", "checkout", base)
+}
+
 // TestMergeBranches_ConflictSelfHealsAndReturns409 covers the failure case:
 // two requirement branches modify the same line of the same file. The second
 // merge conflicts; the sandbox must self-heal the target branch back to
