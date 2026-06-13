@@ -130,6 +130,38 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 	})
 
+	// 2026-06-13 gemini-pro mavlink-hard run 2: the agent omitted `action` AND
+	// wrote the fix prose under the non-schema field `feedback` (not
+	// refined_prompt) → the run-#7 net (keyed on refined_prompt) missed it →
+	// execution_exhausted → plan rejected, despite a recoverable wedge. Adopt
+	// `feedback` as the refined prompt so the inference still fires.
+	t.Run("infers refine_prompt from feedback when action+refined_prompt omitted", func(t *testing.T) {
+		raw := `{"diagnosis":"Tests only assert isConnected() instead of exercising the When/Then telemetry and control steps.","feedback":"Rewrite the tests to assert the actual telemetry datastream values and control command results per the acceptance scenarios.","recovery_succeeded":true}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected feedback to be adopted as refined_prompt, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionRefinePrompt {
+			t.Errorf("Action: got %q, want refine_prompt (inferred from feedback)", got.Action)
+		}
+		if !strings.Contains(got.RefinedPrompt, "telemetry datastream") {
+			t.Errorf("feedback prose not adopted into refined_prompt: %q", got.RefinedPrompt)
+		}
+	})
+
+	// refined_prompt still wins when BOTH it and feedback are present (the
+	// schema-correct field takes precedence; feedback is only a fallback).
+	t.Run("prefers refined_prompt over feedback when both present", func(t *testing.T) {
+		raw := `{"diagnosis":"d","recovery_succeeded":true,"refined_prompt":"SCHEMA prompt","feedback":"fallback prose"}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected ok, got error: %v", err)
+		}
+		if got.RefinedPrompt != "SCHEMA prompt" {
+			t.Errorf("refined_prompt should win over feedback; got %q", got.RefinedPrompt)
+		}
+	})
+
 	// But an action-less result with NO unambiguous payload still errors —
 	// scope_changes is ambiguous (narrow_scope vs split_req) so it is NOT
 	// inferred, and diagnosis-only stays human-gated.

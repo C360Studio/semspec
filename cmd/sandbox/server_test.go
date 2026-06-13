@@ -2159,6 +2159,75 @@ func TestMergeBranches_ReDerivedDependentAfterPrereqMovesStacksClean(t *testing.
 	run(t, srv.repoPath, "git", "checkout", base)
 }
 
+// TestMergeBranches_TwoSiblingPrereqsDisjointHunksMergeClean closes the ≥2-prereq
+// reqbase gap (resolveRequirementBase's >1 path, design §2/§9-E): when a dependent
+// requirement has TWO SIBLING prerequisites (neither derived from the other) that
+// both edit the SAME shared file but in DISJOINT sections, merging both owner
+// branches into semspec/reqbase-<dep> is conflict-free — git 3-way auto-merges the
+// non-overlapping hunks. This is the realistic README "coverage matrix" fan-in the
+// orchestrator produces, and the counterpart to ParallelSharedFileConflicts
+// (same-region → 409): shared-file fan-in conflicts only when the edits overlap.
+func TestMergeBranches_TwoSiblingPrereqsDisjointHunksMergeClean(t *testing.T) {
+	srv, ts := newTestServer(t)
+	base := strings.TrimSpace(runOutput(t, srv.repoPath, "git", "rev-parse", "--abbrev-ref", "HEAD"))
+	readmePath := filepath.Join(srv.repoPath, "README.md")
+
+	writeReadme := func(body string) {
+		if err := os.WriteFile(readmePath, []byte(body), 0o644); err != nil {
+			t.Fatalf("write README: %v", err)
+		}
+	}
+	// Base README: two well-separated sections so disjoint edits never collide.
+	writeReadme("# Coverage Matrix\n\n" +
+		"## Telemetry\n- attitude: TODO\n- battery: TODO\n- gps: TODO\n\n" +
+		"## Control\n- arm: TODO\n- takeoff: TODO\n- land: TODO\n")
+	run(t, srv.repoPath, "git", "add", "README.md")
+	run(t, srv.repoPath, "git", "commit", "-m", "docs: base coverage matrix")
+
+	// a1 (sibling) edits ONLY the Telemetry section.
+	run(t, srv.repoPath, "git", "checkout", "-B", "semspec/requirement-a1", base)
+	writeReadme("# Coverage Matrix\n\n" +
+		"## Telemetry\n- attitude: DataStream\n- battery: DataStream\n- gps: DataStream\n\n" +
+		"## Control\n- arm: TODO\n- takeoff: TODO\n- land: TODO\n")
+	run(t, srv.repoPath, "git", "add", "README.md")
+	run(t, srv.repoPath, "git", "commit", "-m", "docs: a1 telemetry coverage")
+
+	// b1 (sibling) forks from BASE (not from a1) and edits ONLY the Control section.
+	run(t, srv.repoPath, "git", "checkout", "-B", "semspec/requirement-b1", base)
+	writeReadme("# Coverage Matrix\n\n" +
+		"## Telemetry\n- attitude: TODO\n- battery: TODO\n- gps: TODO\n\n" +
+		"## Control\n- arm: ControlStream\n- takeoff: ControlStream\n- land: ControlStream\n")
+	run(t, srv.repoPath, "git", "add", "README.md")
+	run(t, srv.repoPath, "git", "commit", "-m", "docs: b1 control coverage")
+	run(t, srv.repoPath, "git", "checkout", base)
+
+	// The >1-prereq path merges both owner branches into the per-requirement base.
+	resp := doRequest(t, ts, http.MethodPost, "/git/merge-branches", mergeBranchesRequest{
+		Target:   "semspec/reqbase-c1",
+		Base:     base,
+		Branches: []string{"semspec/requirement-a1", "semspec/requirement-b1"},
+		Trailers: map[string]string{"Reqbase": "c1"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("disjoint-hunk reqbase merge: got %d, want 200 (siblings stack clean); body=%s", resp.StatusCode, body)
+	}
+
+	// reqbase-c1 must carry BOTH siblings' edits — the conflict-free fan-in.
+	run(t, srv.repoPath, "git", "checkout", "semspec/reqbase-c1")
+	readme, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("read reqbase README: %v", err)
+	}
+	for _, want := range []string{"attitude: DataStream", "arm: ControlStream"} {
+		if !strings.Contains(string(readme), want) {
+			t.Errorf("reqbase README missing %q after fan-in merge; got:\n%s", want, readme)
+		}
+	}
+	run(t, srv.repoPath, "git", "checkout", base)
+}
+
 // TestMergeBranches_ConflictSelfHealsAndReturns409 covers the failure case:
 // two requirement branches modify the same line of the same file. The second
 // merge conflicts; the sandbox must self-heal the target branch back to
