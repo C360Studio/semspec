@@ -21,9 +21,15 @@ import (
 // (it doesn't survive past handleLoopCompletion); the wire output is the
 // PlanDecision built in emitPlanDecision.
 type rawRecoveryResult struct {
-	Action            string          `json:"action"`
-	Diagnosis         string          `json:"diagnosis"`
-	RefinedPrompt     string          `json:"refined_prompt,omitempty"`
+	Action        string `json:"action"`
+	Diagnosis     string `json:"diagnosis"`
+	RefinedPrompt string `json:"refined_prompt,omitempty"`
+	// Feedback is NOT a schema field — the prompt asks for refined_prompt. But
+	// mid-tier models recurringly write the fix prose under "feedback" instead
+	// (observed 2026-06-13 gemini-pro mavlink-hard run 2). Captured so the
+	// action-inference net below can adopt it rather than terminal-fail a
+	// recoverable wedge.
+	Feedback          string          `json:"feedback,omitempty"`
 	ScopeChanges      json.RawMessage `json:"scope_changes,omitempty"`
 	RecoverySucceeded bool            `json:"recovery_succeeded"`
 }
@@ -91,6 +97,15 @@ func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 	// requirement terminal-failed → plan rejected. The prompt-side fix
 	// (action-first directive) is primary; this is the parse-side safety net.
 	if rr.Action == "" {
+		// The fix prose belongs in refined_prompt, but gemini-pro (mavlink-hard
+		// run 2, 2026-06-13) emitted it under the non-schema field `feedback` AND
+		// omitted action → execution_exhausted → plan rejected, even though the
+		// agent believed the wedge recoverable. Adopt `feedback` as the refined
+		// prompt when refined_prompt is absent, so the inference net below still
+		// fires. (project_recovery_agent_missing_action_2026_06_13)
+		if strings.TrimSpace(rr.RefinedPrompt) == "" && strings.TrimSpace(rr.Feedback) != "" {
+			rr.RefinedPrompt = rr.Feedback
+		}
 		if strings.TrimSpace(rr.RefinedPrompt) != "" {
 			rr.Action = string(payloads.RecoveryActionRefinePrompt)
 		} else {
