@@ -174,6 +174,17 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 
 	exec := c.findExecByTaskID(taskExec.TaskID)
 	if exec == nil {
+		// A terminal task completion that matches no active execution's current
+		// node or reviewer task. Benign + common for nodes whose execution
+		// already completed and was cleaned from activeExecs — but it is ALSO
+		// the silent-drop shape that wedged the 2026-06-13 QA-recovery
+		// re-execution (a re-dispatched node completed, but routing back into
+		// the re-opened DAG found no owner, so the completion vanished and the
+		// requirement never advanced to re-QA — a permanent, invisible wedge).
+		// Log at DEBUG so the gate is visible on a debug run without flooding
+		// the normal path.
+		c.logger.Debug("terminal task completion matched no active execution — dropping",
+			"task_id", taskExec.TaskID, "stage", taskExec.Stage)
 		return
 	}
 
@@ -181,11 +192,23 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 	defer exec.mu.Unlock()
 
 	if exec.terminated {
+		c.logger.Debug("terminal task completion for terminated execution — dropping",
+			"task_id", taskExec.TaskID, "stage", taskExec.Stage,
+			"requirement_id", exec.RequirementID)
 		return
 	}
 
-	// Only handle node completions via this path.
+	// Only handle node completions via this path. A non-current-node task that
+	// still matched findExecByTaskID is the reviewer task (handled elsewhere) —
+	// or a stale node task left behind by a re-dispatch whose CurrentNodeTaskID
+	// did not get re-aligned (the QA-recovery-wedge suspect). Surface both at
+	// DEBUG so the mismatch is diagnosable instead of silent.
 	if taskExec.TaskID != exec.CurrentNodeTaskID {
+		c.logger.Debug("terminal task completion is not the current node task — dropping",
+			"task_id", taskExec.TaskID,
+			"current_node_task_id", exec.CurrentNodeTaskID,
+			"reviewer_task_id", exec.ReviewerTaskID,
+			"requirement_id", exec.RequirementID, "stage", taskExec.Stage)
 		return
 	}
 
