@@ -287,6 +287,126 @@ func TestMergeArchitectureFindings_CohesiveComponentNotFlagged(t *testing.T) {
 	}
 }
 
+// TestMergeArchitectureFindings_SourceBuildIncompleteContract fires
+// architecture.upstream_source_build_incomplete_contract on the 2026-06-13
+// mavlink-hard ICommandStatus shape: a source_build dependency that names an
+// interface (+ a lifecycle string) but resolves zero method signatures, so the
+// dev reverse-engineers the contract through compile errors (ADR-047).
+func TestMergeArchitectureFindings_SourceBuildIncompleteContract(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "osh-incomplete-contract",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "control", Capabilities: []string{"control"}, ImplementationFiles: []string{"src/RawMavlinkControl.java"}},
+			},
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{
+					Name:           "OpenSensorHub Core",
+					Coordinate:     "github.com/opensensorhub/osh-core@v2.0.0",
+					SourceRef:      "/sources/osh-core",
+					ResolutionKind: "source_build",
+					UsedBy:         []string{"control"},
+					APIs: []workflow.APISurface{
+						{Symbol: "ICommandStatus", Kind: "interface", Signature: "public interface ICommandStatus", Lifecycle: "implement getProgress()/getExecutionTime()", Citation: "/sources/osh-core/.../ICommandStatus.java"},
+					},
+				},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	var f *workflow.PlanReviewFinding
+	for i := range result.Findings {
+		if result.Findings[i].SOPID == "architecture.upstream_source_build_incomplete_contract" {
+			f = &result.Findings[i]
+		}
+	}
+	if f == nil {
+		t.Fatalf("expected upstream_source_build_incomplete_contract finding, got: %+v", result.Findings)
+	}
+	if f.TargetID != "OpenSensorHub Core" {
+		t.Errorf("target = %q, want OpenSensorHub Core", f.TargetID)
+	}
+	if !strings.Contains(f.Issue, "ICommandStatus") {
+		t.Errorf("issue should name the unresolved type ICommandStatus: %q", f.Issue)
+	}
+	if result.Verdict != "needs_changes" {
+		t.Errorf("verdict = %q, want needs_changes", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_SourceBuildWithMethodsNotFlagged confirms the
+// rule does NOT fire once the source_build resolution carries method signatures
+// for the interface it names — the honest complete shape.
+func TestMergeArchitectureFindings_SourceBuildWithMethodsNotFlagged(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "osh-complete-contract",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "control", Capabilities: []string{"control"}, ImplementationFiles: []string{"src/RawMavlinkControl.java"}},
+			},
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{
+					Name: "OpenSensorHub Core", Coordinate: "github.com/opensensorhub/osh-core@v2.0.0",
+					SourceRef: "/sources/osh-core", ResolutionKind: "source_build", UsedBy: []string{"control"},
+					APIs: []workflow.APISurface{
+						{Symbol: "ICommandStatus", Kind: "interface", Signature: "public interface ICommandStatus", Citation: "c"},
+						{Symbol: "ICommandStatus.getProgress", Kind: "method", Signature: "int getProgress()", Citation: "c"},
+						{Symbol: "ICommandStatus.getExecutionTime", Kind: "method", Signature: "TimeExtent getExecutionTime()", Citation: "c"},
+					},
+				},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	for _, f := range result.Findings {
+		if f.SOPID == "architecture.upstream_source_build_incomplete_contract" {
+			t.Errorf("source_build with method signatures should not fire: %+v", f)
+		}
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("verdict = %q, want approved", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_NonSourceBuildContractNotFlagged confirms the
+// rule is scoped to source_build: a maven_central resolution (resolved
+// completely upstream, jar-verified) and an honest unresolved flag both carry a
+// type surface with no methods, and neither trips the gate.
+func TestMergeArchitectureFindings_NonSourceBuildContractNotFlagged(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "non-source-build",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "driver", Capabilities: []string{"drive"}, ImplementationFiles: []string{"src/Driver.java"}},
+			},
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{Name: "MAVSDK", Coordinate: "io.mavsdk:mavsdk:3.0.0", ResolutionKind: "maven_central",
+					APIs: []workflow.APISurface{{Symbol: "System", Kind: "class", Signature: "System()", Citation: "c"}}},
+				{Name: "Mystery", Coordinate: "mystery-lib", ResolutionKind: "unresolved",
+					APIs: []workflow.APISurface{{Symbol: "Mystery", Kind: "interface", Signature: "interface Mystery", Citation: "c"}}},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	for _, f := range result.Findings {
+		if f.SOPID == "architecture.upstream_source_build_incomplete_contract" {
+			t.Errorf("only source_build should fire; got finding on %s: %+v", f.TargetID, f)
+		}
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("verdict = %q, want approved", result.Verdict)
+	}
+}
+
 // TestHasSourceFile_DelegatesToWorkflowClassifier guards the
 // reviewer-side ↔ architecture-generator-side classification parity. If
 // workflow.IsDocumentationPath ever drifts from this rule's expectations,
