@@ -361,7 +361,12 @@ type MergeBranchesResult struct {
 	Target            string                `json:"target"`
 	MergeCommits      []MergeBranchesCommit `json:"merge_commits,omitempty"`
 	ConflictingBranch string                `json:"conflicting_branch,omitempty"`
-	Error             string                `json:"error,omitempty"`
+	// ConflictingPaths are the shared files that forced the conflict — the
+	// unmerged paths captured by the sandbox before it aborted the merge.
+	// Callers name them in the conflict diagnostic so the planning-scope defect
+	// (two requirements editing one file with no DependsOn edge) is actionable.
+	ConflictingPaths []string `json:"conflicting_paths,omitempty"`
+	Error            string   `json:"error,omitempty"`
 }
 
 // ErrMergeBranchesConflict is returned when a source branch cannot merge

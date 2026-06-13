@@ -110,6 +110,7 @@ func (c *Component) handleReqPending(ctx context.Context, entry jetstream.KeyVal
 		Description:    reqExec.Description,
 		Scenarios:      reqExec.Scenarios,
 		DependsOn:      reqExec.DependsOn,
+		BaseBranch:     reqExec.BaseBranch,
 		Prompt:         reqExec.Prompt,
 		Role:           reqExec.Role,
 		Model:          model,
@@ -133,13 +134,29 @@ func (c *Component) handleReqPending(ctx context.Context, entry jetstream.KeyVal
 	c.activeExecsMu.Unlock()
 
 	// Dispatch initialization in a goroutine so the watcher loop is never blocked.
-	go c.initReqExecution(ctx, exec, reqExec.PlanBranch)
+	go c.initReqExecution(ctx, exec, reqExec.PlanBranch, reqExec.BaseBranch)
+}
+
+// selectReqBranchBase picks the git ref a requirement branch is created FROM.
+// Precedence: an orchestrator-resolved baseBranch (the DependsOn-derived
+// prerequisite ref) wins over the plan base, which wins over "HEAD". Keeping
+// this pure makes the precedence the unit of test (the load-bearing line of the
+// branch-derivation fix: a dependent must fork from its prereqs, not the plan
+// base) without standing up a sandbox.
+func selectReqBranchBase(planBranch, baseBranch string) string {
+	if baseBranch != "" {
+		return baseBranch
+	}
+	if planBranch != "" {
+		return planBranch
+	}
+	return "HEAD"
 }
 
 // initReqExecution performs the post-claim initialization sequence for a
 // requirement execution: branch creation, scope loading, entity publish,
 // timeout, and decomposer dispatch.
-func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecution, planBranch string) {
+func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecution, planBranch, baseBranch string) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
@@ -150,10 +167,10 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 	// isolation across the whole plan. Fail loud instead of warning-and-proceeding.
 	if c.sandbox != nil {
 		branchName := "semspec/requirement-" + exec.RequirementID
-		baseBranch := "HEAD"
-		if planBranch != "" {
-			baseBranch = planBranch
-		}
+		// DependsOn-driven derivation: when the orchestrator resolved a
+		// prerequisite base (the dependent's branch must fork from its prereqs'
+		// merged work), use it; otherwise fall back to the plan base / HEAD.
+		baseBranch := selectReqBranchBase(planBranch, baseBranch)
 		err := c.sandbox.CreateBranch(ctx, branchName, baseBranch)
 		// A3 now refuses with ErrBranchExistsAtDifferentBase when a stale
 		// branch survives from a prior failed attempt (plan-level /retry

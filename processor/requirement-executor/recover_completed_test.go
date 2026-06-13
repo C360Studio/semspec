@@ -8,6 +8,116 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
+// TestResetDependentBranchSubtree pins the P3 dependent-invalidation wiring:
+// when an owner is reopened for QA-recovery, every requirement whose branch
+// derives from it must have its stale work + reqbase branches deleted (so it
+// re-derives from the rebuilt owner). The pure subtree math is covered by
+// workflow.TestDependentBranchSubtree; here we pin that the executor enumerates
+// the right dependents and targets the right branches (sendReqReset is a no-op
+// in unit mode — nil natsClient — so this asserts the branch-delete wiring).
+func TestResetDependentBranchSubtree(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	// a1 <- b1 <- c1 ; reopening a1 invalidates {b1, c1}, not the unrelated z1.
+	plan := &workflow.Plan{
+		Slug: "demo",
+		Requirements: []workflow.Requirement{
+			{ID: "a1"},
+			{ID: "b1", DependsOn: []string{"a1"}},
+			{ID: "c1", DependsOn: []string{"b1"}},
+			{ID: "z1"},
+		},
+	}
+
+	c.resetDependentBranchSubtree(context.Background(), "demo", "a1", plan)
+
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	want := []string{
+		"semspec/requirement-b1", "semspec/reqbase-b1",
+		"semspec/requirement-c1", "semspec/reqbase-c1",
+	}
+	if len(stub.deletedBranchNames) != len(want) {
+		t.Fatalf("deleted branches = %v, want %v", stub.deletedBranchNames, want)
+	}
+	for i, w := range want {
+		if stub.deletedBranchNames[i] != w {
+			t.Errorf("deletedBranchNames[%d] = %q, want %q", i, stub.deletedBranchNames[i], w)
+		}
+	}
+	// z1 has no derivation edge to a1 — its branches must NOT be touched.
+	for _, b := range stub.deletedBranchNames {
+		if b == "semspec/requirement-z1" || b == "semspec/reqbase-z1" {
+			t.Errorf("z1 branch %q deleted but z1 does not derive from a1", b)
+		}
+	}
+}
+
+// TestCoAffectedDependentSet pins finding [1]: when a single recovery event
+// affects both a prerequisite and a requirement that derives from it, the
+// dependent must be marked skip-direct-resume (the prereq's cascade re-derives
+// it) — regardless of slice order — so it never rebuilds against the prereq's
+// pre-rebuild base.
+func TestCoAffectedDependentSet(t *testing.T) {
+	reqs := []workflow.Requirement{
+		{ID: "a1"},
+		{ID: "b1", DependsOn: []string{"a1"}},
+		{ID: "c1", DependsOn: []string{"b1"}},
+	}
+
+	// a1 + its dependents all affected, dependent-first order: b1, c1 skipped.
+	skip := coAffectedDependentSet([]string{"c1", "b1", "a1"}, reqs, nil)
+	if !skip["b1"] || !skip["c1"] {
+		t.Errorf("b1 and c1 must be skipped (derive from a1); skip=%v", skip)
+	}
+	if skip["a1"] {
+		t.Errorf("a1 is the root prerequisite and must NOT be skipped; skip=%v", skip)
+	}
+
+	// Only the prereq affected -> no dependents in the affected set -> none skipped.
+	if s := coAffectedDependentSet([]string{"a1"}, reqs, nil); len(s) != 0 {
+		t.Errorf("single affected req must skip nothing, got %v", s)
+	}
+
+	// Two unrelated reqs -> neither derives from the other -> none skipped.
+	if s := coAffectedDependentSet([]string{"a1", "x1"}, []workflow.Requirement{{ID: "a1"}, {ID: "x1"}}, nil); len(s) != 0 {
+		t.Errorf("unrelated affected reqs must skip nothing, got %v", s)
+	}
+}
+
+// TestAbandonLiveExecForRequirement pins finding [5] / design §11.F: a
+// dependent that is still mid-execution when its prerequisite reopens must be
+// torn down (terminated + removed from activeExecs) so the fresh re-dispatch is
+// not swallowed by the req_watcher EntityID duplicate guard.
+func TestAbandonLiveExecForRequirement(t *testing.T) {
+	c := newTestComponent(t)
+	exec := &requirementExecution{
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.demo-b1",
+		Slug:           "demo",
+		RequirementID:  "b1",
+		CurrentNodeIdx: -1,
+		VisitedNodes:   make(map[string]bool),
+		storeKey:       workflow.RequirementExecutionKey("demo", "b1"),
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	if !c.abandonLiveExecForRequirement("demo", "b1") {
+		t.Fatal("expected to find and abandon the live b1 exec")
+	}
+	if !exec.terminated {
+		t.Error("abandoned exec should be marked terminated")
+	}
+	if _, ok := c.activeExecs.Get(exec.EntityID); ok {
+		t.Error("abandoned exec should be removed from activeExecs (cleanupExecutionLocked)")
+	}
+	// No live exec for the requirement -> false, no panic.
+	if c.abandonLiveExecForRequirement("demo", "nonexistent") {
+		t.Error("expected false when no live exec matches")
+	}
+}
+
 // TestResumeTerminalForRecoveryLocked covers the new branch added 2026-05-28
 // after the gemini mavlink-decode run #4 verified PR #29's
 // publishRecoveryRequested wire fires correctly but the plan stayed at

@@ -89,6 +89,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	// Branch management.
 	mux.HandleFunc("POST /branch", s.handleCreateBranch)
+	// {name...} captures multi-segment branch names ("semspec/requirement-r1").
+	mux.HandleFunc("DELETE /branch/{name...}", s.handleDeleteBranch)
 
 	// File operations (scoped to worktree).
 	mux.HandleFunc("PUT /file", s.handleWriteFile)
@@ -1091,6 +1093,46 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created", "branch": req.Name})
 }
 
+// handleDeleteBranch force-deletes a branch from the main repo.
+// DELETE /branch/{name...}  (name may contain slashes, e.g. semspec/requirement-r1)
+//
+// Returns 404 when the branch genuinely does not exist — callers
+// (pruneRequirementBranches, the stale-branch reset, the recovery recreate, and
+// the P3 dependent-subtree invalidation) treat that as a benign no-op. Without
+// this route the client's DELETE /branch/{name} matched nothing and every
+// DeleteBranch silently 404'd, so stale per-requirement and reqbase branches
+// were never actually removed.
+func (s *Server) handleDeleteBranch(w http.ResponseWriter, r *http.Request) {
+	if s.refuseIfNeedsReconciliation(w) {
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || !isValidBranchName(name) {
+		writeError(w, http.StatusBadRequest, "invalid or missing branch name")
+		return
+	}
+
+	ctx := r.Context()
+	s.repoMu.Lock()
+	defer s.repoMu.Unlock()
+
+	// A genuinely-absent branch is a benign no-op → 404 so callers' existing
+	// "server error 404" handling stays correct.
+	if _, err := gitOutput(ctx, s.repoPath, "rev-parse", "--verify", "refs/heads/"+name); err != nil {
+		writeError(w, http.StatusNotFound, "branch does not exist: "+name)
+		return
+	}
+
+	// Force-delete: these are throwaway per-requirement / reqbase branches whose
+	// commits live on the assembled plan branch after merge, so -d's "not merged"
+	// refusal would wrongly block pruning a stale fork.
+	if err := runGit(ctx, s.repoPath, "branch", "-D", name); err != nil {
+		writeError(w, http.StatusInternalServerError, "delete branch: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted", "branch": name})
+}
+
 // mergeBranchesRequest is the JSON body for POST /git/merge-branches. It
 // assembles a set of source branches onto a target branch via sequential
 // `git merge --no-ff`, providing the plan-level merge step required by
@@ -1117,7 +1159,12 @@ type mergeBranchesResponse struct {
 	Target            string                `json:"target"`
 	MergeCommits      []mergeBranchesCommit `json:"merge_commits,omitempty"`
 	ConflictingBranch string                `json:"conflicting_branch,omitempty"`
-	Error             string                `json:"error,omitempty"`
+	// ConflictingPaths are the unmerged files (git diff --diff-filter=U) at the
+	// moment the conflict was detected — the shared files two requirements
+	// edited in parallel. Surfaced so plan-manager can name them in the recovery
+	// / terminal diagnostic.
+	ConflictingPaths []string `json:"conflicting_paths,omitempty"`
+	Error            string   `json:"error,omitempty"`
 }
 
 // ancestryRequest is the JSON body for POST /git/ancestry.
@@ -1184,6 +1231,17 @@ func (s *Server) handleMergeBranchesConflict(
 	commits []mergeBranchesCommit,
 	mergeErr error,
 ) {
+	// Capture the unmerged paths BEFORE aborting — once `git merge --abort`
+	// runs, the conflicted index is gone. These are the files two requirements
+	// edited in parallel; plan-manager surfaces them so a human (or the
+	// re-partition recovery) knows exactly which shared file forced the
+	// conflict, instead of a bare "merge failed". Best-effort: a diff failure
+	// just yields no paths, never blocks the conflict response.
+	var conflictingPaths []string
+	if diffOut, diffErr := gitOutput(ctx, s.repoPath, "diff", "--name-only", "--diff-filter=U"); diffErr == nil {
+		conflictingPaths = splitLines(diffOut)
+	}
+
 	if abortErr := runGit(ctx, s.repoPath, "merge", "--abort"); abortErr != nil {
 		if healErr := s.selfHealAfterFailedRestore(ctx, origBranch, abortErr); healErr != nil {
 			s.needsReconciliation.Store(true)
@@ -1207,6 +1265,7 @@ func (s *Server) handleMergeBranchesConflict(
 		Target:            target,
 		MergeCommits:      commits,
 		ConflictingBranch: conflictingBranch,
+		ConflictingPaths:  conflictingPaths,
 		Error:             mergeErr.Error(),
 	})
 }

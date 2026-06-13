@@ -236,13 +236,18 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 	exec.ScenarioVerdicts = nil
 
 	if c.sandbox != nil && exec.RequirementBranch != "" {
+		// Recreate from the DependsOn-derived base, not "HEAD": a reopened
+		// mid-chain requirement must re-fork from its prerequisite's branch so it
+		// re-inherits the prereq edits it was derived from. Empty base (a DAG
+		// root) falls back to HEAD — the prior behavior, unchanged.
+		recreateBase := selectReqBranchBase("", exec.BaseBranch)
 		if err := c.sandbox.DeleteBranch(ctx, exec.RequirementBranch); err != nil {
 			c.logger.Warn("Failed to delete old requirement branch on recovery resume",
 				"branch", exec.RequirementBranch, "error", err)
 		}
-		if err := c.sandbox.CreateBranch(ctx, exec.RequirementBranch, "HEAD"); err != nil {
+		if err := c.sandbox.CreateBranch(ctx, exec.RequirementBranch, recreateBase); err != nil {
 			c.logger.Warn("Failed to recreate requirement branch on recovery resume",
-				"branch", exec.RequirementBranch, "error", err)
+				"branch", exec.RequirementBranch, "base", recreateBase, "error", err)
 		}
 	}
 
@@ -303,6 +308,36 @@ func (c *Component) findAwaitingByRequirement(slug, requirementID string) *requi
 // force-cancelled here (req-executor has no cancellation channel to them); they
 // run to completion and their terminal writes are absorbed by the terminated
 // guard. EXECUTION_STATES rows were already deleted by plan-manager's reset.
+// abandonLiveExecForRequirement tears down any active exec for slug+reqID —
+// marking it terminated and running cleanupExecutionLocked so it leaves
+// activeExecs. Used by the recovery dependent-subtree invalidation so a
+// mid-execution dependent on a stale base does not block the fresh re-dispatch
+// via the req_watcher EntityID duplicate guard. Returns whether one was found.
+//
+// Lock ordering: the caller (resetDependentBranchSubtree) holds the REOPENED
+// owner's exec.mu; here we lock the DEPENDENT's exec.mu — a distinct exec
+// (different requirement ID), and no path locks a dependent then its
+// prerequisite, so owner→dependent ordering cannot deadlock.
+func (c *Component) abandonLiveExecForRequirement(slug, reqID string) bool {
+	for _, key := range c.activeExecs.Keys() {
+		exec, ok := c.activeExecs.Get(key)
+		if !ok || exec == nil {
+			continue
+		}
+		exec.mu.Lock()
+		if exec.Slug != slug || exec.RequirementID != reqID {
+			exec.mu.Unlock()
+			continue
+		}
+		exec.terminated = true
+		exec.awaitingRecovery = false
+		c.cleanupExecutionLocked(exec, false)
+		exec.mu.Unlock()
+		return true
+	}
+	return false
+}
+
 func (c *Component) abandonExecsForSlug(slug string) int {
 	abandoned := 0
 	for _, key := range c.activeExecs.Keys() {
@@ -399,7 +434,21 @@ func (c *Component) handlePlanDecisionAccepted(lifecycleCtx, msgCtx context.Cont
 		return
 	}
 
+	// When one recovery event affects BOTH a prerequisite and a requirement that
+	// derives from it (the normal needs_changes case — every active req is
+	// affected), do NOT directly resume the dependent: resuming it would recreate
+	// its branch from the prerequisite's PRE-rebuild base (the prereq isn't
+	// reopened yet) and launch a dev loop the prereq's cascade then orphans. Skip
+	// it here; the prerequisite's resumeTerminalForRecoveryLocked cascade resets
+	// it, and the orchestrator re-dispatches it fresh with a re-resolved base.
+	skipAsDependent := c.coAffectedDependents(msgCtx, evt.Slug, evt.AffectedRequirementIDs)
+
 	for _, reqID := range evt.AffectedRequirementIDs {
+		if skipAsDependent[reqID] {
+			c.logger.Info("Skipping direct resume of a co-affected branch dependent — its prerequisite's cascade will reset and re-derive it",
+				"slug", evt.Slug, "requirement_id", reqID)
+			continue
+		}
 		// First, the existing awaiting-recovery resume path: covers the
 		// iteration-exhaustion wedge (exec was mid-cycle, got marked
 		// awaiting_recovery by markEscalatedLocked, now we resume it).

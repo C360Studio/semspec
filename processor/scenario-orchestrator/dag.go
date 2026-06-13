@@ -140,3 +140,69 @@ func depsComplete(req workflow.Requirement, complete map[string]bool) bool {
 	}
 	return true
 }
+
+// filterByBranchPrereqCompletion defers a requirement until every owner branch
+// its branch must DERIVE FROM has completed. Branch derivation
+// (resolveRequirementBase) forks a dependent from
+// ResolveRequirementBranchPrereqs(req, stories), which surfaces the Pass-2
+// file-overlap edges that live ONLY on Story.DependsOn and never reach
+// Requirement.DependsOn. filterReadyRequirements gates dispatch on
+// Requirement.DependsOn alone, so without this gate a dependent whose only
+// prerequisite is a cross-Story file-overlap edge (e.g. story.B.DependsOn=
+// [story.A], with b1's Requirement.DependsOn empty) would dispatch in the SAME
+// sweep as its prerequisite and fork from semspec/requirement-<owner> before
+// that branch exists or carries the owner's commits — re-introducing the exact
+// assembly conflict the derivation fix removes.
+//
+// This makes design §2's "prereqs already complete" precondition true for the
+// branch-derivation set WITHOUT mutating Requirement.DependsOn — product call
+// P1 keeps John's authored contract intact for plan-reviewer / UI. The
+// orchestrator re-fires on each completion, so a deferred dependent dispatches
+// on the sweep after its prerequisite owner completes. No-op without Stories
+// (the resolved union then reduces to Requirement.DependsOn, already enforced
+// by filterReadyRequirements).
+func filterByBranchPrereqCompletion(
+	ready []workflow.Requirement,
+	stories []workflow.Story,
+	completedReqIDs map[string]bool,
+) []workflow.Requirement {
+	if len(ready) == 0 || len(stories) == 0 {
+		return ready
+	}
+	out := make([]workflow.Requirement, 0, len(ready))
+	for _, req := range ready {
+		if branchPrereqsComplete(req, stories, completedReqIDs) {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+// branchPrereqsComplete returns true when every owner requirement in req's
+// resolved branch-derivation union is complete (its branch exists and carries
+// its commits).
+func branchPrereqsComplete(req workflow.Requirement, stories []workflow.Story, completedReqIDs map[string]bool) bool {
+	for _, owner := range workflow.ResolveRequirementBranchPrereqs(req, stories) {
+		if !completedReqIDs[owner] {
+			return false
+		}
+	}
+	return true
+}
+
+// staleCompletions returns the cached completion keys that are no longer present
+// in the authoritative completedNow set — the entries reconcileCompletedRequirements
+// must EVICT. This is what makes the orchestrator's completed-set authoritative
+// rather than additive: a requirement reopened for QA-recovery (its KV stage
+// left "completed") or reset (its KV entry deleted) is absent from completedNow,
+// so it is dropped and re-admitted for dispatch. Pure for unit-testing the
+// eviction contract without a live KV.
+func staleCompletions(cachedKeys []string, completedNow map[string]struct{}) []string {
+	var stale []string
+	for _, id := range cachedKeys {
+		if _, ok := completedNow[id]; !ok {
+			stale = append(stale, id)
+		}
+	}
+	return stale
+}

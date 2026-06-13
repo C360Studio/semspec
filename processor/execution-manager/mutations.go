@@ -104,6 +104,11 @@ type ReqCreateRequest struct {
 	Prompt        string                   `json:"prompt,omitempty"`
 	Role          string                   `json:"role,omitempty"`
 	PlanBranch    string                   `json:"plan_branch,omitempty"`
+	// BaseBranch is the orchestrator-resolved branch-derivation base (see
+	// workflow.RequirementExecution.BaseBranch). Carried verbatim into the
+	// requirement execution so the executor forks the requirement branch from
+	// its prerequisites' work rather than the plan base.
+	BaseBranch string `json:"base_branch,omitempty"`
 }
 
 // ReqPhaseRequest transitions a requirement execution to a new phase.
@@ -421,6 +426,7 @@ func (c *Component) handleReqCreateMutation(ctx context.Context, data []byte) Ex
 		Prompt:         req.Prompt,
 		Role:           req.Role,
 		PlanBranch:     req.PlanBranch,
+		BaseBranch:     req.BaseBranch,
 		CurrentNodeIdx: -1,
 		CreatedAt:      now,
 		UpdatedAt:      now,

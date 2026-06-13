@@ -45,6 +45,12 @@ type Component struct {
 	repoRoot     string
 	tripleWriter *graphutil.TripleWriter
 
+	// sandbox resolves the per-requirement branch-derivation base. Nil when
+	// SandboxURL is unset (tests / plans whose branch base is just the plan
+	// base) — resolveRequirementBase then needs a sandbox only for the >1
+	// prerequisite merge and fails loud if asked to merge without one.
+	sandbox sandboxClient
+
 	// completedReqs caches RequirementExecutionCompleteEvent data keyed by
 	// RequirementID. Populated at startup via reconcileCompletedRequirements and
 	// kept current by the completion event consumer. Prerequisite context for
@@ -109,6 +115,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     deps.GetLogger(),
 		decoder:    message.NewDecoder(deps.PayloadRegistry),
 		repoRoot:   repoRoot,
+		sandbox:    newSandboxClient(config.SandboxURL),
 	}, nil
 }
 
@@ -329,13 +336,20 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 	toDispatch := filterReadyRequirements(requirements, completedReqIDs)
 	preStoryGateCount := len(toDispatch)
 	toDispatch = filterByM2NStoryReservations(toDispatch, trigger.Stories)
+	postStoryGateCount := len(toDispatch)
+	// Branch-derivation gate: a dependent whose branch must fork from a
+	// prerequisite owner's branch (including the cross-Story file-overlap edges
+	// that live only on Story.DependsOn) is held until that owner completes, so
+	// resolveRequirementBase never forks from a missing/empty branch.
+	toDispatch = filterByBranchPrereqCompletion(toDispatch, trigger.Stories, completedReqIDs)
 
 	c.logger.Info("requirement DAG gating applied",
 		"plan_slug", trigger.PlanSlug,
 		"total_requirements", len(requirements),
 		"ready_count", len(toDispatch),
 		"blocked_by_deps", len(requirements)-preStoryGateCount,
-		"blocked_by_m_n_story_reservation", preStoryGateCount-len(toDispatch))
+		"blocked_by_m_n_story_reservation", preStoryGateCount-postStoryGateCount,
+		"blocked_by_branch_prereq", postStoryGateCount-len(toDispatch))
 
 	if len(toDispatch) == 0 {
 		return nil
@@ -370,10 +384,7 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 				return
 			}
 
-			if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, r, sc, deps); err != nil {
-				c.logger.Error("failed to trigger requirement execution",
-					"requirement_id", r.ID,
-					"error", err)
+			if err := c.dispatchRequirement(ctx, trigger, r, sc, deps); err != nil {
 				errs <- err
 			} else {
 				c.requirementsTriggered.Add(1)
@@ -391,6 +402,34 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		}
 	}
 	return firstErr
+}
+
+// dispatchRequirement resolves a requirement's DependsOn-derived branch base
+// and triggers its execution. Branch derivation runs here (not in the executor)
+// so the >1-prerequisite reqbase merge happens before the mutation and the
+// executor sees a single ready base. A resolution failure (e.g. a missing
+// prereq branch) is fatal for this requirement — dispatching it anyway would
+// fork from the wrong base and collide at plan-level assembly, the exact bug
+// this fix removes.
+func (c *Component) dispatchRequirement(
+	ctx context.Context,
+	trigger *OrchestratorTrigger,
+	req workflow.Requirement,
+	scenarios []workflow.Scenario,
+	prereqs []payloads.PrereqContext,
+) error {
+	base, err := c.resolveRequirementBase(ctx, req, trigger.Stories, trigger.PlanBranch)
+	if err != nil {
+		c.logger.Error("failed to resolve requirement branch base",
+			"requirement_id", req.ID, "error", err)
+		return err
+	}
+	if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs); err != nil {
+		c.logger.Error("failed to trigger requirement execution",
+			"requirement_id", req.ID, "error", err)
+		return err
+	}
+	return nil
 }
 
 // buildPrereqContext assembles PrereqContext for a requirement's DependsOn list
@@ -434,7 +473,7 @@ func (c *Component) buildPrereqContext(req workflow.Requirement, allReqs []workf
 // decomposition.
 func (c *Component) triggerRequirementExecution(
 	ctx context.Context,
-	planSlug, traceID, planBranch string,
+	planSlug, traceID, planBranch, baseBranch string,
 	req workflow.Requirement,
 	scenarios []workflow.Scenario,
 	prereqs []payloads.PrereqContext,
@@ -448,6 +487,7 @@ func (c *Component) triggerRequirementExecution(
 		"depends_on":     prereqs,
 		"trace_id":       traceID,
 		"plan_branch":    planBranch,
+		"base_branch":    baseBranch,
 	}
 
 	data, err := json.Marshal(mutReq)
@@ -501,6 +541,21 @@ func (c *Component) reconcileCompletedRequirements(ctx context.Context) {
 	}
 
 	recovered := 0
+	// completedNow is the authoritative set of currently-completed requirement
+	// IDs from this scan. After the loop we EVICT any cached completion not in
+	// it (when the scan was clean — see scanClean), so a requirement that a
+	// QA-recovery reopen reset (its KV entry deleted or moved off "completed")
+	// stops counting as complete and is re-dispatched. Without eviction the cache
+	// is additive-only and a reset dependent would be permanently skipped by
+	// filterReadyRequirements — the P3 recovery-staleness bug.
+	completedNow := make(map[string]struct{})
+	// scanClean stays true only if EVERY req.* key was read + parsed. A single
+	// per-key Get/unmarshal failure (or a context-deadline mid-scan) makes
+	// completedNow an undercount, so we must NOT evict on it — that would drop
+	// still-completed reqs from the SHARED cross-plan cache and wrongly block
+	// their dependents in the very same sweep. A partial scan is treated like the
+	// empty-keys early return: skip eviction, retry next sweep.
+	scanClean := true
 	for _, key := range keys {
 		if !strings.HasPrefix(key, "req.") {
 			continue
@@ -508,11 +563,13 @@ func (c *Component) reconcileCompletedRequirements(ctx context.Context) {
 
 		entry, err := kvStore.Get(reconcileCtx, key)
 		if err != nil {
+			scanClean = false
 			continue
 		}
 
 		var reqExec workflow.RequirementExecution
 		if err := json.Unmarshal(entry.Value, &reqExec); err != nil {
+			scanClean = false
 			continue
 		}
 
@@ -520,6 +577,7 @@ func (c *Component) reconcileCompletedRequirements(ctx context.Context) {
 		if reqExec.Stage != "completed" {
 			continue
 		}
+		completedNow[reqExec.RequirementID] = struct{}{}
 
 		// Synthesize a completion event from the durable execution state.
 		// FilesModified and Summary are aggregated from NodeResults; Title and
@@ -550,10 +608,55 @@ func (c *Component) reconcileCompletedRequirements(ctx context.Context) {
 		recovered++
 	}
 
-	if recovered > 0 {
-		c.logger.Info("Reconciled completed requirements from EXECUTION_STATES",
-			"recovered", recovered)
+	// Evict cached completions whose KV state is no longer "completed" (reset /
+	// reopened for recovery) — but ONLY when the scan was clean and complete, so
+	// a partial scan can never mass-evict still-completed reqs and strand their
+	// dependents until the next trigger. On a partial scan the cache is left
+	// as-is (additive); the next clean sweep evicts.
+	evicted := 0
+	if scanClean && reconcileCtx.Err() == nil {
+		for _, id := range staleCompletions(c.completedReqs.Keys(), completedNow) {
+			// A stale candidate is absent from the point-in-time key snapshot. It
+			// could be genuinely reset/reopened (evict) OR a req that COMPLETED
+			// after the snapshot and was cached by the concurrent completion
+			// watcher (keep). Re-read live KV to tell them apart, closing a TOCTOU
+			// that would otherwise transiently re-block that req's dependents.
+			if c.requirementStillCompleted(reconcileCtx, kvStore, id) {
+				continue
+			}
+			if deleted, _ := c.completedReqs.Delete(id); deleted {
+				evicted++
+			}
+		}
 	}
+
+	if recovered > 0 || evicted > 0 {
+		c.logger.Info("Reconciled completed requirements from EXECUTION_STATES",
+			"recovered", recovered, "evicted", evicted)
+	}
+}
+
+// requirementStillCompleted re-reads the cached requirement's live KV entry and
+// reports whether it is currently stage=="completed". Used to spare an eviction
+// candidate that completed AFTER the reconcile key snapshot (cached by the
+// concurrent completion watcher) — a not-found or non-completed read means the
+// entry was genuinely reset/reopened and should be evicted. The cached
+// completion event carries Slug + RequirementID (both Set sites populate them),
+// so the full KV key can be reconstructed.
+func (c *Component) requirementStillCompleted(ctx context.Context, kvStore *natsclient.KVStore, reqID string) bool {
+	evt, ok := c.completedReqs.Get(reqID)
+	if !ok || evt == nil {
+		return false
+	}
+	entry, err := kvStore.Get(ctx, workflow.RequirementExecutionKey(evt.Slug, evt.RequirementID))
+	if err != nil {
+		return false
+	}
+	var re workflow.RequirementExecution
+	if err := json.Unmarshal(entry.Value, &re); err != nil {
+		return false
+	}
+	return re.Stage == "completed"
 }
 
 // Stop gracefully stops the component.

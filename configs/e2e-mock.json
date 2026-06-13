@@ -812,7 +812,8 @@
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
         "execution_timeout": "120s",
-        "max_concurrent": 1
+        "max_concurrent": 1,
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "question-manager": {

@@ -546,6 +546,7 @@ func TestMergeBranches_ClientConflict(t *testing.T) {
 		Target:            "semspec/plan-demo",
 		MergeCommits:      []MergeBranchesCommit{{Branch: "semspec/requirement-r1", Commit: "aaa111"}},
 		ConflictingBranch: "semspec/requirement-r2",
+		ConflictingPaths:  []string{"foo.txt"},
 		Error:             "merge conflict on foo.txt",
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -565,6 +566,7 @@ func TestMergeBranches_ClientConflict(t *testing.T) {
 	require.NotNil(t, got)
 	assert.Equal(t, "conflict", got.Status)
 	assert.Equal(t, "semspec/requirement-r2", got.ConflictingBranch)
+	assert.Equal(t, []string{"foo.txt"}, got.ConflictingPaths, "conflicting shared paths must round-trip to the caller")
 	require.Len(t, got.MergeCommits, 1)
 	assert.Equal(t, "semspec/requirement-r1", got.MergeCommits[0].Branch)
 }

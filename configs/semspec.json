@@ -499,6 +499,7 @@
         "trigger_subject": "scenario.orchestrate.*",
         "execution_timeout": "3600s",
         "max_concurrent": 5,
+        "sandbox_url": "${SANDBOX_URL:-}",
         "ports": {
           "inputs": [
             {

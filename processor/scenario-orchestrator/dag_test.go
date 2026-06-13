@@ -1,6 +1,7 @@
 package scenarioorchestrator
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -142,6 +143,67 @@ func TestFilterByM2NStoryReservations_EmptyStoriesNoOp(t *testing.T) {
 	got := filterByM2NStoryReservations(requirements, nil)
 	if len(got) != 2 {
 		t.Errorf("empty stories should pass through, got %d", len(got))
+	}
+}
+
+// TestFilterByBranchPrereqCompletion_DefersUntilStoryEdgePrereqComplete is the
+// regression guard for the load-bearing race the adversarial review surfaced:
+// the file-overlap edge lives ONLY on Story.DependsOn (b1's Requirement.DependsOn
+// is empty), so the Requirement.DependsOn gate (filterReadyRequirements) lets b1
+// pass. Branch derivation forks b1 from semspec/requirement-a1, so b1 must NOT
+// dispatch until a1 (story.A's owner) completes — otherwise it forks from a
+// missing/empty branch and the assembly conflict returns. b1 is releasable only
+// once a1 is in completedReqIDs.
+func TestFilterByBranchPrereqCompletion_DefersUntilStoryEdgePrereqComplete(t *testing.T) {
+	stories := []workflow.Story{
+		{ID: "story.A", RequirementIDs: []string{"a1", "a2"}, Status: workflow.StoryStatusReady},
+		{ID: "story.B", RequirementIDs: []string{"b1"}, DependsOn: []string{"story.A"}, Status: workflow.StoryStatusReady},
+	}
+	// b1's Requirement.DependsOn is empty — only the Story edge gates it.
+	b1 := workflow.Requirement{ID: "b1"}
+	ready := []workflow.Requirement{b1}
+
+	// a1 not complete -> b1 deferred.
+	if got := filterByBranchPrereqCompletion(ready, stories, map[string]bool{}); len(got) != 0 {
+		t.Errorf("b1 must be deferred while owner a1 is incomplete; got %v", got)
+	}
+
+	// a1 complete -> b1 releasable.
+	got := filterByBranchPrereqCompletion(ready, stories, map[string]bool{"a1": true})
+	if len(got) != 1 || got[0].ID != "b1" {
+		t.Errorf("b1 must dispatch once owner a1 is complete; got %v", got)
+	}
+}
+
+// TestFilterByBranchPrereqCompletion_NoStoriesNoOp pins back-compat: without
+// Stories the resolved union reduces to Requirement.DependsOn (already gated by
+// filterReadyRequirements), so this gate is a pass-through.
+func TestFilterByBranchPrereqCompletion_NoStoriesNoOp(t *testing.T) {
+	reqs := []workflow.Requirement{makeReq("r1"), {ID: "r2", DependsOn: []string{"r1"}}}
+	got := filterByBranchPrereqCompletion(reqs, nil, map[string]bool{})
+	if len(got) != 2 {
+		t.Errorf("no Stories should pass through unchanged, got %d", len(got))
+	}
+}
+
+// TestStaleCompletions pins R2 of the recovery-path fix: the authoritative
+// eviction set. A cached completion absent from completedNow — because it was
+// reopened (KV stage left "completed") or reset (KV entry deleted) — must be
+// evicted, so the orchestrator stops skipping it and re-dispatches it. Entries
+// still in completedNow stay.
+func TestStaleCompletions(t *testing.T) {
+	completedNow := map[string]struct{}{"a1": {}, "c1": {}}
+	cached := []string{"a1", "b1", "c1", "ghost"}
+
+	got := staleCompletions(cached, completedNow)
+	want := []string{"b1", "ghost"} // b1 reopened, ghost deleted; a1/c1 still complete
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("staleCompletions = %v, want %v", got, want)
+	}
+
+	// Nothing stale when every cached entry is still completed.
+	if s := staleCompletions([]string{"a1", "c1"}, completedNow); len(s) != 0 {
+		t.Errorf("expected no evictions, got %v", s)
 	}
 }
 

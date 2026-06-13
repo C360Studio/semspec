@@ -18,6 +18,7 @@ import (
 const (
 	mutReqPhase            = "execution.mutation.req.phase"
 	mutReqNode             = "execution.mutation.req.node"
+	mutReqReset            = "execution.mutation.req.reset"
 	mutReqResetNodeResults = "execution.mutation.req.reset_node_results"
 	mutTaskCreate          = "execution.mutation.task.create"
 	// mutPlanDecisionAdd targets plan-manager (different processor, different
@@ -58,6 +59,20 @@ func (c *Component) sendReqResetNodeResults(ctx context.Context, key string) err
 		return nil
 	}
 	_, err := c.sendMutation(ctx, mutReqResetNodeResults, map[string]any{
+		"key": key,
+	})
+	return err
+}
+
+// sendReqReset asks execution-manager to DELETE a requirement execution KV
+// entry. Used by the recovery dependent-subtree invalidation to un-complete a
+// dependent so the orchestrator re-dispatches it and it re-derives its branch
+// from the rebuilt prerequisite. nil natsClient short-circuits (unit tests).
+func (c *Component) sendReqReset(ctx context.Context, key string) error {
+	if c.natsClient == nil {
+		return nil
+	}
+	_, err := c.sendMutation(ctx, mutReqReset, map[string]any{
 		"key": key,
 	})
 	return err
