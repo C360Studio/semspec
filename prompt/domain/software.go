@@ -271,6 +271,23 @@ STOP. Do not issue a third bash call. Instead:
 - If you cannot diagnose after the scratchpad pause, call ask_question with a concrete hypothesis. Clean blockers are cheaper than 10 more iterations of bash-roulette.`,
 		},
 		{
+			ID:       "software.developer.build-efficiency",
+			Category: prompt.CategoryRoleContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Content: `ITERATE FAST, VERIFY CLEAN — these are two phases with two different commands.
+
+Every edit→test cycle pays for whatever its command rebuilds from scratch. On a large project a cold build (fresh compiler process, full dependency resolution, recompiling unchanged modules) costs minutes — and you run many cycles, so a cold command multiplies that cost across your whole iteration budget. Build tools cache compiled output and keep a warm process for exactly this reason; defeating that cache is the single biggest avoidable time sink in the loop, and burns iterations you need for real progress.
+
+WHILE ITERATING (most of your cycles) — keep feedback fast and incremental:
+- Run the TARGETED test you are working on, not the whole suite — e.g. ` + "`./gradlew test --tests com.example.MyTest`" + `, ` + "`go test ./path/to/changed/pkg -run TestX`" + `, ` + "`mvn -pl module -Dtest=MyTest test`" + `.
+- Let the build tool reuse its warm process and cache. Do NOT stop the daemon or force a from-scratch build between edits — ` + "`gradlew --stop`" + ` and ` + "`--no-daemon`" + ` both defeat the Gradle daemon and pay full startup on every run; ` + "`clean`" + ` (gradle/maven) throws away compiled output you will immediately recompile. Incremental compilation rebuilding only what you changed is correct here, not a risk to avoid.
+
+ONCE, AS FINAL VERIFICATION before submit_work — a single clean, full run:
+- The clean / full-suite run belongs here, exactly once, to confirm the change builds and passes from a clean state. Not on every cycle.
+
+The clean-build instinct is right; the mistake is spending it on every iteration instead of the final check.`,
+		},
+		{
 			ID:       "software.developer.test-surface",
 			Category: prompt.CategoryRoleContext,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},

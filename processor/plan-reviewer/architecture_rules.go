@@ -2,6 +2,7 @@ package planreviewer
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/c360studio/semspec/workflow"
 )
@@ -32,11 +33,21 @@ import (
 //     component). The 2026-06-13 mavlink-hard MavsdkDriver fingerprint:
 //     caps [bootstrap, telemetry, control] mapped to 2 source files → dev
 //     built only Position+Takeoff, QA caught the gap.
+//   - architecture.upstream_source_build_incomplete_contract: a source_build
+//     UpstreamResolution that names a class/interface/type in its APIs but
+//     resolves ZERO method/function signatures — the dev then reverse-engineers
+//     the method contract through compile errors (ADR-047). The 2026-06-13
+//     mavlink-hard ICommandStatus fingerprint. Scoped to source_build (explicit
+//     OR a VCS-source-shaped coordinate when the kind is omitted); maven_central
+//     (jar-verified) and unresolved (honest flag) never fire.
 //
-// Skipped entirely when plan.Architecture is nil (legacy plans without
-// the architecture-generator phase have no components to check), when
-// plan.Exploration is nil (no capabilities to cross-reference), or when
-// ComponentBoundaries is empty.
+// The component-boundary rules are skipped when plan.Architecture is nil (legacy
+// plans without the architecture-generator phase have no components to check),
+// when plan.Exploration is nil (no capabilities to cross-reference), or when
+// ComponentBoundaries is empty. The upstream-resolution rule is INDEPENDENT of
+// ComponentBoundaries (it reads only UpstreamResolutions) and runs whenever
+// Architecture is present, so a degenerate "resolutions but no components"
+// architecture is still gated.
 //
 // Side effect: calls result.NormalizeVerdict() so the verdict reflects the
 // merged findings ("approved" → "needs_changes" when error findings appear).
@@ -44,17 +55,23 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 	if plan == nil || plan.Architecture == nil || result == nil {
 		return
 	}
-	if len(plan.Architecture.ComponentBoundaries) == 0 {
-		return
-	}
 
 	original := len(result.Findings)
+
+	// Upstream-resolution rule is component-independent — it reads only
+	// UpstreamResolutions, so it runs even when ComponentBoundaries is empty.
 	result.Findings = append(result.Findings,
-		architectureImplementationFileFindings(plan.Architecture.ComponentBoundaries)...)
-	result.Findings = append(result.Findings,
-		componentOverloadedCapabilityFindings(plan.Architecture.ComponentBoundaries)...)
-	result.Findings = append(result.Findings,
-		capabilityUnresolvedInArchitectureFindings(plan)...)
+		upstreamSourceBuildContractFindings(plan.Architecture.UpstreamResolutions)...)
+
+	// Component-boundary rules need at least one component to check.
+	if len(plan.Architecture.ComponentBoundaries) > 0 {
+		result.Findings = append(result.Findings,
+			architectureImplementationFileFindings(plan.Architecture.ComponentBoundaries)...)
+		result.Findings = append(result.Findings,
+			componentOverloadedCapabilityFindings(plan.Architecture.ComponentBoundaries)...)
+		result.Findings = append(result.Findings,
+			capabilityUnresolvedInArchitectureFindings(plan)...)
+	}
 
 	if len(result.Findings) > original {
 		result.NormalizeVerdict()
@@ -198,6 +215,115 @@ func capabilityUnresolvedInArchitectureFindings(plan *workflow.Plan) []workflow.
 			TargetValue: fmt.Sprintf("capability %q on ≥1 component", cap.Name),
 			Issue:       fmt.Sprintf("Capability %q is declared in Plan.Exploration but no ComponentDef's capabilities list contains it. Winston must map every capability to at least one component.", cap.Name),
 			Suggestion:  fmt.Sprintf("Either extend an existing component_boundaries[].capabilities to include %q, or declare a new component that implements it. If the capability cannot be mapped to any component, flag it back to the analyst sub-phase rather than emitting an implementation-less abstract.", cap.Name),
+		})
+	}
+	return findings
+}
+
+// isSourceBuildShaped reports whether a resolution should be treated as a
+// source_build for the completeness gate. It fires on an EXPLICIT source_build
+// kind, OR — because resolution_kind is omitempty and the architect prompt does
+// not hard-enforce it — on an omitted/unknown kind whose coordinate is a
+// VCS-source reference (github/gitlab/bitbucket / git@ / .git). The latter is
+// the exact "github.com/org/repo@tag" shape of the OSH dep this gate targets,
+// which EffectiveResolutionKind infers to "unknown" (NOT source_build) when the
+// field is absent — so without this widening the gate would silently miss its
+// own fingerprint. Maven GAV coordinates infer to maven_central (resolved
+// completely) and npm:/pypi: coordinates carry no VCS marker, so neither path
+// reaches here.
+func isSourceBuildShaped(r workflow.UpstreamResolution) bool {
+	switch r.EffectiveResolutionKind() {
+	case workflow.ResolutionKindSourceBuild:
+		return true
+	case "": // unknown / inferred-unverified — accept only the VCS-source shape.
+		return looksLikeVCSSource(r.Coordinate)
+	default:
+		return false
+	}
+}
+
+// looksLikeVCSSource reports whether a coordinate is a version-control source
+// reference rather than a published-registry coordinate. Deliberately narrow:
+// it must NOT match Maven GAV, npm:, or pypi: shapes (those are resolved
+// completely and are not this gate's concern).
+func looksLikeVCSSource(coordinate string) bool {
+	c := strings.ToLower(strings.TrimSpace(coordinate))
+	for _, marker := range []string{"github.com", "gitlab.com", "bitbucket.org", "git@", ".git"} {
+		if strings.Contains(c, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// upstreamSourceBuildContractFindings flags a source_build UpstreamResolution
+// that names a class/interface/type extension point in its APIs but resolves
+// ZERO method/function signatures (ADR-047). Without the method contract the
+// developer reverse-engineers it through compile errors — the 2026-06-13
+// mavlink-hard fingerprint: OSH ICommandStatus resolved as a bare interface +
+// lifecycle string (no getProgress()/getExecutionTime() signatures), and
+// gemini-pro burned ~3.5M tokens rediscovering them one compile at a time.
+//
+// Deterministic floor: the reviewer has no /sources/ access at review time, so
+// it cannot verify the method SET is complete against the upstream source — only
+// that SOME callable/implementable surface exists. A source_build resolution
+// with ≥1 named-type surface (class/interface/type) and zero method/function
+// surfaces is therefore the detectable incompleteness ("named the type, resolved
+// no methods"). A fabricated or partial method set passes this floor but is
+// caught far more cheaply at the dev's compile than by the unbounded discovery
+// loop this rule prevents — the same cost trade ValidateUpstreamImports makes.
+//
+// Kind handling: the named-type set is {class, interface, type} — the shapes a
+// subclass/caller must build against; annotation/constant/config_field are
+// deliberately excluded (no method contract to resolve). Kind is normalised
+// (lower/trim) because the value originates from an LLM.
+//
+// Accepted over-fire: a CONCRETE class whose constructor lives in its own class
+// surface Signature (no separate method entry) will fire even though that
+// constructor IS its contract. The reviewer cannot tell "extends, needs abstract
+// methods" from "construct + call" without per-symbol extends/implements data,
+// so it errs toward firing — the architect adds one method entry or splits the
+// surface, cheap, vs. the discovery loop. Severity error to match the sibling
+// structural rules; dial to a warning if it proves noisy in practice.
+func upstreamSourceBuildContractFindings(resolutions []workflow.UpstreamResolution) []workflow.PlanReviewFinding {
+	var findings []workflow.PlanReviewFinding
+	for _, r := range resolutions {
+		if !isSourceBuildShaped(r) {
+			continue
+		}
+		var hasType, hasMethod bool
+		var types []string
+		for _, api := range r.APIs {
+			switch strings.ToLower(strings.TrimSpace(api.Kind)) {
+			case "class", "interface", "type":
+				hasType = true
+				if api.Symbol != "" {
+					types = append(types, api.Symbol)
+				}
+			case "method", "function":
+				hasMethod = true
+			}
+		}
+		if !hasType || hasMethod {
+			continue
+		}
+		name := r.Name
+		if name == "" {
+			name = r.Coordinate
+		}
+		findings = append(findings, workflow.PlanReviewFinding{
+			SOPID:       "architecture.upstream_source_build_incomplete_contract",
+			SOPTitle:    "source_build dependency names a type but resolves no method contract (ADR-047)",
+			Severity:    "error",
+			Status:      "violation",
+			Category:    "structural",
+			Phase:       "architecture",
+			TargetID:    name,
+			Action:      "add",
+			TargetField: fmt.Sprintf("upstream_resolutions.%s.apis", name),
+			TargetValue: "≥1 method/function APISurface with a full signature for each member a subclass calls or implements",
+			Issue:       fmt.Sprintf("source_build dependency %q names type(s) %v but resolves zero method/function signatures. A subclass or caller needs each method's exact signature; without it the developer reverse-engineers the contract through compile errors (the 2026-06-13 ICommandStatus thrash burned ~3.5M tokens rediscovering getProgress()->int, getExecutionTime()->TimeExtent).", name, types),
+			Suggestion:  fmt.Sprintf("Read %q's source at its source_ref (mounted under /sources/ when WITH_EPIC) and add an apis[] entry (kind=method) with a full signature for each constructor and abstract/interface method a subclass must implement, plus any config/parameter types those signatures reference.", name),
 		})
 	}
 	return findings

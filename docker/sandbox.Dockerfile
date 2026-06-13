@@ -110,6 +110,19 @@ USER sandbox
 ENV HOME=/home/sandbox
 RUN git config --global user.email "sandbox@semspec.dev" \
     && git config --global user.name "Semspec Sandbox"
+# Gradle iteration speed (cold-build lever, 2026-06-13). A user-global build
+# cache + warm daemon so repeated dev/validator test runs reuse compiled task
+# outputs across per-task worktrees instead of recompiling unchanged upstream
+# modules (e.g. osh-core) on every cycle. GRADLE_USER_HOME defaults to
+# ~/.gradle, shared across worktrees, so the cache at
+# ~/.gradle/caches/build-cache-1 persists for the container's life. Crucially
+# org.gradle.caching helps EVEN when a build is invoked with --no-daemon (the
+# cache is independent of the daemon), which is the dominant recompilation cost
+# on large source_build projects. daemon/parallel only take effect when the
+# agent does not force --no-daemon (the developer prompt steers it that way).
+RUN mkdir -p "$HOME/.gradle" \
+    && printf 'org.gradle.caching=true\norg.gradle.daemon=true\norg.gradle.parallel=true\n' \
+       > "$HOME/.gradle/gradle.properties"
 WORKDIR /workspace
 EXPOSE 8090
 
