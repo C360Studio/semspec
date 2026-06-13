@@ -121,6 +121,26 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 		}
 	}
 
+	// Cold-build lever pin (2026-06-13): the developer must be told to iterate
+	// with warm/incremental/targeted builds and reserve the clean cold run for
+	// a single final verification. Caught in the gemini WITH_EPIC mavlink-hard
+	// run where the dev self-ran `./gradlew --stop && ./gradlew test --no-daemon`
+	// every cycle, paying full cold-start (minutes) on a large source_build
+	// project and racing the execution clock. Language-agnostic: names gradle,
+	// go test, and maven so single-toolchain runs aren't polluted by the others.
+	wantBuildEfficiencyPins := []string{
+		"ITERATE FAST, VERIFY CLEAN", // the principle header
+		"--no-daemon",                // the specific antipattern observed live
+		"--tests",                    // targeted-test guidance (gradle)
+		"go test ./path",             // generalized to Go
+		"AS FINAL VERIFICATION",      // the verify-once-clean phase
+	}
+	for _, want := range wantBuildEfficiencyPins {
+		if !strings.Contains(result.SystemMessage, want) {
+			t.Errorf("expected build-efficiency guidance %q in developer prompt (cold-build lever)", want)
+		}
+	}
+
 	// Anti-pin: the persona must NOT name Go-specific failure modes that
 	// don't apply to Python/Node/etc projects. The user (2026-05-08)
 	// caught and rejected a Go-specific draft of this fragment that
