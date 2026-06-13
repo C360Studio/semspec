@@ -857,6 +857,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
+        "sandbox_url": "http://sandbox:8090",
         "execution_timeout": "${SEMSPEC_SCENARIO_ORCH_TIMEOUT:-3600s}"
       }
     },
