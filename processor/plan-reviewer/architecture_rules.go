@@ -24,6 +24,14 @@ import (
 //   - capability.unresolved_in_architecture: a Capability.Name from
 //     plan.Exploration whose name doesn't appear in any ComponentDef's
 //     Capabilities list. Winston didn't map this capability to a component.
+//   - architecture.component_overloaded_capabilities: ComponentDef mapping
+//     ≥2 capabilities but declaring fewer SOURCE (non-doc) implementation
+//     files than capabilities — it has no distinct implementation surface per
+//     capability, so one dev loop implements one and stubs the rest. The
+//     inverse of the missing-files / docs-only rules (an OVER-loaded
+//     component). The 2026-06-13 mavlink-hard MavsdkDriver fingerprint:
+//     caps [bootstrap, telemetry, control] mapped to 2 source files → dev
+//     built only Position+Takeoff, QA caught the gap.
 //
 // Skipped entirely when plan.Architecture is nil (legacy plans without
 // the architecture-generator phase have no components to check), when
@@ -43,6 +51,8 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 	original := len(result.Findings)
 	result.Findings = append(result.Findings,
 		architectureImplementationFileFindings(plan.Architecture.ComponentBoundaries)...)
+	result.Findings = append(result.Findings,
+		componentOverloadedCapabilityFindings(plan.Architecture.ComponentBoundaries)...)
 	result.Findings = append(result.Findings,
 		capabilityUnresolvedInArchitectureFindings(plan)...)
 
@@ -102,6 +112,55 @@ func architectureImplementationFileFindings(components []workflow.ComponentDef) 
 	return findings
 }
 
+// componentOverloadedCapabilityFindings flags a ComponentDef that claims more
+// independently-testable capabilities than it has SOURCE (non-doc)
+// implementation files — it has no distinct implementation surface per
+// capability, so a single developer loop will implement one capability and stub
+// the rest. This is the inverse of the missing-files / docs-only rules: those
+// catch a component with too LITTLE, this catches one asked to do too MUCH.
+//
+// Heuristic: a component mapping N capabilities needs at least N source files
+// (one surface per capability). Fewer source files than capabilities means the
+// architect collapsed distinct behavior surfaces behind a facade. The
+// 2026-06-13 mavlink-hard MavsdkDriver fingerprint: capabilities
+// [mavsdk-bootstrap, mavsdk-telemetry, mavsdk-control] mapped to two source
+// files (UnmannedSystem.java + UnmannedConfig.java) → the dev built only
+// Position telemetry + Takeoff and stubbed the rest; QA (Murat) caught it but
+// only after a full execution + assembly. This rule catches it at plan review.
+//
+// Single-capability components are never flagged (the common, healthy shape).
+func componentOverloadedCapabilityFindings(components []workflow.ComponentDef) []workflow.PlanReviewFinding {
+	var findings []workflow.PlanReviewFinding
+	for _, c := range components {
+		if c.Name == "" {
+			continue
+		}
+		capCount := len(c.Capabilities)
+		if capCount < 2 {
+			continue
+		}
+		src := sourceFileCount(c.ImplementationFiles)
+		if src >= capCount {
+			continue
+		}
+		findings = append(findings, workflow.PlanReviewFinding{
+			SOPID:       "architecture.component_overloaded_capabilities",
+			SOPTitle:    "Component maps more capabilities than it has implementation surfaces (ADR-044)",
+			Severity:    "error",
+			Status:      "violation",
+			Category:    "structural",
+			Phase:       "architecture",
+			TargetID:    c.Name,
+			Action:      "split",
+			TargetField: fmt.Sprintf("component_boundaries.%s", c.Name),
+			TargetValue: "one component per independently-testable capability (or ≥1 source file per capability)",
+			Issue:       fmt.Sprintf("Component %q maps %d capabilities (%v) but declares only %d source implementation file(s) — it has no distinct implementation surface per capability, so a single dev loop will build one and stub the rest.", c.Name, capCount, c.Capabilities, src),
+			Suggestion:  fmt.Sprintf("Split component %q into one component per independently-testable capability, each with its own implementation_files. If the capabilities genuinely share one implementation surface, add a distinct source file per capability so the mapping is honest.", c.Name),
+		})
+	}
+	return findings
+}
+
 // capabilityUnresolvedInArchitectureFindings emits one finding per Capability
 // declared by Mary's analyst sub-phase that has no implementing component.
 // The architect-side mirror of capability.orphan (which flags capabilities
@@ -151,13 +210,20 @@ func capabilityUnresolvedInArchitectureFindings(plan *workflow.Plan) []workflow.
 // downstream phases while the reviewer-side rule rejected it (or vice
 // versa). Both sides delegate to workflow.IsDocumentationPath.
 func hasSourceFile(paths []string) bool {
-	if len(paths) == 0 {
-		return false
-	}
+	return sourceFileCount(paths) > 0
+}
+
+// sourceFileCount returns the number of source-code (non-documentation) files
+// in the given workspace-relative paths, delegating to the same
+// workflow.IsDocumentationPath classifier as hasSourceFile. Used by
+// componentOverloadedCapabilityFindings to compare a component's source-surface
+// count against the number of capabilities it claims.
+func sourceFileCount(paths []string) int {
+	n := 0
 	for _, p := range paths {
 		if !workflow.IsDocumentationPath(p) {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
