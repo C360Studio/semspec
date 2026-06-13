@@ -341,6 +341,7 @@
       "config": {
         "max_iterations": 120,
         "timeout": "1800s",
+        "tool_result_max_bytes": 131072,
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
