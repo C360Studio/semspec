@@ -130,6 +130,13 @@ type requirementExecution struct {
 	// and merge back into this branch.
 	RequirementBranch string
 
+	// BaseBranch is the orchestrator-resolved DependsOn-derivation base this
+	// requirement's branch forks FROM (see workflow.RequirementExecution.BaseBranch).
+	// Carried so the recovery-resume branch recreate forks from the same derived
+	// base as the initial create, not "HEAD" — otherwise a reopened mid-chain
+	// requirement loses the prerequisite edits it was derived from.
+	BaseBranch string
+
 	// --- Requirement-level review ---
 
 	// ReviewerTaskID is the agentic task ID for the scenario reviewer.

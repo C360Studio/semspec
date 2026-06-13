@@ -541,6 +541,7 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		CurrentNodeTaskID: reqExec.CurrentNodeTaskID,
 		ReviewerTaskID:    reqExec.ReviewerTaskID,
 		RequirementBranch: reqExec.RequirementBranch,
+		BaseBranch:        reqExec.BaseBranch,
 		CurrentNodeIdx:    reqExec.CurrentNodeIdx,
 		SortedNodeIDs:     reqExec.SortedNodeIDs,
 		SortedStoryIDs:    reqExec.SortedStoryIDs,

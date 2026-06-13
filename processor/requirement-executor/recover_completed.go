@@ -154,6 +154,108 @@ func (c *Component) resumeTerminalForRecoveryLocked(ctx context.Context, exec *r
 	// visible when dispatchSynthesizerLocked reloads the plan from KV.
 	c.reopenOwnedStoriesForRecoveryLocked(ctx, exec)
 	c.resumeFromRecoveryLocked(ctx, exec)
+	// Invalidate the dependent branch subtree AFTER resumeFromRecoveryLocked has
+	// moved this requirement off "completed" (sendReqPhase → decomposing). That
+	// ordering is load-bearing: the orchestrator reconciles its completed-set
+	// before gating each sweep, so once this owner shows non-completed the
+	// branch-prereq gate HOLDS the dependents until it re-completes — they cannot
+	// re-dispatch against the owner's pre-rebuild branch. Doing the reset here
+	// (not in plan-manager's accept path) is what makes that ordering hold:
+	// plan-manager would reset dependents while this owner was still "completed",
+	// opening a window for a stale re-dispatch.
+	c.invalidateDependentBranchSubtreeLocked(ctx, exec)
+}
+
+// invalidateDependentBranchSubtreeLocked resets every requirement whose branch
+// DERIVES (transitively) from exec — deleting its execution state and stale
+// branches — so the orchestrator re-dispatches it and it re-forks from exec's
+// rebuilt branch instead of staying stale (the P3 recovery-staleness bug). The
+// branch-derivation gate then re-sequences the subtree behind exec's
+// re-completion. Best-effort: a failed reset logs and continues; the pre-QA
+// assembly conflict gate still catches any dependent this misses, so a transient
+// failure degrades to a detected conflict, never silent corruption.
+func (c *Component) invalidateDependentBranchSubtreeLocked(ctx context.Context, exec *requirementExecution) {
+	if c.natsClient == nil {
+		return
+	}
+	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
+	if err != nil || plan == nil {
+		c.logger.Warn("QA-recovery: could not load plan to invalidate dependent branch subtree",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID, "error", err)
+		return
+	}
+	c.resetDependentBranchSubtree(ctx, exec.Slug, exec.RequirementID, plan)
+}
+
+// coAffectedDependents returns the subset of affectedReqIDs that DERIVE
+// (transitively) from another requirement in the same recovery event. Those must
+// NOT be directly resumed: the prerequisite's resume cascade resets and
+// re-derives them, whereas a direct resume would recreate their branch from the
+// prerequisite's PRE-rebuild base. Best-effort — a plan-load failure or a
+// single-requirement event returns nil (every affected req resumes directly).
+func (c *Component) coAffectedDependents(ctx context.Context, slug string, affectedReqIDs []string) map[string]bool {
+	if len(affectedReqIDs) < 2 {
+		return nil
+	}
+	plan, err := c.loadPlanFromKV(ctx, slug)
+	if err != nil || plan == nil {
+		return nil
+	}
+	return coAffectedDependentSet(affectedReqIDs, plan.Requirements, plan.Stories)
+}
+
+// coAffectedDependentSet is the pure core of coAffectedDependents: the affected
+// requirements that derive (transitively) from another affected requirement.
+func coAffectedDependentSet(affectedReqIDs []string, reqs []workflow.Requirement, stories []workflow.Story) map[string]bool {
+	affected := make(map[string]bool, len(affectedReqIDs))
+	for _, id := range affectedReqIDs {
+		affected[id] = true
+	}
+	skip := make(map[string]bool)
+	for _, owner := range affectedReqIDs {
+		for _, dep := range workflow.DependentBranchSubtree(owner, reqs, stories) {
+			if affected[dep] {
+				skip[dep] = true
+			}
+		}
+	}
+	return skip
+}
+
+// resetDependentBranchSubtree resets every requirement whose branch derives from
+// reopenedID — deleting its execution state (req.reset) and its stale branches —
+// so the orchestrator re-dispatches and re-derives them. Split from the plan
+// load so the dep-enumeration + branch-delete wiring is unit-testable with a
+// stub sandbox.
+func (c *Component) resetDependentBranchSubtree(ctx context.Context, slug, reopenedID string, plan *workflow.Plan) {
+	deps := workflow.DependentBranchSubtree(reopenedID, plan.Requirements, plan.Stories)
+	if len(deps) == 0 {
+		return
+	}
+	for _, dep := range deps {
+		// Tear down any LIVE exec for this dependent first. A dependent that was
+		// still mid-execution when its prerequisite reopened is building on the
+		// now-stale base; leaving it in activeExecs would make the req_watcher
+		// duplicate guard swallow the fresh re-dispatch (it keys on EntityID), so
+		// the stale loop would run to completion and the re-derived one never
+		// starts. Removing it lets the orchestrator's re-dispatch claim cleanly.
+		c.abandonLiveExecForRequirement(slug, dep)
+		if err := c.sendReqReset(ctx, workflow.RequirementExecutionKey(slug, dep)); err != nil {
+			c.logger.Warn("Failed to reset dependent requirement for re-derivation",
+				"slug", slug, "requirement_id", dep, "error", err)
+		}
+		if c.sandbox != nil {
+			for _, branch := range []string{"semspec/requirement-" + dep, "semspec/reqbase-" + dep} {
+				if delErr := c.sandbox.DeleteBranch(ctx, branch); delErr != nil &&
+					!strings.Contains(delErr.Error(), "server error 404") {
+					c.logger.Warn("Failed to delete stale dependent branch on recovery",
+						"slug", slug, "branch", branch, "error", delErr)
+				}
+			}
+		}
+	}
+	c.logger.Info("Invalidated dependent branch subtree for re-derivation on QA-recovery",
+		"slug", slug, "reopened", reopenedID, "dependents", deps)
 }
 
 // storiesToReopenForRecovery returns the IDs of complete Stories covering reqID

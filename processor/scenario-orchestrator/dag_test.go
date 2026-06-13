@@ -1,6 +1,7 @@
 package scenarioorchestrator
 
 import (
+	"reflect"
 	"sort"
 	"testing"
 
@@ -182,6 +183,27 @@ func TestFilterByBranchPrereqCompletion_NoStoriesNoOp(t *testing.T) {
 	got := filterByBranchPrereqCompletion(reqs, nil, map[string]bool{})
 	if len(got) != 2 {
 		t.Errorf("no Stories should pass through unchanged, got %d", len(got))
+	}
+}
+
+// TestStaleCompletions pins R2 of the recovery-path fix: the authoritative
+// eviction set. A cached completion absent from completedNow — because it was
+// reopened (KV stage left "completed") or reset (KV entry deleted) — must be
+// evicted, so the orchestrator stops skipping it and re-dispatches it. Entries
+// still in completedNow stay.
+func TestStaleCompletions(t *testing.T) {
+	completedNow := map[string]struct{}{"a1": {}, "c1": {}}
+	cached := []string{"a1", "b1", "c1", "ghost"}
+
+	got := staleCompletions(cached, completedNow)
+	want := []string{"b1", "ghost"} // b1 reopened, ghost deleted; a1/c1 still complete
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("staleCompletions = %v, want %v", got, want)
+	}
+
+	// Nothing stale when every cached entry is still completed.
+	if s := staleCompletions([]string{"a1", "c1"}, completedNow); len(s) != 0 {
+		t.Errorf("expected no evictions, got %v", s)
 	}
 }
 

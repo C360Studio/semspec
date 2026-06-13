@@ -86,6 +86,87 @@ func TestResolveRequirementBranchPrereqs(t *testing.T) {
 	}
 }
 
+// TestDependentBranchSubtree pins the reverse branch-derivation closure used by
+// the recovery-path invalidation (P3): when a prerequisite re-runs after
+// completing, every requirement that (transitively) forked from it must be
+// reset and re-derived.
+func TestDependentBranchSubtree(t *testing.T) {
+	tests := []struct {
+		name     string
+		reopened string
+		reqs     []Requirement
+		stories  []Story
+		want     []string
+	}{
+		{
+			name:     "no dependents -> empty",
+			reopened: "a1",
+			reqs:     []Requirement{{ID: "a1"}, {ID: "z1"}},
+			want:     nil,
+		},
+		{
+			name:     "linear chain a1<-b1<-c1 -> {b1,c1}",
+			reopened: "a1",
+			reqs: []Requirement{
+				{ID: "a1"},
+				{ID: "b1", DependsOn: []string{"a1"}},
+				{ID: "c1", DependsOn: []string{"b1"}},
+			},
+			want: []string{"b1", "c1"},
+		},
+		{
+			name:     "chain reopened in the middle -> only downstream",
+			reopened: "b1",
+			reqs: []Requirement{
+				{ID: "a1"},
+				{ID: "b1", DependsOn: []string{"a1"}},
+				{ID: "c1", DependsOn: []string{"b1"}},
+			},
+			want: []string{"c1"}, // a1 is upstream, not invalidated
+		},
+		{
+			name:     "diamond: b1,b2 on a1; d1 on b1,b2 -> {b1,b2,d1}",
+			reopened: "a1",
+			reqs: []Requirement{
+				{ID: "a1"},
+				{ID: "b1", DependsOn: []string{"a1"}},
+				{ID: "b2", DependsOn: []string{"a1"}},
+				{ID: "d1", DependsOn: []string{"b1", "b2"}},
+			},
+			want: []string{"b1", "b2", "d1"},
+		},
+		{
+			name:     "Story file-overlap edge (only on Story.DependsOn) is followed",
+			reopened: "a1",
+			reqs:     []Requirement{{ID: "a1"}, {ID: "a2"}, {ID: "b1"}},
+			stories: []Story{
+				{ID: "story.A", RequirementIDs: []string{"a1", "a2"}},
+				{ID: "story.B", RequirementIDs: []string{"b1"}, DependsOn: []string{"story.A"}},
+			},
+			// b1 derives from owner(story.A)=a1 via the Pass-2 edge -> invalidated.
+			want: []string{"b1"},
+		},
+		{
+			name:     "cycle is guarded (no infinite loop)",
+			reopened: "a1",
+			reqs: []Requirement{
+				{ID: "a1"},
+				{ID: "b1", DependsOn: []string{"a1", "c1"}},
+				{ID: "c1", DependsOn: []string{"b1"}},
+			},
+			want: []string{"b1", "c1"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DependentBranchSubtree(tt.reopened, tt.reqs, tt.stories)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("DependentBranchSubtree(%q) = %v, want %v", tt.reopened, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestOwnerRequirementFor(t *testing.T) {
 	stories := []Story{
 		{ID: "story.A", RequirementIDs: []string{"a2", "a1"}}, // owner = a1 (min)

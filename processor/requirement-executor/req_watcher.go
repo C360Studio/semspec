@@ -110,6 +110,7 @@ func (c *Component) handleReqPending(ctx context.Context, entry jetstream.KeyVal
 		Description:    reqExec.Description,
 		Scenarios:      reqExec.Scenarios,
 		DependsOn:      reqExec.DependsOn,
+		BaseBranch:     reqExec.BaseBranch,
 		Prompt:         reqExec.Prompt,
 		Role:           reqExec.Role,
 		Model:          model,

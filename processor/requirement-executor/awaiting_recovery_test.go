@@ -277,6 +277,53 @@ func TestResumeFromRecoveryLocked_ResetsRetryCount(t *testing.T) {
 	}
 }
 
+// TestResumeFromRecoveryLocked_RecreatesBranchFromResolvedBase pins R3 of the
+// recovery-path fix: when a reopened requirement's branch is recreated on
+// resume, it must fork from the DependsOn-derived base (so a mid-chain
+// requirement re-inherits its prerequisite's edits), NOT from "HEAD". Empty
+// base (a DAG root) still falls back to HEAD.
+func TestResumeFromRecoveryLocked_RecreatesBranchFromResolvedBase(t *testing.T) {
+	t.Run("derived requirement recreates from its base", func(t *testing.T) {
+		c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+		stub := &stubSandbox{}
+		c.sandbox = stub
+		exec := newAwaitingExec("plan-r3", "b1")
+		exec.RequirementBranch = "semspec/requirement-b1"
+		exec.BaseBranch = "semspec/requirement-a1"
+		c.activeExecs.Set(exec.EntityID, exec)
+
+		exec.mu.Lock()
+		c.resumeFromRecoveryLocked(context.Background(), exec)
+		exec.mu.Unlock()
+
+		stub.mu.Lock()
+		defer stub.mu.Unlock()
+		if len(stub.createdBranchBases) != 1 || stub.createdBranchBases[0] != "semspec/requirement-a1" {
+			t.Errorf("recreate base = %v, want [semspec/requirement-a1] (not HEAD)", stub.createdBranchBases)
+		}
+	})
+
+	t.Run("root requirement recreates from HEAD", func(t *testing.T) {
+		c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+		stub := &stubSandbox{}
+		c.sandbox = stub
+		exec := newAwaitingExec("plan-r3", "a1")
+		exec.RequirementBranch = "semspec/requirement-a1"
+		exec.BaseBranch = "" // DAG root
+		c.activeExecs.Set(exec.EntityID, exec)
+
+		exec.mu.Lock()
+		c.resumeFromRecoveryLocked(context.Background(), exec)
+		exec.mu.Unlock()
+
+		stub.mu.Lock()
+		defer stub.mu.Unlock()
+		if len(stub.createdBranchBases) != 1 || stub.createdBranchBases[0] != "HEAD" {
+			t.Errorf("root recreate base = %v, want [HEAD]", stub.createdBranchBases)
+		}
+	})
+}
+
 // Idempotent timeout: when resume already cleared awaitingRecovery, a
 // late-firing timer must not increment failed-counter or transition
 // state again.

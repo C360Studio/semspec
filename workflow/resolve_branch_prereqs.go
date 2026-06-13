@@ -88,3 +88,50 @@ func storyCoversReq(s Story, reqID string) bool {
 	}
 	return false
 }
+
+// DependentBranchSubtree returns every requirement whose branch derives —
+// transitively — from reopenedID, i.e. the set that must be invalidated and
+// re-derived when reopenedID re-runs AFTER it already completed (a QA-recovery
+// reopen). Without this, a dependent that already forked from reopenedID's old
+// branch state stays stale and re-introduces the assembly conflict on the
+// recovery path.
+//
+// r is a DIRECT dependent of o iff o ∈ ResolveRequirementBranchPrereqs(r, stories).
+// The result is the transitive closure over that reverse relation across reqs —
+// a dependent's dependents are also stale — excluding reopenedID itself,
+// de-duplicated and sorted (deterministic). Cycle-safe via a visited set (the
+// derived DAG is acyclic by construction; the guard is belt-and-suspenders).
+func DependentBranchSubtree(reopenedID string, reqs []Requirement, stories []Story) []string {
+	// Reverse adjacency: owner -> the requirements that derive directly from it.
+	dependentsOf := make(map[string][]string)
+	for _, r := range reqs {
+		for _, prereq := range ResolveRequirementBranchPrereqs(r, stories) {
+			dependentsOf[prereq] = append(dependentsOf[prereq], r.ID)
+		}
+	}
+
+	visited := make(map[string]struct{})
+	queue := append([]string(nil), dependentsOf[reopenedID]...)
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if id == reopenedID {
+			continue
+		}
+		if _, seen := visited[id]; seen {
+			continue
+		}
+		visited[id] = struct{}{}
+		queue = append(queue, dependentsOf[id]...)
+	}
+
+	if len(visited) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(visited))
+	for id := range visited {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}

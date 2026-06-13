@@ -189,3 +189,20 @@ func branchPrereqsComplete(req workflow.Requirement, stories []workflow.Story, c
 	}
 	return true
 }
+
+// staleCompletions returns the cached completion keys that are no longer present
+// in the authoritative completedNow set — the entries reconcileCompletedRequirements
+// must EVICT. This is what makes the orchestrator's completed-set authoritative
+// rather than additive: a requirement reopened for QA-recovery (its KV stage
+// left "completed") or reset (its KV entry deleted) is absent from completedNow,
+// so it is dropped and re-admitted for dispatch. Pure for unit-testing the
+// eviction contract without a live KV.
+func staleCompletions(cachedKeys []string, completedNow map[string]struct{}) []string {
+	var stale []string
+	for _, id := range cachedKeys {
+		if _, ok := completedNow[id]; !ok {
+			stale = append(stale, id)
+		}
+	}
+	return stale
+}
