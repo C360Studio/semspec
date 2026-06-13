@@ -794,7 +794,7 @@ Below is the architecture you produced last round. Start from it and make the MI
 - Focus on structure and boundaries, not implementation details
 - Justify every decision with a rationale
 - Flag architectural risks or trade-offs
-- Component boundaries should reflect natural module/service divisions in the codebase
+- Component boundaries are the planning system's UNIT OF EXECUTION — each component is built and verified by ONE developer loop / ONE story, not just a runtime or deployment module. Default to ONE independently-testable capability per component. Map multiple capabilities onto one component ONLY when the same classes genuinely implement them — never when a facade/config class fronts several distinct behavior surfaces. When capabilities have independent behavior (separate plugins, streams, command handlers, protocols), give each its own component with its own implementation_files
 
 ## Deliverable Structure
 
@@ -811,7 +811,7 @@ Below is the architecture you produced last round. Start from it and make the MI
 **Optional fields** — human documentation in plan.md; only include when they add real value:
 
 - **technology_choices**: array of {category, choice, rationale} — when introducing or formally endorsing a stack choice. Skip when reusing whatever the project already has.
-- **component_boundaries**: array of {name, responsibility, dependencies[], implementation_files[], capability_indices[]} — every component maps to capabilities via capability_indices (0-based indices into the Capabilities list above), NOT re-typed names. Every analyst capability must appear in at least one component's capability_indices.
+- **component_boundaries**: array of {name, responsibility, dependencies[], implementation_files[], capability_indices[]} — every component maps to capabilities via capability_indices (0-based indices into the Capabilities list above), NOT re-typed names. Every analyst capability must appear in at least one component's capability_indices. GRANULARITY: prefer one capability per component. A component that maps N capabilities MUST declare at least one distinct, substantive implementation_file per capability (a real source file — not README/CoverageMatrix/a single *Config facade). You cannot implement N independently-testable capabilities from one class; if you cannot name a distinct implementation surface for each capability, split the component.
 - **data_flow**: string — when data movement between components is non-obvious. Skip for trivial flows.
 - **decisions**: array of {id, title, decision, rationale} — architecture decision records (use IDs like ARCH-001) for trade-offs future contributors will want to understand. Skip for routine choices.
 

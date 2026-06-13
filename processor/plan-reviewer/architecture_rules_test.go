@@ -204,6 +204,89 @@ func TestMergeArchitectureFindings_HappyPath(t *testing.T) {
 	}
 }
 
+// TestMergeArchitectureFindings_OverloadedComponent fires
+// architecture.component_overloaded_capabilities on the 2026-06-13 mavlink-hard
+// MavsdkDriver shape: three independently-testable capabilities collapsed onto
+// one component backed by two source files (+ two doc files). A single dev loop
+// built only one capability's surface and stubbed the rest; this rule catches
+// the collapse at plan review instead of at the QA gate.
+func TestMergeArchitectureFindings_OverloadedComponent(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "mavsdk-overloaded",
+		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{
+			{Name: "mavsdk-bootstrap", Lifecycle: workflow.CapabilityNew, Description: "B."},
+			{Name: "mavsdk-telemetry", Lifecycle: workflow.CapabilityNew, Description: "T."},
+			{Name: "mavsdk-control", Lifecycle: workflow.CapabilityNew, Description: "C."},
+		}},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{
+					Name:                "MavsdkDriver",
+					Capabilities:        []string{"mavsdk-bootstrap", "mavsdk-telemetry", "mavsdk-control"},
+					ImplementationFiles: []string{"src/UnmannedSystem.java", "src/UnmannedConfig.java", "README.md", "CoverageMatrix.md"},
+				},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	var f *workflow.PlanReviewFinding
+	for i := range result.Findings {
+		if result.Findings[i].SOPID == "architecture.component_overloaded_capabilities" {
+			f = &result.Findings[i]
+		}
+	}
+	if f == nil {
+		t.Fatalf("expected component_overloaded_capabilities finding, got: %+v", result.Findings)
+	}
+	if f.TargetID != "MavsdkDriver" {
+		t.Errorf("target = %q, want MavsdkDriver", f.TargetID)
+	}
+	if !strings.Contains(f.Issue, "3 capabilities") || !strings.Contains(f.Issue, "2 source") {
+		t.Errorf("issue should name 3 capabilities / 2 source files: %q", f.Issue)
+	}
+	if result.Verdict != "needs_changes" {
+		t.Errorf("verdict = %q, want needs_changes", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_CohesiveComponentNotFlagged confirms the rule
+// does NOT fire when a multi-capability component declares one source file per
+// capability — the honest exceptional shape (real shared module, distinct
+// surface per capability).
+func TestMergeArchitectureFindings_CohesiveComponentNotFlagged(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "cohesive-ok",
+		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{
+			{Name: "auth", Lifecycle: workflow.CapabilityNew, Description: "A."},
+			{Name: "session", Lifecycle: workflow.CapabilityNew, Description: "S."},
+		}},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{
+					Name:                "identity",
+					Capabilities:        []string{"auth", "session"},
+					ImplementationFiles: []string{"src/auth.go", "src/session.go", "README.md"},
+				},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	for _, f := range result.Findings {
+		if f.SOPID == "architecture.component_overloaded_capabilities" {
+			t.Errorf("2 caps + 2 source files should not fire overloaded rule, got: %+v", f)
+		}
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("verdict = %q, want approved (no findings)", result.Verdict)
+	}
+}
+
 // TestHasSourceFile_DelegatesToWorkflowClassifier guards the
 // reviewer-side ↔ architecture-generator-side classification parity. If
 // workflow.IsDocumentationPath ever drifts from this rule's expectations,
