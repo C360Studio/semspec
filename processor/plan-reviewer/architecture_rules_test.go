@@ -407,6 +407,175 @@ func TestMergeArchitectureFindings_NonSourceBuildContractNotFlagged(t *testing.T
 	}
 }
 
+// sourceBuildResolutionPlan builds a minimal plan with one clean single-cap
+// component (so no component-boundary rule fires) and the given upstream
+// resolutions, for isolating the upstream-contract rule. Exploration is nil so
+// capability.unresolved_in_architecture never fires.
+func sourceBuildResolutionPlan(resolutions ...workflow.UpstreamResolution) *workflow.Plan {
+	return &workflow.Plan{
+		Slug: "upstream-rule-iso",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "driver", Capabilities: []string{"drive"}, ImplementationFiles: []string{"src/Driver.java"}},
+			},
+			UpstreamResolutions: resolutions,
+		},
+	}
+}
+
+func firedUpstreamContract(result *workflow.PlanReviewResult) *workflow.PlanReviewFinding {
+	for i := range result.Findings {
+		if result.Findings[i].SOPID == "architecture.upstream_source_build_incomplete_contract" {
+			return &result.Findings[i]
+		}
+	}
+	return nil
+}
+
+// TestMergeArchitectureFindings_SourceBuildByVCSShapeFiresWhenKindOmitted closes
+// the go-reviewer HIGH gap: the gate's own target shape — a github-coordinate OSH
+// dep — infers to "unknown" (NOT source_build) when resolution_kind is omitted,
+// so without the VCS-shape widening the rule would silently miss it. Also
+// exercises name-fallback to Coordinate (empty Name).
+func TestMergeArchitectureFindings_SourceBuildByVCSShapeFiresWhenKindOmitted(t *testing.T) {
+	plan := sourceBuildResolutionPlan(workflow.UpstreamResolution{
+		// No ResolutionKind set; github coordinate is the de-facto source_build shape.
+		Coordinate: "github.com/opensensorhub/osh-core@v2.0.0",
+		SourceRef:  "/sources/osh-core",
+		APIs: []workflow.APISurface{
+			{Symbol: "ICommandStatus", Kind: "interface", Signature: "public interface ICommandStatus", Citation: "c"},
+		},
+	})
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	f := firedUpstreamContract(result)
+	if f == nil {
+		t.Fatalf("VCS-shaped source_build with omitted kind should fire, got: %+v", result.Findings)
+	}
+	if f.TargetID != "github.com/opensensorhub/osh-core@v2.0.0" {
+		t.Errorf("TargetID should fall back to coordinate when Name is empty, got %q", f.TargetID)
+	}
+	if result.Verdict != "needs_changes" {
+		t.Errorf("verdict = %q, want needs_changes", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_UnknownNonVCSShapeNotFlagged confirms the
+// widening stays narrow: a registry-prefixed coordinate (npm:) infers to unknown
+// but carries no VCS marker, so it is NOT treated as source_build even with a
+// type-only surface — npm/pypi packages resolve completely and are not this
+// gate's concern.
+func TestMergeArchitectureFindings_UnknownNonVCSShapeNotFlagged(t *testing.T) {
+	plan := sourceBuildResolutionPlan(workflow.UpstreamResolution{
+		Name: "Some NPM Lib", Coordinate: "npm:some-lib@1.0.0",
+		APIs: []workflow.APISurface{{Symbol: "Thing", Kind: "interface", Signature: "interface Thing", Citation: "c"}},
+	})
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	if f := firedUpstreamContract(result); f != nil {
+		t.Errorf("npm coordinate (unknown, non-VCS) should not fire: %+v", f)
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("verdict = %q, want approved", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_SourceBuildEmptyAPIsNotFlagged: a source_build
+// resolution with no APIs has no named type, so the rule does not fire (zero-API
+// resolutions are a separate completeness concern, not this rule's floor).
+func TestMergeArchitectureFindings_SourceBuildEmptyAPIsNotFlagged(t *testing.T) {
+	plan := sourceBuildResolutionPlan(workflow.UpstreamResolution{
+		Name: "OSH Core", Coordinate: "github.com/opensensorhub/osh-core@v2", ResolutionKind: "source_build",
+	})
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	if f := firedUpstreamContract(result); f != nil {
+		t.Errorf("source_build with empty APIs should not fire (no named type): %+v", f)
+	}
+}
+
+// TestMergeArchitectureFindings_SourceBuildTypeKindFires confirms the
+// {class,interface,type} named-type set: a source_build resolution naming only a
+// `type` surface (e.g. a protobuf message the dev builds against) with no methods
+// is incomplete and fires — closing the go-reviewer Medium-2 type-kind gap.
+func TestMergeArchitectureFindings_SourceBuildTypeKindFires(t *testing.T) {
+	plan := sourceBuildResolutionPlan(workflow.UpstreamResolution{
+		Name: "Meshtastic Proto", Coordinate: "github.com/meshtastic/protobufs@v2", ResolutionKind: "source_build",
+		APIs: []workflow.APISurface{{Symbol: "ToRadio", Kind: "type", Signature: "message ToRadio", Citation: "c"}},
+	})
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	if f := firedUpstreamContract(result); f == nil {
+		t.Fatalf("source_build naming a `type` with no methods should fire, got: %+v", result.Findings)
+	}
+}
+
+// TestMergeArchitectureFindings_UpstreamRuleRunsWithoutComponents confirms the
+// upstream rule is component-independent (go-reviewer Low): an architecture with
+// resolutions but zero ComponentBoundaries is still gated.
+func TestMergeArchitectureFindings_UpstreamRuleRunsWithoutComponents(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "no-components",
+		Architecture: &workflow.ArchitectureDocument{
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{Name: "OSH Core", Coordinate: "github.com/opensensorhub/osh-core@v2", ResolutionKind: "source_build",
+					APIs: []workflow.APISurface{{Symbol: "ICommandStatus", Kind: "interface", Signature: "interface ICommandStatus", Citation: "c"}}},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	if f := firedUpstreamContract(result); f == nil {
+		t.Fatalf("upstream rule should run even with no components, got: %+v", result.Findings)
+	}
+}
+
+// TestMergeArchitectureFindings_MultipleResolutionsIsolated confirms per-
+// resolution isolation: one incomplete source_build fires while a sibling with
+// methods stays clean (and the collected type list does not leak across loop
+// iterations).
+func TestMergeArchitectureFindings_MultipleResolutionsIsolated(t *testing.T) {
+	plan := sourceBuildResolutionPlan(
+		workflow.UpstreamResolution{
+			Name: "Incomplete", Coordinate: "github.com/x/incomplete@v1", ResolutionKind: "source_build",
+			APIs: []workflow.APISurface{{Symbol: "IFoo", Kind: "interface", Signature: "interface IFoo", Citation: "c"}},
+		},
+		workflow.UpstreamResolution{
+			Name: "Complete", Coordinate: "github.com/x/complete@v1", ResolutionKind: "source_build",
+			APIs: []workflow.APISurface{
+				{Symbol: "IBar", Kind: "interface", Signature: "interface IBar", Citation: "c"},
+				{Symbol: "IBar.run", Kind: "method", Signature: "void run()", Citation: "c"},
+			},
+		},
+	)
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	var count int
+	for _, f := range result.Findings {
+		if f.SOPID == "architecture.upstream_source_build_incomplete_contract" {
+			count++
+			if f.TargetID != "Incomplete" {
+				t.Errorf("only the incomplete resolution should fire, got TargetID %q", f.TargetID)
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 upstream-contract finding, got %d", count)
+	}
+}
+
 // TestHasSourceFile_DelegatesToWorkflowClassifier guards the
 // reviewer-side ↔ architecture-generator-side classification parity. If
 // workflow.IsDocumentationPath ever drifts from this rule's expectations,
