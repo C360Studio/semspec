@@ -1218,6 +1218,18 @@ tasks:
           # cp-into-volume init container snapshots the working tree, not
           # the fixture's git index.
           git checkout -q HEAD -- "$fixture/.semspec/" 2>/dev/null || true
+          # Same restore for .gitignore. The parent-tracked .gitignore carries
+          # the #177 scratch/merge-artefact hardening (*.orig, *.rej, patch.diff,
+          # *.bak, ...), but the fixture's root commit predates it, so the
+          # `reset --hard ROOT` above reverts the on-disk file to the pre-#177
+          # version. Two consequences without this line: (1) the parent repo
+          # perpetually shows the fixture .gitignore as modified after every run;
+          # (2) — the real bug — the sandbox snapshots the reverted working tree,
+          # so #177's protection is INERT during runs and the artefacts it exists
+          # to keep off parallel branches (the 2026-06-13 assembly wedge) can be
+          # committed again. Separate checkout so a fixture with no parent-tracked
+          # .gitignore doesn't fail the .semspec/ restore above.
+          git checkout -q HEAD -- "$fixture/.gitignore" 2>/dev/null || true
         done
         echo "[OK] Fixtures reset"
 
