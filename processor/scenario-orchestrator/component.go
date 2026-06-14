@@ -425,11 +425,34 @@ func (c *Component) dispatchRequirement(
 		return err
 	}
 	if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs); err != nil {
+		// A "req execution already exists" rejection is a benign idempotency
+		// outcome, not a failure (issue #180): when plan-manager re-fires the
+		// orchestrator on a completion AND the DAG gate independently re-dispatches
+		// a now-ready requirement, both paths race to req.create and the executor's
+		// dedup correctly rejects the loser. The requirement got exactly one
+		// execution. Treat it as success — Debug-log and return nil — so the
+		// orchestrate cycle ACKs (no Error-level noise, and no NAK→redelivery churn
+		// that would re-run the whole cycle and re-log on every redelivery).
+		if isIdempotentReqRejection(err) {
+			c.logger.Debug("requirement already dispatched (idempotent re-fire), skipping",
+				"requirement_id", req.ID, "detail", err)
+			return nil
+		}
 		c.logger.Error("failed to trigger requirement execution",
 			"requirement_id", req.ID, "error", err)
 		return err
 	}
 	return nil
+}
+
+// isIdempotentReqRejection reports whether a dispatch error is the benign
+// "execution already exists" rejection the executor returns when a requirement
+// is dispatched twice (re-fire + DAG-gate race). The marker crosses a NATS
+// request/reply boundary as a plain string (execution-manager mutations.go
+// "req execution already exists: <key>"), so it is matched on the message rather
+// than a typed sentinel.
+func isIdempotentReqRejection(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "already exists")
 }
 
 // buildPrereqContext assembles PrereqContext for a requirement's DependsOn list

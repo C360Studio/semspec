@@ -81,6 +81,15 @@ echo "$(now_epoch)" > "$LAST_LOG_TS_FILE"
 # comparison so no extra parsing needed.
 LAST_EMIT_TS_FILE="$OUT_DIR/.poll-state/last-emit-ts"
 
+# Track when the executor last reported NODE-level progress (a node completed or
+# was dispatched). The implementing stage legitimately spans the entire
+# execution phase (1-2h on hard fixtures), so timing the WHOLE stage false-fires
+# the wedge alarm every threshold window even while nodes are actively
+# completing (issue #182). Instead the implementing wedge clock measures time
+# since the last node progress: poll_node_progress refreshes this file and
+# poll_plan_stages measures implementing elapsed from max(stage-entry, this).
+NODE_PROGRESS_TS_FILE="$OUT_DIR/.poll-state/last-node-progress-epoch"
+
 trap 'emit "POLL_EXIT signal=$?"' EXIT
 
 emit "POLL_START interval=${POLL}s http=$HTTP container=$CONTAINER wedge_warn=${WEDGE_WARN}s"
@@ -120,13 +129,30 @@ poll_plan_stages() {
 			echo "$stage" > "$state_file"
 			echo "$epoch" > "$since_file"
 		else
-			local elapsed=$((epoch - since))
+			# Node-aware baseline for implementing (#182): the wedge clock resets
+			# on each node completion/dispatch, so a plan steadily progressing
+			# through its execution DAG never trips the alarm. Other stages stay
+			# stage-timed. baseline is the later of stage-entry and last node
+			# progress, so a genuinely stuck implementing plan (no node progress
+			# for threshold seconds) still fires.
+			local baseline="$since"
+			if [ "$stage" = "implementing" ] && [ -f "$NODE_PROGRESS_TS_FILE" ]; then
+				local np
+				np="$(cat "$NODE_PROGRESS_TS_FILE" 2>/dev/null || echo '')"
+				if [ -n "$np" ] && [ "$np" -gt "$baseline" ]; then
+					baseline="$np"
+				fi
+			fi
+			local elapsed=$((epoch - baseline))
 			local threshold
 			threshold="$(wedge_threshold_for_stage "$stage")"
 			if [ "$elapsed" -gt "$threshold" ]; then
-				# Emit once per threshold window to avoid log spam.
+				# Emit once per threshold window to avoid log spam. The marker
+				# namespace includes the baseline so a node-progress reset (which
+				# moves baseline forward) yields fresh markers — a plan that wedges,
+				# resumes, then wedges again still re-alarms.
 				local window=$((elapsed / threshold))
-				local marker="$OUT_DIR/.poll-state/wedge-$slug-$stage-$window"
+				local marker="$OUT_DIR/.poll-state/wedge-$slug-$stage-$baseline-$window"
 				if [ ! -f "$marker" ]; then
 					touch "$marker"
 					emit "WEDGE_DETECT slug=$slug stage=$stage stuck_for=${elapsed}s threshold=${threshold}s"
@@ -229,9 +255,25 @@ poll_docker_logs() {
 	echo "$now_epoch" > "$LAST_LOG_TS_FILE"
 }
 
+# poll_node_progress refreshes NODE_PROGRESS_TS_FILE whenever the executor
+# logged a node completion or dispatch in the recent window, so the implementing
+# wedge clock (poll_plan_stages) measures time since real node progress rather
+# than time in stage (issue #182). A coarse overlapping window is fine — we only
+# need "did progress happen recently", not a deduplicated line count, so no
+# high-water-mark bookkeeping is required. Runs before poll_plan_stages so the
+# timestamp is fresh for this poll's wedge check.
+poll_node_progress() {
+	local window=$((POLL + 30))
+	if docker logs --since="${window}s" "$CONTAINER" 2>&1 \
+		| grep -qE 'Node completed|Dispatched node'; then
+		echo "$(now_epoch)" > "$NODE_PROGRESS_TS_FILE"
+	fi
+}
+
 # ── Main loop ────────────────────────────────────────────────────────────
 
 while true; do
+	poll_node_progress
 	poll_plan_stages
 	poll_docker_logs
 	sleep "$POLL"
