@@ -5,10 +5,39 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
 )
+
+// mockScenariosWithFixture returns every scenario subdir under mock-responses
+// that contains the named role fixture. Discovery-based ON PURPOSE: the
+// #162/#163/ADR-049 fixture rot stayed silent for weeks because the offline
+// gate was a hardcoded two-scenario list while the docker mock-ladder (the
+// only thing that exercised the rest) is not wired into CI. A newly-added
+// scenario is now covered automatically — you cannot forget to enroll it.
+func mockScenariosWithFixture(t *testing.T, role string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(mockFixtureRoot)
+	if err != nil {
+		t.Fatalf("read mock fixture root %s: %v", mockFixtureRoot, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(mockFixtureRoot, e.Name(), role+".json")); err == nil {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	if len(out) == 0 {
+		t.Fatalf("no mock scenarios with %s fixture under %s", role, mockFixtureRoot)
+	}
+	return out
+}
 
 // mockFixtureRoot resolves the e2e mock-responses dir relative to this package.
 const mockFixtureRoot = "../../test/e2e/fixtures/mock-responses"
@@ -66,7 +95,7 @@ func decodeFixtureArgs(t *testing.T, scenario, role string, into any) bool {
 // has scenario evidence, the exact shape the retired file-count rule wrongly
 // rejected.
 func TestMockFixturesConformToArchitectureRules(t *testing.T) {
-	for _, scenario := range []string{"plan-phase", "execution-phase"} {
+	for _, scenario := range mockScenariosWithFixture(t, "mock-architecture-generator") {
 		t.Run(scenario, func(t *testing.T) {
 			var arch workflow.ArchitectureDocument
 			if !decodeFixtureArgs(t, scenario, "mock-architecture-generator", &arch) {
@@ -123,6 +152,44 @@ func TestMockFixturesConformToArchitectureRules(t *testing.T) {
 			}
 			if result.Verdict != "approved" {
 				t.Errorf("fixture %s: verdict = %q, want approved (no blocking findings)", scenario, result.Verdict)
+			}
+		})
+	}
+}
+
+// TestMockFixturesScenarioTagsValid is the second offline half of the gate: it
+// loads every mock-scenario-generator fixture and runs the production
+// ValidateScenarioTags (ADR-041 Move 1) over each emitted scenario, asserting
+// the LLM-shaped output a real model must produce — exactly one tier tag per
+// scenario. This catches the tag rot (#162/#163 — fixtures authored before
+// ADR-041 carried no tags, so the scenario-generator rejected them at runtime
+// and the plan died at `rejected`) at `go test` time, in CI, instead of only
+// at a docker mock-ladder run that nobody runs regularly.
+func TestMockFixturesScenarioTagsValid(t *testing.T) {
+	for _, scenario := range mockScenariosWithFixture(t, "mock-scenario-generator") {
+		t.Run(scenario, func(t *testing.T) {
+			var scen struct {
+				Scenarios []struct {
+					Title string   `json:"title"`
+					Tags  []string `json:"tags"`
+				} `json:"scenarios"`
+			}
+			if !decodeFixtureArgs(t, scenario, "mock-scenario-generator", &scen) {
+				t.Fatalf("%s has no mock-scenario-generator fixture", scenario)
+			}
+			if len(scen.Scenarios) == 0 {
+				t.Fatalf("%s mock-scenario-generator fixture emits zero scenarios", scenario)
+			}
+			for i, s := range scen.Scenarios {
+				// Only the tag shape is authorial; HarnessProfileIDs are
+				// system-assigned post-parse, so leave them empty here.
+				sc := workflow.Scenario{
+					ID:   fmt.Sprintf("%s.sc-%d", scenario, i),
+					Tags: s.Tags,
+				}
+				if err := workflow.ValidateScenarioTags(sc); err != nil {
+					t.Errorf("fixture %s scenario %d (%q): %v", scenario, i, s.Title, err)
+				}
 			}
 		})
 	}
