@@ -417,3 +417,69 @@ func TestRunFileOwnershipContainment_RealGit(t *testing.T) {
 		t.Errorf("expected new Helper.java in advisory, got %q", adv.Stdout)
 	}
 }
+
+// TestExecute_FileOwnershipContainmentWiring is the Go-level INTEGRATION test
+// for Gate 2 (#175/#177): it drives the full Executor.Execute path (not just the
+// inner func) against a real git worktree with FilesOwned set, proving the wire
+// ValidationRequest.FilesOwned → Execute → runFileOwnershipContainment → git
+// status is connected and the overall ValidationResult fails on a doc co-write.
+func TestExecute_FileOwnershipContainmentWiring(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q")
+
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// An empty checklist so Execute proceeds past checklist loading to the
+	// always-on gates (a missing checklist short-circuits to a passing result).
+	write("checklist.json", `{"checks":[]}`)
+	write("src/A.java", "class A {}\n")
+	write("README.md", "# base\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-qm", "base")
+
+	// Dev co-writes the shared README it does NOT own (the wedge shape) and
+	// edits its owned source.
+	write("README.md", "# base\nreq-2's section\n")
+	write("src/A.java", "class A { int x; }\n")
+
+	e := NewExecutor(dir, "checklist.json", 30*time.Second)
+	res, err := e.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "wiring",
+		FilesModified: []string{"README.md", "src/A.java"},
+		FilesOwned:    []string{"src/A.java"},
+		// No TaskID → local runner executes git in the worktree (dir).
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if res.Passed {
+		t.Fatalf("expected ValidationResult.Passed=false (README co-write by non-owner), got pass: %+v", res.CheckResults)
+	}
+	var found *payloads.CheckResult
+	for i := range res.CheckResults {
+		if res.CheckResults[i].Name == "file-ownership-containment" {
+			found = &res.CheckResults[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("file-ownership-containment check did not run through Execute; results=%+v", res.CheckResults)
+	}
+	if found.Passed || !found.Required {
+		t.Errorf("containment check should be a Required failure, got %+v", *found)
+	}
+	if !strings.Contains(found.Stderr, "README.md") {
+		t.Errorf("expected README.md named in failure, got %q", found.Stderr)
+	}
+}
