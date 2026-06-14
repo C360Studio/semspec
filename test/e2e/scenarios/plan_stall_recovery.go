@@ -244,7 +244,17 @@ if __name__ == "__main__":
 }
 
 func (s *PlanStallRecoveryScenario) stageCreatePlan(ctx context.Context, result *Result) error {
-	resp, err := s.http.CreatePlan(ctx, "add a /goodbye endpoint that returns a goodbye message")
+	// Override AutoRejectOnExhaustion=false for this plan. The mock stack's
+	// component config sets it true (autonomous fail-fast, commit 7794f550
+	// 2026-05-08), which auto-rejects a plan the moment its only requirement
+	// fails. These stall-recovery scenarios need the OPPOSITE: a failed
+	// requirement must leave the plan parked in "implementing" so the operator
+	// recovery endpoints (/retry, /complete, /reject) have something to act on.
+	autoReject := false
+	resp, err := s.http.CreatePlanWithOptions(ctx, client.CreatePlanRequest{
+		Title:                  "add a /goodbye endpoint that returns a goodbye message",
+		AutoRejectOnExhaustion: &autoReject,
+	})
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
 	}
