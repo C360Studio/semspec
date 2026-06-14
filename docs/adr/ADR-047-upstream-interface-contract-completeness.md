@@ -1,6 +1,12 @@
 # ADR-047: Upstream Interface-Contract Completeness (Method-Signature Resolution for source_build Deps)
 
 **Status:** Proposed (2026-06-13)
+**Update (ADR-049, 2026-06-14):** the sibling rule
+`architecture.component_overloaded_capabilities` referenced below was retired by
+[ADR-049](ADR-049-component-ownership-topology.md) in favour of the
+evidence-based `architecture.component_stub_risk`. The pattern this ADR mirrors
+(a deterministic plan-reviewer rule appended in `mergeArchitectureFindings`)
+still stands; only the named sibling changed.
 **Deciders:** Coby, Claude
 **Related:** ADR-046 (dedicated dependency-resolver phase — this ADR is the *completeness* half of
 the same problem and frames where resolution should live), ADR-044 (M:N capability ↔ Story; sibling

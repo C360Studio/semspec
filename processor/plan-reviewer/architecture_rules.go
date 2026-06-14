@@ -26,14 +26,27 @@ import (
 //   - capability.unresolved_in_architecture: a Capability.Name from
 //     plan.Exploration whose name doesn't appear in any ComponentDef's
 //     Capabilities list. Winston didn't map this capability to a component.
-//   - architecture.component_overloaded_capabilities: ComponentDef mapping
-//     ≥2 capabilities but declaring fewer SOURCE (non-doc) implementation
-//     files than capabilities — it has no distinct implementation surface per
-//     capability, so one dev loop implements one and stubs the rest. The
-//     inverse of the missing-files / docs-only rules (an OVER-loaded
-//     component). The 2026-06-13 mavlink-hard MavsdkDriver fingerprint:
-//     caps [bootstrap, telemetry, control] mapped to 2 source files → dev
-//     built only Position+Takeoff, QA caught the gap.
+//   - architecture.component_stub_risk (ADR-049): ComponentDef mapping ≥2
+//     capabilities where one or more capability has NO scenario evidence
+//     (no requirement whose capability_name matches that has any scenario).
+//     A capability with no scenario has no failing test forcing the dev to
+//     build it, so one dev loop builds the evidenced capabilities and stubs
+//     the rest — the 2026-06-13 stub trap, now caught by EVIDENCE, not file
+//     count. Replaces ADR-044's architecture.component_overloaded_capabilities
+//     (a file-count proxy that wrongly penalized cohesive drivers — a single
+//     entry class legitimately backing several tested capabilities). Fires
+//     only when plan.Scenarios is non-empty (it needs the scenario layer, so
+//     it is an R2 check; never fires evidence-blind).
+//   - architecture.components_share_entry_point (ADR-049, the inverse, WARNING):
+//     ≥2 components that integrate into the same integration_target upstream
+//     resolution but declare fully disjoint implementation_files. If they
+//     implement one framework entry class (a driver/plugin registered into the
+//     shared target), each parallel story may independently create that same
+//     undeclared entry file and collide at assembly (the 2026-06-14 over-split
+//     wedge). Best-effort: the reviewer sees only DECLARED data, so this is a
+//     non-blocking nudge — the dev-review ownership gate (ADR-049 move 3) is the
+//     hard backstop. Severity warning so it never false-rejects a legitimate
+//     architecture (the over-correction ADR-049 exists to prevent).
 //   - architecture.upstream_source_build_incomplete_contract: a source_build
 //     UpstreamResolution that names a class/interface/type in its APIs but
 //     resolves ZERO method/function signatures — the dev then reverse-engineers
@@ -69,7 +82,9 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 		result.Findings = append(result.Findings,
 			architectureImplementationFileFindings(plan.Architecture.ComponentBoundaries)...)
 		result.Findings = append(result.Findings,
-			componentOverloadedCapabilityFindings(plan.Architecture.ComponentBoundaries)...)
+			componentStubRiskFindings(plan)...)
+		result.Findings = append(result.Findings,
+			componentCohesionViolationFindings(plan.Architecture)...)
 		result.Findings = append(result.Findings,
 			capabilityUnresolvedInArchitectureFindings(plan)...)
 		result.Findings = append(result.Findings,
@@ -132,53 +147,207 @@ func architectureImplementationFileFindings(components []workflow.ComponentDef) 
 	return findings
 }
 
-// componentOverloadedCapabilityFindings flags a ComponentDef that claims more
-// independently-testable capabilities than it has SOURCE (non-doc)
-// implementation files — it has no distinct implementation surface per
-// capability, so a single developer loop will implement one capability and stub
-// the rest. This is the inverse of the missing-files / docs-only rules: those
-// catch a component with too LITTLE, this catches one asked to do too MUCH.
+// componentStubRiskFindings flags a multi-capability ComponentDef where one or
+// more of its mapped capabilities has NO scenario evidence — no requirement
+// whose capability_name matches that has at least one scenario. A capability
+// with no scenario has no failing test forcing the dev to implement it, so a
+// single dev loop builds the evidenced capabilities and stubs the rest (the
+// 2026-06-13 stub trap).
 //
-// Heuristic: a component mapping N capabilities needs at least N source files
-// (one surface per capability). Fewer source files than capabilities means the
-// architect collapsed distinct behavior surfaces behind a facade. The
-// 2026-06-13 mavlink-hard MavsdkDriver fingerprint: capabilities
-// [mavsdk-bootstrap, mavsdk-telemetry, mavsdk-control] mapped to two source
-// files (UnmannedSystem.java + UnmannedConfig.java) → the dev built only
-// Position telemetry + Takeoff and stubbed the rest; QA (Murat) caught it but
-// only after a full execution + assembly. This rule catches it at plan review.
+// ADR-049: this REPLACES the ADR-044 file-count proxy
+// (architecture.component_overloaded_capabilities, "N capabilities need N
+// source files"). That proxy was backwards for framework code — a cohesive
+// driver (one AbstractSensorModule entry class) legitimately has FEWER files
+// than capabilities, yet the file-count rule rewarded inventing files and
+// splitting, which drove the 2026-06-14 over-split wedge. The real signal is
+// EVIDENCE: scenarios are the forcing functions of TDD. A cohesive component
+// with one file and three TESTED capabilities is fine (each scenario is a
+// failing test the dev must satisfy); a component with an UNTESTED capability
+// is the facade risk regardless of file count.
 //
-// Single-capability components are never flagged (the common, healthy shape).
-func componentOverloadedCapabilityFindings(components []workflow.ComponentDef) []workflow.PlanReviewFinding {
+// Fires only when plan.Scenarios is non-empty — the check needs the scenario
+// layer, so it is effectively an R2 check and never fires evidence-blind (e.g.
+// at architecture-generation time before scenarios exist). Single-capability
+// components are never flagged (the common, healthy shape).
+func componentStubRiskFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
+	if plan == nil || plan.Architecture == nil || len(plan.Scenarios) == 0 {
+		return nil
+	}
 	var findings []workflow.PlanReviewFinding
-	for _, c := range components {
-		if c.Name == "" {
+	for _, c := range plan.Architecture.ComponentBoundaries {
+		if c.Name == "" || len(c.Capabilities) < 2 {
 			continue
 		}
-		capCount := len(c.Capabilities)
-		if capCount < 2 {
-			continue
+		var unevidenced []string
+		for _, capName := range c.Capabilities {
+			if !capabilityHasScenarioEvidence(plan, capName) {
+				unevidenced = append(unevidenced, capName)
+			}
 		}
-		src := sourceFileCount(c.ImplementationFiles)
-		if src >= capCount {
+		if len(unevidenced) == 0 {
 			continue
 		}
 		findings = append(findings, workflow.PlanReviewFinding{
-			SOPID:       "architecture.component_overloaded_capabilities",
-			SOPTitle:    "Component maps more capabilities than it has implementation surfaces (ADR-044)",
+			SOPID:       "architecture.component_stub_risk",
+			SOPTitle:    "Multi-capability component has capabilities with no test evidence (ADR-049)",
 			Severity:    "error",
 			Status:      "violation",
 			Category:    "structural",
 			Phase:       "architecture",
 			TargetID:    c.Name,
-			Action:      "split",
-			TargetField: fmt.Sprintf("component_boundaries.%s", c.Name),
-			TargetValue: "one component per independently-testable capability (or ≥1 source file per capability)",
-			Issue:       fmt.Sprintf("Component %q maps %d capabilities (%v) but declares only %d source implementation file(s) — it has no distinct implementation surface per capability, so a single dev loop will build one and stub the rest.", c.Name, capCount, c.Capabilities, src),
-			Suggestion:  fmt.Sprintf("Split component %q into one component per independently-testable capability, each with its own implementation_files. If the capabilities genuinely share one implementation surface, add a distinct source file per capability so the mapping is honest.", c.Name),
+			Action:      "add",
+			TargetField: fmt.Sprintf("component_boundaries.%s.capabilities", c.Name),
+			TargetValue: "a scenario (forcing test) for every capability the component maps",
+			Issue:       fmt.Sprintf("Component %q maps %d capabilities but %d of them have no scenario evidence (%v). A capability with no scenario has no failing test forcing the dev to implement it, so a single dev loop builds the evidenced capabilities and stubs the rest (the 2026-06-13 stub trap). A cohesive component with FEWER files than capabilities is fine — the gate is missing EVIDENCE, not file count.", c.Name, len(c.Capabilities), len(unevidenced), unevidenced),
+			Suggestion:  fmt.Sprintf("Ensure every capability mapped to %q has at least one scenario (via a requirement whose capability_name matches it), so each becomes a forcing test the dev cannot stub. If a capability belongs to a different component, move it; if it needs no behavior, remove it from this component's capabilities.", c.Name),
 		})
 	}
 	return findings
+}
+
+// capabilityHasScenarioEvidence reports whether any requirement that owns the
+// given capability (Requirement.CapabilityName) has at least one scenario. This
+// is the evidence the stub-risk check requires per capability.
+func capabilityHasScenarioEvidence(plan *workflow.Plan, capName string) bool {
+	for _, req := range plan.Requirements {
+		if req.CapabilityName != capName {
+			continue
+		}
+		if len(plan.ScenariosForRequirement(req.ID)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// componentCohesionViolationFindings is the inverse of stub-risk: it flags an
+// OVER-split where ≥2 components integrate into the same integration_target
+// upstream resolution but declare fully disjoint implementation_files. If those
+// components implement one framework entry class (a driver/plugin registered
+// into the shared target), each parallel story may independently CREATE that
+// same undeclared entry file and collide at the terminal assembly merge — the
+// 2026-06-14 mavlink-hard wedge (four single-capability components each building
+// the canonical MavsdkDriver.java that no component declared).
+//
+// ADR-049: this is a best-effort, NON-BLOCKING (warning) nudge. The reviewer
+// sees only DECLARED data, so it cannot detect the actual collision when the
+// architect fabricates disjoint non-canonical paths (exactly what happened on
+// 2026-06-14) — the dev-review ownership gate (move 3) is the deterministic hard
+// backstop. Warning severity keeps it from false-rejecting a legitimate
+// architecture (e.g. several genuinely-separate services that share an
+// integration target but really do own disjoint files), which would be the same
+// over-correction this ADR exists to prevent.
+//
+// Scope: only integration_target resolutions fire (Role == "integration_target")
+// — a plain runtime/build library shared by many components is the normal case
+// and must not warn. The "share an entry file" escape is satisfied when the
+// group declares any common path in their implementation_files (which
+// DeriveStoryScheduling then serializes), so the architect can resolve the
+// warning by declaring the shared entry file OR merging the components.
+func componentCohesionViolationFindings(arch *workflow.ArchitectureDocument) []workflow.PlanReviewFinding {
+	if arch == nil {
+		return nil
+	}
+	byName := make(map[string]workflow.ComponentDef, len(arch.ComponentBoundaries))
+	for _, c := range arch.ComponentBoundaries {
+		if c.Name != "" {
+			byName[c.Name] = c
+		}
+	}
+
+	var findings []workflow.PlanReviewFinding
+	for _, r := range arch.UpstreamResolutions {
+		if !strings.EqualFold(strings.TrimSpace(r.Role), "integration_target") {
+			continue
+		}
+		group := integratingComponents(r, arch.ComponentBoundaries, byName)
+		if len(group) < 2 {
+			continue
+		}
+		if componentsShareAFile(group) {
+			continue // a shared entry file is declared → scheduler serializes → fine
+		}
+		names := componentNames(group)
+		findings = append(findings, workflow.PlanReviewFinding{
+			SOPID:       "architecture.components_share_entry_point",
+			SOPTitle:    "Components integrate into one target but declare no shared entry file (ADR-049)",
+			Severity:    "warning",
+			Status:      "violation",
+			Category:    "structural",
+			Phase:       "architecture",
+			TargetID:    r.Name,
+			Action:      "review",
+			TargetField: "component_boundaries[].implementation_files",
+			TargetValue: "merge the components, or declare the shared framework entry file on each component's implementation_files",
+			Issue:       fmt.Sprintf("Components %v all integrate into %q (an integration_target) but declare fully disjoint implementation_files. If they implement one framework entry class registered into %q, each parallel story may independently create that same undeclared entry file and collide at assembly (the 2026-06-14 over-split wedge).", names, r.Name, r.Name),
+			Suggestion:  fmt.Sprintf("If these are facets of one cohesive unit, merge them into a single component so one Story builds the shared entry class. If they are genuinely separate but share an entry file, declare that file in each component's implementation_files so DeriveStoryScheduling serializes the sharing stories. This is a warning, not a block — the dev-review ownership gate (ADR-049 move 3) is the hard backstop if the collision actually occurs."),
+		})
+	}
+	return findings
+}
+
+// integratingComponents returns the components that integrate into resolution r,
+// via either r.UsedBy (resolution → component) or ComponentDef.UpstreamRefs
+// (component → resolution) — the bidirectional link. Components with no declared
+// implementation files are excluded (they are flagged by the missing-files rule;
+// counting them here would produce redundant noise).
+func integratingComponents(r workflow.UpstreamResolution, all []workflow.ComponentDef, byName map[string]workflow.ComponentDef) []workflow.ComponentDef {
+	seen := make(map[string]struct{})
+	var group []workflow.ComponentDef
+	add := func(c workflow.ComponentDef) {
+		if c.Name == "" || len(c.ImplementationFiles) == 0 {
+			return
+		}
+		if _, dup := seen[c.Name]; dup {
+			return
+		}
+		seen[c.Name] = struct{}{}
+		group = append(group, c)
+	}
+	for _, name := range r.UsedBy {
+		if c, ok := byName[name]; ok {
+			add(c)
+		}
+	}
+	for _, c := range all {
+		for _, ref := range c.UpstreamRefs {
+			if ref == r.Name {
+				add(c)
+			}
+		}
+	}
+	return group
+}
+
+// componentsShareAFile reports whether any normalized implementation-file path
+// is declared by two or more components in the group — the "declared shared
+// ownership" that satisfies the cohesion check (the scheduler serializes such
+// stories).
+func componentsShareAFile(group []workflow.ComponentDef) bool {
+	count := make(map[string]int)
+	for _, c := range group {
+		fileSeen := make(map[string]struct{})
+		for _, f := range workflow.NormalizeFilePaths(c.ImplementationFiles) {
+			if _, dup := fileSeen[f]; dup {
+				continue
+			}
+			fileSeen[f] = struct{}{}
+			count[f]++
+			if count[f] >= 2 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// componentNames returns the names of the components in the group, in order.
+func componentNames(group []workflow.ComponentDef) []string {
+	out := make([]string, 0, len(group))
+	for _, c := range group {
+		out = append(out, c.Name)
+	}
+	return out
 }
 
 // capabilityUnresolvedInArchitectureFindings emits one finding per Capability
@@ -344,9 +513,9 @@ func hasSourceFile(paths []string) bool {
 
 // sourceFileCount returns the number of source-code (non-documentation) files
 // in the given workspace-relative paths, delegating to the same
-// workflow.IsDocumentationPath classifier as hasSourceFile. Used by
-// componentOverloadedCapabilityFindings to compare a component's source-surface
-// count against the number of capabilities it claims.
+// workflow.IsDocumentationPath classifier as hasSourceFile (which is its only
+// caller — the ADR-044 file-count overload rule that also used it was retired by
+// ADR-049 in favour of the evidence-based componentStubRiskFindings).
 func sourceFileCount(paths []string) int {
 	n := 0
 	for _, p := range paths {

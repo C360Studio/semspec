@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"approved\", \"summary\": \"All requirements are implemented and the plan goal is satisfied. Implementation quality is adequate for the qa.level.\", \"dimensions\": {\"requirement_fulfillment\": \"All declared requirements have corresponding implementation. No gaps detected.\", \"capability_evidence\": \"Every declared Capability has evidence from at least one shipped Story; coverage gates pass.\", \"coverage\": \"\", \"assertion_quality\": \"\", \"regression_surface\": \"\", \"flake_judgment\": \"\"}, \"plan_decisions\": []}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

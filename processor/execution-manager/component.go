@@ -1876,19 +1876,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	_ = c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.ValidationPassed, fmt.Sprintf("%t", exec.ValidationPassed))
 
 	if !exec.ValidationPassed {
-		if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
-			c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
-		}
-		exec.Stage = phaseValidationFailed
-		c.syncToStore(ctx, exec)
-
-		c.extractStructuralLessons(ctx, exec, exec.ValidationResults)
-
-		if exec.TDDCycle+1 < exec.MaxTDDCycles {
-			c.startDeveloperRetryLocked(ctx, exec, buildValidationFailureFeedback(exec.ValidationResults))
-		} else {
-			c.markEscalatedLocked(ctx, exec, "validation failures exceeded TDD cycle budget")
-		}
+		c.handleValidationFailedLocked(ctx, exec)
 		return
 	}
 
@@ -1904,6 +1892,56 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	exec.Stage = phaseReviewing
 	c.syncToStore(ctx, exec)
 	c.dispatchReviewerLocked(ctx, exec)
+}
+
+// handleValidationFailedLocked routes a failed structural validation. An ADR-049
+// ownership/planning gap (a new source/test file outside the story's declared
+// territory) fast-fails straight to recovery — which routes to
+// architecture_revise / story_reprepare — because the developer cannot fix a
+// partition defect by retrying; burning the TDD budget on it just thrashes the
+// dev. Every other validation failure goes to the dev-retry budget, then
+// escalation. Lesson extraction is skipped for the planning gap (a
+// dev-attributed lesson would mis-blame the developer). Caller must hold exec.mu.
+func (c *Component) handleValidationFailedLocked(ctx context.Context, exec *taskExecution) {
+	if err := c.tripleWriter.UpdateTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
+	}
+	exec.Stage = phaseValidationFailed
+	c.syncToStore(ctx, exec)
+
+	if detail, ok := ownershipPlanningGap(exec.ValidationResults); ok {
+		c.logger.Info("Ownership/planning gap at dev gate — fast-failing to recovery (ADR-049)",
+			"slug", exec.Slug, "task_id", exec.TaskID, "detail", detail)
+		c.markEscalatedLocked(ctx, exec, "planning gap (ADR-049 ownership): "+detail)
+		return
+	}
+
+	c.extractStructuralLessons(ctx, exec, exec.ValidationResults)
+
+	if exec.TDDCycle+1 < exec.MaxTDDCycles {
+		c.startDeveloperRetryLocked(ctx, exec, buildValidationFailureFeedback(exec.ValidationResults))
+	} else {
+		c.markEscalatedLocked(ctx, exec, "validation failures exceeded TDD cycle budget")
+	}
+}
+
+// ownershipPlanningGap returns the failure detail if structural validation
+// failed on the ADR-049 ownership-gap check — a new source/test file created
+// outside the story's declared territory, which the developer cannot fix by
+// retrying. The detail is fed to the recovery-agent as the escalation reason so
+// it can route to architecture_revise (partition wrong) or story_reprepare
+// (files_owned wrong).
+func ownershipPlanningGap(results []payloads.CheckResult) (string, bool) {
+	for _, r := range results {
+		if r.Name == payloads.CheckFileOwnershipPlanningGap && r.Required && !r.Passed {
+			detail := strings.TrimSpace(r.Stderr)
+			if detail == "" {
+				detail = "new source/test file created outside the story's declared file scope"
+			}
+			return detail, true
+		}
+	}
+	return "", false
 }
 
 // runStructuralValidation publishes a ValidationRequest to the structural-validator

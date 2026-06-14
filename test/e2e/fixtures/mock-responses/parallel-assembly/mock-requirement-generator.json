@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"requirements\": [{\"title\": \"Feature A endpoint\", \"description\": \"Implement feature A under src/a/feature_a.py, registered through the core driver.\"}, {\"title\": \"Feature B endpoint\", \"description\": \"Implement feature B under src/b/feature_b.py, registered through the core driver.\", \"depends_on\": [\"Feature A endpoint\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

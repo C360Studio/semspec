@@ -204,28 +204,39 @@ func TestMergeArchitectureFindings_HappyPath(t *testing.T) {
 	}
 }
 
-// TestMergeArchitectureFindings_OverloadedComponent fires
-// architecture.component_overloaded_capabilities on the 2026-06-13 mavlink-hard
-// MavsdkDriver shape: three independently-testable capabilities collapsed onto
-// one component backed by two source files (+ two doc files). A single dev loop
-// built only one capability's surface and stubbed the rest; this rule catches
-// the collapse at plan review instead of at the QA gate.
-func TestMergeArchitectureFindings_OverloadedComponent(t *testing.T) {
+// TestMergeArchitectureFindings_StubRiskUntestedCapability fires
+// architecture.component_stub_risk (ADR-049) on the evidence shape of the
+// 2026-06-13 stub trap: a multi-capability component where one capability has a
+// requirement + scenario (a forcing test) and a sibling capability has NO
+// scenario. With no failing test for the second capability the dev builds the
+// first and stubs the second; this rule catches it at plan review — by EVIDENCE,
+// not file count.
+func TestMergeArchitectureFindings_StubRiskUntestedCapability(t *testing.T) {
 	plan := &workflow.Plan{
-		Slug: "mavsdk-overloaded",
+		Slug: "mavsdk-stub-risk",
 		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{
-			{Name: "mavsdk-bootstrap", Lifecycle: workflow.CapabilityNew, Description: "B."},
 			{Name: "mavsdk-telemetry", Lifecycle: workflow.CapabilityNew, Description: "T."},
 			{Name: "mavsdk-control", Lifecycle: workflow.CapabilityNew, Description: "C."},
 		}},
 		Architecture: &workflow.ArchitectureDocument{
 			ComponentBoundaries: []workflow.ComponentDef{
+				// Cohesive single-file driver mapping two capabilities — the
+				// shape the retired file-count rule wrongly penalized. Here it
+				// is flagged ONLY because mavsdk-control has no scenario.
 				{
 					Name:                "MavsdkDriver",
-					Capabilities:        []string{"mavsdk-bootstrap", "mavsdk-telemetry", "mavsdk-control"},
-					ImplementationFiles: []string{"src/UnmannedSystem.java", "src/UnmannedConfig.java", "README.md", "CoverageMatrix.md"},
+					Capabilities:        []string{"mavsdk-telemetry", "mavsdk-control"},
+					ImplementationFiles: []string{"src/MavsdkDriver.java"},
 				},
 			},
+		},
+		Requirements: []workflow.Requirement{
+			{ID: "req-tel", CapabilityName: "mavsdk-telemetry", Title: "Telemetry"},
+			{ID: "req-ctl", CapabilityName: "mavsdk-control", Title: "Control"},
+		},
+		Scenarios: []workflow.Scenario{
+			// Only telemetry has a scenario; control is unevidenced.
+			{ID: "sc-tel-1", RequirementID: "req-tel"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
@@ -234,31 +245,33 @@ func TestMergeArchitectureFindings_OverloadedComponent(t *testing.T) {
 
 	var f *workflow.PlanReviewFinding
 	for i := range result.Findings {
-		if result.Findings[i].SOPID == "architecture.component_overloaded_capabilities" {
+		if result.Findings[i].SOPID == "architecture.component_stub_risk" {
 			f = &result.Findings[i]
 		}
 	}
 	if f == nil {
-		t.Fatalf("expected component_overloaded_capabilities finding, got: %+v", result.Findings)
+		t.Fatalf("expected component_stub_risk finding, got: %+v", result.Findings)
 	}
 	if f.TargetID != "MavsdkDriver" {
 		t.Errorf("target = %q, want MavsdkDriver", f.TargetID)
 	}
-	if !strings.Contains(f.Issue, "3 capabilities") || !strings.Contains(f.Issue, "2 source") {
-		t.Errorf("issue should name 3 capabilities / 2 source files: %q", f.Issue)
+	if !strings.Contains(f.Issue, "mavsdk-control") {
+		t.Errorf("issue should name the unevidenced capability mavsdk-control: %q", f.Issue)
 	}
 	if result.Verdict != "needs_changes" {
 		t.Errorf("verdict = %q, want needs_changes", result.Verdict)
 	}
 }
 
-// TestMergeArchitectureFindings_CohesiveComponentNotFlagged confirms the rule
-// does NOT fire when a multi-capability component declares one source file per
-// capability — the honest exceptional shape (real shared module, distinct
-// surface per capability).
-func TestMergeArchitectureFindings_CohesiveComponentNotFlagged(t *testing.T) {
+// TestMergeArchitectureFindings_CohesiveComponentWithEvidenceNotFlagged is the
+// load-bearing ADR-049 regression: a cohesive component mapping TWO capabilities
+// to a SINGLE file does NOT fire stub-risk when BOTH capabilities have scenario
+// evidence. The retired file-count rule (architecture.component_overloaded_
+// capabilities) would have wrongly flagged this exact shape (2 caps, 1 file) —
+// the over-correction that drove the 2026-06-14 over-split wedge.
+func TestMergeArchitectureFindings_CohesiveComponentWithEvidenceNotFlagged(t *testing.T) {
 	plan := &workflow.Plan{
-		Slug: "cohesive-ok",
+		Slug: "cohesive-evidenced",
 		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{
 			{Name: "auth", Lifecycle: workflow.CapabilityNew, Description: "A."},
 			{Name: "session", Lifecycle: workflow.CapabilityNew, Description: "S."},
@@ -268,9 +281,17 @@ func TestMergeArchitectureFindings_CohesiveComponentNotFlagged(t *testing.T) {
 				{
 					Name:                "identity",
 					Capabilities:        []string{"auth", "session"},
-					ImplementationFiles: []string{"src/auth.go", "src/session.go", "README.md"},
+					ImplementationFiles: []string{"src/identity.go"}, // ONE file, TWO caps
 				},
 			},
+		},
+		Requirements: []workflow.Requirement{
+			{ID: "req-auth", CapabilityName: "auth", Title: "Auth"},
+			{ID: "req-sess", CapabilityName: "session", Title: "Session"},
+		},
+		Scenarios: []workflow.Scenario{
+			{ID: "sc-auth", RequirementID: "req-auth"},
+			{ID: "sc-sess", RequirementID: "req-sess"},
 		},
 	}
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
@@ -278,12 +299,132 @@ func TestMergeArchitectureFindings_CohesiveComponentNotFlagged(t *testing.T) {
 	mergeArchitectureFindings(plan, result)
 
 	for _, f := range result.Findings {
-		if f.SOPID == "architecture.component_overloaded_capabilities" {
-			t.Errorf("2 caps + 2 source files should not fire overloaded rule, got: %+v", f)
+		if f.SOPID == "architecture.component_stub_risk" {
+			t.Errorf("a cohesive 2-cap/1-file component with evidence for BOTH caps must not fire stub-risk, got: %+v", f)
 		}
 	}
 	if result.Verdict != "approved" {
-		t.Errorf("verdict = %q, want approved (no findings)", result.Verdict)
+		t.Errorf("verdict = %q, want approved (cohesive driver is legal under ADR-049)", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_StubRiskEvidenceBlindNoFire confirms the guard:
+// with NO scenarios on the plan (R1 / pre-scenario-gen), stub-risk never fires —
+// it must not regress into a file-count proxy when the evidence layer is absent.
+func TestMergeArchitectureFindings_StubRiskEvidenceBlindNoFire(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "no-scenarios-yet",
+		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{
+			{Name: "a", Lifecycle: workflow.CapabilityNew, Description: "A."},
+			{Name: "b", Lifecycle: workflow.CapabilityNew, Description: "B."},
+		}},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "combo", Capabilities: []string{"a", "b"}, ImplementationFiles: []string{"src/combo.go"}},
+			},
+		},
+		Requirements: []workflow.Requirement{
+			{ID: "req-a", CapabilityName: "a"}, {ID: "req-b", CapabilityName: "b"},
+		},
+		// Scenarios deliberately empty.
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	for _, f := range result.Findings {
+		if f.SOPID == "architecture.component_stub_risk" {
+			t.Errorf("stub-risk must not fire with no scenarios (evidence-blind), got: %+v", f)
+		}
+	}
+}
+
+// TestMergeArchitectureFindings_CohesionViolationOverSplit fires the ADR-049
+// inverse check (warning) on the 2026-06-14 over-split shape: two single-
+// capability components that both integrate into one integration_target but
+// declare fully disjoint implementation_files — they likely converge on one
+// undeclared framework entry class and collide at assembly. Severity warning →
+// surfaced but does NOT flip the verdict (the dev gate, move 3, is the hard
+// backstop).
+func TestMergeArchitectureFindings_CohesionViolationOverSplit(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "osh-over-split",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "telemetry", Capabilities: []string{"telemetry"}, ImplementationFiles: []string{"src/driver/mavsdk/Telemetry.java"}, UpstreamRefs: []string{"OSH Core"}},
+				{Name: "control", Capabilities: []string{"control"}, ImplementationFiles: []string{"src/driver/mavsdk/Control.java"}, UpstreamRefs: []string{"OSH Core"}},
+			},
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{Name: "OSH Core", Coordinate: "github.com/opensensorhub/osh-core@v2", Role: "integration_target", UsedBy: []string{"telemetry", "control"}},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	var f *workflow.PlanReviewFinding
+	for i := range result.Findings {
+		if result.Findings[i].SOPID == "architecture.components_share_entry_point" {
+			f = &result.Findings[i]
+		}
+	}
+	if f == nil {
+		t.Fatalf("expected components_share_entry_point warning, got: %+v", result.Findings)
+	}
+	if f.Severity != "warning" {
+		t.Errorf("cohesion-violation severity = %q, want warning (non-blocking)", f.Severity)
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("verdict = %q, want approved (a warning must not block — move 3 is the hard gate)", result.Verdict)
+	}
+}
+
+// TestMergeArchitectureFindings_CohesionViolationSatisfiedByDeclaredShare
+// confirms the escape: when the two components DECLARE the shared entry file
+// (the same path in each implementation_files), the cohesion check does not
+// fire — DeriveStoryScheduling serializes them, which is exactly move 1's third
+// option. A plain (non-integration_target) shared library also must not fire.
+func TestMergeArchitectureFindings_CohesionViolationSatisfiedByDeclaredShare(t *testing.T) {
+	shared := &workflow.Plan{
+		Slug: "declared-share",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "telemetry", Capabilities: []string{"telemetry"}, ImplementationFiles: []string{"src/driver/mavsdk/MavsdkDriver.java", "src/driver/mavsdk/Telemetry.java"}, UpstreamRefs: []string{"OSH Core"}},
+				{Name: "control", Capabilities: []string{"control"}, ImplementationFiles: []string{"src/driver/mavsdk/MavsdkDriver.java", "src/driver/mavsdk/Control.java"}, UpstreamRefs: []string{"OSH Core"}},
+			},
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{Name: "OSH Core", Coordinate: "github.com/opensensorhub/osh-core@v2", Role: "integration_target", UsedBy: []string{"telemetry", "control"}},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+	mergeArchitectureFindings(shared, result)
+	for _, f := range result.Findings {
+		if f.SOPID == "architecture.components_share_entry_point" {
+			t.Errorf("declared shared entry file (MavsdkDriver.java in both) must not fire cohesion-violation: %+v", f)
+		}
+	}
+
+	// A plain runtime library shared by two components must NOT fire.
+	lib := &workflow.Plan{
+		Slug: "shared-lib-ok",
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "a", Capabilities: []string{"a"}, ImplementationFiles: []string{"src/A.go"}, UpstreamRefs: []string{"logging"}},
+				{Name: "b", Capabilities: []string{"b"}, ImplementationFiles: []string{"src/B.go"}, UpstreamRefs: []string{"logging"}},
+			},
+			UpstreamResolutions: []workflow.UpstreamResolution{
+				{Name: "logging", Coordinate: "go.uber.org/zap", Role: "runtime_dep", UsedBy: []string{"a", "b"}},
+			},
+		},
+	}
+	result2 := &workflow.PlanReviewResult{Verdict: "approved"}
+	mergeArchitectureFindings(lib, result2)
+	for _, f := range result2.Findings {
+		if f.SOPID == "architecture.components_share_entry_point" {
+			t.Errorf("a shared runtime_dep library must not fire cohesion-violation: %+v", f)
+		}
 	}
 }
 

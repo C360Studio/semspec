@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"technology_choices\": [{\"category\": \"language\", \"choice\": \"Python\", \"rationale\": \"Existing Python service\"}], \"component_boundaries\": [{\"name\": \"feature-a\", \"responsibility\": \"Feature A behavior\", \"dependencies\": [], \"implementation_files\": [\"src/a/feature_a.py\"], \"capabilities\": [\"feature-a\"]}, {\"name\": \"feature-b\", \"responsibility\": \"Feature B behavior\", \"dependencies\": [\"feature-a\"], \"implementation_files\": [\"src/b/feature_b.py\"], \"capabilities\": [\"feature-b\"]}], \"data_flow\": \"Each feature registers into the shared core driver and is invoked independently.\", \"decisions\": [{\"id\": \"ARCH-001\", \"title\": \"Per-feature packages\", \"decision\": \"Feature A under src/a, feature B under src/b\", \"rationale\": \"Independently testable feature packages\"}], \"actors\": [{\"name\": \"End User\", \"type\": \"human\", \"triggers\": [\"invokes a feature\"]}], \"integrations\": [{\"name\": \"Core Driver\", \"direction\": \"inbound\", \"protocol\": \"filesystem\"}], \"test_surface\": {\"integration_flows\": [{\"name\": \"feature-registration-flow\", \"components_involved\": [\"feature-a\", \"feature-b\"], \"description\": \"Both features register through the core driver\"}], \"e2e_flows\": [{\"actor\": \"End User\", \"steps\": [\"invoke a feature\"], \"success_criteria\": [\"feature responds\"]}]}, \"upstream_resolutions\": [], \"harness_profiles\": []}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

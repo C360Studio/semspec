@@ -84,13 +84,14 @@ func TestIsJunkArtifact(t *testing.T) {
 
 func TestDecideOwnership(t *testing.T) {
 	tests := []struct {
-		name              string
-		porcelain         string
-		owned             map[string]struct{}
-		wantJunk          []string // matched by path prefix (pattern suffix ignored)
-		wantModDocUnowned []string // hard-fail: non-owner co-writing a shared doc
-		wantModUnowned    []string // advisory: non-owner editing non-doc
-		wantNewUnowned    []string // advisory: new file outside ownership
+		name                  string
+		porcelain             string
+		owned                 map[string]struct{}
+		wantJunk              []string // matched by path prefix (pattern suffix ignored)
+		wantModDocUnowned     []string // hard-fail: non-owner co-writing a shared doc
+		wantModUnowned        []string // advisory: non-owner editing non-doc
+		wantNewUnowned        []string // advisory: new file in-territory / new doc
+		wantNewOutOfTerritory []string // hard-fail: new source/test outside territory
 	}{
 		{
 			name:              "modified non-owned DOC (README wedge) hard-fails",
@@ -121,10 +122,49 @@ func TestDecideOwnership(t *testing.T) {
 			owned:     ownedSetOf("src/A.java"),
 		},
 		{
-			name:           "new unowned source (class split) is advisory",
+			name:           "new unowned source (class split) in same dir is advisory",
 			porcelain:      "?? src/FooHelper.java",
 			owned:          ownedSetOf("src/Foo.java"),
 			wantNewUnowned: []string{"src/FooHelper.java"},
+		},
+		{
+			name:           "new unowned source in an OWNED subdirectory is advisory (in territory)",
+			porcelain:      "?? src/main/java/com/x/internal/Helper.java",
+			owned:          ownedSetOf("src/main/java/com/x/Driver.java"),
+			wantNewUnowned: []string{"src/main/java/com/x/internal/Helper.java"},
+		},
+		{
+			name:                  "new unowned source OUTSIDE territory is an ownership gap (hard fail)",
+			porcelain:             "?? src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java",
+			owned:                 ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNewOutOfTerritory: []string{"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java"},
+		},
+		{
+			name:                  "new unowned TEST outside territory is an ownership gap (hard fail)",
+			porcelain:             "?? src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java",
+			owned:                 ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNewOutOfTerritory: []string{"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java"},
+		},
+		{
+			name:           "new unowned DOC outside territory stays advisory (hygiene only)",
+			porcelain:      "?? docs/TRADEOFFS.md",
+			owned:          ownedSetOf("src/Foo.java"),
+			wantNewUnowned: []string{"docs/TRADEOFFS.md"},
+		},
+		{
+			name:           "empty owned set leaves a new source advisory (no story context)",
+			porcelain:      "?? src/New.java",
+			owned:          ownedSetOf(), // no declared territory → cannot be 'outside' it
+			wantNewUnowned: []string{"src/New.java"},
+		},
+		{
+			name:      "declared shared entry file is owned (move-1 third option seam)",
+			porcelain: "?? src/driver/mavsdk/MavsdkDriver.java",
+			// Two components that explicitly share an entry file BOTH list it in
+			// their implementation_files → it is in this story's FilesOwned → the
+			// node gate treats it as owned (clean), and DeriveStoryScheduling
+			// serializes the sharing stories. No ownership gap.
+			owned: ownedSetOf("src/driver/mavsdk/MavsdkDriver.java", "src/driver/mavsdk/Telemetry.java"),
 		},
 		{
 			name:      "patch.diff committed is junk",
@@ -206,7 +246,59 @@ func TestDecideOwnership(t *testing.T) {
 			if !equalSets(v.NewUnowned, tc.wantNewUnowned) {
 				t.Errorf("newUnowned = %v, want %v", sortedCopy(v.NewUnowned), sortedCopy(tc.wantNewUnowned))
 			}
+			if !equalSets(v.NewUnownedOutOfTerritory, tc.wantNewOutOfTerritory) {
+				t.Errorf("newUnownedOutOfTerritory = %v, want %v", sortedCopy(v.NewUnownedOutOfTerritory), sortedCopy(tc.wantNewOutOfTerritory))
+			}
 		})
+	}
+}
+
+// TestDecideOwnership_NewUnownedSourceFile_FailsContainment is a RED test for the
+// 2026-06-14 paid mavlink-hard assembly wedge (slug 8beacfaa5856, ~34.5M
+// gemini-pro tokens before it failed).
+//
+// Four requirement stories each owned disjoint, architect-DECLARED paths under
+// org/sensorhub/driver/mavsdk/ — paths the architect invented that match no OSH
+// convention, against a bare-skeleton baseline with no existing driver. All four
+// developers independently CREATED the real OSH-canonical driver entry class
+// (org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java) and its shared test,
+// because that is where an OSH sensor driver actually lives. decideOwnership saw
+// each as a NEW file outside the owned set and filed it under the *advisory*
+// NewUnowned bucket, so clean()==true and the per-node dev-review containment
+// gate passed. The collision between the four identical new paths was therefore
+// deferred to the terminal assembly merge — failing the plan only after all 16
+// TDD nodes ran (the "a conflict at assembly will fail the plan honestly"
+// advisory at ownership_check.go is exactly that multi-hour/paid deferral).
+//
+// A newly-created SOURCE/TEST file outside the story's owned set is NOT a
+// mergeable "class split" when sibling parallel stories create the same path; it
+// is the same unmergeable shape as the shared-doc co-write the gate already
+// hard-fails. The dev review must fail it at the node so the ownership/partition
+// gap (here: the architect's fabricated, non-canonical paths) surfaces in
+// seconds, not after a multi-hour paid run.
+//
+// RED until new unowned source/test files are promoted from advisory NewUnowned
+// to a hard-fail containment violation (at which point the "new unowned source
+// (class split) is advisory" case in TestDecideOwnership must be reconciled).
+func TestDecideOwnership_NewUnownedSourceFile_FailsContainment(t *testing.T) {
+	// Architect-declared (fictional, non-canonical) owned path.
+	owned := ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java")
+
+	// What the developer actually created: the real OSH-canonical driver + test,
+	// outside the declared ownership (untracked "??") — the de-facto path all
+	// four parallel stories converged on.
+	changes := parsePorcelain(
+		"?? src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java\n" +
+			"?? src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java\n",
+	)
+
+	v := decideOwnership(changes, owned)
+
+	if v.clean() {
+		t.Fatalf("decideOwnership treated newly-created unowned SOURCE/TEST files as advisory "+
+			"(clean()==true) — this is the 2026-06-14 mavlink-hard wedge: four parallel stories each "+
+			"created the same unowned driver path and the collision was deferred to terminal assembly. "+
+			"Want clean()==false so the dev-review gate fails at the node. verdict=%+v", v)
 	}
 }
 
@@ -291,20 +383,38 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 		}
 	})
 
-	t.Run("new-unowned is advisory, gate passes", func(t *testing.T) {
+	t.Run("in-territory new-unowned is advisory, gate passes", func(t *testing.T) {
 		runner := &fakeRunner{stdout: "?? src/Helper.java\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
 		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
-		c := findResult(t, results, "file-ownership-containment")
+		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
 		if !c.Passed {
-			t.Fatalf("required gate should pass when only new-unowned present, got %+v", c)
+			t.Fatalf("required gate should pass when only in-territory new-unowned present, got %+v", c)
 		}
-		adv := findResult(t, results, "file-ownership-advisory")
+		adv := findResult(t, results, payloads.CheckFileOwnershipAdvisory)
 		if adv.Required {
 			t.Errorf("advisory result must be advisory (Required=false), got %+v", adv)
 		}
 		if !strings.Contains(adv.Stdout, "src/Helper.java") {
 			t.Errorf("expected Helper.java named in advisory, got %q", adv.Stdout)
+		}
+	})
+
+	t.Run("out-of-territory new source emits a planning-gap Required failure", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? other/pkg/New.java\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		// The base containment row (junk/doc) still passes — the gap is its own row.
+		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
+		if !c.Passed {
+			t.Fatalf("containment (junk/doc) should pass; the gap is a separate row, got %+v", c)
+		}
+		gap := findResult(t, results, payloads.CheckFileOwnershipPlanningGap)
+		if gap.Passed || !gap.Required {
+			t.Fatalf("expected a Required planning-gap FAILURE, got %+v", gap)
+		}
+		if !strings.Contains(gap.Stderr, "other/pkg/New.java") {
+			t.Errorf("expected offending path named in planning-gap, got %q", gap.Stderr)
 		}
 	})
 

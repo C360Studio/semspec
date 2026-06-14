@@ -1,0 +1,14 @@
+{
+  "content": "Code review complete. Verdict: approved.",
+  "tool_calls": [
+    {
+      "id": "call_review_approve",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Implementation matches the requirement and passes structural validation.\", \"summary\": \"Code review approved.\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

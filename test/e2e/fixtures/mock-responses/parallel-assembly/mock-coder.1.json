@@ -1,0 +1,14 @@
+{
+  "content": "I'll add the shared core driver that this feature registers into.",
+  "tool_calls": [
+    {
+      "id": "call_write_driver",
+      "type": "function",
+      "function": {
+        "name": "bash",
+        "arguments": "{\"command\":\"mkdir -p src/core && cat > src/core/driver.py << 'PYEOF'\\n# Shared core driver entry point that every feature registers into.\\nclass Driver:\\n    handlers = {}\\n\\n    @classmethod\\n    def register(cls, name, handler):\\n        cls.handlers[name] = handler\\nPYEOF\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

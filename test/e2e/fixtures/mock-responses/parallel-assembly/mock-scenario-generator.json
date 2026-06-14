@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"scenarios\": [{\"given\": \"the service is running\", \"when\": \"the feature is invoked\", \"then\": [\"the feature responds successfully\"], \"title\": \"Feature responds when invoked\", \"tags\": [\"@unit\"]}, {\"given\": \"the service is running\", \"when\": \"the feature is invoked with bad input\", \"then\": [\"an error is returned\"], \"title\": \"Feature handles bad input\", \"tags\": [\"@unit\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
