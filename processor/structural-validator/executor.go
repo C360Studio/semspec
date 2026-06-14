@@ -129,6 +129,16 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		results = append(results, e.runGoTestsExistOnModifiedIn(ctx, trigger.FilesModified, workDir, runner))
 	}
 
+	// Always-on gate: a story may only MODIFY files it owns, and must not commit
+	// scratch artefacts (*.orig, patch.diff, …). Computes the authoritative
+	// change set from `git status` in the worktree (the agent's self-reported
+	// FilesModified is not trustworthy for a gate about the agent overstepping).
+	// Skips when there's no ownership context (manual validation / E2E). Closes
+	// the 2026-06-13 mavlink-hard README assembly wedge upstream of merge
+	// (issues #175 / #177).
+	results = append(results,
+		e.runFileOwnershipContainment(ctx, workflow.NormalizeFilePaths(trigger.FilesOwned), workDir, runner)...)
+
 	// Advisory anti-mock governance check — only when test files are present.
 	if hasTestFiles(trigger.FilesModified) {
 		antiMockResult := CheckAntiMock(workDir, trigger.FilesModified)

@@ -95,10 +95,13 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 			}
 		}
 
-	case workflow.PlanDecisionKindExecutionExhausted:
-		// Terminal kind — cascade is a no-op beyond recording the
+	case workflow.PlanDecisionKindExecutionExhausted,
+		workflow.PlanDecisionKindAssemblyConflict:
+		// Terminal kinds — cascade is a no-op beyond recording the
 		// AffectedRequirementIDs already populated above for caller
-		// telemetry. Stories + Scenarios stay empty.
+		// telemetry. Stories + Scenarios stay empty. assembly_conflict
+		// (issue #176) is informational: the plan is already failed to
+		// rejected, so there is nothing to dirty-cascade.
 
 	case workflow.PlanDecisionKindArchitectureRevise:
 		// The plan-manager accept handler already wiped Architecture +

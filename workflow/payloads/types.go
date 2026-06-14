@@ -424,6 +424,14 @@ type ValidationRequest struct {
 	// the trajectory is the developer agent's path to that worktree.
 	DeveloperLoopID string `json:"developer_loop_id,omitempty"`
 
+	// FilesOwned is the story's declared ownership set (Story.FilesOwned,
+	// threaded via TaskExecution.FileScope). The structural-validator's
+	// file-ownership-containment gate (issue #175/#177) uses it to reject a
+	// submission that MODIFIES an existing file outside this set or commits a
+	// scratch artifact. Empty means the gate is skipped (manual validation,
+	// E2E, or any dispatch without story context).
+	FilesOwned []string `json:"files_owned,omitempty"`
+
 	// Trace context
 	TraceID string `json:"trace_id,omitempty"`
 }

@@ -1789,6 +1789,21 @@ const (
 	// accept handler already performed the wipe inline. Emitted by the
 	// recovery-agent for the architecture_revise action.
 	PlanDecisionKindArchitectureRevise PlanDecisionKind = "architecture_revise"
+
+	// PlanDecisionKindAssemblyConflict marks a decision recording a plan-level
+	// merge conflict at branch assembly (issue #176). Execution SUCCEEDED — all
+	// requirements passed review — but assembleRequirementBranches could not
+	// merge their branches because two truly-parallel branches edited the same
+	// file with no DependsOn edge: a planning-partition defect, NOT an execution
+	// failure. Distinct from execution_exhausted (which means code couldn't
+	// converge) so dashboards and recovery don't conflate "code couldn't
+	// converge" with "branches couldn't merge". plan-manager records this
+	// directly and fails the plan terminally (→ rejected), naming the
+	// conflicting branch + files, rather than firing recovery's escalate_human
+	// (which has no unattended fallback and wedges CI/e2e at implementing until
+	// timeout). The prevention is the file-ownership gates (#175); this is the
+	// honest backstop when an undeclared shared file slips through.
+	PlanDecisionKindAssemblyConflict PlanDecisionKind = "assembly_conflict"
 )
 
 // String returns the string representation of the plan decision kind.
@@ -1802,7 +1817,8 @@ func (k PlanDecisionKind) IsValid() bool {
 	case PlanDecisionKindRequirementChange,
 		PlanDecisionKindExecutionExhausted,
 		PlanDecisionKindStoryReprepare,
-		PlanDecisionKindArchitectureRevise:
+		PlanDecisionKindArchitectureRevise,
+		PlanDecisionKindAssemblyConflict:
 		return true
 	default:
 		return false

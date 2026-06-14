@@ -396,16 +396,26 @@ func (c *Component) handleConvergenceAllSucceeded(ctx context.Context, plan *wor
 }
 
 // routeAssemblyConflict handles a failed pre-QA assemble/stage. The plan never
-// advanced out of implementing, so it stays there with a surfaced LastError —
-// we must NOT proceed to QA against an unmerged tree (the exact bug being
-// fixed). A merge conflict (two requirements edited the same file) is a
-// planning-scope problem that architecture_revise / re-partition must resolve,
-// so it fires phase-local recovery (PRODUCT CALL 4a — reuse RecoveryRequested,
-// no new plan status). Any other failure (sandbox unreachable, worktree
-// staging) is a transient stall: surface LastError and bump the SSE revision so
-// the UI shows the stall; an operator retry or the next execution event
-// re-drives convergence. We deliberately do NOT emit a plan-scope recovery for
-// an infra blip.
+// advanced out of implementing — we must NOT proceed to QA against an unmerged
+// tree.
+//
+// A merge conflict (two truly-parallel branches edited the same file with no
+// DependsOn edge) is a planning-partition defect, not an execution failure: all
+// requirements passed review, the branches just can't merge. In an unattended
+// run firing recovery's escalate_human has no fallback — the decision sits
+// unhandled and the plan idles at implementing until the Playwright timeout
+// (~65 min), failing late with no actionable signal (issue #176). So we instead
+// FAIL FAST and TERMINAL: record a distinct assembly_conflict PlanDecision
+// naming the conflicting branch + files (so dashboards/recovery don't conflate
+// it with execution_exhausted) and transition the plan to rejected, where the
+// defect surfaces immediately and the operator's existing /retry endpoints
+// apply. Prevention is the file-ownership gates (#175); this is the honest
+// backstop when an undeclared shared file slips through.
+//
+// Any other failure (sandbox unreachable, worktree staging) is a transient
+// stall: surface LastError and bump the SSE revision so the UI shows the stall;
+// an operator retry or the next execution event re-drives convergence. We
+// deliberately do NOT fail the plan for an infra blip.
 func (c *Component) routeAssemblyConflict(ctx context.Context, plan *workflow.Plan, assembleErr error) {
 	// Runs from the EXECUTION_STATES watcher (checkPlanConvergence), which is
 	// lock-free like the sibling stall/infra-critical saves here. The
@@ -416,30 +426,59 @@ func (c *Component) routeAssemblyConflict(ctx context.Context, plan *workflow.Pl
 	plan.LastError = fmt.Sprintf("pre-QA assembly failed: %v", assembleErr)
 	plan.LastErrorAt = &now
 
+	if errors.Is(assembleErr, sandbox.ErrMergeBranchesConflict) {
+		c.failPlanOnAssemblyConflict(ctx, plan, assembleErr, now)
+		return
+	}
+
 	if saveErr := c.savePlanCached(ctx, plan); saveErr != nil {
 		c.logger.Error("Failed to persist LastError after pre-QA assembly failure",
 			"slug", plan.Slug, "error", saveErr)
 	}
-
-	if errors.Is(assembleErr, sandbox.ErrMergeBranchesConflict) {
-		c.logger.Warn("Pre-QA plan-level merge conflict — firing recovery, plan stays implementing",
-			"slug", plan.Slug, "error", assembleErr)
-		c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
-			RecoveryID:          uuid.New().String(),
-			Layer:               payloads.RecoveryLayerPhaseLocal,
-			Slug:                plan.Slug,
-			EscalationReason:    "plan-level merge conflict assembling requirement branches before QA",
-			LastFailureFeedback: assembleErr.Error(),
-			// There is no QA verdict yet; the verdict arg only affects an
-			// internal warn-log branch (zero active reqs), which can't fire here
-			// since convergence implies active reqs.
-			AffectedRequirementIDs: c.collectActiveRequirementIDsForRecovery(plan, workflow.QAVerdictNeedsChanges),
-		})
-		return
-	}
-
 	c.logger.Error("Pre-QA assembly failed (non-conflict) — plan stalls in implementing pending retry",
 		"slug", plan.Slug, "error", assembleErr)
+}
+
+// failPlanOnAssemblyConflict records an assembly_conflict PlanDecision and
+// transitions the plan to terminal rejected (issue #176). assembleErr already
+// names the conflicting branch + files (see assembleRequirementBranches), so its
+// message is the actionable signal carried into both LastError and the decision
+// rationale. The decision is authored by plan-manager (ProposedBy != the
+// recovery-agent gate), so the auto-accept watcher ignores it — it is a terminal
+// record, not a cascade trigger.
+func (c *Component) failPlanOnAssemblyConflict(ctx context.Context, plan *workflow.Plan, assembleErr error, now time.Time) {
+	affected := make([]string, 0, len(plan.Requirements))
+	for _, r := range plan.Requirements {
+		affected = append(affected, r.ID)
+	}
+
+	decision := workflow.PlanDecision{
+		ID:             fmt.Sprintf("plan-decision.%s.%d", plan.Slug, len(plan.PlanDecisions)+1),
+		PlanID:         workflow.PlanEntityID(plan.Slug),
+		Kind:           workflow.PlanDecisionKindAssemblyConflict,
+		Title:          "Plan-level merge conflict at branch assembly",
+		Rationale:      fmt.Sprintf("Execution succeeded but the requirement branches could not be merged: %v. This is a planning-partition defect — two parallel branches edited the same file with no ownership/DependsOn edge. Re-run with corrected file ownership (the offending file must be declared on exactly one component, or shared owners serialized).", assembleErr),
+		Status:         workflow.PlanDecisionStatusProposed,
+		ProposedBy:     "plan-manager",
+		AffectedReqIDs: affected,
+		CreatedAt:      now,
+	}
+	plan.PlanDecisions = append(plan.PlanDecisions, decision)
+
+	c.logger.Error("Pre-QA plan-level merge conflict — failing plan terminally (planning-partition defect)",
+		"slug", plan.Slug, "decision_kind", string(decision.Kind), "error", assembleErr)
+
+	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusRejected); err != nil {
+		// setPlanStatusCached persists the plan (including the appended decision
+		// and LastError). On failure, fall back to a direct save so the decision
+		// and LastError are not lost even if the status transition didn't apply.
+		c.logger.Error("Failed to transition plan to rejected after assembly conflict",
+			"slug", plan.Slug, "error", err)
+		if saveErr := c.savePlanCached(ctx, plan); saveErr != nil {
+			c.logger.Error("Failed to persist assembly-conflict decision after transition failure",
+				"slug", plan.Slug, "error", saveErr)
+		}
+	}
 }
 
 // publishQARequestIfNeeded fires when a plan is routed to ready_for_qa. For
