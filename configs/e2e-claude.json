@@ -303,6 +303,7 @@
       "config": {
         "max_iterations": 50,
         "timeout": "3600s",
+        "tool_result_max_bytes": 131072,
         "consumer": {
           "ack_wait": "3900s",
           "heartbeat_interval": "240s"
