@@ -45,13 +45,11 @@ func rootCmd() *cobra.Command {
 
 Tier 1 — Component Tests (no LLM):
   plan-workflow       - Tests CreatePlan, PromotePlan, ExecutePlan via REST API (ADR-003)
-  task-dispatcher     - Tests parallel context building and dependency-aware task dispatch
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
   reactive-execution  - Tests full reactive execution lifecycle: decomposition → node dispatch → completion
   plan-decision     - Tests PlanDecision CRUD, status transitions, cascade response, and error handling
   sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
-  agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   graph-sources       - Tests graph source registry: semsource readiness, GraphQL entity indexing
   graph-tools         - Tests all graph tool paths: graph_summary, graph_query, graph_search
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
@@ -138,13 +136,11 @@ func listCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println("  Tier 1 — Component Tests (no LLM):")
 			fmt.Println("  plan-workflow       Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
-			fmt.Println("  task-dispatcher     Tests parallel context building and dependency-aware dispatch")
 			fmt.Println("  questions-api       Tests Q&A HTTP API endpoints (list, get, answer)")
 			fmt.Println("  scenario-execution  Tests Requirement/Scenario CRUD and reactive workflow trigger")
 			fmt.Println("  reactive-execution  Tests full reactive execution: decomposition → dispatch → completion")
 			fmt.Println("  plan-decision     Tests PlanDecision CRUD, status transitions, cascade, and error handling")
 			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
-			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 			fmt.Println("  graph-sources       Tests graph source registry: semsource readiness, GraphQL entities")
 			fmt.Println("  graph-tools         Tests all graph tool paths: summary, query, search")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
