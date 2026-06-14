@@ -152,18 +152,77 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 // guidance reaches the wedged role through the existing channel.
 //
 // Two callers as of 2026-05-28:
-//   - handlePlanDecisionAccepted via the existing iteration-exhaustion
-//     path (exec was mid-cycle when markEscalatedLocked deferred it).
+//   - handlePlanDecisionAccepted via the existing iteration-exhaustion /
+//     dev-gate fast-fail path (exec was mid-cycle when markEscalatedLocked
+//     deferred it — ADR-049 Move-3 lands here too).
 //   - resumeTerminalForRecoveryLocked via the QA-recovery path (exec was
 //     terminal-stage in KV when the plan-level QA verdict rejected; the
 //     wrapper re-marks it awaiting before calling here).
 //
-// The function is identical for both — the only difference upstream is
-// how the exec got into activeExecs (cache-resident vs. KV-loaded then
+// The function is identical for both callers — the only difference upstream
+// is how the exec got into activeExecs (cache-resident vs. KV-loaded then
 // reinserted).
+//
+// Story reset (ADR-049 / #167/#168 analogue for the dev-gate path): this
+// function calls reopenOwnedStoriesForRecoveryLocked at the TOP — before
+// branch recreation and re-decompose — so ANY owned story left in a non-
+// ready state (Complete, Executing, Failed, Pending) is walked back to Ready.
+// This mirrors the lesson learned on the QA-recovery path: without the reopen,
+// dispatchCurrentStoryLocked's ClaimStoryStatus(→Executing) is rejected for
+// a story not at Ready (invalid transition), the executor misreads the rejection
+// as "M:N reservation held by another executor", skips, and false-completes the
+// requirement with nodes_completed=0. The dev-gate fast-fail (ADR-049 Move-3)
+// is the primary producer of Executing-stranded stories.
+//
+// If the reopen was attempted (natsClient present) but not all owned stories
+// reached Ready (transient NATS error, partial walk), this function re-arms
+// awaiting-recovery and returns WITHOUT incrementing recoveryRestarts — so the
+// next PlanDecision-accepted event retries the walk from wherever the story
+// currently sits (self-healing across cycles). The outer recovery timer still
+// bounds total wait time.
 //
 // Caller must hold exec.mu.
 func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirementExecution) {
+	// Reset any owned stories that are not in a dispatchable state BEFORE the
+	// branch recreation and re-decompose. This must happen first so the reset
+	// stories are visible in PLAN_STATES when dispatchSynthesizerLocked reloads
+	// the plan. Both the dev-gate / iteration-exhaustion path (new) and the
+	// QA-recovery path (existing via resumeTerminalForRecoveryLocked) need this.
+	// The call is idempotent: stories already at Ready are excluded.
+	reopenResult := c.reopenOwnedStoriesForRecoveryLocked(ctx, exec)
+
+	// C1: if the walk was attempted but did not fully land, do NOT proceed to
+	// dispatchSynthesizerLocked — dispatching now would produce the same
+	// false-complete this function exists to prevent (story still non-Ready,
+	// ClaimStoryStatus(→Executing) rejected, executor skips, req marks complete
+	// with nodes_completed=0). Instead, re-arm awaiting-recovery WITHOUT burning
+	// a recoveryRestarts slot so the next cycle retries the walk from the story's
+	// current status (self-healing). The outer recovery timer still fires if no
+	// progress is made, so this path cannot loop forever within a single exec.
+	//
+	// natsClient==nil means unit-test / no-NATS mode: reopenResult.candidates==0
+	// regardless of story states, so we always proceed — keeping the nil-client
+	// path a clean no-op and not disrupting existing unit tests.
+	if c.natsClient != nil && !reopenResult.allReady() {
+		// Re-mark awaiting-recovery (without incrementing recoveryRestarts — this
+		// was not a real restart attempt, only a story-walk attempt). Re-arm the
+		// timer so the outer budget fires if the walk keeps failing.
+		exec.awaitingRecovery = true
+		timeout := c.recoveryTimeout()
+		timer := time.AfterFunc(timeout, func() {
+			c.handleRecoveryTimeout(exec, timeout)
+		})
+		exec.recoveryTimer = &timeoutHandle{stop: func() { timer.Stop() }}
+		c.logger.Warn("recovery: story walk incomplete — re-arming awaiting-recovery to retry on next PlanDecision",
+			"entity_id", exec.EntityID,
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"reopened", reopenResult.reopened,
+			"candidates", reopenResult.candidates,
+		)
+		return
+	}
+
 	if exec.recoveryTimer != nil {
 		exec.recoveryTimer.stop()
 		exec.recoveryTimer = nil

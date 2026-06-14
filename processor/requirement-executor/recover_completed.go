@@ -146,13 +146,15 @@ func (c *Component) resumeTerminalForRecoveryLocked(ctx context.Context, exec *r
 		"prior_stage", "terminal",
 		"proposal_id", proposalID,
 	)
-	// Re-open the M:N Stories this requirement owns so the resumed dev loop
-	// re-does work instead of skipping ("Story already complete"). Without this,
-	// QA-recovery on an M:N-complete plan is a no-op: the req re-dispatches, every
-	// Story is skipped, the req re-marks complete, and the plan bounces back to QA
-	// unchanged. Must run BEFORE resumeFromRecoveryLocked so the reset stories are
-	// visible when dispatchSynthesizerLocked reloads the plan from KV.
-	c.reopenOwnedStoriesForRecoveryLocked(ctx, exec)
+	// resumeFromRecoveryLocked now calls reopenOwnedStoriesForRecoveryLocked
+	// at its own top (before branch recreation + re-decompose), so both the
+	// QA-recovery path (here) and the dev-gate / iteration-exhaustion path
+	// (handlePlanDecisionAccepted) reset owned stories. The explicit
+	// reopenOwnedStoriesForRecoveryLocked call that previously appeared here
+	// was moved into resumeFromRecoveryLocked to close the ADR-049 dev-gate
+	// fast-fail gap — the ordering invariant (reset before plan reload) is
+	// preserved because the reopen is the first thing resumeFromRecoveryLocked
+	// does.
 	c.resumeFromRecoveryLocked(ctx, exec)
 	// Invalidate the dependent branch subtree AFTER resumeFromRecoveryLocked has
 	// moved this requirement off "completed" (sendReqPhase → decomposing). That
@@ -258,64 +260,227 @@ func (c *Component) resetDependentBranchSubtree(ctx context.Context, slug, reope
 		"slug", slug, "reopened", reopenedID, "dependents", deps)
 }
 
-// storiesToReopenForRecovery returns the IDs of complete Stories covering reqID
-// that reqID owns (the deterministic M:N owner). These are the Stories a
-// QA-recovery resume must reset complete → ready so the dev loop re-runs rather
-// than skipping. Non-owned Stories are excluded — resetting one would let a
-// non-owner run the dev loop, inverting the M:N reservation; the non-owner
-// instead re-skips (Story stays complete) and fast-completes via Tier-1 dedup
-// once the owner re-ships. Non-complete Stories are excluded (nothing to
-// re-open). Pure function — the side-effecting reopen lives in
-// reopenOwnedStoriesForRecoveryLocked.
+// storyStatusWalkToReady returns the sequence of StoryStatus transitions
+// required to walk from `from` to StoryStatusReady via the valid state machine
+// edges. Used by reopenOwnedStoriesForRecoveryLocked to reset in-flight owned
+// stories that a recovery resume must reclaim.
+//
+// Transition chains (smallest to largest):
+//
+//	Complete  → Ready
+//	Pending   → Ready
+//	Failed    → Pending → Ready
+//	Executing → Failed  → Pending → Ready
+//
+// Returns nil when `from` is already Ready (no steps needed). The steps are
+// applied in order via sequential ClaimStoryStatus calls; each step must
+// succeed before the next is attempted. This avoids inventing a new state-
+// machine shortcut transition and instead threads through existing valid edges —
+// keeping the plan-manager handler (handleStoryStatusMutation) unchanged.
+//
+// Pure function — no side effects.
+func storyStatusWalkToReady(from workflow.StoryStatus) []workflow.StoryStatus {
+	switch from {
+	case workflow.StoryStatusReady:
+		return nil // already dispatchable, nothing to do
+	case workflow.StoryStatusPending:
+		return []workflow.StoryStatus{workflow.StoryStatusReady}
+	case workflow.StoryStatusComplete:
+		return []workflow.StoryStatus{workflow.StoryStatusReady}
+	case workflow.StoryStatusFailed:
+		return []workflow.StoryStatus{workflow.StoryStatusPending, workflow.StoryStatusReady}
+	case workflow.StoryStatusExecuting:
+		return []workflow.StoryStatus{
+			workflow.StoryStatusFailed,
+			workflow.StoryStatusPending,
+			workflow.StoryStatusReady,
+		}
+	default:
+		return nil
+	}
+}
+
+// storiesToReopenForRecovery returns the IDs of Stories covering reqID that
+// reqID owns (the deterministic M:N owner) and that need to be walked back to
+// Ready before a recovery resume. This covers all non-ready states that would
+// cause false-completion on re-dispatch:
+//
+//   - Complete: QA-recovery shape — req completed + plan-level QA rejected.
+//   - Executing: dev-gate fast-fail shape (ADR-049 Move-3) — the executor
+//     transitioned the req to awaiting-recovery while the Story was mid-
+//     dispatch. Without resetting, ClaimStoryStatus(→Executing) is rejected on
+//     resume (Executing→Executing is invalid), causing false-skip/false-complete.
+//   - Failed: story failed before the requirement reached terminal state.
+//   - Pending: Pending→Executing is also an invalid transition per CanTransitionTo
+//     (Pending→{Ready,Failed} only). A story stranded at Pending — e.g. by a
+//     partial walk from a prior recovery attempt — must be walked to Ready so the
+//     executor can claim it.
+//
+// Only Ready stories are excluded — they are already dispatchable (Ready→Executing
+// is the expected claim). Non-owned Stories are also excluded — resetting one would
+// let a non-owner run the dev loop, inverting the M:N reservation.
+//
+// Pure function — the side-effecting walk lives in reopenOwnedStoriesForRecoveryLocked.
 func storiesToReopenForRecovery(plan *workflow.Plan, reqID string) []string {
 	if plan == nil {
 		return nil
 	}
 	var ids []string
 	for _, s := range plan.StoriesForRequirement(reqID) {
-		if s.Status == workflow.StoryStatusComplete && workflow.DeterministicStoryOwner(s) == reqID {
+		if workflow.DeterministicStoryOwner(s) != reqID {
+			continue // non-owner: M:N reservation must not be violated
+		}
+		switch s.Status {
+		case workflow.StoryStatusComplete,
+			workflow.StoryStatusExecuting,
+			workflow.StoryStatusFailed,
+			workflow.StoryStatusPending:
 			ids = append(ids, s.ID)
+			// Ready is the only dispatchable state; no walk needed.
 		}
 	}
 	return ids
 }
 
-// reopenOwnedStoriesForRecoveryLocked resets the owner's complete M:N Stories to
-// ready via the cross-component story-status mutation. No-op without a NATS
-// client (unit-test substrate) or when the plan can't be loaded. Idempotent
-// across recovery cycles: candidates are pre-filtered to complete Stories, so a
-// re-run reopens nothing once a Story has already moved on to ready/executing.
-func (c *Component) reopenOwnedStoriesForRecoveryLocked(ctx context.Context, exec *requirementExecution) {
-	if c.natsClient == nil {
-		return
-	}
-	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
-	if err != nil || plan == nil {
-		c.logger.Warn("QA-recovery: could not load plan to reopen owned stories",
-			"slug", exec.Slug, "requirement_id", exec.RequirementID, "error", err)
-		return
-	}
-	ids := storiesToReopenForRecovery(plan, exec.RequirementID)
-	reopened := 0
+// storyReopenResult summarises whether the reopen walk succeeded for all
+// candidate stories owned by a requirement.
+type storyReopenResult struct {
+	// candidates is the number of stories that needed a walk (len(ids) from
+	// storiesToReopenForRecovery). Zero means no walk was needed.
+	candidates int
+	// reopened is the number that reached StoryStatusReady.
+	reopened int
+}
+
+// allReady reports whether every candidate story reached Ready.
+func (r storyReopenResult) allReady() bool {
+	return r.candidates == 0 || r.reopened == r.candidates
+}
+
+// reopenStoriesFromPlan is the pure inner kernel of the story-walk logic. It
+// walks each story in `ids` from its current status to Ready using the supplied
+// claimer, and returns how many reached Ready. Extracted so tests can call it
+// directly with a fake claimer and a synthetic plan — without needing a live
+// NATS substrate or loadPlanFromKV. The method reopenOwnedStoriesForRecoveryLocked
+// is the production entry-point that adds plan-loading and logging.
+//
+// Self-healing across cycles (C1): the walk for each story is derived from the
+// status read out of `plan` on THIS call. Production reloads the plan from KV on
+// every recovery cycle (reopenOwnedStoriesForRecoveryLocked), so a prior partial
+// walk that stranded a story at e.g. Pending is re-derived from Pending and
+// resumed on the next call — no in-loop state is carried between calls.
+func reopenStoriesFromPlan(
+	ctx context.Context,
+	slug string,
+	plan *workflow.Plan,
+	ids []string,
+	claimer func(ctx context.Context, slug, storyID string, target workflow.StoryStatus) bool,
+) (reopened, candidates int) {
+	candidates = len(ids)
 	for _, storyID := range ids {
-		if workflow.ClaimStoryStatus(ctx, c.natsClient, exec.Slug, storyID, workflow.StoryStatusReady, c.logger) {
+		story, ok := findStoryByID(plan, storyID)
+		if !ok {
+			continue
+		}
+		walkedOK := true
+		for _, step := range storyStatusWalkToReady(story.Status) {
+			if !claimer(ctx, slug, storyID, step) {
+				walkedOK = false
+				break
+			}
+		}
+		if walkedOK {
 			reopened++
 		}
 	}
-	switch {
-	case len(ids) > 0 && reopened < len(ids):
-		// A reopen was expected but did not fully land (NATS error or a rejected
-		// mutation). Proceeding lets the un-reopened stories re-skip and the
-		// requirement re-complete without work — silently resurrecting the no-op
-		// this function exists to fix. Surface it so it's diagnosable.
-		c.logger.Warn("QA-recovery: not all owned stories reopened — recovery may be a partial no-op",
-			"slug", exec.Slug, "requirement_id", exec.RequirementID,
-			"reopened", reopened, "candidates", len(ids))
-	case reopened > 0:
-		c.logger.Info("QA-recovery: reopened owned M:N stories for re-execution",
-			"slug", exec.Slug, "requirement_id", exec.RequirementID,
-			"reopened", reopened, "candidates", len(ids))
+	return reopened, candidates
+}
+
+// reopenOwnedStoriesForRecoveryLocked walks the owner's non-ready Stories back
+// to Ready via sequential claim mutations. Covers four shapes:
+//
+//   - Pending   → Ready (1 hop — e.g. stranded by prior partial walk; C2 fix)
+//   - Complete  → Ready (1 hop — QA-recovery)
+//   - Failed    → Pending → Ready (2 hops)
+//   - Executing → Failed → Pending → Ready (3 hops — dev-gate fast-fail shape)
+//
+// Self-healing across cycles (C1 fix): delegates to reopenStoriesFromPlan which
+// tracks the story's evolving status locally so subsequent hops start from where
+// the last one landed. A prior partial walk that stranded a story at Pending is
+// resumed from Pending→Ready rather than re-attempting the full original chain.
+//
+// No-op without a NATS client (unit-test substrate) — returns allReady so
+// resumeFromRecoveryLocked proceeds normally in tests. The walk logic is
+// exercised separately via reopenStoriesFromPlan tests with an injected fake
+// claimer. When a NATS client is present and not all stories reached Ready,
+// returns the counts so resumeFromRecoveryLocked can defer instead of dispatching
+// into a guaranteed false-complete.
+//
+// Uses c.storyStatusClaimer (seam) rather than workflow.ClaimStoryStatus
+// directly so tests can inject a fake that enforces CanTransitionTo and asserts
+// the full walk sequence without a live plan-manager.
+//
+// Called from resumeFromRecoveryLocked (which serves BOTH the
+// iteration-exhaustion / dev-gate path AND the QA-recovery path).
+//
+// TODO(R2): a persistent story walk failure (e.g. plan-manager rejects the
+// transition because it already moved on) can strand the exec indefinitely
+// unless the outer recovery-timeout fires. A future improvement is to detect
+// N consecutive plan-load-or-walk failures for the same exec and fall through
+// to markFailedLocked. Track with a per-exec counter; N=3 is a reasonable
+// starting point. Low urgency: the recovery timer already caps the max wait.
+//
+// TODO(ps.save): handleStoryStatusMutation in plan-manager saves the plan on
+// every story transition (mutations.go:848). For the 3-hop Executing walk this
+// means 3 consecutive KV writes to PLAN_STATES within milliseconds. A future
+// optimisation is to batch the walk steps into a single mutation request (e.g. a
+// "walk_to_ready" mutation kind) so plan-manager applies all transitions
+// atomically. Low urgency: the current 3-hop path is correct and plan-manager's
+// per-write latency is negligible relative to LLM dispatch.
+func (c *Component) reopenOwnedStoriesForRecoveryLocked(ctx context.Context, exec *requirementExecution) storyReopenResult {
+	if c.natsClient == nil {
+		// Unit-test path: no NATS, no story state to reset. Report allReady
+		// so the caller proceeds to re-decompose. The walk logic is exercised
+		// separately via reopenStoriesFromPlan tests with an injected fake claimer.
+		return storyReopenResult{}
 	}
+	plan, err := c.loadPlanFromKV(ctx, exec.Slug)
+	if err != nil || plan == nil {
+		c.logger.Warn("recovery: could not load plan to reopen owned stories",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID, "error", err)
+		// Plan-load failure: treat as no candidates so caller can still proceed
+		// (degraded mode — better than wedging the exec permanently).
+		return storyReopenResult{}
+	}
+	ids := storiesToReopenForRecovery(plan, exec.RequirementID)
+	if len(ids) == 0 {
+		return storyReopenResult{}
+	}
+
+	slug := exec.Slug
+	reqID := exec.RequirementID
+	reopened, candidates := reopenStoriesFromPlan(ctx, slug, plan, ids, func(ctx context.Context, slug, storyID string, target workflow.StoryStatus) bool {
+		ok := c.storyStatusClaimer(ctx, slug, storyID, target)
+		if !ok {
+			c.logger.Warn("recovery: story status walk step rejected — will defer resume to retry",
+				"slug", slug, "requirement_id", reqID,
+				"story_id", storyID, "target", target)
+		}
+		return ok
+	})
+	result := storyReopenResult{candidates: candidates, reopened: reopened}
+
+	switch {
+	case result.reopened < result.candidates:
+		c.logger.Warn("recovery: not all owned stories walked to ready — deferring resume to next cycle",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"reopened", result.reopened, "candidates", result.candidates)
+	default:
+		c.logger.Info("recovery: owned stories walked to ready for re-execution",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"reopened", result.reopened, "candidates", result.candidates)
+	}
+	return result
 }
 
 // isKVNotFound returns true when err is the soft "no entry" shape returned
