@@ -2,6 +2,7 @@ package planreviewer
 
 import (
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
@@ -71,6 +72,8 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 			componentOverloadedCapabilityFindings(plan.Architecture.ComponentBoundaries)...)
 		result.Findings = append(result.Findings,
 			capabilityUnresolvedInArchitectureFindings(plan)...)
+		result.Findings = append(result.Findings,
+			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries)...)
 	}
 
 	if len(result.Findings) > original {
@@ -352,4 +355,124 @@ func sourceFileCount(paths []string) int {
 		}
 	}
 	return n
+}
+
+// scopedFileOwnershipFindings emits one finding per scoped DELIVERABLE file that
+// no component owns (issue #175). The invariant: every file the build will write
+// must belong to exactly one component's implementation_files, so the scheduler
+// (workflow.DeriveStoryScheduling) serializes the stories that share an owned
+// file. A file owned by NO component is written by every parallel story and
+// produces an unmergeable conflict at assembly — the 2026-06-13 mavlink-hard
+// README wedge: README.md was a deliverable (scope.include) but appeared in no
+// component's implementation_files, so all four parallel stories wrote it and
+// assembleRequirementBranches conflicted.
+//
+// This is deliberately NOT docs-specific (a doc and a source file are treated
+// identically — both must be owned). It is the architecture-side mirror of the
+// developer-loop containment gate (structural-validator), which rejects a story
+// that MODIFIES an unowned file. Prevention here; containment there.
+//
+// Set S of scoped deliverables (the files that must be owned):
+//   - every concrete file in scope.create (creation intent ⇒ a deliverable), and
+//   - every concrete file in scope.include that is NOT in scope.do_not_touch
+//     (an in-scope existing file the plan will modify; do_not_touch marks the
+//     read-only references, which are excluded).
+//
+// "Concrete file" = a literal path with a file extension and no glob meta — this
+// excludes directory entries ("src/") and patterns ("src/**/*.java"), which a
+// component cannot own as a single path and which would otherwise false-positive.
+//
+// Composes with architecture.component_implementation_files_doc_only: a README
+// cannot satisfy this rule by becoming its own docs-only component (that rule
+// rejects it) — it must ride as a companion file on the source component that
+// produces it (single owner ⇒ single writer), or on several source components
+// (⇒ the scheduler serializes them). Either outcome closes the wedge.
+func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.ComponentDef) []workflow.PlanReviewFinding {
+	// Ownership universe: every file any component declares, regardless of the
+	// component's Name (an unnamed component is flagged elsewhere, but its files
+	// still count as owned — otherwise we'd emit spurious orphan findings).
+	owned := make(map[string]struct{})
+	for _, c := range components {
+		for _, f := range workflow.NormalizeFilePaths(c.ImplementationFiles) {
+			owned[f] = struct{}{}
+		}
+	}
+
+	doNotTouch := make(map[string]struct{})
+	for _, f := range workflow.NormalizeFilePaths(scope.DoNotTouch) {
+		doNotTouch[f] = struct{}{}
+	}
+
+	// Build S in deterministic order (create first, then include), recording the
+	// origin scope list for the finding message. First-seen origin wins so a file
+	// listed in both create and include is reported once as "create".
+	seen := make(map[string]struct{})
+	var findings []workflow.PlanReviewFinding
+
+	consider := func(raw, origin string) {
+		f := workflow.NormalizeFilePath(raw)
+		if f == "" || !isConcreteScopedFile(f) {
+			return
+		}
+		if _, dup := seen[f]; dup {
+			return
+		}
+		seen[f] = struct{}{}
+		if _, protected := doNotTouch[f]; protected {
+			return
+		}
+		if _, ok := owned[f]; ok {
+			return
+		}
+		findings = append(findings, workflow.PlanReviewFinding{
+			SOPID:       "architecture.scoped_file_unowned",
+			SOPTitle:    "Scoped deliverable file has no owning component (issue #175)",
+			Severity:    "error",
+			Status:      "violation",
+			Category:    "structural",
+			Phase:       "architecture",
+			TargetID:    f,
+			Action:      "add",
+			TargetField: "component_boundaries[].implementation_files",
+			TargetValue: fmt.Sprintf("path %q on exactly one component's implementation_files", f),
+			Issue:       fmt.Sprintf("Scoped file %q is a deliverable (scope.%s) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).", f, origin),
+			Suggestion:  fmt.Sprintf("Add %q to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If %q is a read-only reference, move it to scope.do_not_touch instead.", f, f),
+		})
+	}
+
+	for _, f := range scope.Create {
+		consider(f, "create")
+	}
+	for _, f := range scope.Include {
+		consider(f, "include")
+	}
+	return findings
+}
+
+// wellKnownExtensionlessDeliverables are root-level deliverable files that carry
+// no extension but are real owned artifacts a parallel story can collide on the
+// same way README did. Without this set isConcreteScopedFile would exempt them
+// (path.Ext == "") and Gate 1 would miss a Dockerfile/Makefile co-write.
+var wellKnownExtensionlessDeliverables = map[string]bool{
+	"Dockerfile":  true,
+	"Makefile":    true,
+	"Jenkinsfile": true,
+	"Vagrantfile": true,
+	"Procfile":    true,
+}
+
+// isConcreteScopedFile reports whether a normalized scoped path is a single
+// literal file (not a directory entry or glob). It must either carry a file
+// extension or be a well-known extensionless deliverable, and contain no glob
+// metacharacters. Directory entries ("src") and patterns ("src/**/*.java")
+// return false — a component owns concrete files, not dirs or patterns, so
+// requiring those to be "owned" would false-positive.
+func isConcreteScopedFile(p string) bool {
+	if strings.ContainsAny(p, "*?[") {
+		return false
+	}
+	if path.Ext(p) != "" {
+		return true
+	}
+	return wellKnownExtensionlessDeliverables[path.Base(p)]
 }

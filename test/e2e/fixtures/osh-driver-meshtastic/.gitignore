@@ -18,3 +18,16 @@ build/
 .classpath
 .project
 .settings/
+
+# Scratch / merge artefacts — never commit (issue #177). The sandbox commits
+# the worktree with `git add -A`, which honours .gitignore for UNTRACKED files,
+# so ignoring these keeps a dev's throwaway probes and merge leftovers out of
+# the per-requirement branch (a root cause of the 2026-06-13 mavlink-hard
+# assembly wedge: patch.diff/*.orig committed on parallel branches collided).
+*.orig
+*.rej
+*.patch
+patch.diff
+patch*.diff
+*.bak
+*~

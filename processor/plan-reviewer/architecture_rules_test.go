@@ -601,3 +601,167 @@ func TestHasSourceFile_DelegatesToWorkflowClassifier(t *testing.T) {
 		})
 	}
 }
+
+// --- Gate 1: scoped-file ownership (issue #175) -----------------------------
+
+// countScopedUnowned returns the scoped_file_unowned findings keyed by TargetID.
+func scopedUnownedByTarget(findings []workflow.PlanReviewFinding) map[string]workflow.PlanReviewFinding {
+	out := make(map[string]workflow.PlanReviewFinding)
+	for _, f := range findings {
+		if f.SOPID == "architecture.scoped_file_unowned" {
+			out[f.TargetID] = f
+		}
+	}
+	return out
+}
+
+// TestScopedFileOwnershipFindings tables the prevention gate that forces every
+// scoped deliverable file to be owned by some component. README.md being owned
+// by no component is the 2026-06-13 mavlink-hard wedge fingerprint.
+func TestScopedFileOwnershipFindings(t *testing.T) {
+	comp := func(name string, files ...string) workflow.ComponentDef {
+		return workflow.ComponentDef{Name: name, ImplementationFiles: files, Capabilities: []string{"c"}}
+	}
+
+	tests := []struct {
+		name       string
+		scope      workflow.Scope
+		components []workflow.ComponentDef
+		wantOrphan []string // TargetIDs expected to fire (order-independent)
+	}{
+		{
+			name:       "create file unowned",
+			scope:      workflow.Scope{Create: []string{"src/New.java"}},
+			components: []workflow.ComponentDef{comp("c1", "src/Other.java")},
+			wantOrphan: []string{"src/New.java"},
+		},
+		{
+			name:       "include README unowned (the bug)",
+			scope:      workflow.Scope{Include: []string{"build.gradle", "README.md"}},
+			components: []workflow.ComponentDef{comp("c1", "build.gradle", "src/A.java")},
+			wantOrphan: []string{"README.md"},
+		},
+		{
+			name:       "include read-only ref in do_not_touch is excluded",
+			scope:      workflow.Scope{Include: []string{"docs/SPEC.md"}, DoNotTouch: []string{"docs/SPEC.md"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "include directory entry is not a concrete file",
+			scope:      workflow.Scope{Include: []string{"src/", "gradle/"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "include glob entry is not a concrete file",
+			scope:      workflow.Scope{Include: []string{"src/**/*.java"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "all create+include owned",
+			scope:      workflow.Scope{Create: []string{"src/A.java"}, Include: []string{"README.md"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java"), comp("c2", "README.md", "src/B.java")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "README owned as companion on a source component",
+			scope:      workflow.Scope{Include: []string{"README.md"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java", "README.md")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "README owned on two source components (scheduler serializes downstream)",
+			scope:      workflow.Scope{Include: []string{"README.md"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java", "README.md"), comp("c2", "src/B.java", "README.md")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "normalization collapses ./ prefix",
+			scope:      workflow.Scope{Include: []string{"./README.md"}},
+			components: []workflow.ComponentDef{comp("c1", "README.md")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "empty scope greenfield",
+			scope:      workflow.Scope{},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: nil,
+		},
+		{
+			name:       "well-known extensionless deliverable (Makefile) IS gated",
+			scope:      workflow.Scope{Create: []string{"Makefile"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: []string{"Makefile"}, // in the extensionless-deliverable allowlist
+		},
+		{
+			name:       "unknown extensionless entry not gated (avoids dir false positives)",
+			scope:      workflow.Scope{Include: []string{"scripts"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: nil, // no extension, not in allowlist -> treated as a dir
+		},
+		{
+			name:       "file in both create and include reported once",
+			scope:      workflow.Scope{Create: []string{"README.md"}, Include: []string{"README.md"}},
+			components: []workflow.ComponentDef{comp("c1", "src/A.java")},
+			wantOrphan: []string{"README.md"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := scopedUnownedByTarget(scopedFileOwnershipFindings(tc.scope, tc.components))
+			if len(got) != len(tc.wantOrphan) {
+				t.Fatalf("got %d orphan findings %v, want %d %v", len(got), keysOf(got), len(tc.wantOrphan), tc.wantOrphan)
+			}
+			for _, want := range tc.wantOrphan {
+				f, ok := got[want]
+				if !ok {
+					t.Fatalf("expected orphan finding for %q, got %v", want, keysOf(got))
+				}
+				if f.Severity != "error" || f.Action != "add" {
+					t.Errorf("finding %q has wrong shape: severity=%q action=%q", want, f.Severity, f.Action)
+				}
+			}
+		})
+	}
+}
+
+func keysOf(m map[string]workflow.PlanReviewFinding) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// TestScopedFileOwnership_IntegrationVerdictFlip confirms the rule fires through
+// mergeArchitectureFindings and flips the verdict to needs_changes.
+func TestScopedFileOwnership_IntegrationVerdictFlip(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:        "scoped-unowned",
+		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{{Name: "telemetry", Lifecycle: workflow.CapabilityNew, Description: "T."}}},
+		Scope:       workflow.Scope{Include: []string{"README.md"}, Create: []string{"src/Telemetry.java"}},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				// Owns the source file but NOT README.md → README orphaned.
+				{Name: "cs-telemetry", ImplementationFiles: []string{"src/Telemetry.java"}, Capabilities: []string{"telemetry"}},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	got := scopedUnownedByTarget(result.Findings)
+	if _, ok := got["README.md"]; !ok {
+		t.Fatalf("expected README.md orphan finding through mergeArchitectureFindings, got %v", keysOf(got))
+	}
+	if _, ok := got["src/Telemetry.java"]; ok {
+		t.Errorf("src/Telemetry.java is owned; should not be flagged")
+	}
+	if result.Verdict != "needs_changes" {
+		t.Errorf("expected verdict needs_changes, got %q", result.Verdict)
+	}
+}

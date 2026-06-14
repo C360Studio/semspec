@@ -195,6 +195,10 @@ What you don't need to do:
 - Don't create branches or stash. The worktree IS your branch.
 - Don't worry about merging — that happens after submit_work, on a different lock.
 
+Scratch files go to /tmp, never the worktree. Because the system commits EVERYTHING in your worktree wholesale (git add -A), any temporary file you leave behind gets committed as part of your contribution and then collides when your branch is merged with your siblings' branches at assembly. This is a real failure mode: a patch.diff saved from ` + "`git apply`" + `, a *.orig/*.rej left by a conflict, a throwaway Inspect.java or test_*.java probe — all rode git add -A onto the branch and wedged a real run (2026-06-13 mavlink-hard). Write all scratch, experiments, and one-off probes under /tmp/. The only files in your worktree at submit time should be the deliverables in your file scope; if you created a scratch file in the worktree, ` + "`rm`" + ` it before you submit.
+
+Stay inside your file scope. Only create or modify the files you own (your file scope / the component's implementation files). Do NOT edit a shared file you don't own — e.g. a README/coverage doc, a build file, or another component's source — to "document your part" or wire something up. A file owned by no story, written by every story, cannot be merged. If a deliverable you need isn't in your scope, that's a planning gap to surface, not a file to grab.
+
 If a file write seems to have succeeded but git status shows nothing, you wrote outside the worktree. Re-read the path you used and try again from the worktree root.
 
 VERIFY, DON'T INVENT — anti-fabrication rules:

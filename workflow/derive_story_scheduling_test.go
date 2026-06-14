@@ -356,3 +356,49 @@ func TestDeriveStoryScheduling_Pass2_NoEdgeWhenDisjointFiles(t *testing.T) {
 		t.Errorf("s2 DependsOn should be empty, got %v", stories[1].DependsOn)
 	}
 }
+
+// TestDeriveStoryScheduling_SharedDeliverableDocSerializes pins the issue #175
+// invariant that the prevention gate enables: when two stories on DIFFERENT
+// components both own a shared deliverable file (e.g. README.md declared as a
+// companion on each source component), the resource-edge pass serializes them
+// (lower Story.ID first) instead of running them parallel — which is exactly
+// what prevents the 2026-06-13 mavlink-hard README assembly conflict.
+func TestDeriveStoryScheduling_SharedDeliverableDocSerializes(t *testing.T) {
+	stories := []Story{
+		{ID: "s1", ComponentName: "comp-a", RequirementIDs: []string{"req.1"},
+			FilesOwned: []string{"src/a.java", "README.md"}},
+		{ID: "s2", ComponentName: "comp-b", RequirementIDs: []string{"req.2"},
+			FilesOwned: []string{"src/b.java", "README.md"}},
+	}
+	reqs := []Requirement{{ID: "req.1"}, {ID: "req.2"}}
+
+	if err := DeriveStoryScheduling(stories, reqs); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// s2 (higher ID) must depend on s1 (lower ID); s1 must have no deps.
+	if got := sortedDeps(stories[1]); len(got) != 1 || got[0] != "s1" {
+		t.Errorf("expected s2.DependsOn=[s1] (serialized on shared README.md), got %v", got)
+	}
+	if got := sortedDeps(stories[0]); len(got) != 0 {
+		t.Errorf("expected s1.DependsOn=[] (runs first), got %v", got)
+	}
+}
+
+// TestDeriveStoryScheduling_SameComponentSharedDocRejected confirms two stories
+// on the SAME component sharing the doc is still the collapse-to-one error
+// (ErrSameComponentFileConflict) — the doc doesn't get a special pass.
+func TestDeriveStoryScheduling_SameComponentSharedDocRejected(t *testing.T) {
+	stories := []Story{
+		{ID: "s1", ComponentName: "comp-a", RequirementIDs: []string{"req.1"},
+			FilesOwned: []string{"src/a.java", "README.md"}},
+		{ID: "s2", ComponentName: "comp-a", RequirementIDs: []string{"req.2"},
+			FilesOwned: []string{"src/b.java", "README.md"}},
+	}
+	reqs := []Requirement{{ID: "req.1"}, {ID: "req.2"}}
+
+	err := DeriveStoryScheduling(stories, reqs)
+	if !errors.Is(err, ErrSameComponentFileConflict) {
+		t.Fatalf("expected ErrSameComponentFileConflict for same-component shared README.md, got %v", err)
+	}
+}

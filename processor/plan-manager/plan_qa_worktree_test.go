@@ -217,34 +217,49 @@ func TestDeleteQAWorktree_CallsDelete(t *testing.T) {
 
 // routeAssemblyConflict: a merge conflict fires phase-local recovery and keeps
 // the plan in implementing; an infra error stalls without firing recovery.
-func TestRouteAssemblyConflict_ConflictEmitsRecovery(t *testing.T) {
+// A plan-level merge conflict is a planning-partition defect, not an execution
+// failure (issue #176). The plan must fail FAST and TERMINAL — record a distinct
+// assembly_conflict PlanDecision and transition to rejected — instead of firing
+// recovery's escalate_human, which has no unattended fallback and wedges CI/e2e
+// at implementing until timeout.
+func TestRouteAssemblyConflict_ConflictFailsPlanTerminally(t *testing.T) {
 	c := setupTestComponent(t)
-	var captured *payloads.RecoveryRequested
-	c.recoveryPublisher = func(_ context.Context, req *payloads.RecoveryRequested) { captured = req }
+	recoveryFired := false
+	c.recoveryPublisher = func(_ context.Context, _ *payloads.RecoveryRequested) { recoveryFired = true }
 
 	plan := setupTestPlan(t, c, "conflict-plan")
 	plan.Status = workflow.StatusImplementing
 	plan.Requirements = []workflow.Requirement{{ID: "r1"}, {ID: "r2"}}
 	_ = c.plans.save(context.Background(), plan)
 
-	conflictErr := fmt.Errorf("branch x conflicts: %w", sandbox.ErrMergeBranchesConflict)
+	conflictErr := fmt.Errorf("requirement branch x conflicts over files [README.md]: %w", sandbox.ErrMergeBranchesConflict)
 	c.routeAssemblyConflict(context.Background(), plan, conflictErr)
 
-	if captured == nil {
-		t.Fatal("expected RecoveryRequested to be emitted on merge conflict")
-	}
-	if len(captured.AffectedRequirementIDs) != 2 {
-		t.Errorf("AffectedRequirementIDs = %v, want both reqs", captured.AffectedRequirementIDs)
-	}
-	if captured.Layer != payloads.RecoveryLayerPhaseLocal {
-		t.Errorf("Layer = %v, want phase-local", captured.Layer)
+	if recoveryFired {
+		t.Error("merge conflict must NOT fire recovery (escalate_human has no unattended fallback — fail terminal instead)")
 	}
 	stored, _ := c.plans.get("conflict-plan")
-	if stored.Status != workflow.StatusImplementing {
-		t.Errorf("plan status = %q, want implementing (must not advance to QA)", stored.Status)
+	if stored.Status != workflow.StatusRejected {
+		t.Errorf("plan status = %q, want rejected (fail-fast terminal)", stored.Status)
 	}
-	if stored.LastError == "" {
-		t.Error("LastError should be set so the UI can surface the stall")
+	if !strings.Contains(stored.LastError, "README.md") {
+		t.Errorf("LastError = %q, want it to name the conflicting path README.md", stored.LastError)
+	}
+	// A distinct assembly_conflict decision must be recorded (not execution_exhausted).
+	var found *workflow.PlanDecision
+	for i := range stored.PlanDecisions {
+		if stored.PlanDecisions[i].Kind == workflow.PlanDecisionKindAssemblyConflict {
+			found = &stored.PlanDecisions[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("expected an assembly_conflict PlanDecision, got %+v", stored.PlanDecisions)
+	}
+	if !strings.Contains(found.Rationale, "README.md") {
+		t.Errorf("decision rationale = %q, want it to name README.md", found.Rationale)
+	}
+	if len(found.AffectedReqIDs) != 2 {
+		t.Errorf("decision AffectedReqIDs = %v, want both reqs", found.AffectedReqIDs)
 	}
 }
 
@@ -273,24 +288,23 @@ func TestHandleConvergenceAllSucceeded_ConflictDoesNotAdvanceToQA(t *testing.T) 
 	c.handleConvergenceAllSucceeded(context.Background(), plan, "demo", 2)
 
 	stored, _ := c.plans.get("demo")
-	if stored.Status != workflow.StatusImplementing {
-		t.Errorf("status = %q, want implementing (must not advance to QA on conflict)", stored.Status)
+	// Issue #176: a merge conflict fails the plan terminally (rejected) rather
+	// than parking at implementing — it must NOT advance to QA either way.
+	if stored.Status != workflow.StatusRejected {
+		t.Errorf("status = %q, want rejected (fail-fast terminal on conflict)", stored.Status)
 	}
-	if recovery == nil {
-		t.Fatal("expected RecoveryRequested on pre-QA merge conflict")
+	if recovery != nil {
+		t.Error("merge conflict must NOT fire recovery (fail terminal instead)")
 	}
 	if len(stub.createCalls) != 0 {
 		t.Errorf("QA worktree staged despite conflict: %v", stub.createCalls)
 	}
-	// Slice 4a end-to-end: the conflicting shared path must survive the whole
-	// chain (sandbox 409 → assembleRequirementBranches error → routeAssemblyConflict)
-	// into both the plan's LastError and the recovery feedback, so the diagnostic
-	// names the file two requirements collided on rather than a bare "merge failed".
+	// The conflicting shared path must survive the whole chain (sandbox 409 →
+	// assembleRequirementBranches error → routeAssemblyConflict) into the plan's
+	// LastError, so the diagnostic names the file two requirements collided on
+	// rather than a bare "merge failed".
 	if !strings.Contains(stored.LastError, "README.md") {
 		t.Errorf("plan.LastError = %q, want it to name the conflicting path README.md", stored.LastError)
-	}
-	if !strings.Contains(recovery.LastFailureFeedback, "README.md") {
-		t.Errorf("recovery.LastFailureFeedback = %q, want it to name the conflicting path README.md", recovery.LastFailureFeedback)
 	}
 }
 

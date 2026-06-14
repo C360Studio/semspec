@@ -1,0 +1,419 @@
+package structuralvalidator
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
+)
+
+func sortedCopy(s []string) []string {
+	out := append([]string(nil), s...)
+	sort.Strings(out)
+	return out
+}
+
+func ownedSetOf(paths ...string) map[string]struct{} {
+	m := make(map[string]struct{})
+	for _, p := range workflow.NormalizeFilePaths(paths) {
+		m[p] = struct{}{}
+	}
+	return m
+}
+
+func TestParsePorcelain(t *testing.T) {
+	in := " M src/A.java\n" +
+		"?? patch.diff\n" +
+		"A  src/New.java\n" +
+		"R  old/Old.java -> src/Renamed.java\n" +
+		"\n" + // blank line tolerated
+		"M  build.gradle\n"
+	got := parsePorcelain(in)
+
+	want := []porcelainEntry{
+		{Path: "src/A.java", IndexStatus: ' ', WorkStatus: 'M'},
+		{Path: "patch.diff", IndexStatus: '?', WorkStatus: '?'},
+		{Path: "src/New.java", IndexStatus: 'A', WorkStatus: ' '},
+		{Path: "src/Renamed.java", IndexStatus: 'R', WorkStatus: ' '},
+		{Path: "build.gradle", IndexStatus: 'M', WorkStatus: ' '},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parsePorcelain returned %d entries, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("entry %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestIsJunkArtifact(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"src/A.java.orig", true},
+		{"A.rej", true},
+		{"foo.patch", true},
+		{"patch.diff", true},
+		{"patch2.diff", true},
+		{"deep/dir/patch3.diff", true},
+		{"backup.bak", true},
+		{"x.tmp", true},
+		{".file.swp", true},
+		{"foo~", true},
+		{"src/Main.java", false},
+		{"README.md", false},
+		{"build.gradle", false},
+		{"data.diff", false}, // .diff without patch prefix is not junk
+		{"src/test/AppTest.java", false},
+	}
+	for _, tc := range tests {
+		if _, ok := isJunkArtifact(tc.path); ok != tc.want {
+			t.Errorf("isJunkArtifact(%q) = %v, want %v", tc.path, ok, tc.want)
+		}
+	}
+}
+
+func TestDecideOwnership(t *testing.T) {
+	tests := []struct {
+		name              string
+		porcelain         string
+		owned             map[string]struct{}
+		wantJunk          []string // matched by path prefix (pattern suffix ignored)
+		wantModDocUnowned []string // hard-fail: non-owner co-writing a shared doc
+		wantModUnowned    []string // advisory: non-owner editing non-doc
+		wantNewUnowned    []string // advisory: new file outside ownership
+	}{
+		{
+			name:              "modified non-owned DOC (README wedge) hard-fails",
+			porcelain:         " M README.md",
+			owned:             ownedSetOf("src/A.java"),
+			wantModDocUnowned: []string{"README.md"},
+		},
+		{
+			name:           "modified non-owned BUILD file is advisory (usually mergeable)",
+			porcelain:      " M build.gradle",
+			owned:          ownedSetOf("src/A.java"),
+			wantModUnowned: []string{"build.gradle"},
+		},
+		{
+			name:           "modified non-owned source file is advisory",
+			porcelain:      " M src/Other.java",
+			owned:          ownedSetOf("src/A.java"),
+			wantModUnowned: []string{"src/Other.java"},
+		},
+		{
+			name:      "modified owned file is clean",
+			porcelain: " M src/A.java",
+			owned:     ownedSetOf("src/A.java"),
+		},
+		{
+			name:      "new owned source file is clean",
+			porcelain: "A  src/A.java",
+			owned:     ownedSetOf("src/A.java"),
+		},
+		{
+			name:           "new unowned source (class split) is advisory",
+			porcelain:      "?? src/FooHelper.java",
+			owned:          ownedSetOf("src/Foo.java"),
+			wantNewUnowned: []string{"src/FooHelper.java"},
+		},
+		{
+			name:      "patch.diff committed is junk",
+			porcelain: "?? patch.diff",
+			owned:     ownedSetOf("src/A.java"),
+			wantJunk:  []string{"patch.diff"},
+		},
+		{
+			name:      "patch2.diff is junk",
+			porcelain: "?? patch2.diff",
+			owned:     ownedSetOf("src/A.java"),
+			wantJunk:  []string{"patch2.diff"},
+		},
+		{
+			name:      "orig file is junk",
+			porcelain: "?? src/A.java.orig",
+			owned:     ownedSetOf("src/A.java"),
+			wantJunk:  []string{"src/A.java.orig"},
+		},
+		{
+			name:      "staged-modified owned is clean",
+			porcelain: "M  src/A.java",
+			owned:     ownedSetOf("src/A.java"),
+		},
+		{
+			name:      "renamed to owned path is clean",
+			porcelain: "R  old.java -> src/A.java",
+			owned:     ownedSetOf("src/A.java"),
+		},
+		{
+			name:           "renamed to unowned non-doc path is advisory",
+			porcelain:      "R  old.java -> src/B.java",
+			owned:          ownedSetOf("src/A.java"),
+			wantModUnowned: []string{"src/B.java"},
+		},
+		{
+			name:           "deleted unowned non-doc file is advisory",
+			porcelain:      " D shared/Config.java",
+			owned:          ownedSetOf("src/A.java"),
+			wantModUnowned: []string{"shared/Config.java"},
+		},
+		{
+			name:      "normalization matches owned with ./ prefix",
+			porcelain: " M ./README.md",
+			owned:     ownedSetOf("README.md"),
+		},
+		{
+			name:              "normalization flags modified ./ unowned doc",
+			porcelain:         " M ./README.md",
+			owned:             ownedSetOf("src/A.java"),
+			wantModDocUnowned: []string{"README.md"},
+		},
+		{
+			name:      "junk takes precedence over ownership classification",
+			porcelain: "?? README.md.orig",
+			owned:     ownedSetOf("README.md"),
+			wantJunk:  []string{"README.md.orig"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := decideOwnership(parsePorcelain(tc.porcelain), tc.owned)
+
+			// Junk findings carry a "(pattern)" suffix; compare on the path prefix.
+			gotJunkPaths := make([]string, len(v.JunkViolations))
+			for i, j := range v.JunkViolations {
+				gotJunkPaths[i] = strings.SplitN(j, " (", 2)[0]
+			}
+			if !equalSets(gotJunkPaths, tc.wantJunk) {
+				t.Errorf("junk = %v, want %v", sortedCopy(gotJunkPaths), sortedCopy(tc.wantJunk))
+			}
+			if !equalSets(v.ModifiedDocUnowned, tc.wantModDocUnowned) {
+				t.Errorf("modifiedDocUnowned = %v, want %v", sortedCopy(v.ModifiedDocUnowned), sortedCopy(tc.wantModDocUnowned))
+			}
+			if !equalSets(v.ModifiedUnowned, tc.wantModUnowned) {
+				t.Errorf("modifiedUnowned = %v, want %v", sortedCopy(v.ModifiedUnowned), sortedCopy(tc.wantModUnowned))
+			}
+			if !equalSets(v.NewUnowned, tc.wantNewUnowned) {
+				t.Errorf("newUnowned = %v, want %v", sortedCopy(v.NewUnowned), sortedCopy(tc.wantNewUnowned))
+			}
+		})
+	}
+}
+
+func equalSets(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	as, bs := sortedCopy(a), sortedCopy(b)
+	for i := range as {
+		if as[i] != bs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// fakeRunner returns canned output for the containment integration test.
+type fakeRunner struct {
+	stdout   string
+	stderr   string
+	exitCode int
+	err      error
+	gotCmd   string
+}
+
+func (f *fakeRunner) Run(_ context.Context, command, _ string, _ time.Duration) (string, string, int, error) {
+	f.gotCmd = command
+	return f.stdout, f.stderr, f.exitCode, f.err
+}
+
+func TestRunFileOwnershipContainment(t *testing.T) {
+	e := &Executor{}
+
+	t.Run("empty owned skips gate (no check row)", func(t *testing.T) {
+		runner := &fakeRunner{stdout: " M README.md"}
+		results := e.runFileOwnershipContainment(context.Background(), nil, "/wt", runner)
+		if len(results) != 0 {
+			t.Fatalf("expected no check rows when owned is empty, got %+v", results)
+		}
+		if runner.gotCmd != "" {
+			t.Errorf("git should not run when owned is empty, ran %q", runner.gotCmd)
+		}
+	})
+
+	t.Run("modified-unowned DOC hard fails the required gate", func(t *testing.T) {
+		runner := &fakeRunner{stdout: " M README.md\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		c := findResult(t, results, "file-ownership-containment")
+		if c.Passed || !c.Required {
+			t.Fatalf("expected required FAIL, got %+v", c)
+		}
+		if !strings.Contains(c.Stderr, "README.md") {
+			t.Errorf("expected README.md named in failure, got %q", c.Stderr)
+		}
+	})
+
+	t.Run("modified-unowned non-doc (build.gradle) is advisory, gate passes", func(t *testing.T) {
+		runner := &fakeRunner{stdout: " M build.gradle\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		c := findResult(t, results, "file-ownership-containment")
+		if !c.Passed {
+			t.Fatalf("build-file edit by a non-owner must NOT hard-fail (usually mergeable), got %+v", c)
+		}
+		adv := findResult(t, results, "file-ownership-advisory")
+		if adv.Required || !strings.Contains(adv.Stdout, "build.gradle") {
+			t.Errorf("expected build.gradle in advisory result, got %+v", adv)
+		}
+	})
+
+	t.Run("junk hard fails the required gate", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? patch.diff\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		c := findResult(t, results, "file-ownership-containment")
+		if c.Passed {
+			t.Fatalf("expected required FAIL on patch.diff, got %+v", c)
+		}
+		if !strings.Contains(c.Stderr, "patch.diff") {
+			t.Errorf("expected patch.diff named, got %q", c.Stderr)
+		}
+	})
+
+	t.Run("new-unowned is advisory, gate passes", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? src/Helper.java\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		c := findResult(t, results, "file-ownership-containment")
+		if !c.Passed {
+			t.Fatalf("required gate should pass when only new-unowned present, got %+v", c)
+		}
+		adv := findResult(t, results, "file-ownership-advisory")
+		if adv.Required {
+			t.Errorf("advisory result must be advisory (Required=false), got %+v", adv)
+		}
+		if !strings.Contains(adv.Stdout, "src/Helper.java") {
+			t.Errorf("expected Helper.java named in advisory, got %q", adv.Stdout)
+		}
+	})
+
+	t.Run("all owned and clean passes with no advisory", func(t *testing.T) {
+		runner := &fakeRunner{stdout: " M src/A.java\nA  src/B.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java", "src/B.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		if len(results) != 1 {
+			t.Fatalf("expected only the required result, got %+v", results)
+		}
+		if !results[0].Passed || !results[0].Required {
+			t.Errorf("expected passing required result, got %+v", results[0])
+		}
+	})
+
+	t.Run("git failure is advisory not a hard fail", func(t *testing.T) {
+		runner := &fakeRunner{exitCode: 128, stderr: "not a git repository"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		if len(results) != 1 || !results[0].Passed || results[0].Required {
+			t.Fatalf("git failure must not hard-fail, got %+v", results)
+		}
+	})
+}
+
+func findResult(t *testing.T, results []payloads.CheckResult, name string) payloads.CheckResult {
+	t.Helper()
+	for _, r := range results {
+		if r.Name == name {
+			return r
+		}
+	}
+	t.Fatalf("no CheckResult named %q in %+v", name, results)
+	return payloads.CheckResult{}
+}
+
+// gitRun runs a git command in dir, failing the test on error.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestRunFileOwnershipContainment_RealGit validates parsePorcelain against the
+// ACTUAL `git status --porcelain` output (not synthetic blobs) — the CLAUDE.md
+// "real fixture not guessed" discipline. It also pins the H1 interaction: a
+// gitignored scratch file is invisible to --untracked-files=all (so the junk arm
+// is the fallback for repos lacking a gitignore), while a NON-ignored patch.diff
+// is caught.
+func TestRunFileOwnershipContainment_RealGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q")
+
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Base commit: an owned source file + a shared README + a .gitignore.
+	write("src/A.java", "class A {}\n")
+	write("README.md", "# base\n")
+	write(".gitignore", "*.orig\n")
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-qm", "base")
+
+	// Dev changes: modify owned source (clean), co-write the shared README
+	// (hard-fail doc), drop a non-ignored patch.diff (hard-fail junk), drop a
+	// gitignored A.java.orig (invisible — fallback only), add a new helper
+	// (advisory).
+	write("src/A.java", "class A { int x; }\n")
+	write("README.md", "# base\nmy section\n")
+	write("patch.diff", "diff --git ...\n")
+	write("src/A.java.orig", "leftover\n")
+	write("src/Helper.java", "class Helper {}\n")
+
+	owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+	results := (&Executor{}).runFileOwnershipContainment(context.Background(), owned, dir, &localRunner{})
+
+	c := findResult(t, results, "file-ownership-containment")
+	if c.Passed {
+		t.Fatalf("expected required FAIL (README doc co-write + patch.diff junk), got pass: %+v", c)
+	}
+	if !strings.Contains(c.Stderr, "README.md") {
+		t.Errorf("expected README.md (doc co-write) named, got %q", c.Stderr)
+	}
+	if !strings.Contains(c.Stderr, "patch.diff") {
+		t.Errorf("expected patch.diff (junk) named, got %q", c.Stderr)
+	}
+	// The gitignored *.orig must NOT appear (it's invisible to --untracked-files=all).
+	if strings.Contains(c.Stderr, ".orig") {
+		t.Errorf("gitignored .orig should be invisible to the gate, but appeared: %q", c.Stderr)
+	}
+	adv := findResult(t, results, "file-ownership-advisory")
+	if !strings.Contains(adv.Stdout, "src/Helper.java") {
+		t.Errorf("expected new Helper.java in advisory, got %q", adv.Stdout)
+	}
+}
