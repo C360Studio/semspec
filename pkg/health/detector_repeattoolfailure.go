@@ -98,11 +98,11 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 	// streak DON'T re-emit — once is enough for the operator.
 	streaks := make(map[repeatStreakKey]*repeatStreakState)
 	emitted := make(map[repeatStreakKey]bool)
-	malformed := 0
 
 	type seqDiag struct {
-		seq  int64
-		diag Diagnosis
+		seq    int64
+		loopID string
+		diag   Diagnosis
 	}
 	var matches []seqDiag
 
@@ -112,7 +112,11 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 			Payload repeatToolResult `json:"payload"`
 		}
 		if err := json.Unmarshal(m.RawData, &env); err != nil {
-			malformed++
+			// A tool.result payload that won't decode is an OBSERVER-side
+			// condition (e.g. beta.107 payload summarization truncates the
+			// body), NOT an agent tool failure. Skip it silently rather than
+			// emit a RepeatToolFailure with an empty evidence_id (issue #179),
+			// which reads as a real wedge when it is just incomplete capture.
 			continue
 		}
 		toolName := env.Payload.Name
@@ -120,17 +124,22 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 			toolName = callIDToName[env.Payload.CallID]
 		}
 		if toolName == "" || env.Payload.LoopID == "" {
-			// Can't attribute the failure to a loop+tool — skip rather
-			// than guess. A bundle missing this metadata gets reported
-			// as undetermined at the end.
-			if env.Payload.Error != "" {
-				malformed++
-			}
+			// Can't attribute the failure to a loop+tool — skip rather than
+			// guess (an unattributable error is not actionable as a repeat).
 			continue
 		}
 
 		if env.Payload.Error == "" {
 			resetStreaksForTool(streaks, env.Payload.LoopID, toolName)
+			continue
+		}
+
+		// Benign redelivery shape (issue #179): a redelivered duplicate loop for
+		// an already-COMPLETED node hits a GC'd worktree and the sandbox returns
+		// "worktree not found". The real node finished via its original loop; the
+		// duplicate correctly 404s. Ignore it entirely — neither count it toward
+		// a streak nor reset one.
+		if isBenignWorktree404(env.Payload.Error) {
 			continue
 		}
 
@@ -158,22 +167,69 @@ func (RepeatToolFailure) Run(b *Bundle) []Diagnosis {
 		if st.count == repeatThreshold && !emitted[key] {
 			emitted[key] = true
 			matches = append(matches, seqDiag{
-				seq:  st.lastSeq,
-				diag: buildRepeatFailureDiagnosis(key, st, env.Payload.Error),
+				seq:    st.lastSeq,
+				loopID: key.loopID,
+				diag:   buildRepeatFailureDiagnosis(key, st, env.Payload.Error),
 			})
 		}
 	}
 
+	// Gate on loop terminal outcome (issue #179): a loop that ultimately
+	// RECOVERED (outcome=success — e.g. a gradle exit-1 that repeated then
+	// passed at iteration 47-77) must not raise a critical wedge alert in a
+	// post-hoc bundle. A loop still running (no terminal outcome) keeps its
+	// critical so live --bail-on detection still fires on a genuine in-progress
+	// wedge.
+	outcomes := loopOutcomes(b)
+
 	sort.Slice(matches, func(i, j int) bool { return matches[i].seq < matches[j].seq })
-	out := make([]Diagnosis, 0, len(matches)+1)
+	out := make([]Diagnosis, 0, len(matches))
 	for _, m := range matches {
+		if outcomes[m.loopID] == loopOutcomeSuccess {
+			continue
+		}
 		out = append(out, m.diag)
-	}
-	if malformed > 0 {
-		out = append(out, undeterminedFromMalformed(RepeatToolFailureShape, malformed))
 	}
 	if len(out) == 0 {
 		return nil
+	}
+	return out
+}
+
+// loopOutcomeSuccess is the loop-entity outcome value indicating the loop
+// recovered/completed successfully.
+const loopOutcomeSuccess = "success"
+
+// isBenignWorktree404 reports whether a tool error is the benign
+// "worktree not found" 404 that a redelivered duplicate loop hits when its node
+// already completed via the original loop and the worktree was GC'd (issue #179).
+// Matched narrowly on the sentinel phrase so genuine worktree failures (e.g. a
+// worktree that never existed for a live node) are not swallowed.
+func isBenignWorktree404(errMsg string) bool {
+	return strings.Contains(errMsg, "worktree not found")
+}
+
+// loopOutcomes decodes b.Loops into a loopID → terminal-outcome map
+// ("success", "failure", …). The map is keyed by the loop entity's `id`, which
+// equals the `loop_id` stamped on each tool.result payload, so a match's loopID
+// joins directly. AGENT_LOOPS also carries terminal-state marker entries that
+// carry only `loop_id` (no `id` field); those decode to an empty id and are
+// skipped, and a known (non-empty) outcome is never overwritten by an empty one.
+// Only "success" suppresses (a recovered loop); "truncated"/"failed"/unknown
+// keep their critical so a genuine wedge still fires.
+func loopOutcomes(b *Bundle) map[string]string {
+	out := make(map[string]string, len(b.Loops))
+	for _, e := range b.Loops {
+		var le struct {
+			ID      string `json:"id"`
+			Outcome string `json:"outcome"`
+		}
+		if err := json.Unmarshal(e.Value, &le); err != nil || le.ID == "" {
+			continue
+		}
+		if le.Outcome != "" || out[le.ID] == "" {
+			out[le.ID] = le.Outcome
+		}
 	}
 	return out
 }

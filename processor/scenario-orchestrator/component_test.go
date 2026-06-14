@@ -3,6 +3,7 @@ package scenarioorchestrator
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -771,3 +772,28 @@ func (m *mockMsg) NakWithDelay(_ time.Duration) error        { m.naked = true; r
 func (m *mockMsg) InProgress() error                         { return nil }
 func (m *mockMsg) Term() error                               { return nil }
 func (m *mockMsg) TermWithReason(_ string) error             { return nil }
+
+// TestIsIdempotentReqRejection covers the #180 benign-rejection classifier: a
+// re-fire + DAG-gate race produces "req execution already exists", which is a
+// benign idempotency outcome (Debug, ACK) not a dispatch failure (Error, NAK).
+func TestIsIdempotentReqRejection(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"idempotent rejection (real shape)", fmt.Errorf("req.create rejected: req execution already exists: plan.demo.req.1"), true},
+		{"idempotent task-exec shape", fmt.Errorf("req.create rejected: task execution already exists: k"), true},
+		{"genuine mutation failure", fmt.Errorf("req.create mutation failed: context deadline exceeded"), false},
+		{"genuine resolve failure", fmt.Errorf("failed to resolve requirement branch base: missing prereq branch"), false},
+		{"unmarshal failure", fmt.Errorf("unmarshal req.create response: unexpected end of JSON"), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isIdempotentReqRejection(tc.err); got != tc.want {
+				t.Errorf("isIdempotentReqRejection(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}

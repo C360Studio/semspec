@@ -191,3 +191,96 @@ func TestRepeatToolFailure_GraphSearchEOFAlsoTrips(t *testing.T) {
 		t.Errorf("Remediation should name graph_search")
 	}
 }
+
+// TestRepeatToolFailure_BenignWorktree404Suppressed covers issue #179: a
+// redelivered duplicate loop for an already-completed node hits a GC'd worktree
+// and the sandbox returns "worktree not found". These are benign and must NOT
+// count toward a failure streak.
+func TestRepeatToolFailure_BenignWorktree404Suppressed(t *testing.T) {
+	const errStr = "sandbox exec failed: exec: server error 404: worktree not found"
+	mk := func(callID string) []byte {
+		return mustRawJSON(t, map[string]any{
+			"payload": map[string]any{
+				"call_id": callID, "name": "bash", "error": errStr, "loop_id": "loop-dup-1",
+			},
+		})
+	}
+	b := &Bundle{Messages: []Message{
+		{Sequence: 1, Subject: "tool.result.a", RawData: mk("a")},
+		{Sequence: 2, Subject: "tool.result.b", RawData: mk("b")},
+		{Sequence: 3, Subject: "tool.result.c", RawData: mk("c")},
+		{Sequence: 4, Subject: "tool.result.d", RawData: mk("d")},
+	}}
+	if got := (RepeatToolFailure{}).Run(b); len(got) != 0 {
+		t.Fatalf("worktree-404 repeats must not raise a diagnosis, got %d: %+v", len(got), got)
+	}
+}
+
+// TestRepeatToolFailure_RecoveredLoopSuppressed covers issue #179: a loop that
+// repeated a real tool error 3+ times but ultimately RECOVERED (outcome=success
+// in the AGENT_LOOPS entry) must not raise a critical wedge alert in a post-hoc
+// bundle.
+func TestRepeatToolFailure_RecoveredLoopSuppressed(t *testing.T) {
+	const errStr = "validation failed: ./gradlew test exit 1"
+	mk := func(callID string) []byte {
+		return mustRawJSON(t, map[string]any{
+			"payload": map[string]any{
+				"call_id": callID, "name": "bash", "error": errStr, "loop_id": "loop-grad-1",
+			},
+		})
+	}
+	loopVal := mustRawJSON(t, map[string]any{"id": "loop-grad-1", "state": "complete", "outcome": "success"})
+	b := &Bundle{
+		Messages: []Message{
+			{Sequence: 1, Subject: "tool.result.a", RawData: mk("a")},
+			{Sequence: 2, Subject: "tool.result.b", RawData: mk("b")},
+			{Sequence: 3, Subject: "tool.result.c", RawData: mk("c")},
+		},
+		Loops: []KVEntry{{Key: "loop-grad-1", Value: loopVal}},
+	}
+	if got := (RepeatToolFailure{}).Run(b); len(got) != 0 {
+		t.Fatalf("a recovered (outcome=success) loop must not raise a diagnosis, got %d: %+v", len(got), got)
+	}
+}
+
+// TestRepeatToolFailure_NonSuccessLoopStillFires confirms the outcome gate only
+// suppresses success: a loop that terminally failed (or whose outcome is
+// unknown / still running) still raises the critical so live --bail-on works.
+func TestRepeatToolFailure_NonSuccessLoopStillFires(t *testing.T) {
+	const errStr = "validation failed: rejection_type is required"
+	mk := func(callID string) []byte {
+		return mustRawJSON(t, map[string]any{
+			"payload": map[string]any{
+				"call_id": callID, "name": "submit_work", "error": errStr, "loop_id": "loop-fail-1",
+			},
+		})
+	}
+	loopVal := mustRawJSON(t, map[string]any{"id": "loop-fail-1", "state": "complete", "outcome": "failure"})
+	b := &Bundle{
+		Messages: []Message{
+			{Sequence: 1, Subject: "tool.result.a", RawData: mk("a")},
+			{Sequence: 2, Subject: "tool.result.b", RawData: mk("b")},
+			{Sequence: 3, Subject: "tool.result.c", RawData: mk("c")},
+		},
+		Loops: []KVEntry{{Key: "loop-fail-1", Value: loopVal}},
+	}
+	got := (RepeatToolFailure{}).Run(b)
+	if len(got) != 1 || got[0].Severity != SeverityCritical {
+		t.Fatalf("a terminally-failed loop must still raise the critical, got %+v", got)
+	}
+}
+
+// TestRepeatToolFailure_MalformedPayloadNoEmptyEvidenceEmit covers issue #179:
+// tool.result payloads that won't decode (e.g. beta.107 payload summarization)
+// are an observer-side condition, not a tool failure — they must NOT surface as
+// a RepeatToolFailure with an empty evidence_id.
+func TestRepeatToolFailure_MalformedPayloadNoEmptyEvidenceEmit(t *testing.T) {
+	b := &Bundle{Messages: []Message{
+		{Sequence: 1, Subject: "tool.result.a", RawData: []byte(`{not valid json`)},
+		{Sequence: 2, Subject: "tool.result.b", RawData: []byte(`also broken`)},
+		{Sequence: 3, Subject: "tool.result.c", RawData: []byte(`{"payload": <bad>}`)},
+	}}
+	if got := (RepeatToolFailure{}).Run(b); len(got) != 0 {
+		t.Fatalf("malformed payloads must not emit a diagnosis (no empty evidence_id), got %d: %+v", len(got), got)
+	}
+}
