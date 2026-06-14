@@ -129,6 +129,13 @@ func newSandboxClient(url string) sandboxClient {
 	return c
 }
 
+// storyStatusClaimerFunc is the function signature for atomically transitioning
+// a Story's status via plan-manager. The default implementation calls
+// workflow.ClaimStoryStatus; tests inject a fake that enforces CanTransitionTo
+// so the Executing→Failed→Pending→Ready walk can be asserted without a live
+// NATS substrate. See reopenOwnedStoriesForRecoveryLocked.
+type storyStatusClaimerFunc func(ctx context.Context, slug, storyID string, target workflow.StoryStatus) bool
+
 // Component orchestrates per-requirement execution.
 type Component struct {
 	config        Config
@@ -140,6 +147,12 @@ type Component struct {
 	tripleWriter  *graphutil.TripleWriter
 	sandbox       sandboxClient     // nil when sandbox is disabled
 	assembler     *prompt.Assembler // composes system prompts for requirement-level review
+
+	// storyStatusClaimer is the seam for story-status transitions used by
+	// reopenOwnedStoriesForRecoveryLocked. Defaults to a wrapper around
+	// workflow.ClaimStoryStatus; tests inject a fake that enforces
+	// CanTransitionTo so the full walk chain is exercisable without NATS.
+	storyStatusClaimer storyStatusClaimerFunc
 
 	// Story-gate (Murat) review knowledge — symmetric with the per-task
 	// reviewer in execution-manager so the requirement-level gate sees the
@@ -202,9 +215,10 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
 	registry.Register(prompt.GraphManifestFragment(workflowtools.RegistrySummaryFetchFn()))
 
+	nc := deps.NATSClient
 	c := &Component{
 		config:        cfg,
-		natsClient:    deps.NATSClient,
+		natsClient:    nc,
 		logger:        logger,
 		platform:      deps.Platform,
 		toolRegistry:  deps.ToolRegistry,
@@ -212,9 +226,14 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		sandbox:       newSandboxClient(cfg.SandboxURL),
 		assembler:     prompt.NewAssembler(registry),
 		tripleWriter: &graphutil.TripleWriter{
-			NATSClient:    deps.NATSClient,
+			NATSClient:    nc,
 			Logger:        logger,
 			ComponentName: componentName,
+		},
+		// Default story-status claimer wraps the real NATS round-trip.
+		// Tests may replace this with a fake that enforces CanTransitionTo.
+		storyStatusClaimer: func(ctx context.Context, slug, storyID string, target workflow.StoryStatus) bool {
+			return workflow.ClaimStoryStatus(ctx, nc, slug, storyID, target, logger)
 		},
 	}
 	c.initReviewKnowledge()
