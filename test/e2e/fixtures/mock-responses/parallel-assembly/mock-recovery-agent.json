@@ -1,0 +1,14 @@
+{
+  "content": "Recovery analysis complete. The task exhausted its TDD cycle budget on repeated structural-validation rejections; automated recovery cannot resolve it, so I am escalating to a human reviewer.",
+  "tool_calls": [
+    {
+      "id": "call_recovery_escalate_human",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"action\": \"escalate_human\", \"diagnosis\": \"The task repeatedly failed structural validation within the TDD cycle budget (fixable rejections exceeded max_tdd_cycles). The failure is not auto-recoverable; escalating to a human for manual intervention.\", \"recovery_succeeded\": false}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

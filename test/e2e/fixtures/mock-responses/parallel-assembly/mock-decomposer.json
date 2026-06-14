@@ -1,0 +1,14 @@
+{
+  "content": "Decomposing into a single implementation node.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_1",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Implement the feature\",\"nodes\":[{\"id\":\"impl-feature\",\"prompt\":\"Implement the feature. The shared driver class is the integration point.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

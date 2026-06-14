@@ -183,6 +183,27 @@ type CheckResult struct {
 	Duration string `json:"duration"`
 }
 
+// Stable CheckResult.Name values produced by the structural-validator's
+// file-ownership gate (ADR-048 / ADR-049). Consumers key off these by name:
+// the execution-manager validation router treats a PlanningGap failure as a
+// non-developer-fixable ownership/partition defect and fast-fails it to
+// recovery (architecture_revise / story_reprepare) instead of burning the TDD
+// budget on dev retries (ADR-049 move 3).
+const (
+	// CheckFileOwnershipContainment is the Required gate for the unmergeable
+	// shapes a developer CAN fix by retrying: committed scratch artefacts and a
+	// non-owner co-writing a shared documentation file.
+	CheckFileOwnershipContainment = "file-ownership-containment"
+	// CheckFileOwnershipAdvisory is the non-blocking surfacing of mergeable
+	// out-of-scope edits (build/source modifications, in-territory new files).
+	CheckFileOwnershipAdvisory = "file-ownership-advisory"
+	// CheckFileOwnershipPlanningGap is the Required gate for a new source/test
+	// file created OUTSIDE the story's declared territory — a planning gap the
+	// developer cannot fix (the component boundary or the story's files_owned is
+	// wrong). The router fast-fails this straight to recovery (ADR-049 move 3).
+	CheckFileOwnershipPlanningGap = "file-ownership-planning-gap"
+)
+
 // ValidationResult is the canonical payload for structural validation results.
 // Published by the structural-validator component, consumed by the execution-orchestrator.
 type ValidationResult struct {

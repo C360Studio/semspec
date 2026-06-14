@@ -45,11 +45,18 @@ func (e porcelainEntry) isNew() bool {
 // story's owned file set.
 //
 // The hard-fail vs advisory line is drawn at MERGEABLE vs UNMERGEABLE, not
-// new-vs-modified. The assembly wedge is caused by a shared DOC co-written by
-// parallel stories (README + the coverage matrix — line-level conflicts that
-// cannot auto-merge). A non-owner bumping build.gradle / go.mod or editing a
-// pre-existing test usually merges cleanly and is a routine TDD move, so it is
-// advisory (surfaced to the reviewer; #176 fails honestly if it does conflict).
+// new-vs-modified. Two unmergeable shapes hard-fail:
+//   - a shared DOC co-written by parallel stories (the 2026-06-13 README wedge);
+//   - a NEW source/test file created OUTSIDE the story's declared territory
+//     (the 2026-06-14 wedge — four parallel stories each created the same
+//     fabricated-path driver class and collided at terminal assembly). See
+//     ADR-049: this is a planning/ownership gap, routed to recovery, not a
+//     developer error.
+//
+// A non-owner bumping build.gradle / go.mod, editing a pre-existing test, or
+// splitting a class into a new file WITHIN its declared package usually merges
+// cleanly and is a routine TDD move, so it is advisory (surfaced to the
+// reviewer; #176 fails honestly if it does conflict).
 type ownershipVerdict struct {
 	// JunkViolations are committed scratch/merge artefacts (hard fail). Each
 	// element is "path (pattern)".
@@ -58,18 +65,29 @@ type ownershipVerdict struct {
 	// modified (hard fail — the unmergeable co-write that wedged the
 	// 2026-06-13 README assembly).
 	ModifiedDocUnowned []string
+	// NewUnownedOutOfTerritory are newly-created source/test files OUTSIDE the
+	// story's declared territory — the directory prefixes of its owned files
+	// (hard fail, ADR-049 move 3). A file the implementation requires that lies
+	// outside every owned package is the shape parallel stories independently
+	// converge on and collide over at assembly; it signals the architect's
+	// partition or the story's FilesOwned is wrong.
+	NewUnownedOutOfTerritory []string
 	// ModifiedUnowned are pre-existing non-doc files a non-owner modified
 	// (advisory — source/build edits usually merge; surfaced, not blocked).
 	ModifiedUnowned []string
-	// NewUnowned are newly-created files outside the owned set (advisory — a dev
-	// legitimately splitting a class into a new file lands here; too noisy to
-	// hard-fail).
+	// NewUnowned are newly-created files INSIDE the owned territory (advisory —
+	// a dev legitimately splitting a class into a new file in its own package
+	// lands here) plus new docs outside ownership (hygiene-only); too noisy to
+	// hard-fail.
 	NewUnowned []string
 }
 
-// clean reports whether there are no hard-fail violations.
+// clean reports whether there are no hard-fail violations (scratch artefacts,
+// a shared-doc co-write, or an out-of-territory new source/test file).
 func (v ownershipVerdict) clean() bool {
-	return len(v.JunkViolations) == 0 && len(v.ModifiedDocUnowned) == 0
+	return len(v.JunkViolations) == 0 &&
+		len(v.ModifiedDocUnowned) == 0 &&
+		len(v.NewUnownedOutOfTerritory) == 0
 }
 
 // parsePorcelain parses `git status --porcelain=v1` output into entries. It is
@@ -129,10 +147,37 @@ func isJunkArtifact(p string) (pattern string, ok bool) {
 	}
 }
 
+// ownedTerritory returns the set of directory prefixes the story owns, derived
+// from the directories of its owned files. A new file under one of these
+// directories is a legitimate in-package split; a new file outside all of them
+// is an ownership gap (ADR-049): the 2026-06-14 wedge declared
+// .../driver/mavsdk/ but the developer (correctly) wrote .../impl/sensor/mavsdk/.
+func ownedTerritory(owned map[string]struct{}) map[string]struct{} {
+	territory := make(map[string]struct{}, len(owned))
+	for f := range owned {
+		territory[path.Dir(f)] = struct{}{}
+	}
+	return territory
+}
+
+// withinTerritory reports whether a normalized file path sits in or below one of
+// the owned directories. A root-owned file ("." territory) matches only other
+// root-level files, never a nested path.
+func withinTerritory(norm string, territory map[string]struct{}) bool {
+	d := path.Dir(norm)
+	for t := range territory {
+		if d == t || strings.HasPrefix(d, t+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // decideOwnership classifies a worktree change set against the owned file set.
 // Pure: no git, no IO. owned is the normalized set of Story.FilesOwned.
 func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) ownershipVerdict {
 	var v ownershipVerdict
+	territory := ownedTerritory(owned)
 	for _, c := range changes {
 		norm := workflow.NormalizeFilePath(c.Path)
 		if norm == "" {
@@ -145,9 +190,32 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 		if _, isOwned := owned[norm]; isOwned {
 			continue
 		}
+		// A `git mv` rename/copy reports only the DESTINATION path here and is
+		// classified by the modified arms below (advisory for non-doc) — the
+		// out-of-territory hard-fail targets NEW creation (`??`/`A`), which is
+		// the observed 2026-06-14 wedge (devs WRITE the canonical entry class,
+		// they do not rename into it). Renaming into a fabricated canonical path
+		// is a theoretical gap left to the assembly-merge backstop (#176).
 		switch {
 		case c.isNew():
-			v.NewUnowned = append(v.NewUnowned, norm)
+			switch {
+			case workflow.IsDocumentationPath(norm):
+				// A NEW unowned doc is hygiene-only (an undeclared coverage
+				// matrix / scratch note); advisory, surfaced to the reviewer.
+				v.NewUnowned = append(v.NewUnowned, norm)
+			case len(territory) == 0 || withinTerritory(norm, territory):
+				// No declared territory (manual / E2E dispatch with no story
+				// context — the production caller skips the gate entirely in this
+				// case, so this only guards direct callers), or an in-package
+				// class split: advisory, matching pre-ADR-049 behavior.
+				v.NewUnowned = append(v.NewUnowned, norm)
+			default:
+				// A new source/test file OUTSIDE the declared territory is the
+				// 2026-06-14 wedge: parallel stories converge on the same
+				// fabricated path and collide at assembly. Hard fail at the node
+				// so the planning/ownership gap surfaces in seconds (ADR-049).
+				v.NewUnownedOutOfTerritory = append(v.NewUnownedOutOfTerritory, norm)
+			}
 		case workflow.IsDocumentationPath(norm):
 			// A non-owner co-writing a shared doc is the unmergeable shape.
 			v.ModifiedDocUnowned = append(v.ModifiedDocUnowned, norm)
@@ -166,7 +234,7 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 // surfaced as a non-blocking advisory rather than a hard fail — the gate must
 // not wedge a run on a plumbing hiccup.
 func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []string, workDir string, runner CommandRunner) []payloads.CheckResult {
-	const checkName = "file-ownership-containment"
+	const checkName = payloads.CheckFileOwnershipContainment
 
 	// No story ownership context (manual validation / E2E / any dispatch
 	// without FilesOwned) — the gate does not apply. Return no check row so it
@@ -212,16 +280,18 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 
 	var results []payloads.CheckResult
 
-	// Required gate: scratch artefacts + a non-owner co-writing a shared doc
-	// (the unmergeable shapes that wedge assembly).
+	// Required gate 1 (#175/#177): scratch artefacts + a non-owner co-writing a
+	// shared doc — the unmergeable shapes a developer CAN fix by retrying (stop
+	// committing scratch / stop editing the shared doc). Routed to dev-retry.
+	containmentClean := len(verdict.JunkViolations) == 0 && len(verdict.ModifiedDocUnowned) == 0
 	containment := payloads.CheckResult{
 		Name:     checkName,
-		Passed:   verdict.clean(),
+		Passed:   containmentClean,
 		Required: true,
 		Command:  cmd,
 		Duration: duration,
 	}
-	if verdict.clean() {
+	if containmentClean {
 		containment.Stdout = fmt.Sprintf("no scratch artefacts committed and no shared docs co-written outside the story's %d owned path(s)", len(owned))
 	} else {
 		var b strings.Builder
@@ -237,13 +307,35 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 	}
 	results = append(results, containment)
 
+	// Required gate 2 (ADR-049 move 3): a new source/test file created OUTSIDE
+	// the story's declared territory is a planning/ownership gap — the developer
+	// cannot fix it by retrying. Emitted as its own check so the execution-
+	// manager router fast-fails it to recovery (architecture_revise /
+	// story_reprepare) rather than burning the TDD budget. Only present when the
+	// gap exists, so a clean run carries no extra Required row.
+	if len(verdict.NewUnownedOutOfTerritory) > 0 {
+		results = append(results, payloads.CheckResult{
+			Name:     payloads.CheckFileOwnershipPlanningGap,
+			Passed:   false,
+			Required: true,
+			Command:  cmd,
+			ExitCode: 1,
+			Stderr: fmt.Sprintf("New source/test file(s) created outside this story's declared file scope: %s. "+
+				"The story owns paths under: %s. A file the implementation requires but no story owns is created "+
+				"identically by every parallel story and collides at assembly — this is a planning/ownership gap "+
+				"(the component boundary or the story's files_owned is wrong), not a developer error.",
+				strings.Join(verdict.NewUnownedOutOfTerritory, ", "), strings.Join(owned, ", ")),
+			Duration: duration,
+		})
+	}
+
 	// Advisory: non-doc files modified outside ownership (usually mergeable
-	// build/source edits) + new files outside the owned set (legitimate class
-	// splits). Surfaced to the reviewer, never hard-fails.
+	// build/source edits) + new files inside the owned territory (legitimate
+	// class splits) / new docs. Surfaced to the reviewer, never hard-fails.
 	advisory := append(append([]string(nil), verdict.ModifiedUnowned...), verdict.NewUnowned...)
 	if len(advisory) > 0 {
 		results = append(results, payloads.CheckResult{
-			Name:     "file-ownership-advisory",
+			Name:     payloads.CheckFileOwnershipAdvisory,
 			Passed:   false,
 			Required: false,
 			Command:  cmd,

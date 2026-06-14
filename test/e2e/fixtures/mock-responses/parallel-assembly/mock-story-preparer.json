@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"stories\": [{\"label\": \"feature-a\", \"component_name\": \"feature-a\", \"requirement_indices\": [0], \"capability_indices\": [], \"title\": \"Implement feature A\", \"intent\": \"feature-a component owns src/a/feature_a.py (territory src/a).\", \"tasks\": [{\"label\": \"implement\", \"description\": \"Implement feature A.\", \"depends_on_labels\": []}]}, {\"label\": \"feature-b\", \"component_name\": \"feature-b\", \"requirement_indices\": [1], \"capability_indices\": [], \"title\": \"Implement feature B\", \"intent\": \"feature-b component owns src/b/feature_b.py (territory src/b); runs after feature A.\", \"tasks\": [{\"label\": \"implement\", \"description\": \"Implement feature B.\", \"depends_on_labels\": []}]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

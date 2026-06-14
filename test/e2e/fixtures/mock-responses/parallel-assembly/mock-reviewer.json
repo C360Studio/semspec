@@ -1,0 +1,14 @@
+{
+  "content": "Plan review complete. Verdict: approved.",
+  "tool_calls": [
+    {
+      "id": "call_review",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Two independent feature packages with disjoint implementation files; scope aligns with component ownership.\", \"findings\": [], \"summary\": \"Plan approved.\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

@@ -1,0 +1,13 @@
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"goal\": \"Add two independent endpoints, feature A and feature B, each in its own package, both registered through the shared core driver.\", \"context\": \"A Python service. Feature A lives under src/a/ and feature B under src/b/. Both register into a shared core entry point. The two features are independently testable but converge on one driver class.\", \"scope\": {\"include\": [], \"create\": [\"src/a/feature_a.py\", \"src/b/feature_b.py\"], \"exclude\": [\"node_modules\", \".git\", \".semspec\"], \"do_not_touch\": [\"README.md\", \"api/requirements.txt\"]}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

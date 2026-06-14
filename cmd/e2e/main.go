@@ -202,6 +202,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// Tier 2: Pipeline tests (mock LLM)
 		scenarios.NewPlanPhaseScenario(cfg),
 		scenarios.NewExecutionPhaseScenario(cfg),
+		// ADR-049 move-3: out-of-territory shared file caught at the dev node.
+		scenarios.NewParallelAssemblyScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()),
