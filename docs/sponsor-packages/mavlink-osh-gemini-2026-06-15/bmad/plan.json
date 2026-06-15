@@ -1,0 +1,930 @@
+{
+  "id": "semspec.workspace.wf.plan.plan.44214b6c0ba047cc",
+  "slug": "dd236a6cb88b",
+  "title": "Starting from the existing OpenSensorHub MAVSDK addon at https://github.com/opensensorhub/osh-addons/tree/master/sensors/robotics/sensorhub-driver-mavsdk, design and implement MAVLink/MAVSDK support for OpenSensorHub through the OGC Connected Systems API.\n\nTreat the upstream addon as the baseline, not a clean-room rewrite. Preserve its OSH sensor module patterns, MAVSDK Java integration, mavsdk_server lifecycle, existing telemetry outputs, and existing control inputs unless the architecture explicitly replaces them.\n\nThe implementation must provide full Connected Systems API coverage for MAVSDK plugins. For every plugin exposed by the pinned MAVSDK Java/proto version, produce a coverage matrix mapping the plugin's methods and streams to one of:\n- CS API DataStream + Observation\n- CS API ControlStream + Command + CommandStatus/CommandResult\n- SystemEvent\n- explicit unsupported/deferred entry with rationale\n\nPrefer typed MAVSDK plugin integrations for semantic APIs. Also evaluate MAVLink-native access and implement a generic MAVLink fallback using MavlinkDirect or a native MAVLink library where needed for raw messages, custom dialects, or plugin gaps. Do not hand-roll MAVLink framing, do not stub MAVSDK/OSH classes, and do not claim full coverage without a machine-checkable coverage inventory.\n\nAcceptance:\n1. The driver starts a real mavsdk_server and connects to a real or simulated MAVLink system.\n2. CS API exposes typed datastreams for telemetry/status/info/events and typed controlstreams for actions, missions, offboard/manual control, params, camera/gimbal, geofence, FTP/logs, calibration, RTK, shell/tune, transponder/winch/gripper, server-side plugins where applicable.\n3. A generic raw MAVLink datastream/controlstream supports subscribe-all, subscribe-by-message-name, send-message, and load-custom-XML dialect.\n4. Long-running commands expose status/result resources, not just fire-and-forget acknowledgements.\n5. Tests include schema/coverage tests plus at least one live MAVSDK/SITL smoke test.\n6. README documents MAVSDK vs native-MAVLink tradeoffs and the coverage matrix.\n\nTest run: 1781487744373",
+  "project_id": "semspec.workspace.wf.project.project.37a8eec1ce19687d",
+  "status": "complete",
+  "approved": true,
+  "created_at": "2026-06-15T01:42:24.386728709Z",
+  "approved_at": "2026-06-15T01:48:24.208468417Z",
+  "review_verdict": "needs_changes",
+  "review_summary": "Plan is approved. Previous errors were fixed, though some residual unowned files remain in scope.create.",
+  "reviewed_at": "2026-06-15T01:48:22.343918416Z",
+  "review_findings": [
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component",
+      "severity": "info",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "mavsdk-driver",
+      "issue": "Several scoped deliverable files remain unowned by any component, which means they will not be written during assembly.",
+      "suggestion": "Ensure all files in `scope.create` are added to a component's `implementation_files` and the corresponding story's `files_owned`.",
+      "evidence": "`scope.create` includes `MavSdkDriver.java`, `ControlMapper.java`, `RawMavlinkBridge.java`, `TelemetryMapper.java`, `MavSdkServerHandler.java` which are missing from `component_boundaries[0].implementation_files`."
+    },
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component (issue #175)",
+      "severity": "error",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java",
+      "action": "add",
+      "target_field": "component_boundaries[].implementation_files",
+      "target_value": "path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" on exactly one component's implementation_files",
+      "issue": "Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).",
+      "suggestion": "Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" is a read-only reference, move it to scope.do_not_touch instead."
+    },
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component (issue #175)",
+      "severity": "error",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java",
+      "action": "add",
+      "target_field": "component_boundaries[].implementation_files",
+      "target_value": "path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" on exactly one component's implementation_files",
+      "issue": "Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).",
+      "suggestion": "Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" is a read-only reference, move it to scope.do_not_touch instead."
+    },
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component (issue #175)",
+      "severity": "error",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java",
+      "action": "add",
+      "target_field": "component_boundaries[].implementation_files",
+      "target_value": "path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" on exactly one component's implementation_files",
+      "issue": "Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).",
+      "suggestion": "Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" is a read-only reference, move it to scope.do_not_touch instead."
+    },
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component (issue #175)",
+      "severity": "error",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java",
+      "action": "add",
+      "target_field": "component_boundaries[].implementation_files",
+      "target_value": "path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" on exactly one component's implementation_files",
+      "issue": "Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).",
+      "suggestion": "Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" is a read-only reference, move it to scope.do_not_touch instead."
+    },
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component (issue #175)",
+      "severity": "error",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java",
+      "action": "add",
+      "target_field": "component_boundaries[].implementation_files",
+      "target_value": "path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" on exactly one component's implementation_files",
+      "issue": "Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).",
+      "suggestion": "Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" is a read-only reference, move it to scope.do_not_touch instead."
+    },
+    {
+      "sop_id": "architecture.scoped_file_unowned",
+      "sop_title": "Scoped deliverable file has no owning component (issue #175)",
+      "severity": "error",
+      "status": "violation",
+      "category": "structural",
+      "phase": "architecture",
+      "target_id": "README.md",
+      "action": "add",
+      "target_field": "component_boundaries[].implementation_files",
+      "target_value": "path \"README.md\" on exactly one component's implementation_files",
+      "issue": "Scoped file \"README.md\" is a deliverable (scope.include) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).",
+      "suggestion": "Add \"README.md\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"README.md\" is a read-only reference, move it to scope.do_not_touch instead."
+    },
+    {
+      "sop_id": "scenario.deferred_integration_for_services",
+      "sop_title": "Services-class harness integration deferred to operator CI (ADR-045 defer-and-note)",
+      "severity": "warning",
+      "status": "violation",
+      "category": "structural",
+      "phase": "scenarios",
+      "target_id": "requirement.dd236a6cb88b.1",
+      "action": "review",
+      "target_field": "requirement.requirement.dd236a6cb88b.1.scenarios",
+      "target_value": "@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)",
+      "issue": "Requirement requirement.dd236a6cb88b.1 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).",
+      "suggestion": "Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml."
+    },
+    {
+      "sop_id": "scenario.deferred_integration_for_services",
+      "sop_title": "Services-class harness integration deferred to operator CI (ADR-045 defer-and-note)",
+      "severity": "warning",
+      "status": "violation",
+      "category": "structural",
+      "phase": "scenarios",
+      "target_id": "requirement.dd236a6cb88b.2",
+      "action": "review",
+      "target_field": "requirement.requirement.dd236a6cb88b.2.scenarios",
+      "target_value": "@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)",
+      "issue": "Requirement requirement.dd236a6cb88b.2 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).",
+      "suggestion": "Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml."
+    },
+    {
+      "sop_id": "scenario.deferred_integration_for_services",
+      "sop_title": "Services-class harness integration deferred to operator CI (ADR-045 defer-and-note)",
+      "severity": "warning",
+      "status": "violation",
+      "category": "structural",
+      "phase": "scenarios",
+      "target_id": "requirement.dd236a6cb88b.3",
+      "action": "review",
+      "target_field": "requirement.requirement.dd236a6cb88b.3.scenarios",
+      "target_value": "@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)",
+      "issue": "Requirement requirement.dd236a6cb88b.3 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).",
+      "suggestion": "Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml."
+    },
+    {
+      "sop_id": "scenario.deferred_integration_for_services",
+      "sop_title": "Services-class harness integration deferred to operator CI (ADR-045 defer-and-note)",
+      "severity": "warning",
+      "status": "violation",
+      "category": "structural",
+      "phase": "scenarios",
+      "target_id": "requirement.dd236a6cb88b.4",
+      "action": "review",
+      "target_field": "requirement.requirement.dd236a6cb88b.4.scenarios",
+      "target_value": "@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)",
+      "issue": "Requirement requirement.dd236a6cb88b.4 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).",
+      "suggestion": "Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml."
+    },
+    {
+      "sop_id": "scenario.unit_mentions_services",
+      "sop_title": "@unit scenario mentions real services (ADR-041 Move 4 warn)",
+      "severity": "warning",
+      "status": "violation",
+      "category": "structural",
+      "phase": "scenarios",
+      "target_id": "scenario.dd236a6cb88b.3.1.1",
+      "action": "review",
+      "target_field": "scenario.scenario.dd236a6cb88b.3.1.1.{given,when,then,title}",
+      "target_value": "SITL",
+      "issue": "Scenario scenario.dd236a6cb88b.3.1.1 is tagged @unit but its prose contains \"SITL\", which implies real-service observation. @unit scenarios are observable at function/class boundary with fakes only.",
+      "suggestion": "Either rewrite the scenario to describe in-process behavior (fakes, fixtures, no peer process), or move the obligation to a separate @integration scenario bound to the relevant harness profile. The \"SITL\" reference belongs to the @integration tier."
+    }
+  ],
+  "review_formatted_findings": "### Violations\n\n- **[INFO]** Scoped deliverable file has no owning component phase=architecture target=mavsdk-driver\n  - Issue: Several scoped deliverable files remain unowned by any component, which means they will not be written during assembly.\n  - Evidence: `scope.create` includes `MavSdkDriver.java`, `ControlMapper.java`, `RawMavlinkBridge.java`, `TelemetryMapper.java`, `MavSdkServerHandler.java` which are missing from `component_boundaries[0].implementation_files`.\n  - Suggestion: Ensure all files in `scope.create` are added to a component's `implementation_files` and the corresponding story's `files_owned`.\n\n- **[ERROR]** Scoped deliverable file has no owning component (issue #175) phase=architecture target=src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\n  - Action: ADD `path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" on exactly one component's implementation_files` TO `component_boundaries[].implementation_files`\n  - Issue: Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).\n  - Suggestion: Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java\" is a read-only reference, move it to scope.do_not_touch instead.\n\n- **[ERROR]** Scoped deliverable file has no owning component (issue #175) phase=architecture target=src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\n  - Action: ADD `path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" on exactly one component's implementation_files` TO `component_boundaries[].implementation_files`\n  - Issue: Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).\n  - Suggestion: Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java\" is a read-only reference, move it to scope.do_not_touch instead.\n\n- **[ERROR]** Scoped deliverable file has no owning component (issue #175) phase=architecture target=src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\n  - Action: ADD `path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" on exactly one component's implementation_files` TO `component_boundaries[].implementation_files`\n  - Issue: Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).\n  - Suggestion: Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java\" is a read-only reference, move it to scope.do_not_touch instead.\n\n- **[ERROR]** Scoped deliverable file has no owning component (issue #175) phase=architecture target=src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\n  - Action: ADD `path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" on exactly one component's implementation_files` TO `component_boundaries[].implementation_files`\n  - Issue: Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).\n  - Suggestion: Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java\" is a read-only reference, move it to scope.do_not_touch instead.\n\n- **[ERROR]** Scoped deliverable file has no owning component (issue #175) phase=architecture target=src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\n  - Action: ADD `path \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" on exactly one component's implementation_files` TO `component_boundaries[].implementation_files`\n  - Issue: Scoped file \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" is a deliverable (scope.create) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).\n  - Suggestion: Add \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java\" is a read-only reference, move it to scope.do_not_touch instead.\n\n- **[ERROR]** Scoped deliverable file has no owning component (issue #175) phase=architecture target=README.md\n  - Action: ADD `path \"README.md\" on exactly one component's implementation_files` TO `component_boundaries[].implementation_files`\n  - Issue: Scoped file \"README.md\" is a deliverable (scope.include) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).\n  - Suggestion: Add \"README.md\" to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If \"README.md\" is a read-only reference, move it to scope.do_not_touch instead.\n\n- **[WARNING]** Services-class harness integration deferred to operator CI (ADR-045 defer-and-note) phase=scenarios target=requirement.dd236a6cb88b.1\n  - Action: REVIEW `@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)` IN `requirement.requirement.dd236a6cb88b.1.scenarios`\n  - Issue: Requirement requirement.dd236a6cb88b.1 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).\n  - Suggestion: Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml.\n\n- **[WARNING]** Services-class harness integration deferred to operator CI (ADR-045 defer-and-note) phase=scenarios target=requirement.dd236a6cb88b.2\n  - Action: REVIEW `@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)` IN `requirement.requirement.dd236a6cb88b.2.scenarios`\n  - Issue: Requirement requirement.dd236a6cb88b.2 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).\n  - Suggestion: Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml.\n\n- **[WARNING]** Services-class harness integration deferred to operator CI (ADR-045 defer-and-note) phase=scenarios target=requirement.dd236a6cb88b.3\n  - Action: REVIEW `@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)` IN `requirement.requirement.dd236a6cb88b.3.scenarios`\n  - Issue: Requirement requirement.dd236a6cb88b.3 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).\n  - Suggestion: Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml.\n\n- **[WARNING]** Services-class harness integration deferred to operator CI (ADR-045 defer-and-note) phase=scenarios target=requirement.dd236a6cb88b.4\n  - Action: REVIEW `@integration scenario with harness_profile_ids containing \"mavlink.px4-sitl.mavsdk-smoke\" (optional — operator-tier)` IN `requirement.requirement.dd236a6cb88b.4.scenarios`\n  - Issue: Requirement requirement.dd236a6cb88b.4 has no @integration scenario tagging services-class harness profile \"mavlink.px4-sitl.mavsdk-smoke\". This is recorded, NOT a rejection: services-class environments are un-runnable in the sandbox, so their runtime proof is deferred to the operator's CI via qa.yml (ADR-045).\n  - Suggestion: Optional: if a runtime contract is worth pinning, add an @integration scenario tagging \"mavlink.px4-sitl.mavsdk-smoke\" so the operator's CI has an explicit target. Otherwise leave it — the profile already reaches the operator through the emitted qa.yml.\n\n- **[WARNING]** @unit scenario mentions real services (ADR-041 Move 4 warn) phase=scenarios target=scenario.dd236a6cb88b.3.1.1\n  - Action: REVIEW `SITL` IN `scenario.scenario.dd236a6cb88b.3.1.1.{given,when,then,title}`\n  - Issue: Scenario scenario.dd236a6cb88b.3.1.1 is tagged @unit but its prose contains \"SITL\", which implies real-service observation. @unit scenarios are observable at function/class boundary with fakes only.\n  - Suggestion: Either rewrite the scenario to describe in-process behavior (fakes, fixtures, no peer process), or move the obligation to a separate @integration scenario bound to the relevant harness profile. The \"SITL\" reference belongs to the @integration tier.\n\n",
+  "review_iteration": 2,
+  "goal": "Design and implement MAVLink/MAVSDK support for OpenSensorHub through the OGC Connected Systems API, using the upstream sensorhub-driver-mavsdk as a baseline. Produce a coverage matrix, integrate typed datastreams/controlstreams, implement long-running command tracking, and add a generic MAVLink fallback. Includes live MAVSDK/SITL smoke tests.",
+  "context": "OpenSensorHub needs a driver that exposes MAVLink telemetry and control via the OGC Connected Systems API. The existing reference driver uses older OSH API patterns. We must adapt it to the CS API, implementing semantic mapping for MAVSDK plugins (telemetry, control, mission, etc.), tracking long-running commands, and providing a generic raw MAVLink fallback stream. A coverage matrix must be documented mapping all MAVSDK plugin endpoints to their corresponding CS API constructs.",
+  "scope": {
+    "include": [
+      "build.gradle",
+      "README.md"
+    ],
+    "create": [
+      "MAVSDK_CS_Coverage.md",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkConfig.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSControlHandler.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSGenericMavlinkHandler.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSTelemetryHandler.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java",
+      "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/PlatformId.java",
+      "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriverTest.java"
+    ]
+  },
+  "exploration": {
+    "capabilities": [
+      {
+        "name": "mavsdk-lifecycle-manager",
+        "lifecycle": "new",
+        "description": "Manages the startup, connection, and teardown of the mavsdk_server process alongside the OpenSensorHub module lifecycle.",
+        "surfaces": [
+          "background"
+        ]
+      },
+      {
+        "name": "cs-api-telemetry",
+        "lifecycle": "new",
+        "description": "Exposes typed MAVSDK telemetry, status, and event plugins as OGC Connected Systems API DataStreams and Observations.",
+        "depends_on": [
+          "mavsdk-lifecycle-manager"
+        ],
+        "surfaces": [
+          "api"
+        ]
+      },
+      {
+        "name": "cs-api-control",
+        "lifecycle": "new",
+        "description": "Exposes MAVSDK control plugins (actions, missions, params, etc.) as CS API ControlStreams, including status and result resources for long-running commands.",
+        "depends_on": [
+          "mavsdk-lifecycle-manager"
+        ],
+        "surfaces": [
+          "api"
+        ]
+      },
+      {
+        "name": "raw-mavlink-bridge",
+        "lifecycle": "new",
+        "description": "Provides a generic MAVLink fallback exposing raw messages via DataStream/ControlStream, supporting subscription, transmission, and custom XML dialects.",
+        "depends_on": [
+          "mavsdk-lifecycle-manager"
+        ],
+        "surfaces": [
+          "api"
+        ]
+      }
+    ],
+    "open_questions": [
+      "Should the generic raw MAVLink bridge utilize MavlinkDirect or another native MAVLink Java library?",
+      "How should the explicit unsupported/deferred MAVSDK plugins be structurally mapped in the coverage matrix?"
+    ]
+  },
+  "architecture": {
+    "technology_choices": [
+      {
+        "category": "build_tool",
+        "choice": "Gradle",
+        "rationale": "Existing workspace manifest (workspace/build.gradle)"
+      }
+    ],
+    "component_boundaries": [
+      {
+        "name": "mavsdk-driver",
+        "responsibility": "Handles OpenSensorHub module lifecycle, telemetry bridging, control commands, and generic MAVLink fallback",
+        "dependencies": [
+          "OpenSensorHub Core",
+          "MAVSDK Java"
+        ],
+        "upstream_refs": [
+          "OpenSensorHub Core",
+          "MAVSDK Java",
+          "PX4 SITL"
+        ],
+        "implementation_files": [
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java",
+          "README.md",
+          "MAVSDK_CS_Coverage.md",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkConfig.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSControlHandler.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSGenericMavlinkHandler.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSTelemetryHandler.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java",
+          "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/PlatformId.java",
+          "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriverTest.java",
+          "build.gradle"
+        ],
+        "capability_indices": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "capabilities": [
+          "mavsdk-lifecycle-manager",
+          "cs-api-telemetry",
+          "cs-api-control",
+          "raw-mavlink-bridge"
+        ]
+      }
+    ],
+    "data_flow": "MAVLink mesh node -\u003e MAVSDK server -\u003e MAVSDK Java -\u003e mavsdk-driver -\u003e OpenSensorHub CS API",
+    "decisions": [
+      {
+        "id": "ARCH-001",
+        "title": "Extend OSH AbstractSensorModule",
+        "decision": "Driver subclasses AbstractSensorModule",
+        "rationale": "Standard OpenSensorHub driver pattern for system modules (see /sources/github-com-opensensorhub-osh-core/sensorhub-core/src/main/java/org/sensorhub/impl/sensor/AbstractSensorModule.java)"
+      }
+    ],
+    "actors": [
+      {
+        "name": "Mesh node",
+        "type": "system",
+        "triggers": [
+          "Meshtastic packet"
+        ]
+      },
+      {
+        "name": "OpenSensorHub User",
+        "type": "human",
+        "triggers": [
+          "HTTP GET telemetry",
+          "HTTP POST command"
+        ],
+        "permissions": [
+          "read_telemetry",
+          "send_command"
+        ]
+      }
+    ],
+    "integrations": [
+      {
+        "name": "PX4 SITL",
+        "direction": "bidirectional",
+        "protocol": "MAVLink",
+        "contract": "https://docs.px4.io/main/en/simulation/",
+        "error_mode": "Reconnect on timeout"
+      }
+    ],
+    "test_surface": {
+      "integration_flows": [
+        {
+          "name": "sitl-telemetry-and-control",
+          "components_involved": [
+            "mavsdk-driver"
+          ],
+          "description": "Validates telemetry decoding and control forwarding to a live PX4 SITL node via MAVSDK."
+        }
+      ],
+      "e2e_flows": [
+        {
+          "actor": "OpenSensorHub User",
+          "steps": [
+            "Connect to OpenSensorHub",
+            "Subscribe to CS API telemetry stream",
+            "Send control command via CS API"
+          ],
+          "success_criteria": [
+            "Telemetry stream emits live data",
+            "Control command returns success and executes on drone"
+          ]
+        }
+      ]
+    },
+    "upstream_resolutions": [
+      {
+        "name": "OpenSensorHub Core",
+        "coordinate": "github.com/opensensorhub/osh-core@master",
+        "source_ref": "https://github.com/opensensorhub/osh-core",
+        "resolution_kind": "source_build",
+        "apis": [
+          {
+            "symbol": "AbstractSensorModule",
+            "import": "org.sensorhub.impl.sensor.AbstractSensorModule",
+            "kind": "class",
+            "signature": "public abstract class AbstractSensorModule\u003cT extends SensorConfig\u003e extends AbstractModule\u003cT\u003e implements ISensorModule\u003cT\u003e",
+            "notes": "Extends AbstractModule which provides lifecycle methods",
+            "citation": "https://github.com/opensensorhub/osh-core/blob/master/sensorhub-core/src/main/java/org/sensorhub/impl/sensor/AbstractSensorModule.java"
+          },
+          {
+            "symbol": "AbstractModule.doInit",
+            "import": "org.sensorhub.impl.module.AbstractModule",
+            "kind": "method",
+            "signature": "protected void doInit() throws SensorHubException",
+            "notes": "Subclass must implement doInit",
+            "citation": "https://github.com/opensensorhub/osh-core/blob/master/sensorhub-core/src/main/java/org/sensorhub/impl/module/AbstractModule.java"
+          },
+          {
+            "symbol": "AbstractModule.doStart",
+            "import": "org.sensorhub.impl.module.AbstractModule",
+            "kind": "method",
+            "signature": "protected void doStart() throws SensorHubException",
+            "notes": "Subclass must implement doStart",
+            "citation": "https://github.com/opensensorhub/osh-core/blob/master/sensorhub-core/src/main/java/org/sensorhub/impl/module/AbstractModule.java"
+          },
+          {
+            "symbol": "AbstractModule.doStop",
+            "import": "org.sensorhub.impl.module.AbstractModule",
+            "kind": "method",
+            "signature": "protected void doStop() throws SensorHubException",
+            "notes": "Subclass must implement doStop",
+            "citation": "https://github.com/opensensorhub/osh-core/blob/master/sensorhub-core/src/main/java/org/sensorhub/impl/module/AbstractModule.java"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "runtime_dep"
+      },
+      {
+        "name": "MAVSDK Java",
+        "coordinate": "io.mavsdk:mavsdk:1.4.0",
+        "source_ref": "https://central.sonatype.com/artifact/io.mavsdk/mavsdk/1.4.0",
+        "resolution_kind": "maven_central",
+        "apis": [
+          {
+            "symbol": "System",
+            "import": "io.mavsdk.System",
+            "kind": "class",
+            "signature": "public class System",
+            "lifecycle": "new System() -\u003e connect -\u003e plugins",
+            "notes": "Lives in io.mavsdk",
+            "citation": "https://search.maven.org/artifact/io.mavsdk/mavsdk"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "runtime_dep"
+      },
+      {
+        "name": "PX4 SITL",
+        "coordinate": "mavlink:px4-sitl",
+        "source_ref": "https://docs.px4.io/main/en/simulation/",
+        "apis": [
+          {
+            "symbol": "HEARTBEAT",
+            "kind": "config_field",
+            "signature": "MAVLink HEARTBEAT",
+            "lifecycle": "SITL start -\u003e heartbeat -\u003e MAVSDK connected",
+            "notes": "Used as readiness and telemetry proof for the driver",
+            "citation": "https://mavlink.io/en/messages/common.html#HEARTBEAT"
+          }
+        ],
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "role": "integration_target"
+      }
+    ],
+    "harness_profiles": [
+      {
+        "profile_id": "mavlink.px4-sitl.mavsdk-smoke",
+        "used_by": [
+          "mavsdk-driver"
+        ],
+        "purpose": "prove MAVSDK control and telemetry paths against a real PX4 SITL MAVLink endpoint",
+        "covers": [
+          "PX4 SITL",
+          "MAVSDK server"
+        ]
+      }
+    ]
+  },
+  "requirements": [
+    {
+      "id": "requirement.dd236a6cb88b.1",
+      "plan_id": "semspec.workspace.wf.plan.plan.44214b6c0ba047cc",
+      "title": "MAVSDK Lifecycle Manager",
+      "description": "The system MUST manage the startup, connection, and teardown of the mavsdk_server process alongside the OpenSensorHub module lifecycle, and connect to a real or simulated MAVLink system.",
+      "status": "active",
+      "capability_name": "mavsdk-lifecycle-manager",
+      "recovery_hint": "Recommended action: refine_prompt\nRecovery agent confidence: recovery_succeeded=true\nOriginal wedge: planning gap (ADR-049 ownership): New source/test file(s) created outside this story's declared file scope: src/main/java/org/sensorhub/impl/driver/mavsdk/MavSdkDriver.java, src/main/java/org/sensorhub/impl/driver/mavsdk/MavSdkServerHandler.java, src/main/java/org/sensorhub/impl/driver/mavsdk/UnmannedConfig.java, src/main/java/org/sensorhub/impl/driver/mavsdk/UnmannedLocationOutput.java, src/test/java/org/sensorhub/impl/driver/mavsdk/MavSdkDriverIntegrationTest.java, src/test/java/org/sensorhub/impl/driver/mavsdk/MavSdkDriverTest.java. The story owns paths under: src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java, README.md, MAVSDK_CS_Coverage.md, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkConfig.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSControlHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSGenericMavlinkHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSTelemetryHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/util/PlatformId.java, src/test/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriverTest.java, build.gradle. A file the implementation requires but no story owns is created identically by every parallel story and collides at assembly — this is a planning/ownership gap (the component boundary or the story's files_owned is wrong), not a developer error.\nRecovery agent trajectory: 1ddbe5be-9de1-4cd9-9c13-1e93440a3941\nWedged agent trajectory: 3352c8ff-a7b5-4e73-bd1a-b2709692a6bb\n\nDiagnosis:\nThe developer agent created implementation files under 'src/main/java/org/sensorhub/impl/driver/mavsdk/' instead of the declared 'src/main/java/org/sensorhub/impl/sensor/mavsdk/'. The agent hallucinated the 'impl.driver' package, likely inferring it incorrectly from the component name 'mavsdk-driver' while ignoring the explicit paths in the story's file scope. Since the architecture and story correctly specify the 'impl/sensor' paths, refining the prompt to explicitly enforce the correct package and directory structure will fix the wedge.",
+      "created_at": "2026-06-15T01:48:38.119636757Z",
+      "updated_at": "2026-06-15T02:02:40.782586383Z"
+    },
+    {
+      "id": "requirement.dd236a6cb88b.2",
+      "plan_id": "semspec.workspace.wf.plan.plan.44214b6c0ba047cc",
+      "title": "Connected Systems API Telemetry",
+      "description": "The system MUST expose typed MAVSDK telemetry, status, and event plugins as OGC Connected Systems API DataStreams and Observations. A coverage matrix mapping the MAVSDK plugin endpoints to CS API constructs SHALL be documented in the README.",
+      "status": "active",
+      "depends_on": [
+        "requirement.dd236a6cb88b.1"
+      ],
+      "capability_name": "cs-api-telemetry",
+      "created_at": "2026-06-15T01:48:38.119636757Z",
+      "updated_at": "2026-06-15T01:48:38.119636757Z"
+    },
+    {
+      "id": "requirement.dd236a6cb88b.3",
+      "plan_id": "semspec.workspace.wf.plan.plan.44214b6c0ba047cc",
+      "title": "Connected Systems API Control",
+      "description": "The system MUST expose MAVSDK control plugins as CS API ControlStreams. It SHALL expose status and result resources to track long-running commands.",
+      "status": "active",
+      "depends_on": [
+        "requirement.dd236a6cb88b.1"
+      ],
+      "capability_name": "cs-api-control",
+      "created_at": "2026-06-15T01:48:38.119636757Z",
+      "updated_at": "2026-06-15T01:48:38.119636757Z"
+    },
+    {
+      "id": "requirement.dd236a6cb88b.4",
+      "plan_id": "semspec.workspace.wf.plan.plan.44214b6c0ba047cc",
+      "title": "Raw MAVLink Bridge",
+      "description": "The system MUST provide a generic MAVLink fallback exposing raw messages via DataStream and ControlStream. It SHALL support subscription, transmission, and custom XML dialects, and document MAVSDK vs native-MAVLink tradeoffs in the README.",
+      "status": "active",
+      "depends_on": [
+        "requirement.dd236a6cb88b.1"
+      ],
+      "capability_name": "raw-mavlink-bridge",
+      "created_at": "2026-06-15T01:48:38.119636757Z",
+      "updated_at": "2026-06-15T01:48:38.119636757Z"
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "scenario.dd236a6cb88b.1.1.1",
+      "requirement_id": "requirement.dd236a6cb88b.1",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver initializes with user-defined connection string",
+      "given": "a MavSdkDriver instance and an UnmannedConfig with a specific MAVLink connection string 'udp://127.0.0.1:14540'",
+      "when": "the driver's doInit method is called",
+      "then": [
+        "the driver initializes its MavSdkServerHandler with the specified connection string",
+        "the driver transitions to the INITIALIZED state without spawning external processes"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:05.984328215Z",
+      "updated_at": "2026-06-15T01:53:05.984328215Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.1.1.2",
+      "requirement_id": "requirement.dd236a6cb88b.1",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver handles mavsdk_server startup failure gracefully",
+      "given": "a MavSdkDriver instance where the mavsdk_server process fails to start within the configured timeout",
+      "when": "the driver's doStart method is called",
+      "then": [
+        "a SensorHubException is thrown during driver startup",
+        "the driver state remains STOPPED or transitions to ERROR"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:05.984328215Z",
+      "updated_at": "2026-06-15T01:53:05.984328215Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.1.1.3",
+      "requirement_id": "requirement.dd236a6cb88b.1",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver connects to PX4 SITL and receives heartbeats",
+      "given": "the PX4 SITL environment is active at $SITL_ENDPOINT",
+      "when": "the MavSdkDriver is started with the SITL endpoint configuration",
+      "then": [
+        "the driver reports a successful connection to the MAVLink system",
+        "a MAVLink HEARTBEAT message is detected through the telemetry stream within 10 seconds"
+      ],
+      "status": "pending",
+      "tags": [
+        "@integration"
+      ],
+      "created_at": "2026-06-15T01:53:05.984328215Z",
+      "updated_at": "2026-06-15T01:53:05.984328215Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.1.1.4",
+      "requirement_id": "requirement.dd236a6cb88b.1",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Telemetry mapper provides valid position data from SITL",
+      "given": "the MavSdkDriver is connected to a running MAVLink system via PX4 SITL",
+      "when": "a telemetry request for the platform's position is made through the Connected Systems API",
+      "then": [
+        "the Connected Systems API response includes a valid position data point (lat/lon/alt)"
+      ],
+      "status": "pending",
+      "tags": [
+        "@integration"
+      ],
+      "created_at": "2026-06-15T01:53:05.984328215Z",
+      "updated_at": "2026-06-15T01:53:05.984328215Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.2.1.1",
+      "requirement_id": "requirement.dd236a6cb88b.2",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "TelemetryMapper converts MAVSDK Position to CS API Observation",
+      "given": "a TelemetryMapper instance and a MAVSDK Position object with latitude 45.0, longitude -75.0, and altitude 100.0",
+      "when": "the mapPosition method is called",
+      "then": [
+        "the mapper returns a CS API Observation object",
+        "the observation location matches the MAVSDK position values"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:08.850832008Z",
+      "updated_at": "2026-06-15T01:53:08.850832008Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.2.1.2",
+      "requirement_id": "requirement.dd236a6cb88b.2",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver initialization fails with invalid connection URL",
+      "given": "a MavSdkDriverConfig with an invalid connection URL 'invalid://protocol'",
+      "when": "the driver doInit method is invoked",
+      "then": [
+        "the doInit method throws a SensorHubException",
+        "the exception message contains 'Invalid connection URL'"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:08.850832008Z",
+      "updated_at": "2026-06-15T01:53:08.850832008Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.2.1.3",
+      "requirement_id": "requirement.dd236a6cb88b.2",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver connects to PX4 SITL and receives HEARTBEAT",
+      "given": "the SITL endpoint at env $SITL_ENDPOINT and the mavsdk_server process provided by the harness",
+      "when": "the MAVSDK driver is started with the SITL connection string",
+      "then": [
+        "the driver transitions to the STARTED state",
+        "a HEARTBEAT message is observed via the MAVSDK system connection within 15 seconds"
+      ],
+      "status": "pending",
+      "tags": [
+        "@integration"
+      ],
+      "created_at": "2026-06-15T01:53:08.850832008Z",
+      "updated_at": "2026-06-15T01:53:08.850832008Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.2.1.4",
+      "requirement_id": "requirement.dd236a6cb88b.2",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver executes Takeoff command via CS API ControlStream",
+      "given": "a running MAVSDK driver connected to SITL at env $SITL_ENDPOINT",
+      "when": "a POST request with a Takeoff command is sent to the driver's ControlStream endpoint",
+      "then": [
+        "the response status code is 200 or 202",
+        "the MAVSDK plugin receives the 'Takeoff' command within 5 seconds"
+      ],
+      "status": "pending",
+      "tags": [
+        "@integration"
+      ],
+      "created_at": "2026-06-15T01:53:08.850832008Z",
+      "updated_at": "2026-06-15T01:53:08.850832008Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.4.1.1",
+      "requirement_id": "requirement.dd236a6cb88b.4",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver initialization registers telemetry handlers",
+      "given": "a MavSdkDriver instance configured with a mock MAVSDK System and Telemetry plugin",
+      "when": "the doInit method is called on the driver",
+      "then": [
+        "the driver initializes without errors",
+        "the telemetry handler is registered with the system lifecycle"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:11.820060259Z",
+      "updated_at": "2026-06-15T01:53:11.820060259Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.4.1.2",
+      "requirement_id": "requirement.dd236a6cb88b.4",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "TelemetryMapper correctly maps MAVSDK Position to OSH DataPackage",
+      "given": "a MavSdkDriver instance with a TelemetryMapper that simulates a MAVSDK position update",
+      "when": "a MAVSDK position update is processed by the mapper",
+      "then": [
+        "the mapped OSH DataPackage contains the expected latitude and longitude values"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:11.820060259Z",
+      "updated_at": "2026-06-15T01:53:11.820060259Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.4.1.3",
+      "requirement_id": "requirement.dd236a6cb88b.4",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "RawMavlinkBridge loads custom MAVLink XML dialects",
+      "given": "a RawMavlinkBridge instance configured with a custom XML dialect path",
+      "when": "the bridge is initialized",
+      "then": [
+        "the bridge parser loads the custom dialect definitions successfully"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:11.820060259Z",
+      "updated_at": "2026-06-15T01:53:11.820060259Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.3.1.1",
+      "requirement_id": "requirement.dd236a6cb88b.3",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Driver configuration initializes with default MAVLink settings",
+      "given": "a MavLinkNetworkConfig object with default settings",
+      "when": "the configuration is loaded into a MavLinkNetworkProvider",
+      "then": [
+        "the telemetry rate is initialized to 1.0Hz",
+        "the connection string matches the default 'udp://:14540'"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:14.992312677Z",
+      "updated_at": "2026-06-15T01:53:14.992312677Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.3.1.2",
+      "requirement_id": "requirement.dd236a6cb88b.3",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "ControlMapper tracks long-running command execution status",
+      "given": "a ControlMapper instance initialized with a MAVSDK System plugin",
+      "when": "a TAKE_OFF command is dispatched to the mapper",
+      "then": [
+        "the command is accepted for processing",
+        "the command result status is initialized to IN_PROGRESS"
+      ],
+      "status": "pending",
+      "tags": [
+        "@unit"
+      ],
+      "created_at": "2026-06-15T01:53:14.992312677Z",
+      "updated_at": "2026-06-15T01:53:14.992312677Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.3.1.3",
+      "requirement_id": "requirement.dd236a6cb88b.3",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "MAVSDK Driver establishes connection and maps streams in integration environment",
+      "given": "the SITL endpoint at env $SITL_ENDPOINT and a running mavsdk_server process",
+      "when": "the MAVSDK driver is started with the SITL connection string",
+      "then": [
+        "the MAVSDK driver reports a 'connected' state to the SensorHub event bus",
+        "telemetry data streams are visible in the Connected Systems API catalog"
+      ],
+      "status": "pending",
+      "tags": [
+        "@integration"
+      ],
+      "created_at": "2026-06-15T01:53:14.992312677Z",
+      "updated_at": "2026-06-15T01:53:14.992312677Z"
+    },
+    {
+      "id": "scenario.dd236a6cb88b.3.1.4",
+      "requirement_id": "requirement.dd236a6cb88b.3",
+      "story_id": "story.dd236a6cb88b.1.1",
+      "title": "Command execution and result tracking via Connected Systems ControlStream",
+      "given": "a running MAVSDK Driver connected to a SITL instance via the integration harness",
+      "when": "a POST request is sent to the Arm and Takeoff ControlStream endpoint",
+      "then": [
+        "the system receives a MAVSDK result status of SUCCESS within 30 seconds",
+        "the vehicle altitude in telemetry increases beyond 2 meters"
+      ],
+      "status": "pending",
+      "tags": [
+        "@integration"
+      ],
+      "created_at": "2026-06-15T01:53:14.992312677Z",
+      "updated_at": "2026-06-15T01:53:14.992312677Z"
+    }
+  ],
+  "stories": [
+    {
+      "id": "story.dd236a6cb88b.1.1",
+      "component_name": "mavsdk-driver",
+      "requirement_ids": [
+        "requirement.dd236a6cb88b.1",
+        "requirement.dd236a6cb88b.2",
+        "requirement.dd236a6cb88b.3",
+        "requirement.dd236a6cb88b.4"
+      ],
+      "capability_names": [
+        "mavsdk-lifecycle-manager",
+        "cs-api-telemetry",
+        "cs-api-control",
+        "raw-mavlink-bridge"
+      ],
+      "title": "MAVSDK Driver and CS API Integration",
+      "intent": "Delivers the complete MAVSDK driver, mapping MAVSDK plugins to the Connected Systems API and providing a raw MAVLink fallback.",
+      "files_owned": [
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java",
+        "README.md",
+        "MAVSDK_CS_Coverage.md",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkConfig.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSControlHandler.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSGenericMavlinkHandler.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSTelemetryHandler.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java",
+        "src/main/java/org/sensorhub/impl/sensor/mavsdk/util/PlatformId.java",
+        "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriverTest.java",
+        "build.gradle"
+      ],
+      "tasks": [
+        {
+          "id": "task.dd236a6cb88b.1.1.1",
+          "story_id": "story.dd236a6cb88b.1.1",
+          "description": "Write failing test and implement mavsdk_server lifecycle manager and module startup.",
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.dd236a6cb88b.1.1.2",
+          "story_id": "story.dd236a6cb88b.1.1",
+          "description": "Write tests and implement CS API DataStreams and Observations for telemetry.",
+          "depends_on": [
+            "task.dd236a6cb88b.1.1.1"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.dd236a6cb88b.1.1.3",
+          "story_id": "story.dd236a6cb88b.1.1",
+          "description": "Write tests and implement CS API ControlStreams and status tracking for control plugins.",
+          "depends_on": [
+            "task.dd236a6cb88b.1.1.1"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.dd236a6cb88b.1.1.4",
+          "story_id": "story.dd236a6cb88b.1.1",
+          "description": "Write tests and implement generic raw MAVLink fallback and custom XML dialect support.",
+          "depends_on": [
+            "task.dd236a6cb88b.1.1.1"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        },
+        {
+          "id": "task.dd236a6cb88b.1.1.5",
+          "story_id": "story.dd236a6cb88b.1.1",
+          "description": "Write SITL integration smoke tests and compile coverage matrix documentation.",
+          "depends_on": [
+            "task.dd236a6cb88b.1.1.2",
+            "task.dd236a6cb88b.1.1.3",
+            "task.dd236a6cb88b.1.1.4"
+          ],
+          "created_at": "0001-01-01T00:00:00Z",
+          "updated_at": "0001-01-01T00:00:00Z"
+        }
+      ],
+      "status": "complete",
+      "created_at": "0001-01-01T00:00:00Z",
+      "updated_at": "2026-06-15T02:50:44.321001802Z"
+    }
+  ],
+  "plan_decisions": [
+    {
+      "id": "plan-decision.dd236a6cb88b.recovery.e11f50d3",
+      "plan_id": "semspec.workspace.wf.plan.plan.44214b6c0ba047cc",
+      "kind": "requirement_change",
+      "title": "Recovery for requirement.dd236a6cb88b.1: refine_prompt",
+      "rationale": "Recommended action: refine_prompt\nRecovery agent confidence: recovery_succeeded=true\nOriginal wedge: planning gap (ADR-049 ownership): New source/test file(s) created outside this story's declared file scope: src/main/java/org/sensorhub/impl/driver/mavsdk/MavSdkDriver.java, src/main/java/org/sensorhub/impl/driver/mavsdk/MavSdkServerHandler.java, src/main/java/org/sensorhub/impl/driver/mavsdk/UnmannedConfig.java, src/main/java/org/sensorhub/impl/driver/mavsdk/UnmannedLocationOutput.java, src/test/java/org/sensorhub/impl/driver/mavsdk/MavSdkDriverIntegrationTest.java, src/test/java/org/sensorhub/impl/driver/mavsdk/MavSdkDriverTest.java. The story owns paths under: src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriver.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavSdkServerHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/TelemetryMapper.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/ControlMapper.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/RawMavlinkBridge.java, README.md, MAVSDK_CS_Coverage.md, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkCommNetwork.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkConfig.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/MavLinkNetworkProvider.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedActivator.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedConfig.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedDescriptor.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSControlHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSGenericMavlinkHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/cs/CSTelemetryHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/util/MavSdkServerHandler.java, src/main/java/org/sensorhub/impl/sensor/mavsdk/util/PlatformId.java, src/test/java/org/sensorhub/impl/sensor/mavsdk/MavSdkDriverTest.java, build.gradle. A file the implementation requires but no story owns is created identically by every parallel story and collides at assembly — this is a planning/ownership gap (the component boundary or the story's files_owned is wrong), not a developer error.\nRecovery agent trajectory: 1ddbe5be-9de1-4cd9-9c13-1e93440a3941\nWedged agent trajectory: 3352c8ff-a7b5-4e73-bd1a-b2709692a6bb\n\nDiagnosis:\nThe developer agent created implementation files under 'src/main/java/org/sensorhub/impl/driver/mavsdk/' instead of the declared 'src/main/java/org/sensorhub/impl/sensor/mavsdk/'. The agent hallucinated the 'impl.driver' package, likely inferring it incorrectly from the component name 'mavsdk-driver' while ignoring the explicit paths in the story's file scope. Since the architecture and story correctly specify the 'impl/sensor' paths, refining the prompt to explicitly enforce the correct package and directory structure will fix the wedge.",
+      "status": "accepted",
+      "proposed_by": "recovery-agent",
+      "affected_requirement_ids": [
+        "requirement.dd236a6cb88b.1"
+      ],
+      "created_at": "2026-06-15T02:02:40.773986842Z",
+      "decided_at": "2026-06-15T02:02:40.782585925Z"
+    }
+  ],
+  "qa_level": "synthesis",
+  "qa_verdict_summary": {
+    "verdict": "approved",
+    "level": "synthesis",
+    "summary": "The plan's implementation successfully fulfills all requirements. The source tree contains appropriate handlers for telemetry, control, lifecycle management, and raw MAVLink fallback. A coverage matrix is provided in `MAVSDK_CS_Coverage.md`, and integration test suites are present for SITL smoke testing. All capabilities are covered by shipped stories.",
+    "dimensions": {
+      "requirement_fulfillment": "All requirements are satisfied. The implementation provides components for MAVSDK Lifecycle Manager (MavSdkServerHandler, MavSdkDriver), CS API Telemetry (CSTelemetryHandler), CS API Control (CSControlHandler), and Raw MAVLink Bridge (RawMavlinkBridge, CSGenericMavlinkHandler). The MAVSDK_CS_Coverage matrix and smoke tests are present.",
+      "capability_evidence": "All four Capabilities (mavsdk-lifecycle-manager, cs-api-telemetry, cs-api-control, raw-mavlink-bridge) have evidence from shipped stories."
+    },
+    "recorded_at": "2026-06-15T02:50:58.325084711Z"
+  },
+  "assembled_branch": "semspec/plan-dd236a6cb88b",
+  "assembled_merge_commit": "8ddbe90fa02ed1dbabb2e35371ff34016a53d900"
+}
