@@ -1,5 +1,0 @@
-# OpenSpec metadata. Emitted by semspec (ADR-040 Move 3).
-# Source of truth for capability identity + scenarios is in
-# .semspec/plans/<slug>/plan.json — this directory is a derived projection.
-
-schema: spec-driven
