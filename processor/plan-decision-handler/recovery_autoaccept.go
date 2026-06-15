@@ -127,6 +127,13 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 					"max_auto_architecture_revises", c.config.MaxAutoArchitectureRevises)
 				continue
 			}
+			if dec.Kind == workflow.PlanDecisionKindStoryReprepare &&
+				countAcceptedStoryReprepares(planView.PlanDecisions) >= c.config.MaxAutoStoryReprepares {
+				c.logger.Warn("story_reprepare auto-accept budget exhausted; leaving for human review",
+					"slug", planView.Slug, "proposal_id", dec.ID,
+					"max_auto_story_reprepares", c.config.MaxAutoStoryReprepares)
+				continue
+			}
 			acceptedIDs[dec.ID] = now
 			c.invokeAccept(ctx, planView.Slug, dec.ID)
 		}
@@ -163,6 +170,19 @@ func countAcceptedArchitectureRevises(decisions []workflow.PlanDecision) int {
 	n := 0
 	for i := range decisions {
 		if decisions[i].Kind == workflow.PlanDecisionKindArchitectureRevise &&
+			decisions[i].Status == workflow.PlanDecisionStatusAccepted {
+			n++
+		}
+	}
+	return n
+}
+
+// countAcceptedStoryReprepares is the same monotonic loop bound as
+// countAcceptedArchitectureRevises, scoped to story_reprepare recoveries.
+func countAcceptedStoryReprepares(decisions []workflow.PlanDecision) int {
+	n := 0
+	for i := range decisions {
+		if decisions[i].Kind == workflow.PlanDecisionKindStoryReprepare &&
 			decisions[i].Status == workflow.PlanDecisionStatusAccepted {
 			n++
 		}

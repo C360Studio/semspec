@@ -183,6 +183,11 @@ type TaskContext struct {
 	// .semspec/investigation-diff-gate-2026-05-12.md).
 	WorktreePath string
 
+	// FileScope is the Story-owned file surface for this task
+	// (TaskExecution.FileScope, derived from Story.FilesOwned). It includes
+	// both existing files and files the task is expected to create.
+	FileScope []string
+
 	// Scenarios are the BDD scenarios this task is responsible for
 	// satisfying. When non-empty, developer + per-task code-reviewer +
 	// validator prompts render each scenario's given/when/then so the

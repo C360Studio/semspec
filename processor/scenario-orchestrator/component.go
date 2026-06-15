@@ -370,7 +370,7 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 			break
 		}
 
-		scenarios := scenariosByReq[req.ID]
+		scenarios := scenariosForRequirementExecution(req.ID, scenariosByReq, trigger.Stories)
 		prereqs := c.buildPrereqContext(req, requirements)
 
 		wg.Add(1)
@@ -402,6 +402,50 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		}
 	}
 	return firstErr
+}
+
+func scenariosForRequirementExecution(
+	reqID string,
+	scenariosByReq map[string][]workflow.Scenario,
+	stories []workflow.Story,
+) []workflow.Scenario {
+	seen := make(map[string]bool)
+	out := appendScenariosDedup(nil, scenariosByReq[reqID], seen)
+	for _, story := range stories {
+		if workflow.DeterministicStoryOwner(story) != reqID {
+			continue
+		}
+		for _, coveredReqID := range story.RequirementIDs {
+			for _, scenario := range scenariosByReq[coveredReqID] {
+				if scenario.StoryID != "" && scenario.StoryID != story.ID {
+					continue
+				}
+				out = appendScenarioDedup(out, scenario, seen)
+			}
+		}
+	}
+	return out
+}
+
+func appendScenariosDedup(out []workflow.Scenario, scenarios []workflow.Scenario, seen map[string]bool) []workflow.Scenario {
+	for _, scenario := range scenarios {
+		out = appendScenarioDedup(out, scenario, seen)
+	}
+	return out
+}
+
+func appendScenarioDedup(out []workflow.Scenario, scenario workflow.Scenario, seen map[string]bool) []workflow.Scenario {
+	key := scenario.ID
+	if key == "" {
+		if data, err := json.Marshal(scenario); err == nil {
+			key = string(data)
+		}
+	}
+	if seen[key] {
+		return out
+	}
+	seen[key] = true
+	return append(out, scenario)
 }
 
 // dispatchRequirement resolves a requirement's DependsOn-derived branch base

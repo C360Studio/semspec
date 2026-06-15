@@ -174,15 +174,20 @@ These are not stylistic preferences. The compiler / interpreter / type checker e
 			Priority: -1, // negative so the contract appears before other role-context fragments (default priority 0). Reading order: "here's where you are" → "here's what to do".
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				var pathBanner string
+				var pathBanner, fileScopeBanner string
 				if ctx.TaskContext != nil && ctx.TaskContext.WorktreePath != "" {
 					pathBanner = "Your worktree path: " + ctx.TaskContext.WorktreePath + "\n" +
 						"Your bash starts with cwd=this path. Use relative paths or absolute paths beginning with this prefix.\n\n" +
 						"DO NOT `cd /workspace` to write files. `/workspace` is the parent fixture root, NOT your worktree. Writes there land in the parent fixture and the diff gate will reject your submit as a path-confusion mismatch. Reading from `/workspace`, `/sources/`, `~/.m2` etc. is fine — write only inside your worktree.\n\n"
 				}
+				if ctx.TaskContext != nil && len(ctx.TaskContext.FileScope) > 0 {
+					fileScopeBanner = "Your declared file scope (Story.FilesOwned) is:\n- " +
+						strings.Join(ctx.TaskContext.FileScope, "\n- ") +
+						"\n\nYou may create or modify these paths only. This list already includes new files from scope.create and existing files from scope.include that this Story owns.\n\n"
+				}
 				return `Workspace Contract:
 
-` + pathBanner + `Your working directory is a git worktree. Every file you create, edit, or delete is observable to the system. You do NOT run git commands to commit your work — when you call submit_work, the system automatically stages and commits everything in the worktree as your task's contribution to the plan.
+` + pathBanner + fileScopeBanner + `Your working directory is a git worktree. Every file you create, edit, or delete is observable to the system. You do NOT run git commands to commit your work — when you call submit_work, the system automatically stages and commits everything in the worktree as your task's contribution to the plan.
 
 Honest reporting is mandatory:
 - files_modified in your submit_work call MUST list every file you actually created or changed in this worktree, and MUST NOT list files you only intended to write or wrote to /tmp.
@@ -231,13 +236,13 @@ DISCOVERY BEFORE DECLARATION (general rule):
 - 30 seconds of reading the cited reference saves a full TDD cycle when fabrication would have failed compile/test.
 
 USE SCRATCHPAD FIRST for non-trivial tasks:
-- Before writing files for any task that declares dependencies, integrates with an external library, designs a public API surface, or makes non-obvious structural decisions: call scratchpad with your plan. List what you intend to write, where the evidence comes from (which cited reference, which architect decision, which scope.include path), and what assumptions you're making.
+- Before writing files for any task that declares dependencies, integrates with an external library, designs a public API surface, or makes non-obvious structural decisions: call scratchpad with your plan. List what you intend to write, where the evidence comes from (which cited reference, which architect decision, which declared file-scope path), and what assumptions you're making.
 - A scratchpad call followed by an aligned implementation is significantly more reliable than a one-shot implementation. Skipping it on non-trivial work routinely produces submit_work calls with missing files or wrong scope.
 
 Scope is mandatory, not advisory:
-- Re-read the Project File Scope (Include / Exclude / Do not touch) in the task brief BEFORE you call submit_work.
+- Re-read the declared file scope in the task brief BEFORE you call submit_work. This Story-owned scope includes both existing files and files you are expected to create.
 - files_modified MUST NOT contain any path that matches scope.exclude or scope.do_not_touch. Modifying a do-not-touch file is a hard policy break — submit will be rejected and the cycle is wasted.
-- If your changes drifted to files outside scope.include (file you "had to" edit to make tests pass, helper you started writing), STOP and re-orient: either the scope was wrong (surface a question or fail the task with a clear reason), or you wandered off-target. Do not silently broaden the change set; the planner's scope is the contract. Caught 2026-05-03 on openrouter @easy /health where a developer pattern-matched into a scope-excluded auth file and submitted refresh-token code that no one asked for.`
+- If your changes drifted to files outside the declared file scope (file you "had to" edit to make tests pass, helper you started writing), STOP and re-orient: either the scope was wrong (surface a question or fail the task with a clear reason), or you wandered off-target. Do not silently broaden the change set; the Story's file scope is the contract. Caught 2026-05-03 on openrouter @easy /health where a developer pattern-matched into a scope-excluded auth file and submitted refresh-token code that no one asked for.`
 			},
 		},
 		{
@@ -965,7 +970,7 @@ Your review ensures tasks meet quality standards before execution begins.`,
 Review Criteria:
 
 1. SOP Compliance — Do the tasks address all SOP requirements?
-2. Task Coverage — Do the tasks cover all files in the plan's scope.include?
+2. Task Coverage — Do the tasks cover all files in the declared task file scope?
 3. Dependencies Valid — Do all depends_on references point to existing tasks?
 4. Test Requirements — If any SOP requires tests, verify at least one task has type="test"
 5. BDD Acceptance Criteria — Does each task have criteria in Given/When/Then format?
@@ -1049,13 +1054,13 @@ Integrity Rules:
 - If confidence < 0.7, recommend human review.
 
 Scope-Aware Feedback (mandatory when rejecting):
-When files_modified doesn't intersect scope.include, or contains anything in
+When files_modified doesn't intersect the declared task file scope, or contains anything in
 scope.exclude / scope.do_not_touch, the rejection feedback MUST be specific:
-- Quote the scope.include list verbatim so the developer can re-read it.
+- Quote the declared file-scope list verbatim so the developer can re-read it.
 - Name each files_modified entry that is outside scope, and say WHY (excluded,
-  do-not-touch, or simply not in include).
+  do-not-touch, or simply not in the declared file scope).
 - Tell the developer the EXACT files they should be working on instead.
-- If files_modified is empty, name the scope.include files the developer
+- If files_modified is empty, name the declared file-scope files the developer
   should have created or edited; do not just say "no files modified."
 
 A bare "no files modified" feedback is non-actionable — the developer's next
@@ -1587,7 +1592,7 @@ Required per story: label, component_name, requirement_indices, capability_indic
 
 Label and index semantics (ADR-044 M:N coverage):
   - label is your local string identifier for a story/task. Use any short kebab-case form ("driver", "test-first"). The system resolves your labels into canonical Story.ID / Task.ID values server-side, so you don't fabricate the slug-dependent entity-ID format.
-  - component_name is ONE architectural component name. FilesOwned is derived from that component's implementation_files by the system — you do NOT pick files.
+  - component_name is ONE architectural component name. FilesOwned is derived from that component's implementation_files plus deterministic companion test paths by the system — you do NOT pick files.
   - requirement_indices is the LIST of 0-based indices into your prompt's Requirements list — every Requirement this Story covers. One Story may cover many Requirements when they map to the same component (the cohesive-component case).
   - capability_indices is the LIST of 0-based indices into your prompt's Capabilities list — every Capability this Story provides acceptance evidence for.
   - Cross-story DependsOn is SYSTEM-DERIVED from (a) Requirement prereq closure and (b) file-ownership conflicts. Do NOT author cross-story edges; focus on coverage joins.

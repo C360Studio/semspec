@@ -27,6 +27,23 @@ func TestCountAcceptedArchitectureRevises(t *testing.T) {
 	}
 }
 
+func TestCountAcceptedStoryReprepares(t *testing.T) {
+	decisions := []workflow.PlanDecision{
+		{ID: "a", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusAccepted},
+		{ID: "b", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusProposed},     // not yet accepted
+		{ID: "c", Kind: workflow.PlanDecisionKindArchitectureRevise, Status: workflow.PlanDecisionStatusAccepted}, // wrong kind
+		{ID: "d", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusRejected},     // rejected
+		{ID: "e", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusAccepted},
+	}
+
+	if got := countAcceptedStoryReprepares(decisions); got != 2 {
+		t.Errorf("countAcceptedStoryReprepares = %d, want 2 (only accepted story_reprepare)", got)
+	}
+	if got := countAcceptedStoryReprepares(nil); got != 0 {
+		t.Errorf("countAcceptedStoryReprepares(nil) = %d, want 0", got)
+	}
+}
+
 // TestArchitectureReviseCap_Gate documents the cap semantics the watch loop
 // enforces: once MaxAutoArchitectureRevises accepted architecture_revise
 // decisions exist on a plan, a further proposed one is NOT auto-accepted (it
@@ -50,5 +67,24 @@ func TestArchitectureReviseCap_Gate(t *testing.T) {
 	}
 	if got := countAcceptedArchitectureRevises(noneAccepted); got >= reviseCap {
 		t.Errorf("expected first architecture_revise below cap; got count %d >= reviseCap %d", got, reviseCap)
+	}
+}
+
+func TestStoryReprepareCap_Gate(t *testing.T) {
+	const reprepareCap = 1
+
+	withOneAccepted := []workflow.PlanDecision{
+		{ID: "first", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusAccepted},
+		{ID: "second", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusProposed},
+	}
+	if got := countAcceptedStoryReprepares(withOneAccepted); got < reprepareCap {
+		t.Fatalf("precondition: expected >= %d accepted, got %d", reprepareCap, got)
+	}
+
+	noneAccepted := []workflow.PlanDecision{
+		{ID: "first", Kind: workflow.PlanDecisionKindStoryReprepare, Status: workflow.PlanDecisionStatusProposed},
+	}
+	if got := countAcceptedStoryReprepares(noneAccepted); got >= reprepareCap {
+		t.Errorf("expected first story_reprepare below cap; got count %d >= reprepareCap %d", got, reprepareCap)
 	}
 }

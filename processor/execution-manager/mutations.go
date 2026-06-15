@@ -130,9 +130,10 @@ type ReqPhaseRequest struct {
 	DAGRaw        json.RawMessage `json:"dag,omitempty"`
 	SortedNodeIDs []string        `json:"sorted_node_ids,omitempty"`
 	// Story sequencing (ADR-043 PR 4h)
-	SortedStoryIDs  []string              `json:"sorted_story_ids,omitempty"`
-	CurrentStoryIdx *int                  `json:"current_story_idx,omitempty"`
-	NodeResults     []workflow.NodeResult `json:"node_results,omitempty"`
+	SortedStoryIDs   []string                   `json:"sorted_story_ids,omitempty"`
+	CurrentStoryIdx  *int                       `json:"current_story_idx,omitempty"`
+	NodeResults      []workflow.NodeResult      `json:"node_results,omitempty"`
+	ScenarioVerdicts []workflow.ScenarioVerdict `json:"scenario_verdicts,omitempty"`
 }
 
 // ReqResetRequest deletes a requirement execution entry from EXECUTION_STATES.
@@ -498,6 +499,9 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 	}
 	if len(req.NodeResults) > 0 {
 		exec.NodeResults = req.NodeResults
+	}
+	if len(req.ScenarioVerdicts) > 0 {
+		exec.ScenarioVerdicts = req.ScenarioVerdicts
 	}
 
 	if err := c.store.saveReq(ctx, req.Key, exec); err != nil {

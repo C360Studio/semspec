@@ -212,12 +212,17 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusApproved, StatusChanged, false},
 		{StatusReviewingRollup, StatusChanged, false}, // don't interrupt rollup
 
+		// story_reprepare recovery back-edge: implementing →
+		// preparing_stories (Sarah re-runs with Story.RecoveryHint).
+		{StatusImplementing, StatusPreparingStories, true},
 		// architecture_revise recovery back-edge: implementing →
-		// requirements_generated (the architect re-runs after a wipe). This is
-		// the only execution-phase → plan-prep back-transition in the DAG.
+		// requirements_generated (the architect re-runs after a wipe).
 		{StatusImplementing, StatusRequirementsGenerated, true},
 		// ...but the symmetric forward states must NOT gain a free back-edge:
-		// only implementing carries the architecture_revise exception.
+		// only implementing carries these recovery exceptions.
+		{StatusReadyForQA, StatusPreparingStories, false},
+		{StatusReviewingQA, StatusPreparingStories, false},
+		{StatusAwaitingReview, StatusPreparingStories, false},
 		{StatusReadyForQA, StatusRequirementsGenerated, false},
 		{StatusReviewingQA, StatusRequirementsGenerated, false},
 		{StatusAwaitingReview, StatusRequirementsGenerated, false},

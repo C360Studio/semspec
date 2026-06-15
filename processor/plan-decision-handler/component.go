@@ -79,6 +79,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.TimeoutSeconds == 0 {
 		config.TimeoutSeconds = defaults.TimeoutSeconds
 	}
+	if config.MaxAutoArchitectureRevises == 0 {
+		config.MaxAutoArchitectureRevises = defaults.MaxAutoArchitectureRevises
+	}
+	if config.MaxAutoStoryReprepares == 0 {
+		config.MaxAutoStoryReprepares = defaults.MaxAutoStoryReprepares
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}

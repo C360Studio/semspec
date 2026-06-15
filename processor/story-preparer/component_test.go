@@ -1,6 +1,7 @@
 package storypreparer
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -152,7 +153,8 @@ func TestParseStoriesFromResult(t *testing.T) {
 // TestResolveStoryLabels_MNCoverage_CohesiveComponent is the
 // ADR-044 mavlink-hard case: one cohesive component covers N
 // capabilities + N requirements. Sarah emits ONE Story covering
-// all of them. FilesOwned is derived from the component (no union).
+// all of them. FilesOwned is derived from the component plus deterministic
+// companion test paths (no union).
 func TestResolveStoryLabels_MNCoverage_CohesiveComponent(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "mav",
@@ -203,14 +205,56 @@ func TestResolveStoryLabels_MNCoverage_CohesiveComponent(t *testing.T) {
 	if len(s.CapabilityNames) != 3 {
 		t.Errorf("CapabilityNames = %v, want all 3", s.CapabilityNames)
 	}
-	// FilesOwned must be derived from component.ImplementationFiles (no
-	// union, no Sarah authorship).
+	// FilesOwned must be derived from component.ImplementationFiles (plus any
+	// deterministic companion tests), with no union and no Sarah authorship.
 	if len(s.FilesOwned) != 3 || s.FilesOwned[0] != "src/Driver.java" {
-		t.Errorf("FilesOwned = %v, want component.implementation_files exactly", s.FilesOwned)
+		t.Errorf("FilesOwned = %v, want derived component file scope", s.FilesOwned)
 	}
 	// Single Story → no DependsOn edges from Pass 1 (no other coverers).
 	if len(s.DependsOn) != 0 {
 		t.Errorf("Single Story should have no DependsOn, got %v", s.DependsOn)
+	}
+}
+
+func TestResolveStoryLabels_DerivesJavaCompanionTestOwnership(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "mav",
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{{Name: "mavsdk-lifecycle"}},
+		},
+		Requirements: []workflow.Requirement{
+			{ID: "requirement.mav.1", Title: "Lifecycle", CapabilityName: "mavsdk-lifecycle"},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "mavsdk-driver",
+					ImplementationFiles: []string{"src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java"},
+					Capabilities:        []string{"mavsdk-lifecycle"}},
+			},
+		},
+	}
+	input := []positionalStoryInput{{
+		Label:              "driver",
+		ComponentName:      "mavsdk-driver",
+		RequirementIndices: []int{0},
+		CapabilityIndices:  []int{0},
+		Title:              "MAVSDK lifecycle",
+		Tasks:              []positionalTaskInput{{Label: "t1", Description: "write test"}},
+	}}
+
+	got, err := resolveStoryLabels(input, plan, "mav")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{
+		"src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java",
+		"src/test/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystemTest.java",
+	}
+	if len(got) != 1 {
+		t.Fatalf("stories = %d, want 1", len(got))
+	}
+	if !reflect.DeepEqual(got[0].FilesOwned, want) {
+		t.Fatalf("FilesOwned = %v, want %v", got[0].FilesOwned, want)
 	}
 }
 

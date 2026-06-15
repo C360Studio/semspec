@@ -135,6 +135,16 @@ type NodeResult struct {
 	CommitSHA     string   `json:"commit_sha,omitempty"`
 }
 
+// ScenarioVerdict records the requirement reviewer's verdict for one scenario.
+// It is persisted with RequirementExecution so M:N non-owner requirements can
+// only inherit a completed shared Story when the owner actually reviewed that
+// requirement's scenarios.
+type ScenarioVerdict struct {
+	ScenarioID string `json:"scenario_id"`
+	Passed     bool   `json:"passed"`
+	Feedback   string `json:"feedback,omitempty"`
+}
+
 // RequirementExecution is the KV-serializable state for a requirement execution.
 // Stored in EXECUTION_STATES under key "req.<slug>.<requirementID>".
 type RequirementExecution struct {
@@ -179,11 +189,12 @@ type RequirementExecution struct {
 	// DAG decomposition — represents the CURRENT Story's DAG (per-Story
 	// dispatch; the value is replaced each time the executor advances to
 	// the next Story).
-	NodeCount      int             `json:"node_count,omitempty"`
-	CurrentNodeIdx int             `json:"current_node_idx"` // -1 before execution starts
-	DAGRaw         json.RawMessage `json:"dag,omitempty"`    // serialized TaskDAG
-	SortedNodeIDs  []string        `json:"sorted_node_ids,omitempty"`
-	NodeResults    []NodeResult    `json:"node_results,omitempty"`
+	NodeCount        int               `json:"node_count,omitempty"`
+	CurrentNodeIdx   int               `json:"current_node_idx"` // -1 before execution starts
+	DAGRaw           json.RawMessage   `json:"dag,omitempty"`    // serialized TaskDAG
+	SortedNodeIDs    []string          `json:"sorted_node_ids,omitempty"`
+	NodeResults      []NodeResult      `json:"node_results,omitempty"`
+	ScenarioVerdicts []ScenarioVerdict `json:"scenario_verdicts,omitempty"`
 
 	// Routing
 	CurrentNodeTaskID string `json:"current_node_task_id,omitempty"`

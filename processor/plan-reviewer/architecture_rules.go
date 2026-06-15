@@ -528,10 +528,11 @@ func sourceFileCount(paths []string) int {
 
 // scopedFileOwnershipFindings emits one finding per scoped DELIVERABLE file that
 // no component owns (issue #175). The invariant: every file the build will write
-// must belong to exactly one component's implementation_files, so the scheduler
-// (workflow.DeriveStoryScheduling) serializes the stories that share an owned
-// file. A file owned by NO component is written by every parallel story and
-// produces an unmergeable conflict at assembly — the 2026-06-13 mavlink-hard
+// must belong to at least one component's implementation_files. Files shared by
+// multiple components are intentionally listed on each sharing component so the
+// scheduler (workflow.DeriveStoryScheduling) serializes those stories. A file
+// owned by NO component is written by every parallel story and produces an
+// unmergeable conflict at assembly — the 2026-06-13 mavlink-hard
 // README wedge: README.md was a deliverable (scope.include) but appeared in no
 // component's implementation_files, so all four parallel stories wrote it and
 // assembleRequirementBranches conflicted.
@@ -562,7 +563,7 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 	// still count as owned — otherwise we'd emit spurious orphan findings).
 	owned := make(map[string]struct{})
 	for _, c := range components {
-		for _, f := range workflow.NormalizeFilePaths(c.ImplementationFiles) {
+		for _, f := range workflow.ExpandFileScopeWithCompanionTests(c.ImplementationFiles) {
 			owned[f] = struct{}{}
 		}
 	}
@@ -603,8 +604,8 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 			TargetID:    f,
 			Action:      "add",
 			TargetField: "component_boundaries[].implementation_files",
-			TargetValue: fmt.Sprintf("path %q on exactly one component's implementation_files", f),
-			Issue:       fmt.Sprintf("Scoped file %q is a deliverable (scope.%s) but appears in no component's implementation_files. Every file the build writes must have exactly one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).", f, origin),
+			TargetValue: f,
+			Issue:       fmt.Sprintf("Scoped file %q is a deliverable (scope.%s) but appears in no component's implementation_files. Every file the build writes must have at least one owning component; an unowned file is written by every parallel story and produces an unmergeable conflict at assembly (the 2026-06-13 README wedge).", f, origin),
 			Suggestion:  fmt.Sprintf("Add %q to the implementation_files of the single source component that produces it (a README/doc may ride as a companion alongside source — it cannot be its own docs-only component). If %q is a read-only reference, move it to scope.do_not_touch instead.", f, f),
 		})
 	}

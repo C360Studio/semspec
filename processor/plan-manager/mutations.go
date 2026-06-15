@@ -1804,10 +1804,10 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 	var resetCount int
 	for _, reqID := range reqIDs {
 		key := "req." + slug + "." + reqID
-		if err := c.sendReqReset(ctx, key); err != nil {
+		if err := c.requestRequirementReset(ctx, key); err != nil {
 			c.logger.Warn("Failed to reset requirement execution by ID",
 				"key", key, "error", err)
-			continue
+			return resetCount, fmt.Errorf("reset requirement execution %s: %w", key, err)
 		}
 		resetCount++
 	}
@@ -1884,8 +1884,10 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 //     ReviewFormattedFindings, so the recovery-hint + story_reprepare branches
 //     are intentionally skipped.
 //   - any other kind → apply the recovery hint when proposed_by=recovery-agent,
-//     and for story_reprepare drive stories_generated → preparing_stories so
-//     Sarah re-runs with Story.RecoveryHint set (Train C step 4).
+//     and for story_reprepare drive stories_generated/implementing →
+//     preparing_stories so Sarah re-runs with Story.RecoveryHint set (Train C
+//     step 4). The implementing path also resets requirement executions so
+//     stale dev loops do not resume against the old story shape.
 //
 // The status mutations are done IN PLACE (NOT setPlanStatusCached): the caller's
 // trailing save is the sole persist point, avoiding a double save / double
@@ -1901,15 +1903,99 @@ func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *wo
 	}
 
 	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
-		current := plan.EffectiveStatus()
-		if current.CanTransitionTo(workflow.StatusPreparingStories) {
-			plan.Status = workflow.StatusPreparingStories
-		} else {
-			c.logger.Warn("Could not drive stories_generated → preparing_stories on story_reprepare accept; plan stays in place",
-				"slug", slug, "proposal_id", proposal.ID, "current_status", current)
+		if err := c.applyStoryReprepare(ctx, plan, proposal, slug); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusPreparingStories) {
+		c.logger.Warn("Could not drive plan to preparing_stories on story_reprepare accept; plan stays in place",
+			"slug", slug, "proposal_id", proposal.ID, "current_status", current)
+		return nil
+	}
+
+	affectedReqIDs := affectedRequirementIDsForStoryReprepare(plan, proposal)
+	if current == workflow.StatusImplementing {
+		resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), slug, "all", nil)
+		if err != nil {
+			return fmt.Errorf("reset requirement executions for story_reprepare: %w", err)
+		}
+		c.logger.Info("Story reprepare reset requirement executions",
+			"slug", slug,
+			"proposal_id", proposal.ID,
+			"reset_count", resetCount)
+	}
+
+	plan.Scenarios = removeScenariosForStoryReprepare(plan.Scenarios, proposal, affectedReqIDs)
+	plan.Status = workflow.StatusPreparingStories
+	c.logger.Info("Story reprepare applied — plan re-queued for story preparation",
+		"slug", slug,
+		"proposal_id", proposal.ID,
+		"from_status", current,
+		"affected_reqs", len(affectedReqIDs))
+	return nil
+}
+
+func affectedRequirementIDsForStoryReprepare(plan *workflow.Plan, proposal *workflow.PlanDecision) []string {
+	seen := make(map[string]struct{}, len(proposal.AffectedReqIDs))
+	add := func(id string) {
+		if id == "" {
+			return
+		}
+		seen[id] = struct{}{}
+	}
+	for _, id := range proposal.AffectedReqIDs {
+		add(id)
+	}
+	if len(proposal.AffectedStoryIDs) > 0 {
+		storySet := make(map[string]struct{}, len(proposal.AffectedStoryIDs))
+		for _, id := range proposal.AffectedStoryIDs {
+			storySet[id] = struct{}{}
+		}
+		for _, s := range plan.Stories {
+			if _, ok := storySet[s.ID]; !ok {
+				continue
+			}
+			for _, id := range s.RequirementIDs {
+				add(id)
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func removeScenariosForStoryReprepare(scenarios []workflow.Scenario, proposal *workflow.PlanDecision, affectedReqIDs []string) []workflow.Scenario {
+	storySet := make(map[string]struct{}, len(proposal.AffectedStoryIDs))
+	for _, id := range proposal.AffectedStoryIDs {
+		if id != "" {
+			storySet[id] = struct{}{}
+		}
+	}
+	reqSet := make(map[string]struct{}, len(affectedReqIDs))
+	for _, id := range affectedReqIDs {
+		reqSet[id] = struct{}{}
+	}
+	out := make([]workflow.Scenario, 0, len(scenarios))
+	for _, s := range scenarios {
+		if len(storySet) > 0 {
+			if _, ok := storySet[s.StoryID]; ok {
+				continue
+			}
+		} else if _, ok := reqSet[s.RequirementID]; ok {
+			continue
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // reviseArchitectureState performs the pure in-memory state mutation for an

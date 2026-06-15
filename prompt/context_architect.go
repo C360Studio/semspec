@@ -6,6 +6,7 @@ type ArchitectPromptContext struct {
 	PlanContext    string
 	ScopeInclude   []string
 	ScopeExclude   []string
+	ScopeCreate    []string
 	ScopeProtected []string
 	Requirements   []ExistingRequirementSummary
 	// Capabilities is the analyst's capability list, rendered to the architect

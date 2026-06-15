@@ -57,6 +57,14 @@ type Config struct {
 	// one automatic architecture revision, then a human must decide.
 	MaxAutoArchitectureRevises int `json:"max_auto_architecture_revises" schema:"type:int,description:Max architecture_revise recovery decisions auto-accepted per plan before human review,category:advanced,default:1,min:0,max:10"`
 
+	// MaxAutoStoryReprepares bounds how many story_reprepare recovery
+	// PlanDecisions the watcher will auto-accept for a single plan. A
+	// story_reprepare now abandons current requirement executions and re-runs
+	// Sarah for affected Stories; without a cap, a non-converging story shape
+	// can loop through full execution cycles. Default 1: one automatic Story
+	// reprepare, then a human must decide.
+	MaxAutoStoryReprepares int `json:"max_auto_story_reprepares" schema:"type:int,description:Max story_reprepare recovery decisions auto-accepted per plan before human review,category:advanced,default:1,min:0,max:10"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -70,6 +78,7 @@ func DefaultConfig() Config {
 		AcceptedSubject:            "workflow.events.plan-decision.accepted",
 		TimeoutSeconds:             120,
 		MaxAutoArchitectureRevises: 1,
+		MaxAutoStoryReprepares:     1,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

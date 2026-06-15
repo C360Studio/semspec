@@ -315,16 +315,21 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// implementing → awaiting_review (no QA, auto_approve_review=false or GitHub)
 		// implementing → complete (level=none; direct terminal with no review)
 		// implementing → changed (change proposal deprecated requirements)
+		// implementing → preparing_stories (story_reprepare recovery:
+		//   a wedge rooted in Sarah's Story shape is escalated; the accepted
+		//   PlanDecision keeps Architecture/Requirements, carries Story.RecoveryHint,
+		//   resets affected requirement executions, and re-runs Sarah/Bob.)
 		// implementing → requirements_generated (architecture_revise recovery:
 		//   a wedge rooted in the architecture is escalated; the recovery-agent's
 		//   architecture_revise PlanDecision wipes Architecture/Stories/Scenarios +
-		//   all requirement executions and re-runs the architect. This is the one
-		//   execution-phase → plan-prep back-edge in the otherwise forward-only DAG;
-		//   gated to the architecture_revise accept path in plan-manager.)
+		//   all requirement executions and re-runs the architect. These two
+		//   execution-phase → plan-prep back-edges are gated to their accept paths
+		//   in plan-manager.)
 		// implementing → rejected (execution escalation)
 		return target == StatusReviewingRollup || target == StatusReviewingQA || target == StatusReadyForQA ||
 			target == StatusAwaitingReview || target == StatusComplete ||
-			target == StatusChanged || target == StatusRequirementsGenerated || target == StatusRejected
+			target == StatusChanged || target == StatusPreparingStories ||
+			target == StatusRequirementsGenerated || target == StatusRejected
 	case StatusReviewingRollup:
 		// Legacy state — equivalent to reviewing_qa at level=synthesis. Kept for
 		// in-flight plans at upgrade time. New code should emit reviewing_qa.

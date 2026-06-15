@@ -42,7 +42,10 @@ func (e porcelainEntry) isNew() bool {
 }
 
 // ownershipVerdict is the classification of a worktree change set against the
-// story's owned file set.
+// story's owned file set. The owned set is expanded with deterministic
+// companion test paths before classification, so a Story that owns
+// src/main/java/.../Foo.java may create src/test/java/.../FooTest.java without
+// being treated as out-of-territory.
 //
 // The hard-fail vs advisory line is drawn at MERGEABLE vs UNMERGEABLE, not
 // new-vs-modified. Two unmergeable shapes hard-fail:
@@ -177,6 +180,7 @@ func withinTerritory(norm string, territory map[string]struct{}) bool {
 // Pure: no git, no IO. owned is the normalized set of Story.FilesOwned.
 func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) ownershipVerdict {
 	var v ownershipVerdict
+	owned = expandOwnedMapWithCompanionTests(owned)
 	territory := ownedTerritory(owned)
 	for _, c := range changes {
 		norm := workflow.NormalizeFilePath(c.Path)
@@ -226,6 +230,22 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 	return v
 }
 
+func expandOwnedMapWithCompanionTests(owned map[string]struct{}) map[string]struct{} {
+	if len(owned) == 0 {
+		return owned
+	}
+	paths := make([]string, 0, len(owned))
+	for f := range owned {
+		paths = append(paths, f)
+	}
+	expanded := workflow.ExpandFileScopeWithCompanionTests(paths)
+	out := make(map[string]struct{}, len(expanded))
+	for _, f := range expanded {
+		out[f] = struct{}{}
+	}
+	return out
+}
+
 // runFileOwnershipContainment computes the worktree's actual change set via
 // `git status --porcelain` (run in workDir via runner) and returns up to two
 // CheckResults: a Required containment verdict (junk + modified-unowned) and an
@@ -243,6 +263,7 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 		return nil
 	}
 
+	owned = workflow.ExpandFileScopeWithCompanionTests(owned)
 	ownedSet := make(map[string]struct{}, len(owned))
 	for _, f := range owned {
 		ownedSet[f] = struct{}{}

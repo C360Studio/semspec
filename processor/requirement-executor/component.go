@@ -565,6 +565,7 @@ func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementE
 		SortedNodeIDs:     reqExec.SortedNodeIDs,
 		SortedStoryIDs:    reqExec.SortedStoryIDs,
 		CurrentStoryIdx:   reqExec.CurrentStoryIdx,
+		ScenarioVerdicts:  append([]ScenarioVerdict(nil), reqExec.ScenarioVerdicts...),
 		RetryCount:        reqExec.RetryCount,
 		MaxRetries:        reqExec.MaxRetries,
 		storeKey:          key,
@@ -1165,10 +1166,11 @@ func (c *Component) advancePastSkippedStoryLocked(ctx context.Context, exec *req
 }
 
 // applyCompletedStoryEvidenceLocked attaches the owner requirement's real
-// node results before a non-owner requirement advances past a completed
-// shared Story. That keeps ADR-044's M:N dedup from producing zero-node
-// terminal completions: the non-owner still does not re-run the dev loop,
-// but its completion record carries the owner Story's execution evidence.
+// node results and requirement-specific scenario verdicts before a non-owner
+// requirement advances past a completed shared Story. That keeps ADR-044's
+// M:N dedup from producing evidence-free terminal completions: the non-owner
+// still does not re-run the dev loop, but its completion record carries
+// committed Story work plus passing verdicts for its own scenarios.
 //
 // Unit-test components without a NATS substrate keep the historical skip
 // behavior; production paths require KV evidence from the deterministic
@@ -1218,6 +1220,15 @@ func (c *Component) applyCompletedStoryEvidenceLocked(ctx context.Context, exec 
 			"story_id", story.ID)
 		return false
 	}
+	if reason := validateBorrowedStoryEvidence(exec, story, ownerExec); reason != "" {
+		c.logger.Warn("Completed Story owner evidence does not satisfy borrowing requirement",
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"owner_requirement_id", ownerID,
+			"story_id", story.ID,
+			"reason", reason)
+		return false
+	}
 	if !copyStoryEvidence(exec, story, ownerExec) {
 		c.logger.Warn("Completed Story owner has no matching node evidence",
 			"slug", exec.Slug,
@@ -1226,6 +1237,7 @@ func (c *Component) applyCompletedStoryEvidenceLocked(ctx context.Context, exec 
 			"story_id", story.ID)
 		return false
 	}
+	copyScenarioVerdictEvidence(exec, story, ownerExec)
 
 	c.logger.Info("Copied completed Story owner evidence for M:N non-owner requirement",
 		"slug", exec.Slug,
@@ -1234,6 +1246,85 @@ func (c *Component) applyCompletedStoryEvidenceLocked(ctx context.Context, exec 
 		"story_id", story.ID,
 		"node_results", len(exec.NodeResults))
 	return true
+}
+
+func validateBorrowedStoryEvidence(exec *requirementExecution, story workflow.Story, owner *requirementExecution) string {
+	if owner == nil {
+		return "owner execution missing"
+	}
+	if !hasCommittedStoryNodeEvidence(owner, story) {
+		return "owner has no committed node evidence for the Story"
+	}
+	requiredScenarios := requiredScenariosForBorrowedStory(exec, story.ID)
+	if len(requiredScenarios) == 0 {
+		return "borrowing requirement has no scenarios linked to the completed Story"
+	}
+	if reason := validateApprovedScenarioVerdicts(requiredScenarios, owner.ScenarioVerdicts); reason != "" {
+		return reason
+	}
+	return ""
+}
+
+func copyScenarioVerdictEvidence(exec *requirementExecution, story workflow.Story, owner *requirementExecution) {
+	required := requiredScenariosForBorrowedStory(exec, story.ID)
+	if len(required) == 0 || owner == nil || len(owner.ScenarioVerdicts) == 0 {
+		return
+	}
+	requiredIDs := make(map[string]bool, len(required))
+	for _, scenario := range required {
+		if scenario.ID != "" {
+			requiredIDs[scenario.ID] = true
+		}
+	}
+	seen := make(map[string]bool, len(exec.ScenarioVerdicts))
+	for _, verdict := range exec.ScenarioVerdicts {
+		if verdict.ScenarioID != "" {
+			seen[verdict.ScenarioID] = true
+		}
+	}
+	for _, verdict := range owner.ScenarioVerdicts {
+		if !requiredIDs[verdict.ScenarioID] || seen[verdict.ScenarioID] {
+			continue
+		}
+		exec.ScenarioVerdicts = append(exec.ScenarioVerdicts, verdict)
+		seen[verdict.ScenarioID] = true
+	}
+}
+
+func hasCommittedStoryNodeEvidence(owner *requirementExecution, story workflow.Story) bool {
+	taskIDs := storyTaskIDSet(story)
+	for _, nr := range owner.NodeResults {
+		if len(taskIDs) > 0 && !taskIDs[nr.NodeID] {
+			continue
+		}
+		if len(nr.FilesModified) > 0 && nr.CommitSHA != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func requiredScenariosForBorrowedStory(exec *requirementExecution, storyID string) []workflow.Scenario {
+	if exec == nil || len(exec.Scenarios) == 0 {
+		return nil
+	}
+	var matched []workflow.Scenario
+	var legacy []workflow.Scenario
+	for _, s := range exec.Scenarios {
+		switch {
+		case storyID != "" && s.StoryID == storyID:
+			matched = append(matched, s)
+		case s.StoryID == "":
+			legacy = append(legacy, s)
+		}
+	}
+	if len(matched) > 0 {
+		return matched
+	}
+	if len(legacy) > 0 {
+		return legacy
+	}
+	return nil
 }
 
 func executionHasStoryEvidence(exec *requirementExecution, story workflow.Story) bool {
@@ -1784,7 +1875,9 @@ func (c *Component) handleApprovedClaimMismatchLocked(ctx context.Context, exec 
 }
 
 // handleRequirementReviewerCompleteLocked processes the requirement reviewer verdict.
-// The reviewer receives all scenarios as a checklist and returns per-scenario verdicts.
+// The reviewer receives the current Story's scenarios as a checklist; any
+// canonical per-scenario verdicts it returns are accumulated as owner evidence
+// for later M:N borrowers.
 //
 // On rejection:
 //   - "fixable" + retry budget → map failed scenarios to dirty nodes, re-run only those
@@ -1807,13 +1900,10 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 
 	exec.ReviewVerdict = result.Verdict
 	exec.ReviewFeedback = result.Feedback
-	// Per-scenario verdicts are no longer used for node targeting (the
-	// Story-gate retry re-runs the whole Story). Retained on the exec so Phase 3
-	// can record which scenarios were deferred-and-noted (un-runnable tier)
-	// vs genuinely failed.
-	exec.ScenarioVerdicts = result.toScenarioVerdicts()
+	reviewVerdicts := result.toScenarioVerdicts()
 
 	if result.Verdict == "approved" {
+		mergeCurrentStoryScenarioVerdicts(exec, reviewVerdicts)
 		c.handleApprovedVerdictLocked(ctx, exec)
 		return
 	}
@@ -1888,6 +1978,100 @@ func (c *Component) parseRequirementReviewResultLocked(exec *requirementExecutio
 	return result, nil
 }
 
+func validateApprovedScenarioVerdicts(required []workflow.Scenario, verdicts []ScenarioVerdict) string {
+	requiredIDs := scenarioIDs(required)
+	if len(requiredIDs) == 0 {
+		return ""
+	}
+	passed := make(map[string]bool, len(verdicts))
+	for _, v := range verdicts {
+		if v.ScenarioID == "" {
+			continue
+		}
+		passed[v.ScenarioID] = v.Passed
+	}
+	var missingOrFailed []string
+	for _, id := range requiredIDs {
+		if !passed[id] {
+			missingOrFailed = append(missingOrFailed, id)
+		}
+	}
+	if len(missingOrFailed) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("approved review missing passing scenario verdicts for: %s", strings.Join(missingOrFailed, ", "))
+}
+
+func mergeCurrentStoryScenarioVerdicts(exec *requirementExecution, verdicts []ScenarioVerdict) {
+	if exec == nil || len(verdicts) == 0 {
+		return
+	}
+	scopedIDs := scenarioIDSet(scopeScenariosToCurrentStory(exec))
+	replacements := make(map[string]ScenarioVerdict, len(verdicts))
+	for _, verdict := range verdicts {
+		if verdict.ScenarioID == "" {
+			continue
+		}
+		if len(scopedIDs) > 0 && !scopedIDs[verdict.ScenarioID] {
+			continue
+		}
+		replacements[verdict.ScenarioID] = verdict
+	}
+	if len(replacements) == 0 {
+		return
+	}
+
+	out := exec.ScenarioVerdicts[:0]
+	for _, verdict := range exec.ScenarioVerdicts {
+		if verdict.ScenarioID != "" {
+			if _, replace := replacements[verdict.ScenarioID]; replace {
+				continue
+			}
+		}
+		out = append(out, verdict)
+	}
+	for _, verdict := range verdicts {
+		if verdict.ScenarioID == "" {
+			continue
+		}
+		replacement, ok := replacements[verdict.ScenarioID]
+		if !ok {
+			continue
+		}
+		out = append(out, replacement)
+		delete(replacements, verdict.ScenarioID)
+	}
+	exec.ScenarioVerdicts = out
+}
+
+func scenarioIDs(scenarios []workflow.Scenario) []string {
+	if len(scenarios) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(scenarios))
+	out := make([]string, 0, len(scenarios))
+	for _, s := range scenarios {
+		if s.ID == "" || seen[s.ID] {
+			continue
+		}
+		seen[s.ID] = true
+		out = append(out, s.ID)
+	}
+	return out
+}
+
+func scenarioIDSet(scenarios []workflow.Scenario) map[string]bool {
+	ids := scenarioIDs(scenarios)
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out
+}
+
 func (c *Component) handleInvalidRequirementReviewResultLocked(ctx context.Context, exec *requirementExecution, reason string) {
 	maxRetries := c.config.MaxReviewRetries
 	if maxRetries == 0 {
@@ -1932,17 +2116,19 @@ func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requireme
 	exec.ReviewRetryCount = 0 // reset reviewer parse-retry budget for new attempt
 	exec.terminated = false   // allow new terminal write
 
-	// Re-run every node (no scenario→node targeting). Preserve the branch.
+	// Re-run every node in the current Story (no scenario→node targeting).
+	// Preserve the branch and any prior Story evidence already accumulated
+	// for final owner proof.
 	exec.DirtyNodeIDs = nil
 	exec.VisitedNodes = make(map[string]bool)
-	exec.NodeResults = nil
+	exec.NodeResults = nodeResultsOutsideCurrentStory(exec)
 	exec.CurrentNodeIdx = -1
 
-	// Mirror the NodeResults reset to KV — it is append-only via
-	// handleReqNodeMutation, so without this stale entries reappear on the
-	// next restart via rebuildExecFromKV. Best-effort.
-	if err := c.sendReqResetNodeResults(ctx, exec.storeKey); err != nil {
-		c.logger.Warn("Failed to reset KV NodeResults on fixable retry",
+	// Mirror the NodeResults trim to KV — it is append-only via
+	// handleReqNodeMutation, so without this stale current-Story entries
+	// reappear on the next restart via rebuildExecFromKV. Best-effort.
+	if err := c.sendReqReplaceNodeResults(ctx, exec.storeKey, workflowNodeResults(exec.NodeResults)); err != nil {
+		c.logger.Warn("Failed to trim KV NodeResults on fixable retry",
 			"entity_id", exec.EntityID, "error", err)
 	}
 
@@ -1960,6 +2146,32 @@ func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requireme
 	)
 
 	c.dispatchNextNodeLocked(ctx, exec)
+}
+
+func nodeResultsOutsideCurrentStory(exec *requirementExecution) []NodeResult {
+	if exec == nil || len(exec.NodeResults) == 0 || len(exec.SortedNodeIDs) == 0 {
+		return nil
+	}
+	currentNodes := make(map[string]bool, len(exec.SortedNodeIDs))
+	for _, nodeID := range exec.SortedNodeIDs {
+		if nodeID != "" {
+			currentNodes[nodeID] = true
+		}
+	}
+	if len(currentNodes) == 0 {
+		return nil
+	}
+	kept := make([]NodeResult, 0, len(exec.NodeResults))
+	for _, result := range exec.NodeResults {
+		if currentNodes[result.NodeID] {
+			continue
+		}
+		kept = append(kept, result)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	return kept
 }
 
 // startRestructureRetryLocked handles a "restructure" rejection by deleting
@@ -2217,17 +2429,16 @@ func (c *Component) publishStoryCompleteLocked(ctx context.Context, exec *requir
 
 // advanceToNextStoryLocked increments CurrentStoryIdx, clears per-Story
 // state (DAG / node bookkeeping / reviewer verdict / retry counters), and
-// dispatches the next Story's DAG. NodeResults accumulate across Stories
-// so the requirement-final aggregateFiles call still sees every node's
-// output for the merge-commit cross-check.
+// dispatches the next Story's DAG. NodeResults and ScenarioVerdicts accumulate
+// across Stories so terminal owner evidence covers the full requirement: node
+// output for merge-commit cross-checks, and scenario proof for M:N borrowers.
 //
 // Caller must hold exec.mu.
 func (c *Component) advanceToNextStoryLocked(ctx context.Context, exec *requirementExecution) {
 	exec.CurrentStoryIdx++
 
-	// Per-Story state reset. NodeResults intentionally NOT reset — they
-	// feed the requirement-level claim/observation cross-check at
-	// markCompletedLocked.
+	// Per-Story state reset. NodeResults and ScenarioVerdicts intentionally
+	// persist across story advancement; both are requirement-level evidence.
 	resetPerStoryExecutionState(exec)
 
 	nextStoryID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
@@ -2263,7 +2474,6 @@ func resetPerStoryExecutionState(exec *requirementExecution) {
 	exec.ReviewRetryCount = 0
 	exec.RetryCount = 0
 	exec.DirtyNodeIDs = nil
-	exec.ScenarioVerdicts = nil
 }
 
 // filterScenariosByIDs returns the subset of scenarios whose IDs match the
@@ -2308,10 +2518,17 @@ func scopeScenariosToCurrentStory(exec *requirementExecution) []workflow.Scenari
 		return exec.Scenarios
 	}
 	out := make([]workflow.Scenario, 0, len(exec.Scenarios))
+	legacy := make([]workflow.Scenario, 0, len(exec.Scenarios))
 	for _, s := range exec.Scenarios {
-		if s.StoryID == currentStoryID {
+		switch {
+		case s.StoryID == currentStoryID:
 			out = append(out, s)
+		case s.StoryID == "":
+			legacy = append(legacy, s)
 		}
+	}
+	if len(out) == 0 && len(legacy) > 0 {
+		return legacy
 	}
 	return out
 }
@@ -2416,10 +2633,15 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementEx
 		nodeCount = len(exec.VisitedNodes)
 	}
 	fields := map[string]any{
-		"node_count": nodeCount,
+		"node_count":      nodeCount,
+		"review_verdict":  exec.ReviewVerdict,
+		"review_feedback": exec.ReviewFeedback,
 	}
 	if nodeResults := workflowNodeResults(exec.NodeResults); len(nodeResults) > 0 {
 		fields["node_results"] = nodeResults
+	}
+	if len(exec.ScenarioVerdicts) > 0 {
+		fields["scenario_verdicts"] = append([]workflow.ScenarioVerdict(nil), exec.ScenarioVerdicts...)
 	}
 
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseCompleted, fields); err != nil {
@@ -2620,8 +2842,7 @@ func (c *Component) publishRequirementCompleteEvent(ctx context.Context, exec *r
 		}
 	}
 
-	// Count scenarios passed (those with a "passing" verdict, or all if no explicit verdicts).
-	scenariosPassed := len(exec.Scenarios) // default: assume all passed when approved
+	scenariosPassed := countPassedScenarios(exec.Scenarios, exec.ScenarioVerdicts)
 	if outcome != "completed" {
 		scenariosPassed = 0
 	}
@@ -2671,6 +2892,28 @@ func (c *Component) publishRequirementCompleteEvent(ctx context.Context, exec *r
 			"error", err,
 		)
 	}
+}
+
+func countPassedScenarios(scenarios []workflow.Scenario, verdicts []ScenarioVerdict) int {
+	if len(scenarios) == 0 {
+		return 0
+	}
+	if len(verdicts) == 0 {
+		return len(scenarios)
+	}
+	passed := make(map[string]bool, len(verdicts))
+	for _, v := range verdicts {
+		if v.ScenarioID != "" {
+			passed[v.ScenarioID] = v.Passed
+		}
+	}
+	count := 0
+	for _, s := range scenarios {
+		if passed[s.ID] {
+			count++
+		}
+	}
+	return count
 }
 
 // markErrorLocked transitions to the error terminal state.

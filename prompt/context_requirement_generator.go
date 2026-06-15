@@ -13,6 +13,8 @@ type RequirementGeneratorContext struct {
 
 	// ScopeInclude lists files/directories the plan is allowed to modify.
 	ScopeInclude []string
+	// ScopeCreate lists files the plan intends to create.
+	ScopeCreate []string
 	// ScopeExclude lists files/directories explicitly out of scope.
 	ScopeExclude []string
 	// ScopeDoNotTouch lists files/directories that must NEVER be modified.
@@ -41,15 +43,11 @@ type RequirementGeneratorContext struct {
 	ReviewFindings string
 
 	// ProjectFileTree is a ground-truth snapshot of the project's tracked
-	// files (typically `git ls-files | head -50`). The persona repeatedly
-	// instructs the model to set files_owned from the plan's scope.include
-	// and warns against inventing fake file splits ("Inventing fake file
-	// splits to make the partition look clean produces broken work at
-	// execution time"). Without ground truth, weak models still hallucinate
-	// path shapes that look idiomatic (api/handlers/*.go on a project that
-	// has no api/ directory). Same fix shape as plan-reviewer's take-20
-	// fix. Empty for greenfield or when sandbox is unavailable; the
-	// renderer silently omits the section.
+	// files (typically `git ls-files | head -50`). Without ground truth,
+	// weak models still hallucinate path shapes that look idiomatic
+	// (api/handlers/*.go on a project that has no api/ directory). Empty for
+	// greenfield or when sandbox is unavailable; the renderer silently omits
+	// the section.
 	ProjectFileTree string
 
 	// Capabilities is the ADR-040 Move 2 input: the analyst sub-phase's

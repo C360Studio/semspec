@@ -40,6 +40,9 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 	if len(rg.ScopeInclude) > 0 {
 		fmt.Fprintf(&sb, "**Scope Include**: %s\n\n", strings.Join(rg.ScopeInclude, ", "))
 	}
+	if len(rg.ScopeCreate) > 0 {
+		fmt.Fprintf(&sb, "**Scope Create**: %s\n\n", strings.Join(rg.ScopeCreate, ", "))
+	}
 	if len(rg.ScopeExclude) > 0 {
 		fmt.Fprintf(&sb, "**Scope Exclude**: %s\n\n", strings.Join(rg.ScopeExclude, ", "))
 	}
@@ -416,7 +419,7 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 
 	if len(p.ArchitectureComponents) > 0 {
 		sb.WriteString("## Architecture Components (Winston's tech-spec)\n\n")
-		sb.WriteString("Each component declares the files it owns and the capabilities it implements. Pick ONE component per Story via `component_name`; FilesOwned is derived from that component's implementation_files by the system.\n\n")
+		sb.WriteString("Each component declares the files it owns and the capabilities it implements. Pick ONE component per Story via `component_name`; FilesOwned is derived from that component's implementation_files plus deterministic companion test paths by the system.\n\n")
 		for _, comp := range p.ArchitectureComponents {
 			fmt.Fprintf(&sb, "### %s\n", comp.Name)
 			if comp.Responsibility != "" {
@@ -464,7 +467,7 @@ func renderStoryPreparerPrompt(p *prompt.StoryPreparerPromptContext) string {
 	sb.WriteString("\n## Your Task\n\n")
 	sb.WriteString("Produce Stories that satisfy ALL of these constraints (ADR-044 M:N coverage):\n\n")
 	sb.WriteString("1. **Coverage closure** — every Capability appears in at least one Story's `capability_indices`; every Requirement appears in at least one Story's `requirement_indices`.\n")
-	sb.WriteString("2. **One component per Story** — `component_name` is a single declared component from the Architecture Components list. FilesOwned is derived from that component's implementation_files by the system; you do NOT pick files.\n")
+	sb.WriteString("2. **One component per Story** — `component_name` is a single declared component from the Architecture Components list. FilesOwned is derived from that component's implementation_files plus deterministic companion test paths by the system; you do NOT pick files.\n")
 	sb.WriteString("3. **Cross-Story DependsOn is NOT yours** — the system derives Story.DependsOn from (a) Requirement prerequisite closure and (b) file-ownership conflicts. Focus on coverage joins; the dispatch graph follows.\n\n")
 	sb.WriteString("Canonical shape: for each architectural component, emit ONE Story covering every requirement whose capabilities map into that component. For cohesive modules (one component implementing N capabilities), one Story covers all N capabilities + their requirements — no artificial fan-out. For naturally disjoint components, one Story per component.\n\n")
 	sb.WriteString("For each Story:\n")
@@ -704,6 +707,7 @@ func renderRequiredTiers(tiers []prompt.RequiredTier) string {
 func renderArchitectPrompt(p *prompt.ArchitectPromptContext) string {
 	scopeInclude := formatScopeListLocal(p.ScopeInclude, "all files")
 	scopeExclude := formatScopeListLocal(p.ScopeExclude, "none")
+	scopeCreate := formatScopeListLocal(p.ScopeCreate, "none")
 	scopeProtected := formatScopeListLocal(p.ScopeProtected, "none")
 
 	var capSection strings.Builder
@@ -778,7 +782,15 @@ Below is the architecture you produced last round. Start from it and make the MI
 **Scope:**
 - Include: %s
 - Exclude: %s
+- Create: %s
 - Protected (do not touch): %s
+
+Every concrete path in Create is a deliverable the plan intends to write.
+Assign each Create path to exactly one component_boundaries[].implementation_files
+entry unless it is a deliberate shared framework entry file, in which case list
+that same path on every sharing component so the scheduler serializes those
+Stories. Do not omit Create paths from component ownership; the reviewer treats
+unowned Create paths as blocking architecture defects.
 %s
 %s
 %s
@@ -819,7 +831,7 @@ Below is the architecture you produced last round. Start from it and make the MI
 - Walk integrations[]: each entry that goes inbound or bidirectional needs at minimum one integration_flow that validates the contract and the error_mode. Outbound-only integrations (we call them, they don't call us) also need coverage when failure is consequential.
 - Walk actors[]: each human or system actor with a trigger that produces user-visible output needs one e2e_flow. Scheduler and event actors only need e2e coverage if the flow touches the UI or external systems; otherwise integration coverage is sufficient.
 - It's fine for test_surface.integration_flows to reference requirement scenarios via scenario_refs — reviewers use this to verify the test authors wrote tests that actually implement the declared surface.
-%s`, p.Goal, p.PlanContext, scopeInclude, scopeExclude, scopeProtected,
+%s`, p.Goal, p.PlanContext, scopeInclude, scopeExclude, scopeCreate, scopeProtected,
 		capSection.String(), reqSection.String(), harnessSection, prevErr)
 }
 

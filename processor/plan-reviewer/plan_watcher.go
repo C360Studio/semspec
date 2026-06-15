@@ -88,6 +88,9 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 				c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
 				continue
 			}
+			if c.maybeSendDeterministicRevision(ctx, plan.Slug, roundDraftReview, &plan) {
+				continue
+			}
 			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundDraftReview, "")
 
 		case workflow.StatusScenariosGenerated:
@@ -104,9 +107,34 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 				c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
 				continue
 			}
+			if c.maybeSendDeterministicRevision(ctx, plan.Slug, roundScenariosReview, &plan) {
+				continue
+			}
 			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundScenariosReview, "")
 		}
 	}
+}
+
+// maybeSendDeterministicRevision restores the hard-gate ordering intended by
+// plan review: cheap structural checks run before the paid reviewer loop. When
+// they find error-severity violations, the normal revision mutation carries the
+// findings back to the owning generation phase and no LLM is dispatched.
+func (c *Component) maybeSendDeterministicRevision(ctx context.Context, slug string, round reviewRound, plan *workflow.Plan) bool {
+	result := deterministicPreflightReview(plan)
+	if result == nil {
+		return false
+	}
+
+	c.updateLastActivity()
+	c.reviewsRejected.Add(1)
+	c.logger.Info("Deterministic review preflight rejected plan before LLM dispatch",
+		"slug", slug,
+		"round", round,
+		"findings", len(result.Findings),
+		"errors", len(result.ErrorFindings()))
+	c.sendRevisionMutation(ctx, slug, round, result)
+	c.extractPlanLessons(ctx, slug, result)
+	return true
 }
 
 // sendApprovalMutations sends the mutation sequence that advances the plan

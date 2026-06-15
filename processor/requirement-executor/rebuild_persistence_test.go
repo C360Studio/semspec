@@ -46,6 +46,30 @@ func TestRebuildExecFromKV_CommitSHARoundTrips(t *testing.T) {
 	}
 }
 
+func TestRebuildExecFromKV_ScenarioVerdictsRoundTrip(t *testing.T) {
+	c := newTestComponent(t)
+	persisted := &workflow.RequirementExecution{
+		EntityID:      "entity-1",
+		Slug:          "demo",
+		RequirementID: "req.demo.1",
+		ScenarioVerdicts: []workflow.ScenarioVerdict{
+			{ScenarioID: "scen.telemetry.1", Passed: true},
+		},
+	}
+
+	exec := c.rebuildExecFromKV("req.demo.req.demo.1", persisted)
+
+	if len(exec.ScenarioVerdicts) != 1 {
+		t.Fatalf("ScenarioVerdicts = %v, want one verdict rebuilt from KV", exec.ScenarioVerdicts)
+	}
+	if got := exec.ScenarioVerdicts[0].ScenarioID; got != "scen.telemetry.1" {
+		t.Fatalf("ScenarioVerdicts[0].ScenarioID = %q, want scen.telemetry.1", got)
+	}
+	if !exec.ScenarioVerdicts[0].Passed {
+		t.Fatal("ScenarioVerdicts[0].Passed = false, want true")
+	}
+}
+
 // TestRebuildExecFromKV_StoryCursorRoundTrips pins go-reviewer Pass-1
 // findings C1 + C2: after restart, the per-Story cursor (SortedStoryIDs +
 // CurrentStoryIdx) MUST round-trip through KV. Pre-fix, no sendReqPhase

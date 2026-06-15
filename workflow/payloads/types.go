@@ -802,9 +802,9 @@ type ScenarioOrchestrationTrigger struct {
 	// by the owning requirement (deterministic = lexicographically
 	// smallest req ID in Story.RequirementIDs). Non-owners wait for the
 	// Story to reach Complete before their executors are spawned, at
-	// which point the executor's Tier-1 dedup advances them only after
-	// copying the completed owner's node evidence, without re-dispatching
-	// the dev loop.
+	// which point the executor advances them only after copying completed
+	// owner evidence for committed nodes and passing scenario verdicts,
+	// without re-dispatching the dev loop.
 	Stories    []workflow.Story `json:"stories,omitempty"`
 	TraceID    string           `json:"trace_id,omitempty"`
 	PlanBranch string           `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)

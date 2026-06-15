@@ -1188,6 +1188,13 @@ func (c *Component) sendReqReset(ctx context.Context, key string) error {
 	return nil
 }
 
+func (c *Component) requestRequirementReset(ctx context.Context, key string) error {
+	if c.reqResetSender != nil {
+		return c.reqResetSender(ctx, key)
+	}
+	return c.sendReqReset(ctx, key)
+}
+
 // handleRetryPlan handles POST /plans/{slug}/retry.
 // Resets failed (or all) requirement executions and re-dispatches the plan to the
 // scenario orchestrator. Valid for plans in implementing, rejected, complete, or archived status.
@@ -1356,9 +1363,9 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 			}
 		}
 
-		if resetErr := c.sendReqReset(ctx, key); resetErr != nil {
+		if resetErr := c.requestRequirementReset(ctx, key); resetErr != nil {
 			c.logger.Warn("Failed to reset execution entry", "key", key, "error", resetErr)
-			continue
+			return resetCount, fmt.Errorf("reset execution entry %s: %w", key, resetErr)
 		}
 		resetCount++
 	}
