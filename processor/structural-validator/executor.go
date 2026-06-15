@@ -185,6 +185,13 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		results = append(results, checkGradleWrapperCompleteness(workDir))
 	}
 
+	if shouldRunJavaQualityChecks(filesModified, workDir) {
+		results = append(results,
+			CheckJavaImplementationCompleteness(workDir, filesModified),
+			CheckOSHModuleProviderRegistration(workDir),
+		)
+	}
+
 	// Deterministic stub-artifact detector — runs whenever .jar files
 	// appear in filesModified, regardless of project language. Hard
 	// reject (Required: true) on stubs because fabrication is a

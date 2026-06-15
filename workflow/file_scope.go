@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// CompanionTestPaths returns conventional test-file companions for an owned
-// source file. These paths are deterministic ownership expansions: a Story that
-// owns src/main/java/.../Foo.java also owns the canonical unit test path
+// CompanionTestPaths returns conventional companion files for an owned source
+// file. These paths are deterministic ownership expansions: a Story that owns
+// src/main/java/.../Foo.java also owns the canonical unit test path
 // src/test/java/.../FooTest.java, even when the architect omitted that test
 // file from component_boundaries[].implementation_files.
 //
@@ -31,7 +31,11 @@ func CompanionTestPaths(sourcePath string) []string {
 		if dir != "." {
 			testRel = dir + "/" + testRel
 		}
-		return []string{"src/test/java/" + testRel}
+		out := []string{"src/test/java/" + testRel}
+		if strings.HasSuffix(base, "Descriptor") {
+			out = append(out, "src/main/resources/META-INF/services/org.sensorhub.api.module.IModuleProvider")
+		}
+		return out
 	}
 
 	return nil

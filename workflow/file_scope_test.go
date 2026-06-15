@@ -10,6 +10,22 @@ func TestCompanionTestPaths_JavaMainSource(t *testing.T) {
 	}
 }
 
+func TestCompanionTestPaths_OSHDescriptorIncludesModuleProviderService(t *testing.T) {
+	got := CompanionTestPaths("src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSensorDescriptor.java")
+	want := []string{
+		"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSensorDescriptorTest.java",
+		"src/main/resources/META-INF/services/org.sensorhub.api.module.IModuleProvider",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("len = %d, want %d: %v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got[%d] = %q, want %q; all=%v", i, got[i], want[i], got)
+		}
+	}
+}
+
 func TestExpandFileScopeWithCompanionTests_DedupesExistingCompanion(t *testing.T) {
 	got := ExpandFileScopeWithCompanionTests([]string{
 		"src/main/java/com/acme/Foo.java",

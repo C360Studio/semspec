@@ -96,6 +96,27 @@ func TestExecCommand_NormalCommandStillWorks(t *testing.T) {
 	}
 }
 
+func TestExecCommandWithEnv_PassesExtraEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	stdout, stderr, exitCode, timedOut := execCommandWithEnv(
+		context.Background(),
+		dir,
+		"printf '%s' \"$GRADLE_USER_HOME\"",
+		2*time.Second,
+		64*1024,
+		[]string{"GRADLE_USER_HOME=/tmp/semspec-gradle-cache"},
+	)
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0 (stderr=%q)", exitCode, stderr)
+	}
+	if timedOut {
+		t.Fatalf("timedOut = true, want false")
+	}
+	if stdout != "/tmp/semspec-gradle-cache" {
+		t.Fatalf("stdout = %q, want injected env value", stdout)
+	}
+}
+
 func TestExecCommand_NonZeroExitPreserved(t *testing.T) {
 	dir := t.TempDir()
 	_, _, exitCode, timedOut := execCommand(
