@@ -203,11 +203,7 @@ type requirementExecution struct {
 }
 
 // ScenarioVerdict carries a per-scenario pass/fail from the requirement reviewer.
-type ScenarioVerdict struct {
-	ScenarioID string `json:"scenario_id"`
-	Passed     bool   `json:"passed"`
-	Feedback   string `json:"feedback,omitempty"`
-}
+type ScenarioVerdict = workflow.ScenarioVerdict
 
 // timeoutHandle wraps a timer reference so it can be stopped on completion.
 type timeoutHandle struct {

@@ -44,6 +44,67 @@ func completed(ids ...string) map[string]bool {
 	return out
 }
 
+func TestScenariosForRequirementExecution_OwnerCarriesSharedStoryScenarioUnion(t *testing.T) {
+	scenariosByReq := map[string][]workflow.Scenario{
+		"req.mav.1": {
+			{ID: "scen.lifecycle.1", RequirementID: "req.mav.1", StoryID: "story.mav.driver"},
+		},
+		"req.mav.2": {
+			{ID: "scen.telemetry.1", RequirementID: "req.mav.2", StoryID: "story.mav.driver"},
+		},
+		"req.mav.3": {
+			{ID: "scen.control.1", RequirementID: "req.mav.3", StoryID: "story.mav.control"},
+		},
+	}
+	stories := []workflow.Story{
+		{
+			ID:             "story.mav.driver",
+			RequirementIDs: []string{"req.mav.2", "req.mav.1"},
+		},
+		{
+			ID:             "story.mav.control",
+			RequirementIDs: []string{"req.mav.3"},
+		},
+	}
+
+	got := scenariosForRequirementExecution("req.mav.1", scenariosByReq, stories)
+	gotIDs := scenarioIDs(got)
+	want := []string{"scen.lifecycle.1", "scen.telemetry.1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("owner scenarios = %v, want %v", gotIDs, want)
+	}
+}
+
+func TestScenariosForRequirementExecution_NonOwnerKeepsOwnScenariosOnly(t *testing.T) {
+	scenariosByReq := map[string][]workflow.Scenario{
+		"req.mav.1": {
+			{ID: "scen.lifecycle.1", RequirementID: "req.mav.1", StoryID: "story.mav.driver"},
+		},
+		"req.mav.2": {
+			{ID: "scen.telemetry.1", RequirementID: "req.mav.2", StoryID: "story.mav.driver"},
+		},
+	}
+	stories := []workflow.Story{{
+		ID:             "story.mav.driver",
+		RequirementIDs: []string{"req.mav.1", "req.mav.2"},
+	}}
+
+	got := scenariosForRequirementExecution("req.mav.2", scenariosByReq, stories)
+	gotIDs := scenarioIDs(got)
+	want := []string{"scen.telemetry.1"}
+	if !reflect.DeepEqual(gotIDs, want) {
+		t.Fatalf("non-owner scenarios = %v, want %v", gotIDs, want)
+	}
+}
+
+func scenarioIDs(scenarios []workflow.Scenario) []string {
+	out := make([]string, 0, len(scenarios))
+	for _, scenario := range scenarios {
+		out = append(out, scenario.ID)
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // requirementComplete
 // ---------------------------------------------------------------------------

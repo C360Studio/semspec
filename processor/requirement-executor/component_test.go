@@ -2548,3 +2548,122 @@ func TestCopyStoryEvidence_FailsWithoutMatchingOwnerNodes(t *testing.T) {
 		t.Fatalf("NodeResults = %d, want 0 when no matching story evidence exists", len(nonOwner.NodeResults))
 	}
 }
+
+func TestValidateApprovedScenarioVerdicts_RequiresAllScopedScenarios(t *testing.T) {
+	scenarios := []workflow.Scenario{
+		{ID: "scen.telemetry.1", StoryID: "story.demo.shared"},
+		{ID: "scen.telemetry.2", StoryID: "story.demo.shared"},
+	}
+	verdicts := []ScenarioVerdict{
+		{ScenarioID: "scen.telemetry.1", Passed: true},
+	}
+
+	if got := validateApprovedScenarioVerdicts(scenarios, verdicts); got == "" {
+		t.Fatal("validateApprovedScenarioVerdicts returned empty reason; approved review must fail closed when a scoped scenario lacks a passing verdict")
+	}
+
+	verdicts = append(verdicts, ScenarioVerdict{ScenarioID: "scen.telemetry.2", Passed: true})
+	if got := validateApprovedScenarioVerdicts(scenarios, verdicts); got != "" {
+		t.Fatalf("validateApprovedScenarioVerdicts returned %q, want empty when every scoped scenario passed", got)
+	}
+}
+
+func TestValidateBorrowedStoryEvidence_RequiresScenarioProofForBorrower(t *testing.T) {
+	story := workflow.Story{
+		ID:             "story.demo.shared",
+		RequirementIDs: []string{"req.demo.1", "req.demo.2"},
+		Tasks:          []workflow.Task{{ID: "task.demo.shared.1", StoryID: "story.demo.shared"}},
+	}
+	owner := &requirementExecution{
+		RequirementID: "req.demo.1",
+		NodeResults: []NodeResult{
+			{NodeID: "task.demo.shared.1", FilesModified: []string{"src/shared.go"}, CommitSHA: "abc123"},
+		},
+		ScenarioVerdicts: []ScenarioVerdict{
+			{ScenarioID: "scen.lifecycle.1", Passed: true},
+		},
+	}
+	borrower := &requirementExecution{
+		RequirementID: "req.demo.2",
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.telemetry.1", RequirementID: "req.demo.2", StoryID: "story.demo.shared"},
+		},
+	}
+
+	if got := validateBorrowedStoryEvidence(borrower, story, owner); got == "" {
+		t.Fatal("validateBorrowedStoryEvidence returned empty reason; borrower must not complete from owner evidence that lacks its scenario verdict")
+	}
+
+	owner.ScenarioVerdicts = append(owner.ScenarioVerdicts, ScenarioVerdict{ScenarioID: "scen.telemetry.1", Passed: true})
+	if got := validateBorrowedStoryEvidence(borrower, story, owner); got != "" {
+		t.Fatalf("validateBorrowedStoryEvidence returned %q, want empty after owner reviewed borrower scenario", got)
+	}
+}
+
+func TestValidateBorrowedStoryEvidence_RequiresCommittedNodeEvidence(t *testing.T) {
+	story := workflow.Story{
+		ID:             "story.demo.shared",
+		RequirementIDs: []string{"req.demo.1", "req.demo.2"},
+		Tasks:          []workflow.Task{{ID: "task.demo.shared.1", StoryID: "story.demo.shared"}},
+	}
+	owner := &requirementExecution{
+		RequirementID: "req.demo.1",
+		NodeResults: []NodeResult{
+			{NodeID: "task.demo.shared.1", FilesModified: []string{"src/shared.go"}},
+		},
+		ScenarioVerdicts: []ScenarioVerdict{{ScenarioID: "scen.telemetry.1", Passed: true}},
+	}
+	borrower := &requirementExecution{
+		RequirementID: "req.demo.2",
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.telemetry.1", RequirementID: "req.demo.2", StoryID: "story.demo.shared"},
+		},
+	}
+
+	if got := validateBorrowedStoryEvidence(borrower, story, owner); got == "" {
+		t.Fatal("validateBorrowedStoryEvidence returned empty reason; borrowed Story evidence needs a commit observation")
+	}
+}
+
+func TestCopyScenarioVerdictEvidence_CopiesBorrowedRequirementVerdicts(t *testing.T) {
+	story := workflow.Story{ID: "story.demo.shared"}
+	owner := &requirementExecution{
+		ScenarioVerdicts: []ScenarioVerdict{
+			{ScenarioID: "scen.lifecycle.1", Passed: true},
+			{ScenarioID: "scen.telemetry.1", Passed: true},
+		},
+	}
+	borrower := &requirementExecution{
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.telemetry.1", RequirementID: "req.demo.2", StoryID: "story.demo.shared"},
+		},
+	}
+
+	copyScenarioVerdictEvidence(borrower, story, owner)
+
+	if len(borrower.ScenarioVerdicts) != 1 {
+		t.Fatalf("copied ScenarioVerdicts = %d, want 1 borrower-specific verdict", len(borrower.ScenarioVerdicts))
+	}
+	if got := borrower.ScenarioVerdicts[0].ScenarioID; got != "scen.telemetry.1" {
+		t.Fatalf("copied scenario_id = %q, want scen.telemetry.1", got)
+	}
+}
+
+func TestScopeScenariosToCurrentStory_FallsBackToLegacyUnlinkedScenarios(t *testing.T) {
+	exec := &requirementExecution{
+		SortedStoryIDs:  []string{"story.demo.shared"},
+		CurrentStoryIdx: 0,
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.legacy.1", RequirementID: "req.demo.1"},
+			{ID: "scen.other.1", RequirementID: "req.demo.1", StoryID: "story.demo.other"},
+		},
+	}
+
+	got := scopeScenariosToCurrentStory(exec)
+	if len(got) != 1 {
+		t.Fatalf("scoped scenarios = %d, want one legacy fallback scenario", len(got))
+	}
+	if got[0].ID != "scen.legacy.1" {
+		t.Fatalf("scoped scenario = %q, want scen.legacy.1", got[0].ID)
+	}
+}

@@ -1,6 +1,7 @@
 package planmanager
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -39,6 +40,68 @@ func TestApplyRecoveryHint_StoryReprepare_NamedStoriesOnly(t *testing.T) {
 	}
 	if got := plan.Stories[2].RecoveryHint; got != "" {
 		t.Errorf("Stories[2].RecoveryHint = %q, want empty (sibling untouched)", got)
+	}
+}
+
+func TestApplyStoryReprepare_ImplementingRequeuesSarah(t *testing.T) {
+	c := setupTestComponent(t)
+	plan := &workflow.Plan{
+		Slug:   "demo",
+		Status: workflow.StatusImplementing,
+		Requirements: []workflow.Requirement{
+			{ID: "req.demo.1"},
+			{ID: "req.demo.2"},
+		},
+		Stories: []workflow.Story{
+			{ID: "story.demo.1.1", RequirementIDs: []string{"req.demo.1"}, ComponentName: "driver"},
+			{ID: "story.demo.2.1", RequirementIDs: []string{"req.demo.2"}, ComponentName: "bridge"},
+		},
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.target", RequirementID: "req.demo.1", StoryID: "story.demo.1.1"},
+			{ID: "scen.sibling", RequirementID: "req.demo.2", StoryID: "story.demo.2.1"},
+		},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:               "plan-decision.demo.recovery.story",
+		Kind:             workflow.PlanDecisionKindStoryReprepare,
+		Rationale:        "Story missed the companion unit test.",
+		AffectedReqIDs:   []string{"req.demo.1"},
+		AffectedStoryIDs: []string{"story.demo.1.1"},
+	}
+
+	if err := c.applyStoryReprepare(context.Background(), plan, proposal, plan.Slug); err != nil {
+		t.Fatalf("applyStoryReprepare: %v", err)
+	}
+
+	if plan.Status != workflow.StatusPreparingStories {
+		t.Fatalf("plan.Status = %s, want preparing_stories", plan.Status)
+	}
+	if len(plan.Scenarios) != 1 || plan.Scenarios[0].ID != "scen.sibling" {
+		t.Fatalf("scenarios after story_reprepare = %+v, want only sibling scenario", plan.Scenarios)
+	}
+}
+
+func TestAffectedRequirementIDsForStoryReprepare_IncludesStoryCoveredReqs(t *testing.T) {
+	plan := &workflow.Plan{
+		Stories: []workflow.Story{
+			{ID: "story.demo.1", RequirementIDs: []string{"req.demo.2", "req.demo.3"}},
+		},
+	}
+	proposal := &workflow.PlanDecision{
+		Kind:             workflow.PlanDecisionKindStoryReprepare,
+		AffectedReqIDs:   []string{"req.demo.1"},
+		AffectedStoryIDs: []string{"story.demo.1"},
+	}
+
+	got := affectedRequirementIDsForStoryReprepare(plan, proposal)
+	want := []string{"req.demo.1", "req.demo.2", "req.demo.3"}
+	if len(got) != len(want) {
+		t.Fatalf("affected reqs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("affected reqs = %v, want %v", got, want)
+		}
 	}
 }
 

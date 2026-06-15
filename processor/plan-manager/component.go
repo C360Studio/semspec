@@ -448,6 +448,9 @@ func (c *Component) getExecBucket(ctx context.Context) (jetstream.KeyValue, erro
 	}
 
 	// Try to get the bucket (it may have been created since startup)
+	if c.natsClient == nil {
+		return nil, fmt.Errorf("no NATS client")
+	}
 	js, err := c.natsClient.JetStream()
 	if err != nil {
 		return nil, fmt.Errorf("get jetstream: %w", err)

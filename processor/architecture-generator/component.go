@@ -362,6 +362,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		PlanContext:              plan.Context,
 		ScopeInclude:             plan.Scope.Include,
 		ScopeExclude:             plan.Scope.Exclude,
+		ScopeCreate:              plan.Scope.Create,
 		ScopeProtected:           plan.Scope.DoNotTouch,
 		Requirements:             reqSummaries,
 		Capabilities:             capCards,

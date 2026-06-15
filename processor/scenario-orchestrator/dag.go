@@ -80,11 +80,12 @@ func filterReadyRequirements(
 //     N requirements to actually dispatch the dev loop.
 //  2. A non-owner requirement may dispatch ONLY when every covering
 //     Story it does NOT own has reached Story.Status == complete. The
-//     post-completion executor's Tier-1 dedup at component.go:dispatchCurrentStoryLocked
+//     post-completion executor's dedup at component.go:dispatchCurrentStoryLocked
 //     advances without re-running the dev loop, but only after copying
-//     the deterministic owner's node evidence into the non-owner
-//     requirement execution. That preserves the one-dev-loop property
-//     without producing zero-node completions.
+//     the deterministic owner's committed node evidence and passing
+//     scenario verdicts into the non-owner requirement execution. That
+//     preserves the one-dev-loop property without producing evidence-free
+//     completions.
 //
 // Without this gate, the post-claim-rejection path in requirement-executor
 // would call markCompletedLocked for a non-owner requirement BEFORE the

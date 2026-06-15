@@ -99,7 +99,7 @@ func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Pl
 		Goal:    plan.Goal,
 		Context: plan.Context,
 	}
-	if len(plan.Scope.Include) > 0 || len(plan.Scope.Exclude) > 0 || len(plan.Scope.DoNotTouch) > 0 {
+	if len(plan.Scope.Include) > 0 || len(plan.Scope.Create) > 0 || len(plan.Scope.Exclude) > 0 || len(plan.Scope.DoNotTouch) > 0 {
 		scope := plan.Scope
 		trigger.Scope = &scope
 	}

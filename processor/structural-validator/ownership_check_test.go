@@ -146,6 +146,11 @@ func TestDecideOwnership(t *testing.T) {
 			wantNewOutOfTerritory: []string{"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java"},
 		},
 		{
+			name:      "new Java companion test for owned main class is clean",
+			porcelain: "?? src/test/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystemTest.java",
+			owned:     ownedSetOf("src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java"),
+		},
+		{
 			name:           "new unowned DOC outside territory stays advisory (hygiene only)",
 			porcelain:      "?? docs/TRADEOFFS.md",
 			owned:          ownedSetOf("src/Foo.java"),

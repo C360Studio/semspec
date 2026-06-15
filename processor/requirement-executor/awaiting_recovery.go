@@ -476,19 +476,18 @@ func (c *Component) handlePlanDecisionAccepted(lifecycleCtx, msgCtx context.Cont
 		return
 	}
 
-	// architecture_revise restarts the plan from the architect: plan-manager
-	// has already wiped Architecture + Stories + Scenarios and reset the
-	// requirement executions in EXECUTION_STATES. The wedged exec(s) must NOT
-	// be resumed — resuming would re-decompose against the now-deleted DAG and
-	// race the architect re-run, and the resumed exec shares the deterministic
-	// req.<slug>.<reqID> store key with the fresh exec the re-run will create,
-	// so a late write would corrupt it. Abandon every active exec for the slug
-	// instead, then return before the resume loop below. The architect-driven
-	// re-run creates clean execs once it reaches execution.
-	if evt.Kind == workflow.PlanDecisionKindArchitectureRevise {
+	// architecture_revise and story_reprepare restart the plan from a planning
+	// phase: plan-manager has already reset the relevant EXECUTION_STATES rows
+	// and moved the plan out of implementing. The wedged exec(s) must NOT be
+	// resumed — resuming would re-decompose against the stale DAG and race the
+	// regenerated execution. Abandon every active exec for the slug instead,
+	// then return before the resume loop below. The re-run creates clean execs
+	// once it reaches execution again.
+	if evt.Kind == workflow.PlanDecisionKindArchitectureRevise ||
+		evt.Kind == workflow.PlanDecisionKindStoryReprepare {
 		abandoned := c.abandonExecsForSlug(evt.Slug)
-		c.logger.Info("Abandoned in-flight execs on architecture_revise accept",
-			"slug", evt.Slug, "proposal_id", evt.ProposalID, "abandoned", abandoned)
+		c.logger.Info("Abandoned in-flight execs on planning re-entry accept",
+			"slug", evt.Slug, "proposal_id", evt.ProposalID, "kind", evt.Kind, "abandoned", abandoned)
 		_ = msg.Ack()
 		return
 	}

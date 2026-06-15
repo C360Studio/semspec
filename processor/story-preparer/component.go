@@ -872,12 +872,13 @@ func parseStoriesFromResult(result string, plan *workflow.Plan, slug string) ([]
 // The function (a) validates each Story's component_name resolves to an
 // architecture component, (b) validates every requirement_index +
 // capability_index is in range, (c) derives FilesOwned from the
-// component's ImplementationFiles (no union, no Sarah authorship), (d)
-// assigns canonical Story.ID = story.<slug>.<reqseq>.<storyseq> using
-// the FIRST RequirementIndex as the "primary" for seq purposes, (e)
-// runs DeriveStoryScheduling to populate Story.DependsOn from semantic
-// + resource edges, (f) enforces coverage closure — every Requirement
-// and every Capability appears in at least one Story's join.
+// component's ImplementationFiles plus deterministic companion test paths
+// (no union, no Sarah authorship), (d) assigns canonical Story.ID =
+// story.<slug>.<reqseq>.<storyseq> using the FIRST RequirementIndex as
+// the "primary" for seq purposes, (e) runs DeriveStoryScheduling to
+// populate Story.DependsOn from semantic + resource edges, (f) enforces
+// coverage closure — every Requirement and every Capability appears in
+// at least one Story's join.
 func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug string) ([]workflow.Story, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("plan required for label resolution")
@@ -949,7 +950,7 @@ func resolveStoryLabels(input []positionalStoryInput, plan *workflow.Plan, slug 
 			CapabilityNames: resolvedCapNames[i],
 			Title:           s.Title,
 			Intent:          s.Intent,
-			FilesOwned:      append([]string(nil), componentFiles[s.ComponentName]...),
+			FilesOwned:      workflow.ExpandFileScopeWithCompanionTests(componentFiles[s.ComponentName]),
 			Tasks:           tasks,
 		}
 	}

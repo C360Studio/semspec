@@ -807,6 +807,12 @@ func TestScopedFileOwnershipFindings(t *testing.T) {
 			wantOrphan: nil,
 		},
 		{
+			name:       "Java companion test derived from owned main class is owned",
+			scope:      workflow.Scope{Create: []string{"src/test/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystemTest.java"}},
+			components: []workflow.ComponentDef{comp("c1", "src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java")},
+			wantOrphan: nil,
+		},
+		{
 			name:       "README owned as companion on a source component",
 			scope:      workflow.Scope{Include: []string{"README.md"}},
 			components: []workflow.ComponentDef{comp("c1", "src/A.java", "README.md")},
@@ -863,6 +869,14 @@ func TestScopedFileOwnershipFindings(t *testing.T) {
 				}
 				if f.Severity != "error" || f.Action != "add" {
 					t.Errorf("finding %q has wrong shape: severity=%q action=%q", want, f.Severity, f.Action)
+				}
+				if f.TargetField != "component_boundaries[].implementation_files" || f.TargetValue != want {
+					t.Errorf("finding %q has non-executable action target: field=%q value=%q", want, f.TargetField, f.TargetValue)
+				}
+				formatted := (&workflow.PlanReviewResult{Findings: []workflow.PlanReviewFinding{f}}).FormatFindings()
+				wantAction := "Action: ADD `" + want + "` TO `component_boundaries[].implementation_files`"
+				if !strings.Contains(formatted, wantAction) {
+					t.Errorf("formatted scoped-file finding missing executable action %q:\n%s", wantAction, formatted)
 				}
 			}
 		})

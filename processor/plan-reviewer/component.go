@@ -368,10 +368,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	// in [[go-reviewer-cross-pass-synthesis-adr043]]; the co-fire shape
 	// here is the interim contract.
 	if planForRules, loadErr := c.loadPlanForRules(ctx, slug); loadErr == nil {
-		mergeCapabilityFindings(planForRules, result)
-		mergeArchitectureFindings(planForRules, result)
-		mergeStoryFindings(planForRules, result)
-		mergeScenarioTagFindings(planForRules, result)
+		mergeDeterministicFindings(planForRules, result)
 	} else {
 		c.logger.Warn("Skipping capability + architecture + story + scenario-tag rules — plan load failed",
 			"slug", slug, "error", loadErr)

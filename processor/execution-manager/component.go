@@ -859,11 +859,15 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	// re-dispatches the developer with actionable feedback.
 	if parseErr != nil || len(exec.FilesModified) == 0 {
 		var feedback string
+		scopeHint := ""
+		if len(exec.FileScope) > 0 {
+			scopeHint = " Work only inside the declared file scope: " + strings.Join(exec.FileScope, ", ") + "."
+		}
 		switch {
 		case parseErr != nil:
-			feedback = "Your previous attempt ended without calling submit_work. You must call submit_work with a summary and a non-empty files_modified array before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer."
+			feedback = "Your previous attempt ended without calling submit_work. You must call submit_work with a summary and a non-empty files_modified array before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer." + scopeHint
 		default:
-			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified."
+			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified." + scopeHint
 		}
 		c.routeFixableRejection(ctx, exec, feedback)
 		return
@@ -1615,6 +1619,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			TestSurface:         planTestSurface(plan),
 			HarnessProfiles:     c.planHarnessProfiles(plan),
 			WorktreePath:        exec.WorktreePath,
+			FileScope:           append([]string(nil), exec.FileScope...),
 			Scenarios:           scenariosToSpecs(exec.Scenarios),
 			UpstreamResolutions: prompt.ProjectUpstreams(planArchitecture(plan)),
 		}

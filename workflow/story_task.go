@@ -28,9 +28,9 @@ func DeterministicStoryOwner(s Story) string {
 //
 // Stories partition by execution-unit (ComponentName anchor): one Story per
 // cohesive component, carrying ALL requirements and capabilities that map
-// into that component. FilesOwned equals the component's
-// ImplementationFiles directly — Sarah does not choose files; the component
-// selection determines them.
+// into that component. FilesOwned is derived from the component's
+// ImplementationFiles plus deterministic companion test paths — Sarah does not
+// choose files; the component selection determines them.
 //
 // DependsOn is system-derived post-emission by DeriveStoryScheduling (NOT
 // Sarah-authored). The derivation runs two passes: (1) semantic edges from
@@ -50,7 +50,8 @@ type Story struct {
 
 	// ComponentName is the 1:1 execution anchor — the single architectural
 	// component this Story implements. Sarah selects ONE component per Story;
-	// FilesOwned is derived directly from ComponentDef.ImplementationFiles.
+	// FilesOwned is derived from ComponentDef.ImplementationFiles plus
+	// deterministic companion test paths.
 	// Plan-reviewer rule story.unresolved_component rejects values that
 	// don't match any declared component.
 	ComponentName string `json:"component_name,omitempty"`
@@ -74,8 +75,9 @@ type Story struct {
 	// proves.
 	Intent string `json:"intent,omitempty"`
 
-	// FilesOwned is the component's ImplementationFiles (NOT a union —
-	// Sarah's component selection determines them exactly).
+	// FilesOwned is the component's ImplementationFiles plus deterministic
+	// companion test paths (NOT a union — Sarah's component selection determines
+	// them).
 	// Plan-reviewer rule story.missing_files_owned rejects empty lists;
 	// story.docs_only_files_owned rejects lists with no source-code file.
 	FilesOwned []string `json:"files_owned,omitempty"`

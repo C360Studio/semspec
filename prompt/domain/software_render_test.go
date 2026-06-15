@@ -147,6 +147,7 @@ func TestRenderRequirementGeneratorPrompt_FreshGeneration(t *testing.T) {
 		Goal:            "Implement a /goodbye HTTP endpoint that returns JSON.",
 		Context:         "The service currently has /hello but no /goodbye.",
 		ScopeInclude:    []string{"api/app.py", "api/test_app.py"},
+		ScopeCreate:     []string{"api/goodbye.py"},
 		ScopeExclude:    []string{"docs/"},
 		ScopeDoNotTouch: []string{"README.md"},
 	})
@@ -157,6 +158,7 @@ func TestRenderRequirementGeneratorPrompt_FreshGeneration(t *testing.T) {
 		"**Goal**: Implement a /goodbye HTTP endpoint",
 		"**Context**: The service currently has /hello",
 		"**Scope Include**: api/app.py, api/test_app.py",
+		"**Scope Create**: api/goodbye.py",
 		"**Scope Exclude**: docs/",
 		"**Do Not Touch**: README.md",
 		"Extract testable requirements from the above plan",
@@ -432,6 +434,29 @@ func TestRenderArchitectPrompt_UsesHarnessProfileCatalogCards(t *testing.T) {
 	}
 	if strings.Contains(out, "test"+"_harness") {
 		t.Errorf("architect prompt still contains legacy harness field\nFull prompt:\n%s", out)
+	}
+}
+
+func TestRenderArchitectPrompt_RendersScopeCreateOwnershipContract(t *testing.T) {
+	out := renderArchitectPrompt(&prompt.ArchitectPromptContext{
+		Goal:         "support MAVLink",
+		ScopeInclude: []string{"build.gradle"},
+		ScopeCreate: []string{
+			"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkCsSystem.java",
+			"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSmokeTest.java",
+		},
+	})
+
+	required := []string{
+		"- Create: src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkCsSystem.java, src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSmokeTest.java",
+		"Every concrete path in Create is a deliverable",
+		"Assign each Create path to exactly one component_boundaries[].implementation_files",
+		"unowned Create paths as blocking architecture defects",
+	}
+	for _, want := range required {
+		if !strings.Contains(out, want) {
+			t.Errorf("architect prompt missing %q\nFull prompt:\n%s", want, out)
+		}
 	}
 }
 

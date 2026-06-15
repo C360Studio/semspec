@@ -185,6 +185,10 @@ func TestSoftwareDeveloperAssembly_WorktreePath_BannerRendered(t *testing.T) {
 		SupportsTools:  true,
 		TaskContext: &prompt.TaskContext{
 			WorktreePath: "/workspace/.semspec/worktrees/node-abc123/",
+			FileScope: []string{
+				"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkCsSystem.java",
+				"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSmokeTest.java",
+			},
 		},
 	})
 
@@ -193,6 +197,10 @@ func TestSoftwareDeveloperAssembly_WorktreePath_BannerRendered(t *testing.T) {
 		"DO NOT `cd /workspace` to write files",
 		"parent fixture root, NOT your worktree",
 		"Reading from `/workspace`, `/sources/`",
+		"Your declared file scope (Story.FilesOwned) is:",
+		"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkCsSystem.java",
+		"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkSmokeTest.java",
+		"This list already includes new files from scope.create",
 	}
 	for _, want := range wantPins {
 		if !strings.Contains(result.SystemMessage, want) {

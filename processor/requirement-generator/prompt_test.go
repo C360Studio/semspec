@@ -22,6 +22,7 @@ func TestBuildPromptContext_FreshGeneration(t *testing.T) {
 		Context: "Flask API",
 		Scope: &workflow.Scope{
 			Include:    []string{"api/app.py"},
+			Create:     []string{"api/goodbye.py"},
 			Exclude:    []string{"docs/"},
 			DoNotTouch: []string{"README.md"},
 		},
@@ -34,6 +35,9 @@ func TestBuildPromptContext_FreshGeneration(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.ScopeInclude, []string{"api/app.py"}) {
 		t.Errorf("ScopeInclude mapping wrong: %v", got.ScopeInclude)
+	}
+	if !reflect.DeepEqual(got.ScopeCreate, []string{"api/goodbye.py"}) {
+		t.Errorf("ScopeCreate mapping wrong: %v", got.ScopeCreate)
 	}
 	if !reflect.DeepEqual(got.ScopeExclude, []string{"docs/"}) {
 		t.Errorf("ScopeExclude mapping wrong: %v", got.ScopeExclude)

@@ -457,6 +457,7 @@ func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGenerat
 	}
 	if trigger.Scope != nil {
 		rg.ScopeInclude = trigger.Scope.Include
+		rg.ScopeCreate = trigger.Scope.Create
 		rg.ScopeExclude = trigger.Scope.Exclude
 		rg.ScopeDoNotTouch = trigger.Scope.DoNotTouch
 	}
