@@ -209,8 +209,8 @@ func TestResumeTerminalForRecoveryLocked_RecordsReasonBeforeResume(t *testing.T)
 // dev-gate fast-fail (ADR-049 Move-3) transitions the requirement to
 // awaiting-recovery — the ADR-049 / #167/#168 fix extends the original
 // QA-recovery logic (complete-only) to the iteration-exhaustion path. Reopening
-// a non-owned Story would invert the M:N reservation; a non-owner re-skips and
-// fast-completes via Tier-1 dedup once the owner re-ships.
+// a non-owned Story would invert the M:N reservation; a non-owner re-skips with
+// inherited owner evidence via Tier-1 dedup once the owner re-ships.
 func TestStoriesToReopenForRecovery(t *testing.T) {
 	plan := &workflow.Plan{Stories: []workflow.Story{
 		// owner = r1 (smallest), complete → reopen candidate for r1

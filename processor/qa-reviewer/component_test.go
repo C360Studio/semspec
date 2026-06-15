@@ -226,6 +226,58 @@ func TestBuildQAReviewContext(t *testing.T) {
 	})
 }
 
+func TestBuildQAVerdictEvent_ExecutableQAFailClosed(t *testing.T) {
+	result := &qaReviewOutput{Verdict: string(workflow.QAVerdictApproved), Summary: "looks fine"}
+
+	t.Run("missing QARun rejects integration", func(t *testing.T) {
+		plan := &workflow.Plan{Slug: "mavlink-hard", ID: "plan-1", QALevel: workflow.QALevelIntegration}
+		got := buildQAVerdictEvent(plan.Slug, plan, result)
+		if got.Verdict != workflow.QAVerdictRejected {
+			t.Fatalf("Verdict = %q, want rejected", got.Verdict)
+		}
+		if !strings.Contains(got.Summary, "no QARun") {
+			t.Errorf("Summary should explain missing QARun, got %q", got.Summary)
+		}
+	})
+
+	t.Run("failing QARun cannot be approved", func(t *testing.T) {
+		plan := &workflow.Plan{
+			Slug:    "mavlink-hard",
+			ID:      "plan-1",
+			QALevel: workflow.QALevelIntegration,
+			QARun: &workflow.QARun{
+				Passed: false,
+				Failures: []workflow.QAFailure{
+					{JobName: "integration", Message: "gradle test failed"},
+				},
+			},
+		}
+		got := buildQAVerdictEvent(plan.Slug, plan, result)
+		if got.Verdict != workflow.QAVerdictNeedsChanges {
+			t.Fatalf("Verdict = %q, want needs_changes", got.Verdict)
+		}
+		if !strings.Contains(got.Summary, "gradle test failed") {
+			t.Errorf("Summary should include failure evidence, got %q", got.Summary)
+		}
+	})
+
+	t.Run("passing QARun allows reviewer verdict", func(t *testing.T) {
+		plan := &workflow.Plan{
+			Slug:    "mavlink-hard",
+			ID:      "plan-1",
+			QALevel: workflow.QALevelIntegration,
+			QARun:   &workflow.QARun{Passed: true},
+		}
+		got := buildQAVerdictEvent(plan.Slug, plan, result)
+		if got.Verdict != workflow.QAVerdictApproved {
+			t.Fatalf("Verdict = %q, want approved", got.Verdict)
+		}
+		if got.Summary != "looks fine" {
+			t.Errorf("Summary = %q, want model summary", got.Summary)
+		}
+	})
+}
+
 // TestBuildQAReviewContext_ADR044CapabilityEvidence pins the ADR-044
 // release-readiness contract shift: QAReviewContext.Capabilities surfaces
 // per-Capability covering Story join + shipped count. A Capability with

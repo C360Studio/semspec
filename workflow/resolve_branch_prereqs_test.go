@@ -44,7 +44,7 @@ func TestResolveRequirementBranchPrereqs(t *testing.T) {
 		{
 			// A requirement-level dep that points at a NON-owner req (a2) must
 			// resolve to that req's covering-story owner (a1), since a2's branch
-			// is an empty fast-complete.
+			// is empty even though its execution record inherits owner evidence.
 			name: "requirement dep on non-owner -> owner branch",
 			req:  Requirement{ID: "c1", DependsOn: []string{"a2"}},
 			stories: []Story{

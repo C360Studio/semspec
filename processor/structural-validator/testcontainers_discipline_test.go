@@ -15,8 +15,9 @@ import (
 // retired (evidence-anchor presence, @integration binding string,
 // env-key consumption). What remains is "do the architect's
 // selections resolve in the catalog?" — a plan-time validity check.
-// Binding correctness is enforced by LLM reviewer + operator's CI
-// runtime (qa-runner integration-tier enforcement removed ADR-045).
+// Binding correctness is enforced by the LLM reviewer plus executable
+// qa_level=integration runtime when the project selects it; full/e2e
+// orchestration remains in operator CI.
 
 func TestCheckHarnessProfileDiscipline_NoSelections(t *testing.T) {
 	catalog := mustCatalog(t)

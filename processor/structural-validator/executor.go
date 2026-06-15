@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -81,10 +82,12 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		return nil, err
 	}
 
+	filesModified := e.effectiveFilesModified(ctx, trigger.FilesModified, workDir, runner)
+
 	// When FilesModified is empty, run all checks (full scan mode).
 	// This is the default for workflow-triggered validation where the
 	// developer agent doesn't report specific files modified.
-	runAll := len(trigger.FilesModified) == 0
+	runAll := len(filesModified) == 0
 
 	var results []payloads.CheckResult
 	for _, check := range checklist.Checks {
@@ -95,7 +98,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		// fixture authors expect. Caught PR #8 (issue #6 ring 2):
 		// hello-world-py pip-install had trigger:[] and was silently
 		// skipped on every dispatch, so pytest ran against an empty venv.
-		if !runAll && len(check.Trigger) > 0 && !matchesAny(check.Trigger, trigger.FilesModified) {
+		if !runAll && len(check.Trigger) > 0 && !matchesAny(check.Trigger, filesModified) {
 			continue
 		}
 
@@ -110,8 +113,8 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// Only fires in Go projects (go.mod exists) to avoid spurious failures.
 	if !hasCheckNamed(results, "go-test") && !hasCheckNamed(results, "go-test-modified") &&
 		!checklistHasName(checklist, "go-test") && !checklistHasName(checklist, "go-test-modified") {
-		if hasGoFiles(trigger.FilesModified) && e.isGoProjectIn(workDir) {
-			goTestResult := e.runGoTestOnModifiedIn(ctx, trigger.FilesModified, workDir, runner)
+		if hasGoFiles(filesModified) && e.isGoProjectIn(workDir) {
+			goTestResult := e.runGoTestOnModifiedIn(ctx, filesModified, workDir, runner)
 			results = append(results, goTestResult)
 		}
 	}
@@ -125,8 +128,8 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// the code-reviewer approved because `go test ./...` reported "passes
 	// all tests" — the auth/ package's pre-existing tests passed and the
 	// reviewer didn't notice main.go's package showed `?  [no test files]`.
-	if hasGoFiles(trigger.FilesModified) && e.isGoProjectIn(workDir) {
-		results = append(results, e.runGoTestsExistOnModifiedIn(ctx, trigger.FilesModified, workDir, runner))
+	if hasGoFiles(filesModified) && e.isGoProjectIn(workDir) {
+		results = append(results, e.runGoTestsExistOnModifiedIn(ctx, filesModified, workDir, runner))
 	}
 
 	// Always-on gate: a story may only MODIFY files it owns, and must not commit
@@ -140,8 +143,8 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		e.runFileOwnershipContainment(ctx, workflow.NormalizeFilePaths(trigger.FilesOwned), workDir, runner)...)
 
 	// Advisory anti-mock governance check — only when test files are present.
-	if hasTestFiles(trigger.FilesModified) {
-		antiMockResult := CheckAntiMock(workDir, trigger.FilesModified)
+	if hasTestFiles(filesModified) {
+		antiMockResult := CheckAntiMock(workDir, filesModified)
 		results = append(results, antiMockResult)
 	}
 
@@ -151,13 +154,12 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// dispatch is in flight). Post-issue #113 (2026-06-03) the check
 	// verifies only that the architect's harness_profile_selections
 	// resolve in the catalog. Binding correctness (the test actually
-	// exercises the bound harness) is enforced by the LLM reviewer +
-	// operator's CI runtime — see ADR-041 Move 5 amendment for why the
-	// literal-substring sub-checks were retired (qa-runner enforcement
-	// removed ADR-045).
+	// exercises the bound harness) is enforced by the LLM reviewer plus the
+	// executable QA runtime — see ADR-041 Move 5 amendment for why the
+	// literal-substring sub-checks were retired.
 	// Loads selections from .semspec/plans/<slug>/plan.json on disk;
 	// greenfield projects (no architecture) trivially pass.
-	if len(filterTestFiles(trigger.FilesModified)) > 0 {
+	if len(filterTestFiles(filesModified)) > 0 {
 		selections := loadHarnessProfiles(e.repoPath, trigger.Slug)
 		catalog, err := harnesscatalog.Load(e.repoPath)
 		if err != nil {
@@ -173,10 +175,14 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 			// workDir/filesModified/scenarios. The literal-substring sub-
 			// checks were retired (goodhart-able); the simplified check
 			// just verifies the architect's selections resolve in the
-			// catalog. Binding correctness is enforced by LLM reviewer +
-			// operator's CI runtime (ADR-045).
+			// catalog. Binding correctness is enforced by LLM reviewer plus
+			// executable QA runtime.
 			results = append(results, CheckHarnessProfileDiscipline(selections, catalog))
 		}
+	}
+
+	if shouldCheckGradleWrapper(filesModified, workDir) {
+		results = append(results, checkGradleWrapperCompleteness(workDir))
 	}
 
 	// Deterministic stub-artifact detector — runs whenever .jar files
@@ -184,8 +190,8 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// reject (Required: true) on stubs because fabrication is a
 	// ship-stopper that neither reviewer prose nor Testcontainers
 	// discipline catches reliably. Take-19 deferred item (c).
-	if hasJarFiles(trigger.FilesModified) {
-		stubResult := CheckStubArtifacts(workDir, trigger.FilesModified)
+	if hasJarFiles(filesModified) {
+		stubResult := CheckStubArtifacts(workDir, filesModified)
 		results = append(results, stubResult)
 	}
 
@@ -197,6 +203,38 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 		ChecksRun:    len(results),
 		CheckResults: results,
 	}, nil
+}
+
+func (e *Executor) effectiveFilesModified(ctx context.Context, reported []string, workDir string, runner CommandRunner) []string {
+	seen := make(map[string]struct{}, len(reported))
+	for _, f := range workflow.NormalizeFilePaths(reported) {
+		if f != "" {
+			seen[f] = struct{}{}
+		}
+	}
+
+	stdout, _, exitCode, err := runner.Run(ctx, "git status --porcelain=v1 --untracked-files=all", workDir, 15*time.Second)
+	if err != nil || exitCode != 0 {
+		return sortedKeys(seen)
+	}
+	for _, entry := range parsePorcelain(stdout) {
+		if entry.Path != "" {
+			seen[workflow.NormalizeFilePath(entry.Path)] = struct{}{}
+		}
+	}
+	return sortedKeys(seen)
+}
+
+func sortedKeys(set map[string]struct{}) []string {
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // runnerForTrigger returns a sandbox runner when the sandbox is configured and

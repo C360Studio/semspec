@@ -75,8 +75,9 @@ Cycle in derived DAG = invalid coverage partition; Sarah retries with remediatio
 scenario-orchestrator's `filterByM2NStoryReservations` ensures ONLY the deterministic owner
 (lexicographically smallest req ID in `Story.RequirementIDs`) dispatches the dev loop. Non-owners
 are gated behind `Story.Status == complete`. On owner completion, plan-manager re-fires the
-orchestrator; non-owners dispatch and hit the executor's Tier-1 dedup which fast-completes them
-without re-running the dev loop. Cost: 1 dev loop per Story instead of N.
+orchestrator; non-owners dispatch and the executor copies the owner's completed node evidence
+before marking the requirement complete. Missing owner evidence is a failure, not a zero-node
+completion. Cost: 1 dev loop per Story instead of N.
 
 **workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a
 state management layer. Components own their entity lifecycle.
@@ -97,7 +98,7 @@ state management layer. Components own their entity lifecycle.
 | `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
 | `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
 | `execution-manager` | `processor/execution-manager/` | TDD pipeline: developer → validator → reviewer |
-| `qa-reviewer` | `processor/qa-reviewer/` | Release-readiness verdict (Murat); scoped by project `qa_level` (synthesis/unit). Heavier tiers run in the operator's CI (ADR-045) |
+| `qa-reviewer` | `processor/qa-reviewer/` | Release-readiness verdict (Murat); scoped by project `qa_level` (synthesis/unit/integration/full). Unit/integration require sandbox QA evidence; full/e2e remains operator CI (ADR-045) |
 | `requirement-executor` | `processor/requirement-executor/` | DAG decomposition and serial node execution |
 | `scenario-orchestrator` | `processor/scenario-orchestrator/` | Dispatches pending requirements for execution |
 | `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, cascade |

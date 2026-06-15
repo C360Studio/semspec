@@ -835,7 +835,7 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 	// Validate qa_level before touching state. Empty string is accepted
 	// (clears to synthesis default via EffectiveQALevel).
 	if req.QALevel != nil && *req.QALevel != "" && !workflow.QALevel(*req.QALevel).IsValid() {
-		http.Error(w, fmt.Sprintf("qa_level %q is not one of: none, synthesis, unit", *req.QALevel), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("qa_level %q is not one of: none, synthesis, unit, integration", *req.QALevel), http.StatusBadRequest)
 		return
 	}
 

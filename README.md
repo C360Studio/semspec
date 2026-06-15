@@ -188,9 +188,9 @@ the full changeset and returns per-scenario verdicts: `approved`, `needs_changes
 into a final release-readiness verdict. The plan transitions through `reviewing_qa` (or directly
 to `complete` when `qa_level=none`) before reaching `complete`. The gate counts completed
 requirements, not scenarios. Inputs vary by `qa_level`: `synthesis` reads plan+impl only;
-`unit` first routes through `ready_for_qa` so the sandbox can run project tests, then feeds
-results into the reviewer. Heavier tiers (`integration`/`full`) run in the operator's CI via
-the emitted `qa.yml` — semspec designs and gates, the operator's CI executes.
+`unit` and `integration` first route through `ready_for_qa` so the sandbox can run the
+configured project test command, then feed results into the reviewer. `full`/e2e proof remains
+operator-owned via the emitted `qa.yml`.
 
 > Older plans may show a `reviewing_rollup` status. That stage is kept for in-flight plans on
 > upgrade but no new code emits it.

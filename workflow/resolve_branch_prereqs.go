@@ -6,8 +6,9 @@ import "sort"
 // for the story covering reqID — the DeterministicStoryOwner of that story.
 //
 // Under ADR-044 M:N, only a Story's owner runs the dev loop; non-owner
-// requirements fast-complete with no commits on their own branch. So a dependent
-// must derive from the OWNER's branch, never a non-owner's (which is empty).
+// requirements inherit the owner's node evidence but have no commits on their
+// own branch. So a dependent must derive from the OWNER's branch, never a
+// non-owner's (which is empty).
 // When no Story covers reqID (legacy/mock plans without Stories), reqID owns its
 // own work.
 func ownerRequirementFor(reqID string, stories []Story) string {

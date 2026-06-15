@@ -250,10 +250,12 @@ func (c *Component) pruneBranch(ctx context.Context, slug, branch string) bool {
 //
 // Nodes (M:N, product call P2): the DeterministicStoryOwner of each Story plus
 // every requirement covered by no Story (legacy/mock plans). Non-owner covered
-// requirements are skipped — they fast-complete with no commits, so their
-// branches are empty and the owner branch already carries the whole Story's
-// work. With no Stories every requirement is its own node, reducing to the
-// pre-M:N behavior (and keeping existing assembly tests green).
+// requirements are skipped for branch assembly because their branches are empty
+// and the owner branch already carries the whole Story's work. Their
+// requirement-execution records still inherit the owner Story's node evidence;
+// this branch filter is about git assembly, not QA proof. With no Stories every
+// requirement is its own node, reducing to the pre-M:N behavior (and keeping
+// existing assembly tests green).
 //
 // Order: a node's prerequisites are ResolveRequirementBranchPrereqs (the SAME
 // resolved union that drove branch derivation — design §3), restricted to the
@@ -283,8 +285,8 @@ func assemblyBranchOrder(reqs []workflow.Requirement, stories []workflow.Story) 
 // assemblyNodes returns the requirement IDs whose branches assembly merges, in
 // requirement-slice order (stable tie-break position): each Story's owner plus
 // every requirement covered by no Story. Non-owner covered requirements are
-// excluded (empty fast-complete branches). With no Stories every requirement is
-// its own node.
+// excluded because their branches are empty and the owner branch carries the
+// shared Story's work. With no Stories every requirement is its own node.
 func assemblyNodes(reqs []workflow.Requirement, stories []workflow.Story) (order []string, set map[string]struct{}) {
 	storyOwners := make(map[string]struct{}, len(stories))
 	for _, s := range stories {

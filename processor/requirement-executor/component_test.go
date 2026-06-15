@@ -2486,3 +2486,65 @@ func TestDispatchCurrentStoryLocked_SkipsAlreadyCompleteStory(t *testing.T) {
 		t.Error("exec.DAG should be nil (no dispatch on already-complete Story)")
 	}
 }
+
+func TestCopyStoryEvidence_CopiesOwnerNodeResultsForSharedStory(t *testing.T) {
+	story := workflow.Story{
+		ID:             "story.demo.shared",
+		RequirementIDs: []string{"req.demo.1", "req.demo.2"},
+		Tasks: []workflow.Task{
+			{ID: "task.demo.shared.1", StoryID: "story.demo.shared"},
+			{ID: "task.demo.shared.2", StoryID: "story.demo.shared"},
+		},
+	}
+	owner := &requirementExecution{
+		RequirementID: "req.demo.1",
+		NodeResults: []NodeResult{
+			{NodeID: "task.demo.shared.1", FilesModified: []string{"src/shared.go"}, CommitSHA: "abc123"},
+			{NodeID: "task.demo.other.1", FilesModified: []string{"src/other.go"}, CommitSHA: "def456"},
+		},
+	}
+	nonOwner := &requirementExecution{
+		RequirementID: "req.demo.2",
+		VisitedNodes:  make(map[string]bool),
+	}
+
+	if !copyStoryEvidence(nonOwner, story, owner) {
+		t.Fatal("copyStoryEvidence returned false, want true for matching owner node evidence")
+	}
+	if len(nonOwner.NodeResults) != 1 {
+		t.Fatalf("copied NodeResults = %d, want 1 matching the shared story tasks", len(nonOwner.NodeResults))
+	}
+	if got := nonOwner.NodeResults[0].NodeID; got != "task.demo.shared.1" {
+		t.Errorf("copied NodeID = %q, want task.demo.shared.1", got)
+	}
+	if !nonOwner.VisitedNodes["task.demo.shared.1"] {
+		t.Error("VisitedNodes should include copied story evidence for completion accounting")
+	}
+
+	if !copyStoryEvidence(nonOwner, story, owner) {
+		t.Fatal("second copyStoryEvidence returned false; existing evidence should still satisfy the story")
+	}
+	if len(nonOwner.NodeResults) != 1 {
+		t.Fatalf("second copy duplicated evidence: NodeResults = %d, want 1", len(nonOwner.NodeResults))
+	}
+}
+
+func TestCopyStoryEvidence_FailsWithoutMatchingOwnerNodes(t *testing.T) {
+	story := workflow.Story{
+		ID:             "story.demo.shared",
+		RequirementIDs: []string{"req.demo.1", "req.demo.2"},
+		Tasks:          []workflow.Task{{ID: "task.demo.shared.1", StoryID: "story.demo.shared"}},
+	}
+	owner := &requirementExecution{
+		RequirementID: "req.demo.1",
+		NodeResults:   []NodeResult{{NodeID: "task.demo.other.1", CommitSHA: "abc123"}},
+	}
+	nonOwner := &requirementExecution{RequirementID: "req.demo.2"}
+
+	if copyStoryEvidence(nonOwner, story, owner) {
+		t.Fatal("copyStoryEvidence returned true, want false when owner has no node result for this Story")
+	}
+	if len(nonOwner.NodeResults) != 0 {
+		t.Fatalf("NodeResults = %d, want 0 when no matching story evidence exists", len(nonOwner.NodeResults))
+	}
+}

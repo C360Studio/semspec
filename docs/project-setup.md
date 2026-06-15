@@ -137,12 +137,12 @@ plan at creation so policy changes don't retroactively affect in-flight work.
 | `none` | — | No QA gate; plan goes straight to `complete` | Doc-only hotfixes |
 | `synthesis` | qa-reviewer only | LLM verdict on plan artifacts, no test execution | Default; fast, content-based check |
 | `unit` | sandbox | `go test ./...` (or language default) against the merged worktree | Most projects |
-| `integration` | operator's CI | `.github/workflows/qa.yml` job `integration` — tagged integration tests against real service dependencies. Per ADR-039 the catalog `services`-class profiles render as qa.yml `services:` blocks; the operator's CI brings the stack up. `testcontainers` and `pure-fixture` profiles are started by the test code itself. Semspec emits the qa.yml; it does not execute it (ADR-045). Values of `integration` in `qa_level` are coerced to `synthesis` at runtime. | Projects with integration suites (operator-CI-only) |
-| `full` | operator's CI | Both `integration` + `e2e` jobs — adds Playwright browser flows. Semspec emits the qa.yml; the operator's CI executes it (ADR-045). Values of `full` in `qa_level` are coerced to `synthesis` at runtime. | Projects with UI + browser tests (operator-CI-only) |
+| `integration` | sandbox + operator CI contract | Semspec runs the configured integration command in the sandbox and requires a passing QA executor result before qa-reviewer can approve. Catalog `services` profiles still render into `.github/workflows/qa.yml` for operator CI because the sandbox cannot stand up every live dependency; `testcontainers` and `pure-fixture` profiles are owned by project test code. | Projects with runnable integration suites |
+| `full` | operator's CI | Both `integration` + `e2e` jobs — adds Playwright browser flows. Semspec emits the qa.yml; the operator's CI executes it (ADR-045). Stale `full` values are treated as `synthesis` by semspec's local gate. | Projects with UI + browser tests (operator-CI-only) |
 
-**MVP scope:** use `synthesis` for hard-scenario demos unless the project already owns a reliable integration command.
-Scenario tags and harness profile IDs remain planning/review metadata, but semspec-managed harness routing and full/e2e
-orchestration are post-MVP.
+**MVP scope:** use `integration` when the project owns a reliable sandbox-runnable command.
+Scenario tags and harness profile IDs remain planning/review metadata for service orchestration; full/e2e
+orchestration stays in operator CI.
 
 Configure via `.semspec/project.json`:
 

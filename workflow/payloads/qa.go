@@ -10,9 +10,10 @@ import (
 )
 
 // QA phase payloads — target-project test execution gate before complete. The
-// sandbox consumes QARequestedPayload (unit mode) and publishes
-// QACompletedPayload; qa-reviewer consumes QACompletedPayload (failure path) to
-// emit PlanDecisions. Heavier tiers run in the operator's CI, not a semspec executor.
+// sandbox consumes QARequestedPayload for executable QA modes and publishes
+// QACompletedPayload; qa-reviewer consumes QACompletedPayload to emit the
+// release verdict. Full/e2e orchestration remains an operator CI concern for
+// MVP.
 
 // QARequestedType is the message type for QA execution requests.
 var QARequestedType = message.Type{
@@ -37,11 +38,11 @@ func (p *QARequestedPayload) Validate() error {
 	if err := workflow.ValidateSlug(p.Slug); err != nil {
 		return fmt.Errorf("slug: %w", err)
 	}
-	// Mode must be the sandbox-executed unit level. none and synthesis don't
-	// publish QARequestedEvent (they skip QA or go straight to reviewing_qa);
-	// heavier tiers run in the operator's CI, not via a semspec executor.
-	if p.Mode != workflow.QALevelUnit {
-		return fmt.Errorf("mode must be unit, got %q", p.Mode)
+	// Mode must be one of the sandbox-executed QA levels. none and synthesis do
+	// not publish QARequestedEvent; stale/removed levels such as "full" are not
+	// executable in-process.
+	if !p.Mode.UsesSandboxTests() {
+		return fmt.Errorf("mode must be a sandbox-executed QA level (unit or integration), got %q", p.Mode)
 	}
 	// Workspace, when present, is the QA worktree's sandbox task_id. Reject
 	// path-traversal-shaped values so a malformed event cannot escape the

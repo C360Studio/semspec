@@ -23,10 +23,10 @@ tasks:
 
   build-image:
     internal: true
-    desc: Build semspec Docker image for E2E tests
+    desc: Build semspec and sandbox Docker images for E2E tests
     cmds:
-      - echo "[BUILD-IMAGE] Building semspec Docker image..."
-      - docker compose -p semspec-e2e -f docker/compose/e2e.yml build semspec
+      - echo "[BUILD-IMAGE] Building semspec and sandbox Docker images..."
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml build semspec sandbox
       - echo "[OK] Docker image built"
 
   check-ports:
@@ -403,8 +403,14 @@ tasks:
       - |
         echo "[E2E:MOCK] Scenario: {{.SCENARIO}}"
 
-        # Validate mock fixtures exist for this scenario.
-        FIXTURE_DIR="test/e2e/fixtures/mock-responses/{{.SCENARIO}}"
+        # Validate mock fixtures exist for this scenario. Some scenario
+        # variants intentionally share deterministic LLM fixtures while
+        # exercising different runtime routing.
+        FIXTURE_SCENARIO="{{.SCENARIO}}"
+        case "$FIXTURE_SCENARIO" in
+          qa-cycle-integration) FIXTURE_SCENARIO="qa-cycle" ;;
+        esac
+        FIXTURE_DIR="test/e2e/fixtures/mock-responses/$FIXTURE_SCENARIO"
         if [ ! -d "$FIXTURE_DIR" ]; then
           echo "[ERROR] No mock LLM fixtures found at: $FIXTURE_DIR"
           echo ""
@@ -418,7 +424,7 @@ tasks:
         fi
 
         echo "[E2E:MOCK] Starting infrastructure with mock LLM..."
-        MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        MOCK_SCENARIO="$FIXTURE_SCENARIO" docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
       - |
         echo "[E2E:MOCK] Running {{.SCENARIO}} with mock LLM..."
         E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11535 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}

@@ -1819,7 +1819,7 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 // the execution-phase counterpart of determineR2ReentryPoint's "architecture"
 // case: capture the prior architecture so the architect REVISES rather than
 // rewrites, wipe Architecture + Stories + Scenarios, reset every requirement
-// execution so the re-run can't fast-complete via the executor's Tier-1 dedup,
+// execution so the re-run cannot reuse stale Story owner evidence via Tier-1 dedup,
 // route the recovery diagnosis into ReviewFormattedFindings (the channel the
 // architecture-generator already reads on revision rounds — component.go:301),
 // and drive the back-transition implementing → requirements_generated so the

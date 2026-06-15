@@ -81,9 +81,10 @@ func filterReadyRequirements(
 //  2. A non-owner requirement may dispatch ONLY when every covering
 //     Story it does NOT own has reached Story.Status == complete. The
 //     post-completion executor's Tier-1 dedup at component.go:dispatchCurrentStoryLocked
-//     immediately fires markCompletedLocked without re-running the dev
-//     loop — correct, because the work has actually shipped under the
-//     owner's executor.
+//     advances without re-running the dev loop, but only after copying
+//     the deterministic owner's node evidence into the non-owner
+//     requirement execution. That preserves the one-dev-loop property
+//     without producing zero-node completions.
 //
 // Without this gate, the post-claim-rejection path in requirement-executor
 // would call markCompletedLocked for a non-owner requirement BEFORE the
@@ -117,7 +118,7 @@ func filterByM2NStoryReservations(ready []workflow.Requirement, stories []workfl
 				continue // we own this Story — dispatch normally
 			}
 			if s.Status == workflow.StoryStatusComplete {
-				continue // owner already shipped this Story — we can dispatch and Tier-1 fast-completes
+				continue // owner already shipped this Story — executor will inherit owner evidence
 			}
 			// Non-owner Story not yet complete — defer until owner ships.
 			gated = true

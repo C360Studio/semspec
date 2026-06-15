@@ -45,6 +45,10 @@ import (
 	"github.com/google/uuid"
 )
 
+var fixtureScenarioAliases = map[string]string{
+	"qa-cycle-integration": "qa-cycle",
+}
+
 // --- OpenAI-compatible types ---
 
 type chatRequest struct {
@@ -157,6 +161,22 @@ func newServer(fixtures map[string][]string, fixtureDir string) *server {
 	}
 }
 
+func resolveFixtureDir(dir string) string {
+	if _, err := os.Stat(dir); err == nil {
+		return dir
+	}
+	alias, ok := fixtureScenarioAliases[filepath.Base(dir)]
+	if !ok {
+		return dir
+	}
+	aliasedDir := filepath.Join(filepath.Dir(dir), alias)
+	if _, err := os.Stat(aliasedDir); err != nil {
+		return dir
+	}
+	log.Printf("Fixture scenario %q aliased to %q", filepath.Base(dir), alias)
+	return aliasedDir
+}
+
 // captureRequest stores a request for later retrieval via /requests endpoint.
 func (s *server) captureRequest(model string, req chatRequest, callIndex int) {
 	s.modelRequestsMu.Lock()
@@ -195,6 +215,7 @@ func main() {
 		*fixtureDir = "/fixtures"
 	}
 
+	*fixtureDir = resolveFixtureDir(*fixtureDir)
 	fixtures, err := loadFixtures(*fixtureDir)
 	if err != nil {
 		log.Fatalf("Failed to load fixtures from %s: %v", *fixtureDir, err)
@@ -391,7 +412,7 @@ func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
 	// The original fixtureDir already includes the scenario subdirectory
 	// (e.g., /fixtures/hello-world), so we go up one level.
 	baseDir := filepath.Dir(s.fixtureDir)
-	newDir := filepath.Join(baseDir, scenario)
+	newDir := resolveFixtureDir(filepath.Join(baseDir, scenario))
 
 	fixtures, err := loadFixtures(newDir)
 	if err != nil {
@@ -402,6 +423,7 @@ func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.fixtures = fixtures
+	s.fixtureDir = newDir
 	s.mu.Unlock()
 
 	// Reset all counters and fault injection.

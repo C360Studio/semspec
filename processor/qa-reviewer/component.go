@@ -5,7 +5,7 @@
 // mutation to plan-manager.
 //
 // Phase 6 wires real LLM review and populates verdict dimensions scoped by the
-// plan's qa.level (synthesis/unit/integration/full). Projects that want to
+// plan's qa.level (synthesis/unit/integration). Projects that want to
 // bypass qa-reviewer entirely set qa.level=none on their project config —
 // plan-manager then routes plans straight to complete without entering
 // reviewing_qa at all. Plan-manager is the single writer — this component
@@ -195,7 +195,7 @@ func (c *Component) Start(ctx context.Context) error {
 	go c.watchPlanStates(subCtx, js)
 	go c.watchLoopCompletions(subCtx)
 	if err := c.startQACompletedConsumer(subCtx); err != nil {
-		c.logger.Warn("Failed to start QACompleted consumer — unit/integration/full plans will stall",
+		c.logger.Warn("Failed to start QACompleted consumer — unit/integration plans will stall",
 			"error", err)
 	}
 
@@ -686,6 +686,9 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 	if plan != nil {
 		level = plan.EffectiveQALevel()
 	}
+	if forced := forcedExecutableQAVerdict(slug, plan, level); forced != nil {
+		return forced
+	}
 	verdict := &workflow.QAVerdictEvent{
 		Slug:    slug,
 		Level:   level,
@@ -729,6 +732,72 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 		verdict.PlanDecisionIDs = append(verdict.PlanDecisionIDs, proposal.ID)
 	}
 	return verdict
+}
+
+func forcedExecutableQAVerdict(slug string, plan *workflow.Plan, level workflow.QALevel) *workflow.QAVerdictEvent {
+	if plan == nil || !level.UsesSandboxTests() {
+		return nil
+	}
+	base := &workflow.QAVerdictEvent{
+		Slug:   slug,
+		PlanID: plan.ID,
+		Level:  level,
+		Dimensions: workflow.QAVerdictDimensions{
+			Coverage:          "not satisfied",
+			AssertionQuality:  "not satisfied",
+			RegressionSurface: "not satisfied",
+		},
+	}
+	if plan.QARun == nil {
+		base.Verdict = workflow.QAVerdictRejected
+		base.Summary = fmt.Sprintf("QA level %s requires an executor result, but no QARun was attached. Refusing to approve without executed test evidence.", level)
+		base.ReviewerError = "missing qa executor result"
+		return base
+	}
+	if plan.QARun.RunnerError != "" {
+		base.Verdict = workflow.QAVerdictRejected
+		base.Summary = fmt.Sprintf("QA executor failed at level %s: %s", level, plan.QARun.RunnerError)
+		base.ReviewerError = plan.QARun.RunnerError
+		return base
+	}
+	if !plan.QARun.Passed {
+		base.Verdict = workflow.QAVerdictNeedsChanges
+		base.Summary = summarizeQAFailures(level, plan.QARun)
+		return base
+	}
+	return nil
+}
+
+func summarizeQAFailures(level workflow.QALevel, run *workflow.QARun) string {
+	if run == nil {
+		return fmt.Sprintf("QA level %s did not produce a run result.", level)
+	}
+	if len(run.Failures) == 0 {
+		return fmt.Sprintf("QA level %s failed: executor reported passed=false with no structured failures.", level)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "QA level %s failed with %d failure(s).", level, len(run.Failures))
+	for i, failure := range run.Failures {
+		if i >= 3 {
+			fmt.Fprintf(&b, " %d additional failure(s) omitted.", len(run.Failures)-i)
+			break
+		}
+		fmt.Fprintf(&b, " [%s]", failure.JobName)
+		if failure.TestName != "" {
+			fmt.Fprintf(&b, " %s", failure.TestName)
+		}
+		if failure.Message != "" {
+			fmt.Fprintf(&b, ": %s", failure.Message)
+		}
+		excerpt := strings.TrimSpace(failure.LogExcerpt)
+		if excerpt != "" {
+			if len(excerpt) > 240 {
+				excerpt = excerpt[:240] + "..."
+			}
+			fmt.Fprintf(&b, " Excerpt: %s", excerpt)
+		}
+	}
+	return b.String()
 }
 
 // recordQARejectionLesson persists a role-scoped lesson when the verdict

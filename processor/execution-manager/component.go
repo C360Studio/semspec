@@ -1947,7 +1947,7 @@ func ownershipPlanningGap(results []payloads.CheckResult) (string, bool) {
 // runStructuralValidation publishes a ValidationRequest to the structural-validator
 // component and waits for the result. Same pattern as ask_question — fire and wait.
 func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecution) (payloads.ValidationResult, error) {
-	timeout := 30 * time.Second
+	timeout := 15 * time.Minute
 
 	req := &payloads.ValidationRequest{
 		ExecutionID:     uuid.New().String(),

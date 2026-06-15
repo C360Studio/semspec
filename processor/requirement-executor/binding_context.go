@@ -54,8 +54,9 @@ func buildBindingContextBlock(scenarios []workflow.Scenario) string {
 	b.WriteString("For MVP, this block is authoring and review context: write tests so they can ")
 	b.WriteString("participate in the project's own integration-test protocol, usually by ")
 	b.WriteString("declaring the tier, reading environment-provided endpoints, and asserting ")
-	b.WriteString("the catalog's required behavior. Murat records whether runtime proof is ")
-	b.WriteString("present, missing, or deferred; full semspec-managed harness routing is post-MVP.\n\n")
+	b.WriteString("the catalog's required behavior. qa_level=integration runs the configured ")
+	b.WriteString("project QA command as the runtime evidence gate; full/e2e orchestration remains ")
+	b.WriteString("operator CI for MVP.\n\n")
 
 	for _, sc := range relevant {
 		b.WriteString(formatScenarioBinding(sc))

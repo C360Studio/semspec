@@ -26,10 +26,10 @@ import (
 //   - **LLM reviewer** — judges whether the test actually exercises the
 //     bound harness (catches "UDP probe facade is not real mavsdk_server
 //     lifecycle" — the smoke-9 reviewer's call).
-//   - **Operator's CI runtime** — actually starts the bound service stack
-//     and runs the @integration test against it. A test that just
-//     references the literal but doesn't open the service fails here.
-//     (qa-runner integration-tier enforcement removed — ADR-045)
+//   - **Executable QA runtime** — qa_level=integration runs the configured
+//     project QA command in the sandbox; full/e2e orchestration remains in
+//     operator CI for MVP. A test that just references the literal but doesn't
+//     open the service fails at that runtime gate.
 //
 // This check now does one thing: verify that the architect didn't name
 // a profile that doesn't exist in the catalog. That's a plan-time
@@ -38,8 +38,8 @@ import (
 //
 // Future direction: see issue #113 for the path to AST-aware or
 // behavioral evidence (Option B / Option C). This commit ships
-// Option A — delete the literal checks; rely on LLM reviewer +
-// operator's CI runtime (ADR-045).
+// Option A — delete the literal checks; rely on LLM reviewer plus executable
+// QA runtime.
 func CheckHarnessProfileDiscipline(selections []workflow.HarnessProfileSelection, catalog *harnesscatalog.Catalog) payloads.CheckResult {
 	if len(selections) == 0 {
 		return passHarnessResult("no test environment profiles selected — nothing to enforce")
@@ -49,7 +49,7 @@ func CheckHarnessProfileDiscipline(selections []workflow.HarnessProfileSelection
 		return failHarnessResult(err.Error())
 	}
 	return passHarnessResult(fmt.Sprintf(
-		"required test environment profiles resolve in catalog: %d (binding correctness enforced by LLM reviewer + operator's CI runtime, not literal-grep — see issue #113; qa-runner integration-tier enforcement removed ADR-045)",
+		"required test environment profiles resolve in catalog: %d (binding correctness enforced by LLM reviewer + executable QA runtime, not literal-grep — see issue #113)",
 		len(required)))
 }
 

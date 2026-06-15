@@ -16,7 +16,8 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// QACycleScenario validates the end-to-end QA phase for qa_level=unit.
+// QACycleScenario validates the end-to-end QA phase for sandbox-executable
+// qa_level values.
 //
 // This is the Tier 2 runtime validation of Phases 2.5a / 2.5b / 3 / 4 / 5 / 5.1 / 6:
 //
@@ -37,12 +38,8 @@ type QACycleScenario struct {
 	nats    *client.NATSClient
 	mockLLM *client.MockLLMClient
 
-	// qaLevel is always "unit" — the only sandbox-executed QA level.
-	// Heavier tiers (integration, full) run in the operator's CI via the
-	// emitted qa.yml and have no in-process e2e scenario (ADR-045).
 	qaLevel string
-	// name is the scenario name; also the mock-llm fixture subdirectory.
-	name string
+	name    string
 }
 
 // NewQACycleScenario creates a new QA cycle scenario at qa_level=unit.
@@ -51,17 +48,21 @@ func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
 	return &QACycleScenario{config: cfg, qaLevel: "unit", name: "qa-cycle"}
 }
 
-// NOTE: the qa-cycle-integration and qa-cycle-services scenarios were removed
-// with the qa-runner executor (BMAD realignment / ADR-045). Integration/services
-// tiers now run in the operator's CI, not via a semspec executor, so there is
-// no in-process path for an e2e scenario to exercise them.
+// NewQAIntegrationCycleScenario creates a QA cycle scenario at
+// qa_level=integration. It intentionally reuses the qa-cycle mock LLM fixtures:
+// the plan/dev story is identical, but plan-manager must route through
+// QARequestedEvent(mode=integration), sandbox QA execution, and qa-reviewer
+// fail-closed verdict handling.
+func NewQAIntegrationCycleScenario(cfg *config.Config) *QACycleScenario {
+	return &QACycleScenario{config: cfg, qaLevel: "integration", name: "qa-cycle-integration"}
+}
 
 // Name implements Scenario.
 func (s *QACycleScenario) Name() string { return s.name }
 
 // Description implements Scenario.
 func (s *QACycleScenario) Description() string {
-	return "QA phase end-to-end at qa_level=unit: sandbox runs go test, qa-reviewer approves, plan → complete"
+	return fmt.Sprintf("QA phase end-to-end at qa_level=%s: sandbox runs go test, qa-reviewer approves, plan → complete", s.qaLevel)
 }
 
 // Setup prepares the scenario environment.
@@ -106,11 +107,10 @@ func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 		return time.Duration(normalSec) * time.Second
 	}
 
-	// qaBudget is the per-stage timeout for stages that wait on the QA executor
-	// (reviewing_qa / qa.completed assertions / complete). Only unit is executed
-	// in-process via the sandbox; heavier tiers run in the operator's CI.
-	qaBudget := func(unitNormal, unitFast int) time.Duration {
-		return t(unitNormal, unitFast)
+	// qaBudget is the per-stage timeout for stages that wait on the sandbox QA
+	// executor (reviewing_qa / qa.completed assertions / complete).
+	qaBudget := func(normalSec, fastSec int) time.Duration {
+		return t(normalSec, fastSec)
 	}
 
 	stages := []struct {
@@ -165,7 +165,7 @@ func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 // and initialises a git repository.
 //
 // The workspace must contain a passing Go test suite so the sandbox can run
-// `go test ./...` at qa_level=unit and get a green result.
+// `go test ./...` at the configured sandbox QA level and get a green result.
 func (s *QACycleScenario) stageSetupWorkspace(_ context.Context, result *Result) error {
 	// (REACTIVE_STATE purge removed — the bucket was deleted with the rules
 	// engine; PLAN_STATES/EXECUTION_STATES are reset by docker compose down -v
@@ -174,7 +174,7 @@ func (s *QACycleScenario) stageSetupWorkspace(_ context.Context, result *Result)
 	// Go module and source files — `go test ./...` passes on this workspace.
 	files := map[string]string{
 		"go.mod":    "module example.com/qa-cycle-project\n\ngo 1.21\n",
-		"README.md": "# QA Cycle Project\n\nA minimal Go project used for qa_level=unit E2E validation.\n",
+		"README.md": fmt.Sprintf("# QA Cycle Project\n\nA minimal Go project used for qa_level=%s E2E validation.\n", s.qaLevel),
 		// Package with a trivial passing test that confirms go test works.
 		"pkg/math/math.go":      "// Package math provides simple math utilities.\npackage math\n\n// Add returns the sum of a and b.\nfunc Add(a, b int) int { return a + b }\n",
 		"pkg/math/math_test.go": "package math\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif got := Add(1, 2); got != 3 {\n\t\tt.Errorf(\"Add(1, 2) = %d; want 3\", got)\n\t}\n}\n",
@@ -231,7 +231,7 @@ func (s *QACycleScenario) stageInitProject(ctx context.Context, result *Result) 
 	initReq := &client.ProjectInitRequest{
 		Project: client.ProjectInitInput{
 			Name:        "QA Cycle Project",
-			Description: "Minimal Go project for qa_level=unit E2E validation",
+			Description: fmt.Sprintf("Minimal Go project for qa_level=%s E2E validation", s.qaLevel),
 			Languages:   languages,
 		},
 		Checklist: detection.ProposedChecklist,
@@ -258,7 +258,7 @@ func (s *QACycleScenario) stageInitProject(ctx context.Context, result *Result) 
 // Stage: set-qa-level
 // ---------------------------------------------------------------------------
 
-// stageSetQALevel patches the project config to set qa_level=unit.
+// stageSetQALevel patches the project config to the scenario's qa_level.
 // Plans created after this point snapshot the level and trigger the sandbox
 // executor at implementing convergence.
 func (s *QACycleScenario) stageSetQALevel(ctx context.Context, result *Result) error {
@@ -326,7 +326,7 @@ func (s *QACycleScenario) stageVerifyQALevel(_ context.Context, result *Result) 
 // Stage: create-plan
 // ---------------------------------------------------------------------------
 
-// stageCreatePlan posts a new plan. The plan will snapshot qa_level=unit from
+// stageCreatePlan posts a new plan. The plan snapshots qa_level from
 // project.json, ensuring the QA executor path fires at implementing convergence.
 func (s *QACycleScenario) stageCreatePlan(ctx context.Context, result *Result) error {
 	resp, err := s.http.CreatePlan(ctx, "add a math utility package with Add and Subtract functions and full test coverage")
@@ -630,7 +630,8 @@ func (s *QACycleScenario) stageWaitForReviewingQA(ctx context.Context, result *R
 // ---------------------------------------------------------------------------
 
 // stageAssertQACompleted fetches message-logger entries and confirms that
-// workflow.events.qa.completed was published with Level=unit and Passed=true.
+// workflow.events.qa.completed was published with Level matching the scenario
+// and Passed=true.
 func (s *QACycleScenario) stageAssertQACompleted(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 

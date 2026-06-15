@@ -104,20 +104,18 @@ type UserSignalErrorEvent struct {
 }
 
 // QA phase events — target-project test execution gate between implementing
-// and complete. The sandbox executes unit-level tests; heavier tiers
-// (integration, full) run in the operator's CI via the emitted qa.yml
-// (ADR-045). qa-reviewer is always the verdict gate, consuming
-// QACompletedEvent and emitting QAVerdictEvent.
+// and complete. The sandbox executes unit/integration QA commands; full/e2e
+// orchestration runs in the operator's CI for MVP. qa-reviewer is always the
+// verdict gate, consuming QACompletedEvent and emitting QAVerdictEvent.
 
-// QARequestedEvent is published by plan-manager when a unit-level plan enters
-// ready_for_qa, so the sandbox runs the project's test suite before
-// qa-reviewer interprets. Level=synthesis skips this event (the plan goes
-// straight to reviewing_qa) and level=none skips QA entirely. Heavier tiers
-// run in the operator's CI, not via a semspec executor.
+// QARequestedEvent is published by plan-manager when an executable QA-level
+// plan enters ready_for_qa, so the sandbox runs the project's configured QA
+// command before qa-reviewer interprets. Level=synthesis skips this event and
+// level=none skips QA entirely.
 type QARequestedEvent struct {
 	Slug   string  `json:"slug"`
 	PlanID string  `json:"plan_id"`
-	Mode   QALevel `json:"mode"` // unit (the only sandbox-executed level)
+	Mode   QALevel `json:"mode"` // sandbox-executed level: unit or integration
 	// Workspace is the sandbox task_id of the per-plan QA worktree (see
 	// QAWorktreeID) — a checkout of the assembled plan branch that holds the
 	// merged per-requirement implementation. The sandbox runs the test command
@@ -147,10 +145,9 @@ type QAArtifactRef struct {
 	Purpose string `json:"purpose,omitempty"` // e.g., "playwright flow X failure"
 }
 
-// QACompletedEvent is published by the QA executor (sandbox for unit mode;
-// integration/full run in the operator's CI via the emitted qa.yml) after
-// test execution. qa-reviewer consumes it and produces a QAVerdictEvent.
-// plan-manager does NOT consume this event directly.
+// QACompletedEvent is published by the QA executor after test execution.
+// qa-reviewer consumes it and produces a QAVerdictEvent. plan-manager does
+// NOT consume this event directly.
 type QACompletedEvent struct {
 	Slug        string          `json:"slug"`
 	PlanID      string          `json:"plan_id"`
@@ -236,10 +233,11 @@ var (
 	UserSignalError = natsclient.NewSubject[UserSignalErrorEvent](
 		"user.signal.error")
 
-	// QA phase events — the sandbox (unit) or operator's CI (integration/full)
-	// publishes QACompletedEvent; qa-reviewer delivers its verdict via
-	// request/reply mutation plan.mutation.qa.verdict (see
-	// processor/plan-manager/mutations.go) rather than a fire-and-forget event.
+	// QA phase events — the sandbox publishes unit/integration
+	// QACompletedEvent; operator full/e2e CI remains outside SemSpec.
+	// qa-reviewer delivers its verdict via request/reply mutation
+	// plan.mutation.qa.verdict (see processor/plan-manager/mutations.go)
+	// rather than a fire-and-forget event.
 	QARequested = natsclient.NewSubject[QARequestedEvent](
 		"workflow.events.qa.requested")
 	QACompleted = natsclient.NewSubject[QACompletedEvent](
