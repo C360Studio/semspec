@@ -1,3 +1,0 @@
-// Project name is derived from the directory; setting it explicitly keeps
-// the build coords stable regardless of the worktree layout.
-rootProject.name = 'osh-driver-mavsdk'
