@@ -10,6 +10,10 @@ import (
 // owns src/main/java/.../Foo.java also owns the canonical unit test path
 // src/test/java/.../FooTest.java, even when the architect omitted that test
 // file from component_boundaries[].implementation_files.
+//
+// The expansion is intentionally conservative for MVP: Maven-style
+// src/{main,test}/java only, and only FooTest.java. Multi-module layouts and
+// alternate suffixes such as *IT.java or *Tests.java require explicit scope.
 func CompanionTestPaths(sourcePath string) []string {
 	p := NormalizeFilePath(sourcePath)
 	if p == "" {

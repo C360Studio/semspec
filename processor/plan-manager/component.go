@@ -65,6 +65,10 @@ type Component struct {
 	// revision-cap / iteration-exhaustion / QA-rejection trigger points.
 	recoveryPublisher func(ctx context.Context, req *payloads.RecoveryRequested)
 
+	// reqResetSender is the seam tests use to force execution reset failures
+	// without a live execution-manager. Nil means "send the real NATS request."
+	reqResetSender func(ctx context.Context, key string) error
+
 	// slugMutexes serializes mutation handlers per plan slug. NATS dispatches
 	// each subscription's handler in its own goroutine, so two mutations for
 	// the same plan can interleave their get → mutate → save sequence and

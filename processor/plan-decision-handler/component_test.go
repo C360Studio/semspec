@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -126,6 +127,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.TimeoutSeconds <= 0 {
 		t.Errorf("DefaultConfig().TimeoutSeconds = %d, want > 0", cfg.TimeoutSeconds)
 	}
+	if cfg.MaxAutoArchitectureRevises != 1 {
+		t.Errorf("DefaultConfig().MaxAutoArchitectureRevises = %d, want 1", cfg.MaxAutoArchitectureRevises)
+	}
+	if cfg.MaxAutoStoryReprepares != 1 {
+		t.Errorf("DefaultConfig().MaxAutoStoryReprepares = %d, want 1", cfg.MaxAutoStoryReprepares)
+	}
 	if cfg.Ports == nil {
 		t.Error("DefaultConfig().Ports must not be nil")
 	}
@@ -134,6 +141,21 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if len(cfg.Ports.Outputs) == 0 {
 		t.Error("DefaultConfig().Ports.Outputs must have at least one entry")
+	}
+}
+
+func TestNewComponent_AppliesAutoAcceptCapDefaults(t *testing.T) {
+	comp, err := NewComponent(json.RawMessage(`{}`), component.Dependencies{})
+	if err != nil {
+		t.Fatalf("NewComponent: %v", err)
+	}
+	c := comp.(*Component)
+
+	if c.config.MaxAutoArchitectureRevises != 1 {
+		t.Errorf("MaxAutoArchitectureRevises = %d, want default 1", c.config.MaxAutoArchitectureRevises)
+	}
+	if c.config.MaxAutoStoryReprepares != 1 {
+		t.Errorf("MaxAutoStoryReprepares = %d, want default 1", c.config.MaxAutoStoryReprepares)
 	}
 }
 

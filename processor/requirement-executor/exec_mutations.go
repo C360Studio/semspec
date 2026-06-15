@@ -47,21 +47,29 @@ func (c *Component) sendReqPhase(ctx context.Context, key, stage string, fields 
 	return err
 }
 
-// sendReqResetNodeResults asks execution-manager to wipe the NodeResults
-// slice on the existing requirement execution KV entry. Called from
-// recovery resume + restructure retry paths that wipe in-memory
-// NodeResults — without this, the KV-side slice (handleReqNodeMutation
-// only appends) would accumulate stale entries from prior cycles and
-// reappear on the next restart via rebuildExecFromKV. Closes
-// go-reviewer Pass-1 H4. nil natsClient short-circuits (unit tests).
-func (c *Component) sendReqResetNodeResults(ctx context.Context, key string) error {
+// sendReqReplaceNodeResults asks execution-manager to replace the NodeResults
+// slice on the existing requirement execution KV entry. An empty slice wipes
+// the field; a populated slice preserves clean cross-Story evidence while
+// dropping the current Story's stale retry entries. nil natsClient short-circuits
+// for unit tests.
+func (c *Component) sendReqReplaceNodeResults(ctx context.Context, key string, results []workflow.NodeResult) error {
 	if c.natsClient == nil {
 		return nil
 	}
-	_, err := c.sendMutation(ctx, mutReqResetNodeResults, map[string]any{
+	req := map[string]any{
 		"key": key,
-	})
+	}
+	if len(results) > 0 {
+		req["node_results"] = results
+	}
+	_, err := c.sendMutation(ctx, mutReqResetNodeResults, req)
 	return err
+}
+
+// sendReqResetNodeResults wipes the NodeResults slice on the existing
+// requirement execution KV entry.
+func (c *Component) sendReqResetNodeResults(ctx context.Context, key string) error {
+	return c.sendReqReplaceNodeResults(ctx, key, nil)
 }
 
 // sendReqReset asks execution-manager to DELETE a requirement execution KV

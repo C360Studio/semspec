@@ -1804,10 +1804,10 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 	var resetCount int
 	for _, reqID := range reqIDs {
 		key := "req." + slug + "." + reqID
-		if err := c.sendReqReset(ctx, key); err != nil {
+		if err := c.requestRequirementReset(ctx, key); err != nil {
 			c.logger.Warn("Failed to reset requirement execution by ID",
 				"key", key, "error", err)
-			continue
+			return resetCount, fmt.Errorf("reset requirement execution %s: %w", key, err)
 		}
 		resetCount++
 	}

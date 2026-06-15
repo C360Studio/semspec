@@ -170,7 +170,9 @@ type requirementExecution struct {
 	// Appended to dirty node prompts on retry.
 	LastReviewFeedback string
 
-	// ScenarioVerdicts carries per-scenario pass/fail from the last review.
+	// ScenarioVerdicts carries accumulated passing/failing per-scenario proof
+	// from approved Story reviews. It is persisted at requirement completion
+	// so M:N borrowers can verify owner evidence for their scoped scenarios.
 	ScenarioVerdicts []ScenarioVerdict
 
 	// --- Timeout ---

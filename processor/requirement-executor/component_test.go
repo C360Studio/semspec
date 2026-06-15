@@ -2044,6 +2044,58 @@ func TestRequirementReviewerFixableRerunsStoryOnExistingBranch(t *testing.T) {
 	}
 }
 
+func TestRequirementReviewerFixableRetryPreservesPriorStoryEvidence(t *testing.T) {
+	c := newTestComponent(t)
+
+	dag := &TaskDAG{
+		Nodes: []TaskNode{
+			{ID: "story-2-node-a", ScenarioIDs: []string{"s2"}},
+			{ID: "story-2-node-b", ScenarioIDs: []string{"s2"}},
+		},
+	}
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.fixable-multi-story",
+		Slug:              "fixable-multi-story",
+		RequirementID:     "requirement.fixable.1",
+		RequirementBranch: "req/fixable",
+		DAG:               dag,
+		SortedNodeIDs:     []string{"story-2-node-a", "story-2-node-b"},
+		NodeIndex:         map[string]*TaskNode{"story-2-node-a": &dag.Nodes[0], "story-2-node-b": &dag.Nodes[1]},
+		VisitedNodes:      map[string]bool{"story-2-node-a": true, "story-2-node-b": true},
+		NodeResults: []NodeResult{
+			{NodeID: "story-1-node-a", FilesModified: []string{"src/story1.go"}, CommitSHA: "abc123"},
+			{NodeID: "story-2-node-a", FilesModified: []string{"src/story2a.go"}, CommitSHA: "def456"},
+			{NodeID: "story-2-node-b", FilesModified: []string{"src/story2b.go"}, CommitSHA: "fed654"},
+		},
+		MaxRetries:      2,
+		CurrentStoryIdx: 1,
+		SortedStoryIDs:  []string{"story.fixable.1", "story.fixable.2"},
+		Scenarios:       []workflow.Scenario{{ID: "s2", StoryID: "story.fixable.2"}},
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		Outcome: agentic.OutcomeSuccess,
+		Result:  `{"verdict":"rejected","rejection_type":"fixable","feedback":"Story 2 still misses one assertion."}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	if len(exec.NodeResults) != 1 {
+		t.Fatalf("NodeResults = %+v, want only prior Story evidence preserved", exec.NodeResults)
+	}
+	if got := exec.NodeResults[0].NodeID; got != "story-1-node-a" {
+		t.Fatalf("kept NodeResult = %q, want story-1-node-a", got)
+	}
+	if len(exec.VisitedNodes) != 0 {
+		t.Errorf("VisitedNodes = %v, want current Story retry state reset", exec.VisitedNodes)
+	}
+	if exec.CurrentNodeIdx != 0 {
+		t.Errorf("CurrentNodeIdx = %d, want first current Story node redispatched", exec.CurrentNodeIdx)
+	}
+}
+
 // TestRequirementCompletion_RejectsApprovalWithoutCommitObservation pins the
 // claim/observation contract for requirement-level completion. Sibling of
 // bug #9: even when individual node merges silently no-op, the reviewer can
@@ -2189,6 +2241,38 @@ func TestPerStoryReviewer_ApprovedOnFinalStoryCompletesRequirement(t *testing.T)
 	}
 	if !exec.terminated {
 		t.Error("exec.terminated should be true after final Story approval")
+	}
+}
+
+func TestRequirementReviewer_ApprovedWithoutScenarioVerdictsCompletesNormalPath(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:        "semspec.local.exec.req.run.test-approved-no-verdicts",
+		Slug:            "test-plan",
+		RequirementID:   "requirement.test-plan.1",
+		SortedStoryIDs:  []string{"story.test-plan.1.1"},
+		CurrentStoryIdx: 0,
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.test-plan.1", RequirementID: "requirement.test-plan.1", StoryID: "story.test-plan.1.1"},
+		},
+		VisitedNodes: map[string]bool{"impl": true},
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		Outcome: agentic.OutcomeSuccess,
+		Result:  `{"verdict":"approved","feedback":"OK","scenario_verdicts":[]}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1; missing LLM-authored scenario_verdicts must not block a normal owner approval", c.requirementsCompleted.Load())
+	}
+	if c.requirementsFailed.Load() != 0 {
+		t.Errorf("requirementsFailed = %d, want 0", c.requirementsFailed.Load())
 	}
 }
 
@@ -2559,12 +2643,47 @@ func TestValidateApprovedScenarioVerdicts_RequiresAllScopedScenarios(t *testing.
 	}
 
 	if got := validateApprovedScenarioVerdicts(scenarios, verdicts); got == "" {
-		t.Fatal("validateApprovedScenarioVerdicts returned empty reason; approved review must fail closed when a scoped scenario lacks a passing verdict")
+		t.Fatal("validateApprovedScenarioVerdicts returned empty reason; borrowed owner evidence must fail closed when a scoped scenario lacks a passing verdict")
 	}
 
 	verdicts = append(verdicts, ScenarioVerdict{ScenarioID: "scen.telemetry.2", Passed: true})
 	if got := validateApprovedScenarioVerdicts(scenarios, verdicts); got != "" {
 		t.Fatalf("validateApprovedScenarioVerdicts returned %q, want empty when every scoped scenario passed", got)
+	}
+}
+
+func TestMergeCurrentStoryScenarioVerdicts_AccumulatesAcrossStoryReset(t *testing.T) {
+	exec := &requirementExecution{
+		SortedStoryIDs:  []string{"story.demo.1", "story.demo.2"},
+		CurrentStoryIdx: 0,
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.demo.1", StoryID: "story.demo.1"},
+			{ID: "scen.demo.2", StoryID: "story.demo.2"},
+		},
+	}
+
+	mergeCurrentStoryScenarioVerdicts(exec, []ScenarioVerdict{
+		{ScenarioID: "scen.demo.1", Passed: true},
+		{ScenarioID: "scen.demo.2", Passed: true},
+	})
+	if len(exec.ScenarioVerdicts) != 1 || exec.ScenarioVerdicts[0].ScenarioID != "scen.demo.1" {
+		t.Fatalf("after story 1 merge ScenarioVerdicts = %+v, want only scen.demo.1", exec.ScenarioVerdicts)
+	}
+
+	resetPerStoryExecutionState(exec)
+	if len(exec.ScenarioVerdicts) != 1 || exec.ScenarioVerdicts[0].ScenarioID != "scen.demo.1" {
+		t.Fatalf("resetPerStoryExecutionState wiped durable scenario evidence: %+v", exec.ScenarioVerdicts)
+	}
+
+	exec.CurrentStoryIdx = 1
+	mergeCurrentStoryScenarioVerdicts(exec, []ScenarioVerdict{
+		{ScenarioID: "scen.demo.2", Passed: true},
+	})
+	if len(exec.ScenarioVerdicts) != 2 {
+		t.Fatalf("ScenarioVerdicts = %+v, want both story verdicts accumulated", exec.ScenarioVerdicts)
+	}
+	if exec.ScenarioVerdicts[0].ScenarioID != "scen.demo.1" || exec.ScenarioVerdicts[1].ScenarioID != "scen.demo.2" {
+		t.Fatalf("ScenarioVerdicts order/content = %+v, want scen.demo.1 then scen.demo.2", exec.ScenarioVerdicts)
 	}
 }
 
@@ -2597,6 +2716,35 @@ func TestValidateBorrowedStoryEvidence_RequiresScenarioProofForBorrower(t *testi
 	owner.ScenarioVerdicts = append(owner.ScenarioVerdicts, ScenarioVerdict{ScenarioID: "scen.telemetry.1", Passed: true})
 	if got := validateBorrowedStoryEvidence(borrower, story, owner); got != "" {
 		t.Fatalf("validateBorrowedStoryEvidence returned %q, want empty after owner reviewed borrower scenario", got)
+	}
+}
+
+func TestValidateBorrowedStoryEvidence_MultiStoryOwnerUsesEarlierStoryVerdict(t *testing.T) {
+	story := workflow.Story{
+		ID:             "story.demo.early",
+		RequirementIDs: []string{"req.demo.owner", "req.demo.borrower"},
+		Tasks:          []workflow.Task{{ID: "task.demo.early", StoryID: "story.demo.early"}},
+	}
+	owner := &requirementExecution{
+		RequirementID: "req.demo.owner",
+		NodeResults: []NodeResult{
+			{NodeID: "task.demo.early", FilesModified: []string{"src/early.go"}, CommitSHA: "abc123"},
+			{NodeID: "task.demo.later", FilesModified: []string{"src/later.go"}, CommitSHA: "def456"},
+		},
+		ScenarioVerdicts: []ScenarioVerdict{
+			{ScenarioID: "scen.demo.early", Passed: true},
+			{ScenarioID: "scen.demo.later", Passed: true},
+		},
+	}
+	borrower := &requirementExecution{
+		RequirementID: "req.demo.borrower",
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.demo.early", RequirementID: "req.demo.borrower", StoryID: "story.demo.early"},
+		},
+	}
+
+	if got := validateBorrowedStoryEvidence(borrower, story, owner); got != "" {
+		t.Fatalf("validateBorrowedStoryEvidence returned %q, want empty; earlier Story verdicts from a multi-Story owner must remain borrowable", got)
 	}
 }
 
