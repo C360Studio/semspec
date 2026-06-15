@@ -224,6 +224,52 @@ func TestSynthesizeTaskDAGForStory_BindingBlockAppendedToPrompts(t *testing.T) {
 	}
 }
 
+// TestSynthesizeTaskDAGForStory_LargeCohesiveComponent_FileScopeWithinCap pins
+// the ADR-049 interaction with the DAG file_scope cap. A single cohesive
+// component (e.g. the OSH MAVSDK driver) legitimately owns >50 files, and every
+// synthesized node carries the full component territory as its file_scope
+// (FileScope = Story.FilesOwned). Synthesis must succeed for a realistic
+// single-component surface. Regression for the 2026-06-14 mavlink-hard run
+// (slug 2a6c27143fa9): the 52-file mavsdk-driver story decomposed into 5 Tasks
+// but synthesis hard-failed "file_scope exceeds maximum entry count (52 > 50)"
+// → AutoRejectOnExhaustion before any dev loop ran.
+func TestSynthesizeTaskDAGForStory_LargeCohesiveComponent_FileScopeWithinCap(t *testing.T) {
+	t.Parallel()
+	const nFiles = 52 // the live mavsdk-driver size (38 real OSH files + ~14 new)
+	files := make([]string, nFiles)
+	for i := range files {
+		// Unique paths via varying length; mirrors the real OSH package layout.
+		files[i] = "src/main/java/org/sensorhub/impl/sensor/mavsdk/File" + strings.Repeat("x", i) + ".java"
+	}
+	story := workflow.Story{
+		ID:             "story.mavsdk.1.1",
+		RequirementIDs: []string{"req.mavsdk.1"},
+		ComponentName:  "mavsdk-driver",
+		Title:          "MAVSDK driver",
+		FilesOwned:     files,
+		Tasks: []workflow.Task{
+			{ID: "task.mavsdk.1.1.1", StoryID: "story.mavsdk.1.1", Description: "Bootstrap mavsdk_server + lifecycle."},
+			{ID: "task.mavsdk.1.1.2", StoryID: "story.mavsdk.1.1", Description: "Telemetry datastreams."},
+			{ID: "task.mavsdk.1.1.3", StoryID: "story.mavsdk.1.1", Description: "Control commands."},
+			{ID: "task.mavsdk.1.1.4", StoryID: "story.mavsdk.1.1", Description: "Raw MAVLink fallback."},
+			{ID: "task.mavsdk.1.1.5", StoryID: "story.mavsdk.1.1", Description: "SITL smoke + coverage matrix."},
+		},
+	}
+
+	dag, err := synthesizeTaskDAGForStory(nil, story)
+	if err != nil {
+		t.Fatalf("synthesize 52-file cohesive component: %v", err)
+	}
+	if len(dag.Nodes) != len(story.Tasks) {
+		t.Fatalf("expected %d nodes (one per Task), got %d", len(story.Tasks), len(dag.Nodes))
+	}
+	for _, n := range dag.Nodes {
+		if len(n.FileScope) != nFiles {
+			t.Errorf("node %s: file_scope = %d entries, want %d (full component territory)", n.ID, len(n.FileScope), nFiles)
+		}
+	}
+}
+
 // TestBuildBindingContextBlock_AssertionCap pins the safety cap on
 // RequiredAssertions: a profile with more than maxAssertionsPerScenario
 // entries renders the first N + a truncation marker. Catalog authors

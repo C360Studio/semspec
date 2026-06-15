@@ -23,8 +23,19 @@ type TaskNode struct {
 }
 
 const (
-	maxDAGNodes         = 100
-	maxFileScopeEntries = 50
+	maxDAGNodes = 100
+	// maxFileScopeEntries bounds a node's file_scope, which is the ownership
+	// TERRITORY (the Move-3 write-boundary / Story.FilesOwned), not a per-node
+	// worklist — work size is bounded by maxDAGNodes and the per-Task
+	// decomposition, never by this. A cohesive ADR-049 component legitimately
+	// owns many files (the live OSH MAVSDK driver is ~52: class-per-command +
+	// class-per-output), so the cap must clear a realistic single-component
+	// surface. Raised 50→100 after the 2026-06-14 mavlink-hard run auto-rejected
+	// on "file_scope exceeds maximum entry count (52 > 50)" before any dev loop
+	// ran — the work there was already decomposed into 5 Tasks; the cap was the
+	// only thing rejecting it, and it was conflating territory size with work
+	// size.
+	maxFileScopeEntries = 100
 )
 
 // Validate checks the DAG for structural correctness: non-empty, no duplicates,

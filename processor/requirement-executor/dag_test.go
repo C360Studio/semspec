@@ -229,7 +229,7 @@ func TestValidate_FileScope_ValidGlobPatterns_NoError(t *testing.T) {
 
 func TestValidate_FileScope_MaxEntriesExceeded_ReturnsError(t *testing.T) {
 	t.Parallel()
-	scope := make([]string, 51)
+	scope := make([]string, maxFileScopeEntries+1)
 	for i := range scope {
 		scope[i] = "src/file" + strings.Repeat("x", i) + ".go"
 	}
@@ -245,13 +245,13 @@ func TestValidate_FileScope_MaxEntriesExceeded_ReturnsError(t *testing.T) {
 
 func TestValidate_FileScope_ExactlyMaxEntries_Valid(t *testing.T) {
 	t.Parallel()
-	scope := make([]string, 50)
+	scope := make([]string, maxFileScopeEntries)
 	for i := range scope {
 		scope[i] = "src/file" + strings.Repeat("x", i) + ".go"
 	}
 	d := dag(TaskNode{ID: "a", Prompt: "Do something", Role: "worker", FileScope: scope})
 	if err := d.Validate(); err != nil {
-		t.Errorf("Validate() = %v, want nil for exactly %d file_scope entries", err, 50)
+		t.Errorf("Validate() = %v, want nil for exactly %d file_scope entries", err, maxFileScopeEntries)
 	}
 }
 
