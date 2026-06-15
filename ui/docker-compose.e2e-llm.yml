@@ -75,6 +75,13 @@ services:
       # GitHub identity.
       GITHUB_ACTOR: ${GITHUB_ACTOR:-USERNAME}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      # Enable the sandbox QA subscriber so executable integration QA
+      # (qa_level=unit/integration) runs here: plan-manager publishes
+      # QARequestedEvent → sandbox runs the project test command (./gradlew
+      # test) → emits QACompleted → qa-reviewer verdict. Without this the
+      # sandbox runs HTTP-only and the plan wedges at ready_for_qa (the
+      # backend e2e sandbox in docker/compose/e2e.yml already sets this).
+      NATS_URL: nats://nats:4222
     depends_on:
       workspace-init:
         condition: service_completed_successfully
