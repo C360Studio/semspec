@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	osexec "os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -517,6 +518,88 @@ func TestRunAllChecks_WithFilesModified(t *testing.T) {
 	}
 	if !result.Passed {
 		t.Error("expected Passed=true — only the passing go check ran")
+	}
+}
+
+func TestExecute_UsesGitStatusForChecklistTriggers(t *testing.T) {
+	if _, err := osexec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q")
+	writeChecklist(t, dir, workflow.Checklist{
+		Version: "1",
+		Checks: []workflow.Check{
+			{
+				Name:     "java-build",
+				Command:  trueCmd(),
+				Trigger:  []string{"*.java"},
+				Category: workflow.CheckCategoryCompile,
+				Required: true,
+				Timeout:  "5s",
+			},
+		},
+	})
+	javaPath := filepath.Join(dir, "src", "main", "java", "Driver.java")
+	if err := os.MkdirAll(filepath.Dir(javaPath), 0o755); err != nil {
+		t.Fatalf("mkdir java dir: %v", err)
+	}
+	if err := os.WriteFile(javaPath, []byte("class Driver {}\n"), 0o644); err != nil {
+		t.Fatalf("write java file: %v", err)
+	}
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "git-status-triggers",
+		FilesModified: []string{"README.md"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !hasCheckNamed(result.CheckResults, "java-build") {
+		t.Fatalf("java-build check did not run from git status changes; results=%+v", result.CheckResults)
+	}
+}
+
+func TestExecute_FailsIncompleteGradleWrapper(t *testing.T) {
+	dir := t.TempDir()
+	writeChecklist(t, dir, workflow.Checklist{Version: "1"})
+	if err := os.WriteFile(filepath.Join(dir, "gradlew"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write gradlew: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "gradle", "wrapper"), 0o755); err != nil {
+		t.Fatalf("mkdir wrapper: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gradle", "wrapper", "gradle-wrapper.properties"), []byte("distributionUrl=https://services.gradle.org/distributions/gradle.zip\n"), 0o644); err != nil {
+		t.Fatalf("write wrapper properties: %v", err)
+	}
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
+		Slug:          "gradle-wrapper",
+		FilesModified: []string{"build.gradle"},
+	})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Passed {
+		t.Fatalf("Passed = true, want false for incomplete Gradle wrapper")
+	}
+	found := false
+	for _, check := range result.CheckResults {
+		if check.Name == "gradle-wrapper-completeness" {
+			found = true
+			if check.Passed {
+				t.Fatalf("gradle-wrapper-completeness passed unexpectedly: %+v", check)
+			}
+			if !strings.Contains(check.Stderr, "gradle-wrapper.jar") {
+				t.Fatalf("failure should name missing jar, got %q", check.Stderr)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("gradle-wrapper-completeness check did not run; results=%+v", result.CheckResults)
 	}
 }
 

@@ -1,6 +1,17 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/c360studio/semspec/workflow"
+)
 
 func TestSelectQAWorkDir(t *testing.T) {
 	const repoPath = "/repo"
@@ -50,5 +61,46 @@ func TestSelectQAWorkDir(t *testing.T) {
 				t.Errorf("fellBack = %v, want %v", fellBack, tt.wantFellBack)
 			}
 		})
+	}
+}
+
+func TestRunSandboxQAIntegrationFailsOnSkippedJUnitTests(t *testing.T) {
+	dir := t.TempDir()
+	resultsDir := filepath.Join(dir, "build", "test-results", "test")
+	if err := os.MkdirAll(resultsDir, 0o755); err != nil {
+		t.Fatalf("mkdir results: %v", err)
+	}
+	xml := `<testsuite tests="1" skipped="1"><testcase classname="DriverIT" name="sitl"><skipped/></testcase></testsuite>`
+	if err := os.WriteFile(filepath.Join(resultsDir, "TEST-DriverIT.xml"), []byte(xml), 0o644); err != nil {
+		t.Fatalf("write junit xml: %v", err)
+	}
+
+	h := &qaHandler{
+		srv: &Server{
+			repoPath:       dir,
+			maxTimeout:     5 * time.Second,
+			maxOutputBytes: 64 * 1024,
+			worktreeRoot:   filepath.Join(dir, ".semspec", "worktrees"),
+		},
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	got := h.runSandboxQA(context.Background(), workflow.QARequestedEvent{
+		Slug:        "mavlink-hard",
+		PlanID:      "plan-1",
+		Mode:        workflow.QALevelIntegration,
+		TestCommand: "true",
+	}, "run-1", time.Now())
+
+	if got.Passed {
+		t.Fatalf("Passed = true, want false for skipped integration tests")
+	}
+	if got.Level != workflow.QALevelIntegration {
+		t.Fatalf("Level = %q, want integration", got.Level)
+	}
+	if len(got.Failures) != 1 {
+		t.Fatalf("Failures = %d, want 1", len(got.Failures))
+	}
+	if !strings.Contains(got.Failures[0].Message, "skipped") {
+		t.Errorf("failure message should mention skipped tests, got %q", got.Failures[0].Message)
 	}
 }

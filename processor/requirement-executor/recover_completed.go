@@ -67,6 +67,43 @@ func (c *Component) loadTerminalReqExecFromKV(ctx context.Context, slug, require
 	return c.rebuildExecFromKV(key, &reqExec), nil
 }
 
+// loadCompletedReqExecFromKV fetches a completed requirement execution
+// from EXECUTION_STATES. ADR-044 M:N dedup uses this as the evidence
+// source when a non-owner requirement advances past a Story already
+// completed by its deterministic owner. Failed/error/in-flight entries
+// are not valid proof of shipped work.
+func (c *Component) loadCompletedReqExecFromKV(ctx context.Context, slug, requirementID string) (*requirementExecution, error) {
+	if c.natsClient == nil {
+		return nil, nil
+	}
+
+	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "EXECUTION_STATES")
+	if err != nil {
+		return nil, fmt.Errorf("get EXECUTION_STATES bucket: %w", err)
+	}
+	kvStore := c.natsClient.NewKVStore(bucket)
+
+	key := workflow.RequirementExecutionKey(slug, requirementID)
+	entry, err := kvStore.Get(ctx, key)
+	if err != nil {
+		if isKVNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get %s: %w", key, err)
+	}
+
+	var reqExec workflow.RequirementExecution
+	if err := json.Unmarshal(entry.Value, &reqExec); err != nil {
+		c.logger.Debug("Skipping corrupt EXECUTION_STATES entry during completed-owner evidence load",
+			"key", key, "error", err)
+		return nil, nil
+	}
+	if reqExec.Stage != phaseCompleted {
+		return nil, nil
+	}
+	return c.rebuildExecFromKV(key, &reqExec), nil
+}
+
 // countAcceptedRecoveryCyclesForReq returns how many recovery-agent
 // PlanDecisions have already been accepted for this requirement on this
 // plan. Used as a defense-in-depth budget gate for the QA-recovery path —

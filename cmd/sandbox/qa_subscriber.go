@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
@@ -36,7 +37,8 @@ const (
 )
 
 // startQASubscriber sets up the durable JetStream consumer for QARequestedEvent
-// and begins dispatching unit-mode requests to the server's exec infrastructure.
+// and begins dispatching sandbox-executable QA requests to the server's exec
+// infrastructure.
 // The consumer context must be cancelled on shutdown to stop delivery.
 func startQASubscriber(ctx context.Context, srv *Server, natsClient *natsclient.Client, logger *slog.Logger) error {
 	// Wait for the WORKFLOW stream to exist. plan-manager creates it at its
@@ -103,11 +105,11 @@ func (h *qaHandler) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Only unit mode is sandbox-executed. Heavier tiers run in the operator's
-	// CI (the qa-runner act executor was removed); plan-manager no longer
-	// publishes any non-unit QARequestedEvent, so this is a defensive guard.
-	if evt.Mode != workflow.QALevelUnit {
-		h.logger.Debug("Skipping non-unit QARequestedEvent",
+	// Only sandbox-executable modes run here. Full/e2e orchestration remains in
+	// operator CI, so stale/invalid modes are acknowledged rather than
+	// redelivered forever.
+	if !evt.Mode.UsesSandboxTests() {
+		h.logger.Debug("Skipping non-sandbox QARequestedEvent",
 			"slug", evt.Slug, "mode", evt.Mode)
 		_ = msg.Ack()
 		return
@@ -123,14 +125,15 @@ func (h *qaHandler) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	runID := uuid.New().String()
 	start := time.Now()
 
-	h.logger.Info("Running unit QA",
+	h.logger.Info("Running sandbox QA",
 		"slug", evt.Slug, "plan_id", evt.PlanID,
+		"mode", evt.Mode,
 		"run_id", runID, "test_command", evt.TestCommand,
 		"trace_id", evt.TraceID)
 
-	completed := h.runUnitQA(ctx, evt, runID, start)
+	completed := h.runSandboxQA(ctx, evt, runID, start)
 	if completed == nil {
-		// runUnitQA already nak'd — nothing further to do.
+		// runSandboxQA already nak'd — nothing further to do.
 		return
 	}
 
@@ -144,12 +147,13 @@ func (h *qaHandler) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	_ = msg.Ack()
-	h.logger.Info("Unit QA complete",
+	h.logger.Info("Sandbox QA complete",
 		"slug", evt.Slug, "run_id", runID,
+		"mode", evt.Mode,
 		"passed", completed.Passed, "duration_ms", completed.DurationMs)
 }
 
-// selectQAWorkDir resolves the directory the unit test command runs in: the
+// selectQAWorkDir resolves the directory the QA command runs in: the
 // dedicated QA worktree when plan-manager created one and it resolves, else the
 // repo root. resolve mirrors Server.worktreeFor — it returns "" when the
 // worktree is absent. fellBack is true only when a workspace was requested but
@@ -165,8 +169,8 @@ func selectQAWorkDir(repoPath, workspace string, resolve func(string) string) (d
 	return repoPath, true
 }
 
-// runUnitQA executes the test command and assembles the QACompletedEvent.
-func (h *qaHandler) runUnitQA(
+// runSandboxQA executes the test command and assembles the QACompletedEvent.
+func (h *qaHandler) runSandboxQA(
 	ctx context.Context,
 	evt workflow.QARequestedEvent,
 	runID string,
@@ -175,16 +179,16 @@ func (h *qaHandler) runUnitQA(
 	if evt.TestCommand == "" {
 		// plan-manager's EffectiveTestCommand() should have resolved this before
 		// publishing; an empty command means project config is incomplete.
-		h.logger.Error("QARequestedEvent has no test_command — cannot run unit QA",
-			"slug", evt.Slug)
+		h.logger.Error("QARequestedEvent has no test_command — cannot run sandbox QA",
+			"slug", evt.Slug, "mode", evt.Mode)
 		return &workflow.QACompletedEvent{
 			Slug:        evt.Slug,
 			PlanID:      evt.PlanID,
 			RunID:       runID,
-			Level:       workflow.QALevelUnit,
+			Level:       evt.Mode,
 			Passed:      false,
 			DurationMs:  time.Since(start).Milliseconds(),
-			RunnerError: "no test_command configured at qa.level=unit",
+			RunnerError: fmt.Sprintf("no test_command configured at qa.level=%s", evt.Mode),
 			TraceID:     evt.TraceID,
 		}
 	}
@@ -204,7 +208,7 @@ func (h *qaHandler) runUnitQA(
 	// runs against the pre-implementation main HEAD and is meaningless.
 	workDir, fellBack := selectQAWorkDir(h.srv.repoPath, evt.Workspace, h.srv.worktreeFor)
 	if fellBack {
-		h.logger.Warn("QA worktree not found — running unit tests against repo root (may be the unmerged baseline)",
+		h.logger.Warn("QA worktree not found — running QA command against repo root (may be the unmerged baseline)",
 			"slug", evt.Slug, "workspace", evt.Workspace)
 	}
 	stdout, stderr, exitCode, timedOut := execCommand(
@@ -222,11 +226,13 @@ func (h *qaHandler) runUnitQA(
 
 	// Archive the full output.
 	artifactRelPath := filepath.Join(
-		".semspec", "qa-artifacts", evt.Slug, runID, "unit-test.log")
-	artifacts := h.archiveLog(evt.Slug, runID, artifactRelPath, combined)
+		".semspec", "qa-artifacts", evt.Slug, runID, fmt.Sprintf("%s-test.log", evt.Mode))
+	artifacts := h.archiveLog(evt.Slug, runID, artifactRelPath, combined, fmt.Sprintf("%s test output", evt.Mode))
+
+	skippedEvidence := integrationSkippedTestEvidence(evt.Mode, workDir)
 
 	// Build pass/fail result.
-	passed := exitCode == 0 && !timedOut
+	passed := exitCode == 0 && !timedOut && len(skippedEvidence) == 0
 	var failures []workflow.QAFailure
 	if !passed {
 		excerpt := combined
@@ -236,10 +242,12 @@ func (h *qaHandler) runUnitQA(
 		msg := fmt.Sprintf("test command failed (exit %d)", exitCode)
 		if timedOut {
 			msg = fmt.Sprintf("test command timed out after %s", timeout)
+		} else if len(skippedEvidence) > 0 {
+			msg = fmt.Sprintf("integration QA skipped test(s): %s", strings.Join(skippedEvidence, ", "))
 		}
 		failures = []workflow.QAFailure{
 			{
-				JobName:    "unit",
+				JobName:    string(evt.Mode),
 				Message:    msg,
 				LogExcerpt: excerpt,
 			},
@@ -250,7 +258,7 @@ func (h *qaHandler) runUnitQA(
 		Slug:       evt.Slug,
 		PlanID:     evt.PlanID,
 		RunID:      runID,
-		Level:      workflow.QALevelUnit,
+		Level:      evt.Mode,
 		Passed:     passed,
 		Failures:   failures,
 		Artifacts:  artifacts,
@@ -263,7 +271,7 @@ func (h *qaHandler) runUnitQA(
 // and returns a populated QAArtifactRef slice on success. On write failure the
 // error is logged and an empty slice is returned — the caller still publishes
 // QACompletedEvent without the artifact reference.
-func (h *qaHandler) archiveLog(slug, runID, relPath, content string) []workflow.QAArtifactRef {
+func (h *qaHandler) archiveLog(slug, runID, relPath, content, purpose string) []workflow.QAArtifactRef {
 	absPath := filepath.Join(h.srv.repoPath, relPath)
 	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
 		h.logger.Warn("Failed to create qa-artifact directory — artifact will not be archived",
@@ -279,9 +287,48 @@ func (h *qaHandler) archiveLog(slug, runID, relPath, content string) []workflow.
 		{
 			Path:    relPath, // workspace-relative — consumers resolve against their own root
 			Type:    "log",
-			Purpose: "unit test output",
+			Purpose: purpose,
 		},
 	}
+}
+
+func integrationSkippedTestEvidence(mode workflow.QALevel, workDir string) []string {
+	if mode != workflow.QALevelIntegration || workDir == "" {
+		return nil
+	}
+	roots := []string{
+		filepath.Join(workDir, "build", "test-results"),
+		filepath.Join(workDir, "target", "surefire-reports"),
+		filepath.Join(workDir, "target", "failsafe-reports"),
+	}
+	var evidence []string
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			continue
+		}
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || len(evidence) >= 5 {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(path))
+			if ext != ".xml" {
+				return nil
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+			if strings.Contains(strings.ToLower(string(data)), "<skipped") {
+				rel, relErr := filepath.Rel(workDir, path)
+				if relErr != nil {
+					rel = path
+				}
+				evidence = append(evidence, rel)
+			}
+			return nil
+		})
+	}
+	return evidence
 }
 
 // publishCompleted wraps evt in a BaseMessage envelope and publishes it to

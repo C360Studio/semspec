@@ -25,8 +25,9 @@ func TestQARequestedPayloadValidate(t *testing.T) {
 	}{
 		{"valid_no_workspace", func(*QARequestedPayload) {}, false, ""},
 		{"valid_with_workspace", func(p *QARequestedPayload) { p.Workspace = workflow.QAWorktreeID("auth") }, false, ""},
+		{"valid_integration_mode", func(p *QARequestedPayload) { p.Mode = workflow.QALevelIntegration }, false, ""},
 		{"empty_slug", func(p *QARequestedPayload) { p.Slug = "" }, true, "slug"},
-		{"non_unit_mode", func(p *QARequestedPayload) { p.Mode = workflow.QALevelSynthesis }, true, "mode must be unit"},
+		{"non_executable_mode", func(p *QARequestedPayload) { p.Mode = workflow.QALevelSynthesis }, true, "sandbox-executed QA level"},
 		{"workspace_path_traversal_dots", func(p *QARequestedPayload) { p.Workspace = "../escape" }, true, "path separators"},
 		{"workspace_slash", func(p *QARequestedPayload) { p.Workspace = "qa/auth" }, true, "path separators"},
 		{"workspace_backslash", func(p *QARequestedPayload) { p.Workspace = "qa\\auth" }, true, "path separators"},

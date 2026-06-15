@@ -326,9 +326,10 @@ Semspec registers 22 components at startup alongside the full semstreams compone
 │  execution-manager      TDD pipeline per DAG node:                  │
 │                          developer → validator → reviewer            │
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │
-│                          scoped by qa_level (synthesis/unit).         │
-│                          Heavier tiers run in the operator's CI       │
-│                          against the emitted qa.yml (ADR-045)         │
+│                          scoped by qa_level                           │
+│                          (synthesis/unit/integration/full)            │
+│                          unit/integration use sandbox QA; full/e2e    │
+│                          remains operator CI via emitted qa.yml        │
 │  plan-decision-handler  PlanDecision OODA loop and cascade           │
 │  recovery-agent         Wedge recovery — manager-role agents that    │
 │                          unstick stuck loops via trajectory analysis │

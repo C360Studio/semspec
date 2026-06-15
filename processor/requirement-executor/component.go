@@ -1065,23 +1065,25 @@ func (c *Component) dispatchSynthesizerLocked(ctx context.Context, exec *require
 // Two-tier guard:
 //
 //  1. Post-completion skip (cheap, in-process): if the freshly-loaded plan
-//     KV shows Status==Complete, another executor already shipped — advance
-//     cursor and re-enter. Catches the late-arriving case.
+//     KV shows Status==Complete, another executor already shipped — copy
+//     the deterministic owner's node evidence, advance cursor, and re-enter.
+//     Catches the late-arriving case without producing zero-node completions.
 //
 //  2. Compare-and-swap reservation (load-bearing, NATS round-trip):
 //     attempt ready→executing via workflow.ClaimStoryStatus. Plan-manager
 //     enforces Story.Status.CanTransitionTo. First executor wins; others
 //     observe the rejection and treat it as "another executor owns this
-//     Story" — skip with the same cursor-advance logic. Closes the
-//     race-load window where N executors all see Status as not-yet-set
-//     and would otherwise all dispatch.
+//     Story" only if completed-owner execution evidence exists. Closes
+//     the race-load window where N executors all see Status as not-yet-set
+//     and would otherwise all dispatch, while still failing closed when no
+//     owner proof exists.
 //
 // Failed / Pending stories fall through to dispatch so requirement-level
 // recovery still works. When the claim NATS call has no client wired
 // (test components), the reservation is silently skipped — back-compat
 // with unit tests that drive dispatchCurrentStoryLocked directly without
-// a NATS substrate. Failed claim against a real client is treated as
-// "someone else owns it" and the executor skips dispatch.
+// a NATS substrate. Failed claim against a real client requires completed
+// owner evidence before the executor skips dispatch.
 //
 // Caller must hold exec.mu.
 func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
@@ -1103,6 +1105,10 @@ func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requir
 			"requirement_id", exec.RequirementID,
 			"story_id", currentStoryID,
 			"covered_requirements", story.RequirementIDs)
+		if !c.applyCompletedStoryEvidenceLocked(ctx, exec, story) {
+			c.markFailedLocked(ctx, exec, fmt.Sprintf("completed Story %s has no completed owner execution evidence for requirement %s", currentStoryID, exec.RequirementID))
+			return
+		}
 		c.advancePastSkippedStoryLocked(ctx, exec, plan)
 		return
 	}
@@ -1115,6 +1121,10 @@ func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requir
 				"entity_id", exec.EntityID,
 				"requirement_id", exec.RequirementID,
 				"story_id", currentStoryID)
+			if !c.applyCompletedStoryEvidenceLocked(ctx, exec, story) {
+				c.markFailedLocked(ctx, exec, fmt.Sprintf("Story %s reservation was unavailable and no completed owner execution evidence exists for requirement %s", currentStoryID, exec.RequirementID))
+				return
+			}
 			c.advancePastSkippedStoryLocked(ctx, exec, plan)
 			return
 		}
@@ -1147,10 +1157,146 @@ func (c *Component) dispatchCurrentStoryLocked(ctx context.Context, exec *requir
 func (c *Component) advancePastSkippedStoryLocked(ctx context.Context, exec *requirementExecution, plan *workflow.Plan) {
 	if exec.CurrentStoryIdx+1 < len(exec.SortedStoryIDs) {
 		exec.CurrentStoryIdx++
+		resetPerStoryExecutionState(exec)
 		c.dispatchCurrentStoryLocked(ctx, exec, plan)
 		return
 	}
 	c.markCompletedLocked(ctx, exec)
+}
+
+// applyCompletedStoryEvidenceLocked attaches the owner requirement's real
+// node results before a non-owner requirement advances past a completed
+// shared Story. That keeps ADR-044's M:N dedup from producing zero-node
+// terminal completions: the non-owner still does not re-run the dev loop,
+// but its completion record carries the owner Story's execution evidence.
+//
+// Unit-test components without a NATS substrate keep the historical skip
+// behavior; production paths require KV evidence from the deterministic
+// Story owner and fail closed when it is missing.
+//
+// Caller must hold exec.mu.
+func (c *Component) applyCompletedStoryEvidenceLocked(ctx context.Context, exec *requirementExecution, story workflow.Story) bool {
+	if c.natsClient == nil {
+		return true
+	}
+
+	ownerID := workflow.DeterministicStoryOwner(story)
+	if ownerID == "" {
+		c.logger.Warn("Completed Story has no deterministic owner; refusing evidence-free skip",
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"story_id", story.ID)
+		return false
+	}
+
+	if ownerID == exec.RequirementID {
+		if executionHasStoryEvidence(exec, story) {
+			return true
+		}
+		c.logger.Warn("Owned Story is already complete but current requirement has no node evidence",
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"story_id", story.ID)
+		return false
+	}
+
+	ownerExec, err := c.loadCompletedReqExecFromKV(ctx, exec.Slug, ownerID)
+	if err != nil {
+		c.logger.Warn("Failed to load completed Story owner execution evidence",
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"owner_requirement_id", ownerID,
+			"story_id", story.ID,
+			"error", err)
+		return false
+	}
+	if ownerExec == nil {
+		c.logger.Warn("Completed Story owner execution evidence missing",
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"owner_requirement_id", ownerID,
+			"story_id", story.ID)
+		return false
+	}
+	if !copyStoryEvidence(exec, story, ownerExec) {
+		c.logger.Warn("Completed Story owner has no matching node evidence",
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"owner_requirement_id", ownerID,
+			"story_id", story.ID)
+		return false
+	}
+
+	c.logger.Info("Copied completed Story owner evidence for M:N non-owner requirement",
+		"slug", exec.Slug,
+		"requirement_id", exec.RequirementID,
+		"owner_requirement_id", ownerID,
+		"story_id", story.ID,
+		"node_results", len(exec.NodeResults))
+	return true
+}
+
+func executionHasStoryEvidence(exec *requirementExecution, story workflow.Story) bool {
+	taskIDs := storyTaskIDSet(story)
+	if len(taskIDs) == 0 {
+		return len(exec.NodeResults) > 0
+	}
+	for _, nr := range exec.NodeResults {
+		if taskIDs[nr.NodeID] {
+			return true
+		}
+	}
+	return false
+}
+
+func copyStoryEvidence(exec *requirementExecution, story workflow.Story, owner *requirementExecution) bool {
+	if owner == nil || len(owner.NodeResults) == 0 {
+		return false
+	}
+
+	taskIDs := storyTaskIDSet(story)
+	seen := make(map[string]bool, len(exec.NodeResults))
+	for _, nr := range exec.NodeResults {
+		seen[nodeEvidenceKey(nr)] = true
+	}
+	if exec.VisitedNodes == nil {
+		exec.VisitedNodes = make(map[string]bool)
+	}
+
+	copied := 0
+	for _, nr := range owner.NodeResults {
+		if len(taskIDs) > 0 && !taskIDs[nr.NodeID] {
+			continue
+		}
+		key := nodeEvidenceKey(nr)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		exec.NodeResults = append(exec.NodeResults, NodeResult{
+			NodeID:        nr.NodeID,
+			FilesModified: append([]string(nil), nr.FilesModified...),
+			Summary:       nr.Summary,
+			CommitSHA:     nr.CommitSHA,
+		})
+		exec.VisitedNodes[nr.NodeID] = true
+		copied++
+	}
+	return copied > 0 || executionHasStoryEvidence(exec, story)
+}
+
+func storyTaskIDSet(story workflow.Story) map[string]bool {
+	out := make(map[string]bool, len(story.Tasks))
+	for _, task := range story.Tasks {
+		if task.ID != "" {
+			out[task.ID] = true
+		}
+	}
+	return out
+}
+
+func nodeEvidenceKey(nr NodeResult) string {
+	return nr.NodeID + "\x00" + nr.CommitSHA
 }
 
 // findStoryByID returns the Story with the given ID from plan.Stories.
@@ -1230,10 +1376,10 @@ func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.
 // Scenarios are partitioned by tier tag (@unit / @integration / @smoke /
 // @e2e). Each tier group carries instructions that tell the reviewer
 // WHAT to look for at that tier — crucially, @integration scenarios do
-// NOT need to pass at dev-completion (the harness isn't running in the
-// dev sandbox); they need to be authored correctly. Murat records runtime
-// proof readiness at QA, and full semspec-managed harness execution is
-// post-MVP unless the project test command already owns it.
+// NOT need to pass at dev-completion (the harness may not be running in the
+// dev sandbox); they need to be authored correctly. Runtime proof is enforced
+// by qa_level=integration when the project selects that level. Full/e2e
+// orchestration remains an operator CI concern for MVP.
 //
 // Legacy scenarios without tier tags (PR 1's tags field absent) fall into
 // an "untagged" group with the legacy "verify all aspects" instruction —
@@ -1265,7 +1411,7 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution, scenarios []wo
 		groups := groupScenariosByTier(scenarios)
 
 		sb.WriteString("\n## Scenarios to verify (grouped by test pyramid tier)\n")
-		sb.WriteString("\nApply tier-appropriate verification per ADR-041. The harness is NOT running in the dev sandbox — @integration scenarios are verified for AUTHORING CORRECTNESS, not runtime behavior. For MVP, Murat records whether runtime proof is present, missing, or deferred; full harness orchestration is post-MVP unless the project test command already owns it.\n")
+		sb.WriteString("\nApply tier-appropriate verification per ADR-041. The harness is not guaranteed to run in the dev sandbox — @integration scenarios are verified for AUTHORING CORRECTNESS here, not runtime behavior. Runtime proof is enforced later by qa_level=integration when the project selects that level; full/e2e orchestration remains operator CI for MVP.\n")
 
 		if len(groups.unit) > 0 {
 			sb.WriteString("\n### @unit scenarios\n")
@@ -1275,7 +1421,7 @@ func (c *Component) buildReviewPrompt(exec *requirementExecution, scenarios []wo
 
 		if len(groups.integration) > 0 {
 			sb.WriteString("\n### @integration scenarios\n")
-			sb.WriteString("Verify each has an integration test or documented integration-test plan that (a) declares the tier using the project's test framework idiom, (b) binds to the scenario's harness_profile_ids where project tooling consumes such bindings, (c) reads harness endpoints from environment variables declared by the bound catalog profile (NOT a hardcoded host/port), and (d) asserts on each required_assertion of every bound profile. The test does NOT need to PASS here — the harness isn't up in the dev sandbox. Approve when AUTHORING is correct; Murat records runtime proof readiness at QA, and full harness orchestration remains post-MVP unless the project test command already owns it.\n\n")
+			sb.WriteString("Verify each has an integration test or documented integration-test plan that (a) declares the tier using the project's test framework idiom, (b) binds to the scenario's harness_profile_ids where project tooling consumes such bindings, (c) reads harness endpoints from environment variables declared by the bound catalog profile (NOT a hardcoded host/port), and (d) asserts on each required_assertion of every bound profile. The test does NOT need to PASS here — the harness may not be up in the dev sandbox. Approve when AUTHORING is correct; qa_level=integration is the runtime evidence gate when the project selects it, while full/e2e orchestration remains operator CI for MVP.\n\n")
 			writeScenarioList(&sb, groups.integration)
 		}
 
@@ -2082,18 +2228,7 @@ func (c *Component) advanceToNextStoryLocked(ctx context.Context, exec *requirem
 	// Per-Story state reset. NodeResults intentionally NOT reset — they
 	// feed the requirement-level claim/observation cross-check at
 	// markCompletedLocked.
-	exec.DAG = nil
-	exec.SortedNodeIDs = nil
-	exec.NodeIndex = nil
-	exec.CurrentNodeIdx = -1
-	exec.CurrentNodeTaskID = ""
-	exec.VisitedNodes = make(map[string]bool)
-	exec.ReviewVerdict = ""
-	exec.ReviewFeedback = ""
-	exec.ReviewRetryCount = 0
-	exec.RetryCount = 0
-	exec.DirtyNodeIDs = nil
-	exec.ScenarioVerdicts = nil
+	resetPerStoryExecutionState(exec)
 
 	nextStoryID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
 	c.logger.Info("Advancing to next Story",
@@ -2114,6 +2249,21 @@ func (c *Component) advanceToNextStoryLocked(ctx context.Context, exec *requirem
 	}
 
 	c.dispatchCurrentStoryLocked(ctx, exec, plan)
+}
+
+func resetPerStoryExecutionState(exec *requirementExecution) {
+	exec.DAG = nil
+	exec.SortedNodeIDs = nil
+	exec.NodeIndex = nil
+	exec.CurrentNodeIdx = -1
+	exec.CurrentNodeTaskID = ""
+	exec.VisitedNodes = make(map[string]bool)
+	exec.ReviewVerdict = ""
+	exec.ReviewFeedback = ""
+	exec.ReviewRetryCount = 0
+	exec.RetryCount = 0
+	exec.DirtyNodeIDs = nil
+	exec.ScenarioVerdicts = nil
 }
 
 // filterScenariosByIDs returns the subset of scenarios whose IDs match the
@@ -2233,6 +2383,22 @@ func (c *Component) buildNodeSummaries(exec *requirementExecution) []prompt.Node
 	return summaries
 }
 
+func workflowNodeResults(results []NodeResult) []workflow.NodeResult {
+	if len(results) == 0 {
+		return nil
+	}
+	out := make([]workflow.NodeResult, 0, len(results))
+	for _, nr := range results {
+		out = append(out, workflow.NodeResult{
+			NodeID:        nr.NodeID,
+			FilesModified: append([]string(nil), nr.FilesModified...),
+			Summary:       nr.Summary,
+			CommitSHA:     nr.CommitSHA,
+		})
+	}
+	return out
+}
+
 // ---------------------------------------------------------------------------
 // Terminal state handlers
 // ---------------------------------------------------------------------------
@@ -2245,7 +2411,18 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementEx
 	}
 	exec.terminated = true
 
-	if err := c.sendReqPhase(ctx, exec.storeKey, phaseCompleted, nil); err != nil {
+	nodeCount := len(exec.NodeResults)
+	if nodeCount == 0 {
+		nodeCount = len(exec.VisitedNodes)
+	}
+	fields := map[string]any{
+		"node_count": nodeCount,
+	}
+	if nodeResults := workflowNodeResults(exec.NodeResults); len(nodeResults) > 0 {
+		fields["node_results"] = nodeResults
+	}
+
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseCompleted, fields); err != nil {
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseCompleted, "error", err)
 	}
 
@@ -2255,7 +2432,7 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementEx
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
 		"requirement_id", exec.RequirementID,
-		"nodes_completed", len(exec.VisitedNodes),
+		"nodes_completed", nodeCount,
 	)
 
 	c.publishRequirementCompleteEvent(ctx, exec, "completed")
@@ -2451,6 +2628,10 @@ func (c *Component) publishRequirementCompleteEvent(ctx context.Context, exec *r
 
 	// Build summary from aggregate node summaries.
 	summary := c.aggregateNodeSummaries(exec)
+	nodeCount := len(exec.NodeResults)
+	if nodeCount == 0 {
+		nodeCount = len(exec.VisitedNodes)
+	}
 
 	event := workflow.RequirementExecutionCompleteEvent{
 		Slug:            exec.Slug,
@@ -2460,7 +2641,7 @@ func (c *Component) publishRequirementCompleteEvent(ctx context.Context, exec *r
 		ProjectID:       exec.ProjectID,
 		TraceID:         exec.TraceID,
 		Outcome:         outcome,
-		NodeCount:       len(exec.VisitedNodes),
+		NodeCount:       nodeCount,
 		FilesModified:   allFiles,
 		Summary:         summary,
 		ScenariosTotal:  len(exec.Scenarios),

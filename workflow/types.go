@@ -49,10 +49,10 @@ const (
 	// and the plan is awaiting partial requirement regeneration.
 	StatusChanged Status = "changed"
 	// StatusReadyForQA indicates the plan is waiting for the sandbox to run
-	// project tests at level=unit. Entered at implementing convergence when
-	// qa.level=unit; skipped for level=synthesis (which goes straight to
-	// reviewing_qa) and level=none. Integration/full tiers run in the
-	// operator's CI via the emitted qa.yml and do not use this status.
+	// project tests at an executable QA level. Entered at implementing
+	// convergence when qa.level=unit or integration; skipped for level=synthesis
+	// (which goes straight to reviewing_qa) and level=none. Full/e2e proof stays
+	// in the operator's CI via the emitted qa.yml and does not use this status.
 	StatusReadyForQA Status = "ready_for_qa"
 	// StatusReviewingQA indicates qa-reviewer is producing the release-readiness
 	// verdict. Entered for all non-"none" levels. Inputs vary by level:
@@ -119,11 +119,10 @@ func (s Status) String() string {
 // QALevel describes the project-level quality-assurance depth applied at
 // plan completion.
 //
-// semspec executes only what the sandbox can run (unit). Heavier tiers
-// (integration via testcontainers, services-class live SITL, e2e) run in the
-// OPERATOR's CI against the emitted qa.yml — semspec designs + gates, it does
-// not stand up those environments (the integration/full levels and the
-// act-based qa-runner that ran them were removed in the BMAD realignment).
+// semspec executes the project's configured QA command for unit and integration
+// levels in the sandbox. Full/e2e orchestration remains an operator CI concern
+// for MVP; plans with stale "full" snapshots coerce to synthesis rather than
+// entering an unclaimed ready_for_qa state.
 type QALevel string
 
 const (
@@ -136,6 +135,11 @@ const (
 	// QALevelUnit runs the project's existing test suite in the sandbox at
 	// plan-completion time, then qa-reviewer interprets.
 	QALevelUnit QALevel = "unit"
+	// QALevelIntegration runs the project's configured integration-capable QA
+	// command in the sandbox at plan-completion time. External e2e/browser
+	// orchestration still belongs to operator CI; this tier is the executed
+	// evidence gate for integration claims that the project command owns.
+	QALevelIntegration QALevel = "integration"
 )
 
 // String returns the string representation of the QA level.
@@ -146,17 +150,17 @@ func (l QALevel) String() string {
 // IsValid returns true if the level is one of the defined values.
 func (l QALevel) IsValid() bool {
 	switch l {
-	case QALevelNone, QALevelSynthesis, QALevelUnit:
+	case QALevelNone, QALevelSynthesis, QALevelUnit, QALevelIntegration:
 		return true
 	default:
 		return false
 	}
 }
 
-// UsesSandboxTests returns true if this level runs the project's test suite
-// in the sandbox at plan-completion time.
+// UsesSandboxTests returns true if this level runs the project's configured QA
+// command in the sandbox at plan-completion time.
 func (l QALevel) UsesSandboxTests() bool {
-	return l == QALevelUnit
+	return l == QALevelUnit || l == QALevelIntegration
 }
 
 // IsValid returns true if the status is a valid workflow status.
@@ -307,7 +311,7 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusImplementing:
 		// implementing → reviewing_rollup (legacy alias for reviewing_qa; still emitted today until Phase 2f branch-point move)
 		// implementing → reviewing_qa (level=synthesis after Phase 2f)
-		// implementing → ready_for_qa (level=unit|integration|full after Phase 2f; executor runs tests before review)
+		// implementing → ready_for_qa (level=unit|integration; executor runs tests before review)
 		// implementing → awaiting_review (no QA, auto_approve_review=false or GitHub)
 		// implementing → complete (level=none; direct terminal with no review)
 		// implementing → changed (change proposal deprecated requirements)
@@ -330,7 +334,7 @@ func (s Status) CanTransitionTo(target Status) bool {
 		return target == StatusAwaitingReview ||
 			target == StatusComplete || target == StatusRejected
 	case StatusReadyForQA:
-		// ready_for_qa → reviewing_qa (sandbox completes unit tests)
+		// ready_for_qa → reviewing_qa (sandbox completes unit/integration tests)
 		// ready_for_qa → rejected (sandbox cannot execute — infrastructure error)
 		return target == StatusReviewingQA || target == StatusRejected
 	case StatusReviewingQA:
@@ -751,11 +755,10 @@ type QAVerdictSummary struct {
 
 // EffectiveQALevel returns the plan's QA level, defaulting to synthesis when
 // unset OR when the snapshotted value is no longer a defined level. The latter
-// guards plans/configs created before the integration/full levels were removed:
-// a stale "integration"/"full" must coerce to synthesis rather than fall
-// through routing into a silent wedge (routed to ready_for_qa but never
-// dispatched and never claimed). Centralized so the branch point and verdict
-// handlers agree on the interpretation.
+// guards plans/configs created with removed levels such as "full": stale values
+// must coerce to synthesis rather than fall through routing into a silent wedge.
+// Centralized so the branch point and verdict handlers agree on the
+// interpretation.
 func (p *Plan) EffectiveQALevel() QALevel {
 	if !p.QALevel.IsValid() {
 		return QALevelSynthesis

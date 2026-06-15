@@ -169,10 +169,10 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 // ready state (Complete, Executing, Failed, Pending) is walked back to Ready.
 // This mirrors the lesson learned on the QA-recovery path: without the reopen,
 // dispatchCurrentStoryLocked's ClaimStoryStatus(→Executing) is rejected for
-// a story not at Ready (invalid transition), the executor misreads the rejection
-// as "M:N reservation held by another executor", skips, and false-completes the
-// requirement with nodes_completed=0. The dev-gate fast-fail (ADR-049 Move-3)
-// is the primary producer of Executing-stranded stories.
+// a story not at Ready (invalid transition), the executor treats the reservation
+// as unavailable and now fails closed unless completed owner evidence exists.
+// The dev-gate fast-fail (ADR-049 Move-3) is the primary producer of
+// Executing-stranded stories.
 //
 // If the reopen was attempted (natsClient present) but not all owned stories
 // reached Ready (transient NATS error, partial walk), this function re-arms
@@ -193,10 +193,10 @@ func (c *Component) resumeFromRecoveryLocked(ctx context.Context, exec *requirem
 
 	// C1: if the walk was attempted but did not fully land, do NOT proceed to
 	// dispatchSynthesizerLocked — dispatching now would produce the same
-	// false-complete this function exists to prevent (story still non-Ready,
-	// ClaimStoryStatus(→Executing) rejected, executor skips, req marks complete
-	// with nodes_completed=0). Instead, re-arm awaiting-recovery WITHOUT burning
-	// a recoveryRestarts slot so the next cycle retries the walk from the story's
+	// false-green pressure this function exists to prevent (story still non-Ready,
+	// ClaimStoryStatus(→Executing) rejected, executor cannot attach completed
+	// owner evidence). Instead, re-arm awaiting-recovery WITHOUT burning a
+	// recoveryRestarts slot so the next cycle retries the walk from the story's
 	// current status (self-healing). The outer recovery timer still fires if no
 	// progress is made, so this path cannot loop forever within a single exec.
 	//

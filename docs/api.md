@@ -235,7 +235,7 @@ created → drafting → drafted → reviewing_draft → reviewed → approved
        → generating_scenarios → scenarios_generated
        → reviewing_scenarios → scenarios_reviewed → ready_for_execution
        → implementing
-       → ready_for_qa (qa_level=unit/integration/full only)
+       → ready_for_qa (qa_level=unit/integration only)
        → reviewing_qa
        → complete
 ```

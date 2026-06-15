@@ -482,10 +482,10 @@ func (c *Component) failPlanOnAssemblyConflict(ctx context.Context, plan *workfl
 }
 
 // publishQARequestIfNeeded fires when a plan is routed to ready_for_qa. For
-// unit-level QA it publishes a QARequestedEvent so the sandbox runs the
-// project's test suite before qa-reviewer interprets. synthesis/none don't
-// dispatch (synthesis is claimed directly by qa-reviewer; none skips QA).
-// Heavier tiers run in the operator's CI, not via a semspec executor.
+// sandbox-executed QA levels it publishes a QARequestedEvent so the sandbox
+// runs the project's configured QA command before qa-reviewer interprets.
+// synthesis/none don't dispatch (synthesis is claimed directly by qa-reviewer;
+// none skips QA). Full/e2e orchestration remains operator CI for MVP.
 // No-op when plan.Status != ready_for_qa or natsClient is nil (tests).
 func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow.Plan) {
 	if plan == nil || plan.Status != workflow.StatusReadyForQA || c.natsClient == nil {
@@ -552,15 +552,14 @@ func (c *Component) publishQARequestIfNeeded(ctx context.Context, plan *workflow
 //
 // level=none      → StatusComplete (or StatusAwaitingReview when gated)
 // level=synthesis → StatusReadyForQA (qa-reviewer claims it directly, no tests run)
-// level=unit      → StatusReadyForQA (the sandbox runs project tests first via
+// level=unit/integration → StatusReadyForQA (the sandbox runs project QA first via
 //
 //	a QARequestedEvent, then qa-reviewer interprets the result)
 //
-// Heavier tiers (testcontainers integration, services-class live SITL, e2e)
-// are NOT executed by semspec — they run in the operator's CI against the
-// emitted qa.yml. qa-reviewer owns the ready_for_qa → reviewing_qa transition
-// via plan.mutation.qa.start; for unit, publishQARequestIfNeeded additionally
-// fires a QARequestedEvent so the sandbox runs before qa-reviewer claims it.
+// Full/e2e orchestration is NOT executed by semspec — it runs in the operator's
+// CI against the emitted qa.yml. qa-reviewer owns the ready_for_qa →
+// reviewing_qa transition via plan.mutation.qa.start; executable levels also
+// fire a QARequestedEvent so the sandbox runs before qa-reviewer claims it.
 func (c *Component) targetForQALevel(level workflow.QALevel, plan *workflow.Plan, _ string) workflow.Status {
 	switch level {
 	case workflow.QALevelNone:

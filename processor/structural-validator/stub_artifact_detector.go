@@ -42,9 +42,9 @@ const stubJarSizeThreshold = 2048
 //
 // Closes deferred item (c) from take-19 forensics. Item d-equivalent
 // (test-body mismatch / faked implementations) is now owned by the
-// LLM reviewer + operator's CI runtime after issue #113 retired the
+// LLM reviewer + executable QA runtime after issue #113 retired the
 // literal-substring harness-discipline checks; see ADR-041 Move 5
-// amendment (qa-runner integration-tier enforcement removed ADR-045).
+// amendment.
 func CheckStubArtifacts(workDir string, filesModified []string) payloads.CheckResult {
 	jars := filterJarFiles(filesModified)
 	if len(jars) == 0 {

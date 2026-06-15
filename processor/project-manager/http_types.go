@@ -45,13 +45,14 @@ type ConfigUpdateRequest struct {
 	Org         *string `json:"org,omitempty"`
 	Platform    *string `json:"platform,omitempty"`
 	// QALevel updates the project-wide QA policy. Values: "none",
-	// "synthesis", "unit". Empty string clears to default (synthesis).
+	// "synthesis", "unit", "integration". Empty string clears to default
+	// (synthesis).
 	// In-flight plans are unaffected — QA level is snapshotted onto each plan
 	// at creation time.
 	QALevel *string `json:"qa_level,omitempty"`
 
-	// QATestCommand overrides the inferred test command the sandbox runs at
-	// qa.level=unit. Empty string clears the override, reverting to
+	// QATestCommand overrides the inferred test command the sandbox runs for
+	// executable QA levels. Empty string clears the override, reverting to
 	// language-based inference.
 	QATestCommand *string `json:"qa_test_command,omitempty"`
 }

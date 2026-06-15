@@ -67,7 +67,8 @@ Tier 2 — Pipeline Tests (mock LLM):
   plan-stall-retry             - Execution stall: failed requirement → retry → re-execution succeeds
   plan-stall-complete          - Execution stall: failed requirement → force-complete
   plan-stall-reject            - Execution stall: failed requirement → reject → retry from rejected
-  qa-cycle                     - QA phase: sandbox runs go test, qa-reviewer approves, plan → complete
+  qa-cycle                     - QA phase at qa_level=unit: sandbox runs go test, qa-reviewer approves, plan → complete
+  qa-cycle-integration         - QA phase at qa_level=integration: same pipeline with integration mode
 
 Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) have moved
 to Playwright E2E — see docs/e2e-scenario-archive.md for details.
@@ -158,7 +159,8 @@ func listCmd() *cobra.Command {
 			fmt.Println("  plan-stall-retry             Execution stall: failed req → retry → re-execute")
 			fmt.Println("  plan-stall-complete          Execution stall: failed req → force-complete")
 			fmt.Println("  plan-stall-reject            Execution stall: failed req → reject → retry")
-			fmt.Println("  qa-cycle                     QA phase: sandbox go test + qa-reviewer verdict pipeline")
+			fmt.Println("  qa-cycle                     QA phase at qa_level=unit: sandbox go test + qa-reviewer verdict pipeline")
+			fmt.Println("  qa-cycle-integration         QA phase at qa_level=integration: sandbox go test + qa-reviewer verdict pipeline")
 			fmt.Println()
 			fmt.Println("  Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic)")
 			fmt.Println("  have moved to Playwright E2E — see docs/e2e-scenario-archive.md")
@@ -210,8 +212,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete),
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),
-		// Tier 2: QA phase — sandbox unit-test executor + qa-reviewer verdict pipeline
+		// Tier 2: QA phase — sandbox executable QA + qa-reviewer verdict pipeline
 		scenarios.NewQACycleScenario(cfg),
+		scenarios.NewQAIntegrationCycleScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

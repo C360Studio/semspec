@@ -54,9 +54,9 @@ type ProjectConfig struct {
 
 	// QALevel is the project-wide QA policy applied at plan completion.
 	// Values: "none" (escape hatch), "synthesis" (default, LLM verdict only,
-	// no test execution), "unit" (sandbox runs project tests). Heavier tiers
-	// (testcontainers integration, services-class live SITL, e2e) run in the
-	// operator's CI against the emitted qa.yml, not via a semspec executor.
+	// no test execution), "unit" (sandbox runs project tests), "integration"
+	// (sandbox runs the configured integration-capable QA command). Full/e2e
+	// orchestration stays in operator CI for MVP.
 	// Plans snapshot this value at creation — changing qa_level does not affect
 	// in-flight plans. Empty string is treated as "synthesis".
 	QALevel QALevel `json:"qa_level,omitempty"`
@@ -75,7 +75,7 @@ type ProjectConfig struct {
 }
 
 // EffectiveQALevel returns the project's QA level, defaulting to synthesis
-// when unset or no longer a defined level (coerces a stale "integration"/"full"
+// when unset or no longer a defined level (for example, a stale "full"
 // snapshot). Matches Plan.EffectiveQALevel so both config surfaces agree.
 func (pc *ProjectConfig) EffectiveQALevel() QALevel {
 	if pc == nil || !pc.QALevel.IsValid() {
@@ -84,7 +84,8 @@ func (pc *ProjectConfig) EffectiveQALevel() QALevel {
 	return pc.QALevel
 }
 
-// EffectiveTestCommand returns the test command sandbox runs at level=unit.
+// EffectiveTestCommand returns the test command sandbox runs for executable QA
+// levels (unit and integration).
 // When unset, infers from the primary language — Go projects run
 // `go test ./...`, Node `npm test`, Python `pytest`, Rust `cargo test`,
 // Java `./gradlew test`. Falls through to an empty string when the

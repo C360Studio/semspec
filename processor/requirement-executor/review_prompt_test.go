@@ -60,7 +60,7 @@ func TestFirstTierTag_HonorsFirstMatch(t *testing.T) {
 // The req-reviewer prompt MUST communicate three contracts to the LLM:
 //   - @unit scenarios need running tests
 //   - @integration scenarios need correctly-AUTHORED tests but NOT passing
-//     ones (the harness isn't running in dev sandbox)
+//     ones at dev-completion (runtime proof is the QA integration gate)
 //   - @smoke / @e2e MUST NOT block dev approval
 //
 // Without these contracts the legacy "verify all scenarios" prompt
@@ -100,10 +100,10 @@ func TestBuildReviewPrompt_TierAwareContract(t *testing.T) {
 		// The crucial sentence: @integration tests don't need to PASS at
 		// dev-completion. This is the structural fix for #37.
 		"does NOT need to PASS",
-		// MVP scope: Murat records integration runtime proof readiness; full
-		// semspec-managed harness routing is post-MVP unless the project owns it.
-		"Murat records",
-		"post-MVP",
+		// MVP scope: integration runtime proof is restored as a QA gate, while
+		// full/e2e orchestration stays with operator CI.
+		"qa_level=integration",
+		"operator CI",
 		// Env-var contract.
 		"environment variables",
 		// Required-assertion contract.

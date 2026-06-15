@@ -90,7 +90,7 @@ func main() {
 	defer cancel()
 	go srv.CleanupLoop(ctx, *cleanupInterval, *cleanupAge)
 
-	// Optional NATS subscriber for unit-level QA requests.
+	// Optional NATS subscriber for sandbox-executable QA requests.
 	// When -nats-url is empty and NATS_URL is unset, the sandbox runs HTTP-only
 	// — existing callers are unaffected.
 	connectNATSQA(ctx, srv, *natsURL, logger)
@@ -114,7 +114,7 @@ func main() {
 	}
 }
 
-// connectNATSQA connects to NATS and starts the QA unit-mode subscriber.
+// connectNATSQA connects to NATS and starts the sandbox QA subscriber.
 // When url is empty, logs a notice and returns — sandbox operates HTTP-only.
 // On any connection error, logs and exits so the process doesn't start
 // partially configured.
