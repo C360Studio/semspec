@@ -29,8 +29,8 @@
 
 	let sourceFilter = $state<string>('all');
 
-	const sourceOptions = ['all', 'plan', 'execution', 'question'];
-	const sourcesForCount = ['plan', 'execution', 'question'] as const;
+	const sourceOptions = ['all', 'plan', 'execution', 'activity', 'question'];
+	const sourcesForCount = ['plan', 'execution', 'activity', 'question'] as const;
 
 	// All events before the source-filter is applied. We need the unfiltered
 	// list so per-source counts in the dropdown reflect the totals, not the
@@ -73,6 +73,8 @@
 					return 'hammer';
 				}
 				return 'layers';
+			case 'activity':
+				return 'activity';
 			case 'question':
 				if (event.type === 'question_answered') return 'check-circle';
 				if (event.type === 'question_timeout') return 'clock';
@@ -96,6 +98,8 @@
 				if (stage === 'error' || stage === 'failed' || stage === 'escalated') return 'var(--color-error)';
 				return 'var(--color-text-muted)';
 			}
+			case 'activity':
+				return 'var(--color-text-muted)';
 			case 'question':
 				if (event.type === 'question_answered') return 'var(--color-success)';
 				if (event.type === 'question_timeout') return 'var(--color-warning, var(--color-error))';
@@ -114,6 +118,7 @@
 			all: 'All events',
 			plan: 'Plan',
 			execution: 'Execution',
+			activity: 'Activity',
 			question: 'Questions'
 		};
 		return labels[source] ?? source;
@@ -546,6 +551,11 @@
 	.event-source-tag.execution {
 		background: color-mix(in srgb, var(--color-success) 15%, transparent);
 		color: var(--color-success);
+	}
+
+	.event-source-tag.activity {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-muted);
 	}
 
 	.event-source-tag.question {

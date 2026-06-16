@@ -111,7 +111,7 @@ describe('getRequirementAnchor — bug #7.9 requirement pill', () => {
 });
 
 describe('countBySource — bug #7.5 dropdown counts', () => {
-	const sources = ['plan', 'execution', 'question'] as const;
+	const sources = ['plan', 'execution', 'activity', 'question'] as const;
 
 	it('sums events per source plus an all-events total', () => {
 		const events = [
@@ -120,10 +120,11 @@ describe('countBySource — bug #7.5 dropdown counts', () => {
 			baseEvent({ id: '3', source: 'execution' }),
 			baseEvent({ id: '4', source: 'execution' }),
 			baseEvent({ id: '5', source: 'execution' }),
-			baseEvent({ id: '6', source: 'question' })
+			baseEvent({ id: '6', source: 'activity' }),
+			baseEvent({ id: '7', source: 'question' })
 		];
 		const counts = countBySource(events, sources);
-		expect(counts).toEqual({ all: 6, plan: 2, execution: 3, question: 1 });
+		expect(counts).toEqual({ all: 7, plan: 2, execution: 3, activity: 1, question: 1 });
 	});
 
 	it('reports zero for sources with no events (so dropdown can grey them)', () => {
@@ -131,12 +132,13 @@ describe('countBySource — bug #7.5 dropdown counts', () => {
 		const counts = countBySource(events, sources);
 		expect(counts.plan).toBe(1);
 		expect(counts.execution).toBe(0);
+		expect(counts.activity).toBe(0);
 		expect(counts.question).toBe(0);
 	});
 
 	it('returns zeros + 0 total for empty input', () => {
 		const counts = countBySource([], sources);
-		expect(counts).toEqual({ all: 0, plan: 0, execution: 0, question: 0 });
+		expect(counts).toEqual({ all: 0, plan: 0, execution: 0, activity: 0, question: 0 });
 	});
 
 	it('ignores events with unknown sources (defensive against wire drift)', () => {

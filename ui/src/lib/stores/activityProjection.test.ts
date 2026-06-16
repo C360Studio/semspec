@@ -10,7 +10,12 @@ import {
 } from '$lib/stores/activityProjection';
 import type { ActivityEvent } from '$lib/types';
 
-function activity(overrides: Partial<ActivityEvent> & { type: string }): ActivityEvent {
+type ActivityOverride = Omit<Partial<ActivityEvent>, 'data'> & {
+	type: string;
+	data?: unknown;
+} & Record<string, unknown>;
+
+function activity(overrides: ActivityOverride): ActivityEvent {
 	return {
 		loop_id: '01234567-abcd',
 		timestamp: '2026-04-21T12:00:00Z',
@@ -21,10 +26,53 @@ function activity(overrides: Partial<ActivityEvent> & { type: string }): Activit
 describe('activityEventToFeedEvent', () => {
 	it('maps loop_created to a start summary with loop id prefix', () => {
 		const fe = activityEventToFeedEvent(activity({ type: 'loop_created' }));
-		expect(fe.source).toBe('execution');
+		expect(fe.source).toBe('activity');
 		expect(fe.type).toBe('loop_created');
 		expect(fe.summary).toMatch(/Loop started/);
 		expect(fe.summary).toContain('01234567');
+	});
+
+	it('labels semspec-planning loop data as plan activity', () => {
+		const fe = activityEventToFeedEvent(activity({
+			type: 'loop_updated',
+			data: {
+				task_id: 'scengen-4',
+				workflow_slug: 'semspec-planning',
+				workflow_step: 'scenario-generation',
+				role: 'scenario-generator'
+			}
+		}));
+		expect(fe.source).toBe('plan');
+		expect(fe.data?.workflow_slug).toBe('semspec-planning');
+		expect(fe.data?.workflow_step).toBe('scenario-generation');
+		expect(fe.data?.task_id).toBe('scengen-4');
+		expect(fe.data?.role).toBe('scenario-generator');
+	});
+
+	it('labels semspec-execution loop data as execution activity', () => {
+		const fe = activityEventToFeedEvent(activity({
+			type: 'loop_updated',
+			data: {
+				task_id: 'reqexec-2',
+				workflow_slug: 'semspec-execution',
+				workflow_step: 'executing',
+				role: 'developer'
+			}
+		}));
+		expect(fe.source).toBe('execution');
+	});
+
+	it('labels task-execution workflow loop data as execution activity', () => {
+		const fe = activityEventToFeedEvent(activity({
+			type: 'loop_updated',
+			data: {
+				task_id: 'task-run-1',
+				workflow_slug: 'semspec-task-execution',
+				workflow_step: 'develop',
+				role: 'general'
+			}
+		}));
+		expect(fe.source).toBe('execution');
 	});
 
 	it('maps loop_updated to a tick summary', () => {
@@ -67,6 +115,17 @@ describe('activityEventToFeedEvent', () => {
 		const raw = { ...activity({ type: 'loop_updated' }), requirement_id: 'R4' };
 		const fe = activityEventToFeedEvent(raw as ActivityEvent);
 		expect(fe.data?.requirement_id).toBe('R4');
+	});
+
+	it('passes requirement_id through from loop data when present', () => {
+		const fe = activityEventToFeedEvent(activity({
+			type: 'loop_updated',
+			data: {
+				workflow_slug: 'semspec-planning',
+				requirement_id: 'R8'
+			}
+		}));
+		expect(fe.data?.requirement_id).toBe('R8');
 	});
 
 	it('omits requirement_id when empty string on the raw event', () => {

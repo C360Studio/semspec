@@ -6,7 +6,7 @@ export type FeedEvent = {
 	/** Dedup key (source + SSE event ID or timestamp) */
 	id: string;
 	timestamp: string;
-	source: 'plan' | 'execution' | 'question';
+	source: 'plan' | 'execution' | 'activity' | 'question';
 	/** Original SSE event type (plan_updated, task_updated, question_created, etc.) */
 	type: string;
 	/** Human-readable summary */

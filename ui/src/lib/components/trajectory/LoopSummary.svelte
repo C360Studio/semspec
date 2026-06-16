@@ -13,21 +13,24 @@
 	let { role, state, trajectory, summary }: Props = $props();
 
 	// Prefer full trajectory data; fall back to summary when available
-	const totalTokens = $derived(
-		trajectory
-			? trajectory.total_tokens_in + trajectory.total_tokens_out
-			: summary
-				? summary.total_tokens_in + summary.total_tokens_out
-				: 0
-	);
-
-	const displayDuration = $derived(
-		trajectory ? trajectory.duration : summary ? summary.duration : 0
-	);
-
-	const displayIterations = $derived(trajectory ? null : summary ? summary.iterations : null);
-
 	const isActive = $derived(state === 'executing' || state === 'pending');
+
+	const totalTokens = $derived.by(() => {
+		const trajectoryTokens = trajectory ? trajectory.total_tokens_in + trajectory.total_tokens_out : 0;
+		const summaryTokens = summary ? summary.total_tokens_in + summary.total_tokens_out : 0;
+		return isActive ? Math.max(trajectoryTokens, summaryTokens) : trajectoryTokens || summaryTokens;
+	});
+
+	const displayDuration = $derived.by(() => {
+		const trajectoryDuration = trajectory?.duration ?? 0;
+		const summaryDuration = summary?.duration ?? 0;
+		return isActive ? Math.max(trajectoryDuration, summaryDuration) : trajectoryDuration || summaryDuration;
+	});
+
+	const displayIterations = $derived(
+		isActive && summary ? summary.iterations : trajectory ? null : summary ? summary.iterations : null
+	);
+
 	const isComplete = $derived(state === 'completed');
 	const isFailed = $derived(state === 'failed' || state === 'error');
 
