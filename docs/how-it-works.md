@@ -3,6 +3,9 @@
 This document explains what happens when you use semspec, from infrastructure to command execution.
 Start here before reading the architecture or component guides.
 
+For the comprehensive happy-path, retry-path, and SemTeams starter-spec view, see
+[SemSpec End-to-End Flow](e2e-flow.md).
+
 ## What is Semspec?
 
 Semspec is a spec-driven development agent with a **persistent knowledge graph**. It helps you:
@@ -18,34 +21,28 @@ team's coding standards.
 
 ## Execution Model
 
-Planning produces Requirements and Scenarios. Task decomposition happens at runtime for each
-Requirement:
+Planning produces Requirements, Architecture, Stories, and Scenarios. Runtime execution then
+dispatches Requirements while implementation work happens through Story-owned task DAGs:
 
 ```
-Plan approved → Requirements → Scenarios → ready_for_execution
-                                                  │
-                                          scenario-orchestrator
-                                                  │
-                          ┌───────────────────────┼───────────────────────┐
-                          ▼                       ▼                       ▼
-              requirement-execution-loop  requirement-execution-loop  requirement-execution-loop
-                   (Requirement 1)             (Requirement 2)           (Requirement N)
-                          │
-                 LLM: decompose_task
-                          │
-                       TaskDAG
-                          │
-                  dag-execution-loop
-                          │
-                ┌─────────┼─────────┐
-                ▼         ▼         ▼
-             node A     node B    node C
-                          │(after A)
+Plan approved -> Requirements -> Architecture -> Stories -> Scenarios -> ready_for_execution
+                                                                       |
+                                                               scenario-orchestrator
+                                                                       |
+                                              +------------------------+------------------------+
+                                              v                        v                        v
+                                      Requirement 1             Requirement 2             Requirement N
+                                              |
+                                      Story task DAG
+                                              |
+                                developer -> validator -> reviewer
+                                              |
+                                      Story scenario review
 ```
 
-Task decomposition happens at execution time because the best breakdown depends on what the code
-looks like now — not at planning time. The agent inspects the live codebase and chooses the right
-task structure for each Requirement when it is ready to execute.
+Task synthesis happens at execution time from Stories because the best node sequence depends on
+the accepted Story/file ownership surface and the current requirement branch. The executor does
+not invent new scope during implementation; it works the Story boundaries created during planning.
 
 ### Agent Tool Set
 
@@ -79,8 +76,9 @@ When a PlanDecision is accepted during reactive execution, running scenario loop
 via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Scenarios are
 re-queued for fresh execution with the updated behavioral contracts.
 
-The `dag-execution-loop` and `requirement-execution-loop` reactive workflows are defined as
-declarative JSON rules in `configs/rules/`.
+The current execution path is component-owned: `scenario-orchestrator` dispatches ready
+requirements, `requirement-executor` synthesizes Story task DAGs, and `execution-manager` owns the
+TDD task pipeline.
 
 ## The Semstreams Relationship
 
@@ -302,7 +300,7 @@ These files are git-friendly. Commit them to preserve context across sessions an
 
 ## Component Groups
 
-Semspec registers 22 components at startup alongside the full semstreams component suite.
+Semspec registers its project components at startup alongside the full semstreams component suite.
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
@@ -311,18 +309,20 @@ Semspec registers 22 components at startup alongside the full semstreams compone
 │                          validates against standards; sets reviewed or│
 │                          revision_needed; promotes to approved when   │
 │                          auto_approve=true                            │
-│  architecture-generator Watches PLAN_STATES=approved, generates       │
+│  requirement-generator  Watches approved/changed plans, generates     │
+│                          structured Requirements via LLM              │
+│  architecture-generator Watches requirements_generated plans, creates │
 │                          technology decisions and component boundaries│
-│  requirement-generator  Watches PLAN_STATES, generates structured     │
-│                          Requirements via LLM                        │
-│  scenario-generator     Generates BDD Scenarios from Requirements    │
+│  story-preparer         Watches architecture_generated plans, creates │
+│                          Stories and dependency scheduling            │
+│  scenario-generator     Generates Story-scoped Scenarios              │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
-│  scenario-orchestrator  Dispatches requirement-execution-loop per    │
-│                          pending Requirement                         │
-│  requirement-executor   Decomposes Requirements into DAGs, serial    │
-│                          node dispatch, and per-requirement review   │
+│  scenario-orchestrator  Dispatches ready Requirements by dependency  │
+│                          and Story availability                      │
+│  requirement-executor   Synthesizes Story task DAGs, handles serial  │
+│                          node dispatch, and Story review             │
 │  execution-manager      TDD pipeline per DAG node:                  │
 │                          developer → validator → reviewer            │
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │

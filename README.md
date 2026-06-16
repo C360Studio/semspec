@@ -156,49 +156,56 @@ common errors.
 
 ## How It Works
 
+For the full state chart, happy paths, retry paths, and SemTeams starter contract, see
+[End-to-End Flow](docs/e2e-flow.md).
+
 ```
-plan → architecture → requirements → scenarios → decompose → TDD pipeline [developer → validator → reviewer]
-                                                            → requirement review
-                                                            → qa review
+plan -> requirements -> architecture -> stories -> scenarios -> execute
+                                                   -> TDD pipeline [developer -> validator -> reviewer]
+                                                   -> Story / requirement review
+                                                   -> qa review
 ```
 
 **Plan** — Communicate intent: goal, context, scope. The pipeline is self-coordinating — each
 component watches a KV bucket and triggers when it sees the status it owns. Planner drafts,
-plan-reviewer validates against standards, architecture-generator produces technology decisions,
-then requirement-generator and scenario-generator run in sequence. No coordinator needed.
+plan-reviewer validates against standards, requirement-generator produces dependency-aware
+requirements, architecture-generator produces technology decisions, story-preparer slices the
+work into Stories, and scenario-generator writes Story-scoped evidence. No coordinator needed.
 
-**Requirements** — The unit of execution. Each requirement gets decomposed into a TaskDAG at
-runtime by inspecting the live codebase. Nodes execute serially in dependency order. Scenarios
-are acceptance criteria validated at review time, not independent execution units.
+**Requirements and Stories** — Requirements are the scheduling and traceability unit. Stories are
+the implementation slices: they bind requirements and capabilities to concrete files, ownership,
+and dependencies. At runtime, requirement-executor synthesizes Story task DAGs; task nodes execute
+serially in dependency order. Scenarios are acceptance criteria validated at review time, not
+independent execution units.
 
 **TDD Pipeline** — Three stages run per DAG node, in order:
 
 1. **Developer** — writes tests and implements until they pass (TDD in a single agent)
 2. **Validator** — runs structural validation (linting, type checks, conventions)
-3. **Reviewer** — reviews the code and returns a verdict: `approved`, `fixable`, `misscoped`,
-   or `too_big`
+3. **Reviewer** — reviews the code and returns a verdict such as `approved`, `fixable`, or
+   `restructure`
 
-Rejections route back with specific feedback. Code issues go to the Developer. Misscoped or
-oversized tasks escalate to humans.
+Rejections route back with specific feedback. Code issues go to the Developer. Restructure
+feedback, ownership planning gaps, or exhausted TDD budgets escalate to recovery.
 
-**Requirement Review** — After all DAG nodes for a requirement complete, a reviewer runs against
-the full changeset and returns per-scenario verdicts: `approved`, `needs_changes`, or `escalate`.
+**Requirement Review** — After Story task nodes complete, a reviewer runs against the Story
+changeset and scenarios. Approved Stories advance the requirement; fixable feedback reruns the
+Story DAG; restructure feedback rebuilds the requirement branch.
 
 **QA Review** — After all requirements complete, qa-reviewer synthesizes requirement outcomes
-into a final release-readiness verdict. The plan transitions through `reviewing_qa` (or directly
-to `complete` when `qa_level=none`) before reaching `complete`. The gate counts completed
-requirements, not scenarios. Inputs vary by `qa_level`: `synthesis` reads plan+impl only;
-`unit` and `integration` first route through `ready_for_qa` so the sandbox can run the
-configured project test command, then feed results into the reviewer. `full`/e2e proof remains
-operator-owned via the emitted `qa.yml`.
+into a final release-readiness verdict. The plan transitions through `ready_for_qa` and
+`reviewing_qa` (or directly to `complete` when `qa_level=none`) before reaching `complete`. The
+gate counts completed requirements, not scenarios. Inputs vary by `qa_level`: `synthesis` reads
+plan+impl only; `unit` and `integration` include sandbox test results before feeding the reviewer.
+`full`/e2e proof remains operator-owned via the emitted `qa.yml`.
 
 > Older plans may show a `reviewing_rollup` status. That stage is kept for in-flight plans on
 > upgrade but no new code emits it.
 
-**Rules Engine** — Declarative JSON rules in `configs/rules/` react to graph entity state changes.
-Components write workflow phases; rules handle terminal transitions — approved tasks trigger the
-next DAG node, escalated tasks emit events, errors route to recovery. This keeps orchestrator code
-free of terminal-state logic.
+**Event-Driven Components** — Components react to durable state changes and publish regular
+semstreams events. `scenario-orchestrator` dispatches ready requirements, `requirement-executor`
+synthesizes Story task DAGs, and `execution-manager` owns the TDD task pipeline. Recovery remains
+explicit through PlanDecisions instead of hidden terminal-state logic.
 
 **Lessons Learned** — Reviewer rejections are classified against error categories and stored as
 role-scoped lessons in the graph. Lessons matching the current error patterns are injected into
