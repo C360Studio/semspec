@@ -1806,6 +1806,14 @@ func (c *Component) handleGitHubPRMetadataMutation(ctx context.Context, data []b
 // resetRequirementExecutionsByID resets specific requirement executions by ID,
 // regardless of their current stage. Used by PR feedback to reset completed
 // requirements for re-execution.
+//
+// KNOWN GAP / TRACKED (2026-06-16, not fixing now): this only constructs and
+// resets "req.<slug>.<reqID>" keys — it cannot reach the "task.<slug>.node-*"
+// per-node executions for those requirements, so escalated task nodes orphan
+// here exactly as they did in the architecture_revise wedge that
+// resetRequirementExecutions(scope="all") was fixed for. Same raw-key smell
+// (see execution-manager ReqResetRequest). When fixed, mirror the scope=
+// "requirements" task-key handling from resetRequirementExecutions.
 func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug string, reqIDs []string) (int, error) {
 	var resetCount int
 	for _, reqID := range reqIDs {

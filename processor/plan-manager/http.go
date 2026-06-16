@@ -1301,8 +1301,9 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 	})
 }
 
-// resetRequirementExecutions scans EXECUTION_STATES for req.<slug>.* keys and
-// resets entries selected by scope. Returns the number of entries reset.
+// resetRequirementExecutions scans EXECUTION_STATES for this plan's execution
+// entries — both req.<slug>.* (requirement-level) and task.<slug>.* (per-node
+// task) keys — and resets those selected by scope. Returns the number reset.
 //
 // Scope semantics:
 //
@@ -1317,7 +1318,17 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 		return 0, nil
 	}
 
-	prefix := "req." + slug + "."
+	// EXECUTION_STATES holds two entry shapes for a plan, written by two
+	// different components:
+	//   req.<slug>.<reqID>     — requirement-level execution (requirement-executor)
+	//   task.<slug>.node-<...> — per-node task execution (execution-manager)
+	// A full reset must clear BOTH. The req.-only filter used previously left
+	// escalated task-node entries stranded: after an architecture_revise
+	// recovery re-planned the plan back to ready_for_execution, the orphaned
+	// task node blocked re-dispatch and the plan wedged (2026-06-16 hybrid-gpt5
+	// mavlink-hard). See reset_execution_taskkeys_test.go.
+	reqPrefix := "req." + slug + "."
+	taskPrefix := "task." + slug + "."
 	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
 	if err != nil {
 		if errors.Is(err, jetstream.ErrNoKeysFound) {
@@ -1326,8 +1337,7 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 		return 0, fmt.Errorf("list execution keys: %w", err)
 	}
 
-	// Build a quick lookup set for scope="requirements". The key format is
-	// "req.<slug>.<requirement_id>" so we match the suffix after the prefix.
+	// Build a quick lookup set for scope="requirements".
 	var idSet map[string]struct{}
 	if scope == "requirements" {
 		idSet = make(map[string]struct{}, len(requirementIDs))
@@ -1340,31 +1350,53 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 
 	var resetCount int
 	for _, key := range keys {
-		if !strings.HasPrefix(key, prefix) {
+		isReq := strings.HasPrefix(key, reqPrefix)
+		isTask := strings.HasPrefix(key, taskPrefix)
+		if !isReq && !isTask {
 			continue
 		}
 
 		switch scope {
 		case "failed":
-			// Only reset entries in a failed or error stage.
+			// Only reset entries currently in a failed or error stage. Applies
+			// to both req and task entries — both carry a "stage" field.
 			entry, getErr := bucket.Get(ctx, key)
 			if getErr != nil {
 				c.logger.Debug("Failed to get execution entry during retry scan", "key", key, "error", getErr)
 				continue
 			}
-			var reqExec struct {
+			var execMeta struct {
 				Stage string `json:"stage"`
 			}
-			if jsonErr := json.Unmarshal(entry.Value(), &reqExec); jsonErr != nil {
+			if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
 				c.logger.Debug("Failed to unmarshal execution entry during retry scan", "key", key, "error", jsonErr)
 				continue
 			}
-			if reqExec.Stage != "failed" && reqExec.Stage != "error" {
+			if execMeta.Stage != "failed" && execMeta.Stage != "error" {
 				continue
 			}
 		case "requirements":
-			// Match the requirement_id portion of the key against the allow-list.
-			reqID := strings.TrimPrefix(key, prefix)
+			// Match against the allow-list. req.* keys carry the requirement id
+			// as the key suffix; task.* keys carry it in the entry body (the
+			// key suffix is the node id, not a requirement id).
+			reqID := ""
+			if isReq {
+				reqID = strings.TrimPrefix(key, reqPrefix)
+			} else {
+				entry, getErr := bucket.Get(ctx, key)
+				if getErr != nil {
+					c.logger.Debug("Failed to get task execution entry during requirements scan", "key", key, "error", getErr)
+					continue
+				}
+				var execMeta struct {
+					RequirementID string `json:"requirement_id"`
+				}
+				if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
+					c.logger.Debug("Failed to unmarshal task execution entry during requirements scan", "key", key, "error", jsonErr)
+					continue
+				}
+				reqID = execMeta.RequirementID
+			}
 			if _, ok := idSet[reqID]; !ok {
 				continue
 			}
