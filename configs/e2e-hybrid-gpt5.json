@@ -149,12 +149,12 @@
         ]
       },
       "reviewing": {
-        "description": "Code review, quality analysis — same code-specialized model as coding, so it reviews against the same mental model that produced the change.",
+        "description": "Code review, quality analysis. Deliberately NOT gpt-5.5 (the coding model): gpt-5.5 in the reviewer slot wedged ~15min with request_timeout unenforced (2026-05-31). gemini-pro reviews reliably; gpt-5-5 retained only as fallback.",
         "preferred": [
-          "gpt-5-5"
+          "gemini-pro"
         ],
         "fallback": [
-          "gemini-pro",
+          "gpt-5-5",
           "gemini-flash"
         ]
       },
@@ -250,7 +250,7 @@
         "fallback": [
           "seminstruct-summary"
         ],
-        "timeout": "60s"
+        "timeout": "300s"
       },
       "question_answering": {
         "description": "Answerer-agent backend for ask_question routes — bigger reasoning model than workflow default.",
@@ -939,6 +939,7 @@
         "accepted_subject": "workflow.events.plan-decision.accepted",
         "auto_accept_recovery": true,
         "timeout_seconds": 120,
+        "max_auto_architecture_revises": 2,
         "ports": {
           "inputs": [
             {
