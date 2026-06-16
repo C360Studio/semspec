@@ -367,6 +367,26 @@ func TestRenderPlanReviewerPrompt_R1PhaseBoundaries(t *testing.T) {
 	}
 }
 
+// TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity pins #204's R2 gate:
+// the round-2 reviewer must judge whether the requirements+scenarios cover the
+// breadth the plan's `constraints` demand, catching the "full-coverage goal
+// decomposed into a thin scenario slice" under-scoping the 2026-06-16 run hit.
+func TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x","constraints":["full Connected Systems API coverage"]}`,
+		Round:       2,
+	})
+	if !strings.Contains(out, "Constraint & scope-coverage fidelity") {
+		t.Errorf("R2 prompt missing the #204 constraint/scope coverage-fidelity criterion\nGot:\n%s", out)
+	}
+	// R1 must NOT carry it (R1 is pre-requirements/scenarios — nothing to judge yet).
+	r1 := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{Slug: "abc123", PlanContent: `{"goal":"x"}`, Round: 1})
+	if strings.Contains(r1, "Constraint & scope-coverage fidelity") {
+		t.Errorf("R1 prompt should NOT carry the R2 coverage-fidelity criterion")
+	}
+}
+
 // TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits guards against accidentally
 // dragging the R1 phase-boundary stanza into R2 (which reviews requirements +
 // scenarios + architecture and SHOULD demand implementation-adjacent rigor).
