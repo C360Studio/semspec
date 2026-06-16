@@ -733,14 +733,15 @@ type Plan struct {
 // Mirrors the informative fields of QACompletedEvent minus slug/plan_id/level
 // which already live on the plan.
 type QARun struct {
-	RunID       string          `json:"run_id"`
-	Passed      bool            `json:"passed"`
-	Failures    []QAFailure     `json:"failures,omitempty"`
-	Artifacts   []QAArtifactRef `json:"artifacts,omitempty"`
-	DurationMs  int64           `json:"duration_ms"`
-	RunnerError string          `json:"runner_error,omitempty"`
-	TraceID     string          `json:"trace_id,omitempty"`
-	CompletedAt time.Time       `json:"completed_at"`
+	RunID        string          `json:"run_id"`
+	Passed       bool            `json:"passed"`
+	Failures     []QAFailure     `json:"failures,omitempty"`
+	SkippedTests []QASkippedTest `json:"skipped_tests,omitempty"`
+	Artifacts    []QAArtifactRef `json:"artifacts,omitempty"`
+	DurationMs   int64           `json:"duration_ms"`
+	RunnerError  string          `json:"runner_error,omitempty"`
+	TraceID      string          `json:"trace_id,omitempty"`
+	CompletedAt  time.Time       `json:"completed_at"`
 }
 
 // QAVerdictSummary is the persisted, human-readable form of the qa-reviewer's

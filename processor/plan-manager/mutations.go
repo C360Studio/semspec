@@ -1303,9 +1303,9 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 		return MutationResponse{Success: false, Error: "slug required"}
 	}
 	switch req.Verdict {
-	case workflow.QAVerdictApproved, workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:
+	case workflow.QAVerdictApproved, workflow.QAVerdictConditionallyApproved, workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:
 	default:
-		return MutationResponse{Success: false, Error: fmt.Sprintf("verdict must be approved|needs_changes|rejected, got %q", req.Verdict)}
+		return MutationResponse{Success: false, Error: fmt.Sprintf("verdict must be approved|conditionally_approved|needs_changes|rejected, got %q", req.Verdict)}
 	}
 
 	defer c.lockSlug(req.Slug)()
@@ -1343,7 +1343,13 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 	}
 
 	switch req.Verdict {
-	case workflow.QAVerdictApproved:
+	case workflow.QAVerdictApproved, workflow.QAVerdictConditionallyApproved:
+		// conditionally_approved shares the approved terminal path (assemble the
+		// branches, mark complete) — the deliverable is as verified as the sandbox
+		// tier allows. It is NOT all-green: the conditional verdict is recorded in
+		// QAVerdictSummary (above) and surfaced as a distinct user-facing stage
+		// (complete_with_deferrals), and the deferred behavior must be verified in
+		// the operator-CI e2e tier (ADR-045).
 		target := workflow.StatusComplete
 		if c.shouldGateReview(plan) {
 			target = workflow.StatusAwaitingReview
@@ -1383,8 +1389,8 @@ func (c *Component) handleQAVerdictMutation(ctx context.Context, data []byte) Mu
 			return MutationResponse{Success: false, Error: plan.LastError}
 		}
 		plan.Status = target
-		c.logger.Info("QA verdict approved",
-			"slug", req.Slug, "level", req.Level, "target", target,
+		c.logger.Info("QA verdict accepted — plan assembled",
+			"slug", req.Slug, "verdict", req.Verdict, "level", req.Level, "target", target,
 			"plan_branch", plan.AssembledBranch, "plan_merge_commit", plan.AssembledMergeCommit)
 
 	case workflow.QAVerdictNeedsChanges, workflow.QAVerdictRejected:

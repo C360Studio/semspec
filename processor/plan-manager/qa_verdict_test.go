@@ -156,3 +156,55 @@ func TestHandleQAVerdictMutation_PersistsSummaryOnMergeFail(t *testing.T) {
 		t.Error("LastError should record the merge failure for operator visibility")
 	}
 }
+
+// TestDeterminePlanStage_ConditionallyApproved asserts a conditionally-approved
+// terminal plan renders as a distinct yellow stage, never plain green
+// "complete" — the user-visible half of the done-with-deferrals contract.
+func TestDeterminePlanStage_ConditionallyApproved(t *testing.T) {
+	c := setupTestComponent(t)
+
+	plain := &workflow.Plan{Slug: "s", Status: workflow.StatusComplete}
+	if got := c.determinePlanStage(plain); got != "complete" {
+		t.Errorf("plain complete stage = %q, want complete", got)
+	}
+
+	cond := &workflow.Plan{
+		Slug:             "s",
+		Status:           workflow.StatusComplete,
+		QAVerdictSummary: &workflow.QAVerdictSummary{Verdict: workflow.QAVerdictConditionallyApproved},
+	}
+	if got := c.determinePlanStage(cond); got != "complete_with_deferrals" {
+		t.Errorf("conditionally-approved complete stage = %q, want complete_with_deferrals", got)
+	}
+
+	// An ordinary approval must remain plain green.
+	appr := &workflow.Plan{
+		Slug:             "s",
+		Status:           workflow.StatusComplete,
+		QAVerdictSummary: &workflow.QAVerdictSummary{Verdict: workflow.QAVerdictApproved},
+	}
+	if got := c.determinePlanStage(appr); got != "complete" {
+		t.Errorf("approved complete stage = %q, want complete", got)
+	}
+}
+
+// TestHandleQAVerdictMutation_AcceptsConditionallyApproved asserts the new
+// verdict passes validation (it reaches the plan lookup rather than being
+// rejected as an unknown verdict).
+func TestHandleQAVerdictMutation_AcceptsConditionallyApproved(t *testing.T) {
+	ctx := context.Background()
+	c := setupTestComponent(t)
+
+	event := workflow.QAVerdictEvent{Slug: "missing-plan", Verdict: workflow.QAVerdictConditionallyApproved}
+	data, err := json.Marshal(event)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resp := c.handleQAVerdictMutation(ctx, data)
+	if resp.Success {
+		t.Fatal("expected failure for a missing plan")
+	}
+	if resp.Error != "plan not found" {
+		t.Errorf("Error = %q, want \"plan not found\" (proves conditionally_approved passed verdict validation)", resp.Error)
+	}
+}

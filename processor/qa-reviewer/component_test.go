@@ -14,6 +14,7 @@ func TestIsValidQAVerdict(t *testing.T) {
 		want    bool
 	}{
 		{"approved", true},
+		{"conditionally_approved", true},
 		{"needs_changes", true},
 		{"rejected", true},
 		{"", false},

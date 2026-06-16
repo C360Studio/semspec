@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"log/slog"
 	"os"
@@ -251,10 +252,19 @@ func (h *qaHandler) runSandboxQA(
 		".semspec", "qa-artifacts", evt.Slug, runID, fmt.Sprintf("%s-test.log", evt.Mode))
 	artifacts := h.archiveLog(evt.Slug, runID, artifactRelPath, combined, fmt.Sprintf("%s test output", evt.Mode))
 
-	skippedEvidence := integrationSkippedTestEvidence(evt.Mode, workDir)
+	skippedTests := integrationSkippedTests(evt.Mode, workDir)
 
-	// Build pass/fail result.
-	passed := exitCode == 0 && !timedOut && len(skippedEvidence) == 0
+	// Build pass/fail result. A SKIP is NOT a failure: Passed reflects only that
+	// the build succeeded and every test that ACTUALLY RAN passed. Skipped tests
+	// are surfaced as evidence (SkippedTests) for qa-reviewer to reason about —
+	// the agent reads each skipped test's source to decide whether the skip is a
+	// legitimate sandbox limitation (a test gated on a live external harness this
+	// sandbox can't provide → conditionally_approved) or gaming (a disabled test
+	// dodging a failure → needs_changes). The executor stays deterministic on the
+	// unambiguous (build/test failures, timeouts) and defers the judgment call to
+	// the agent. (Until 2026-06-16 a skip here forced passed=false, which made a
+	// fixture whose behavior tests need SITL un-passable in the sandbox forever.)
+	passed := exitCode == 0 && !timedOut
 	var failures []workflow.QAFailure
 	if !passed {
 		excerpt := combined
@@ -264,8 +274,6 @@ func (h *qaHandler) runSandboxQA(
 		msg := fmt.Sprintf("test command failed (exit %d)", exitCode)
 		if timedOut {
 			msg = fmt.Sprintf("test command timed out after %s", timeout)
-		} else if len(skippedEvidence) > 0 {
-			msg = fmt.Sprintf("integration QA skipped test(s): %s", strings.Join(skippedEvidence, ", "))
 		}
 		failures = []workflow.QAFailure{
 			{
@@ -277,15 +285,16 @@ func (h *qaHandler) runSandboxQA(
 	}
 
 	return &workflow.QACompletedEvent{
-		Slug:       evt.Slug,
-		PlanID:     evt.PlanID,
-		RunID:      runID,
-		Level:      evt.Mode,
-		Passed:     passed,
-		Failures:   failures,
-		Artifacts:  artifacts,
-		DurationMs: durationMs,
-		TraceID:    evt.TraceID,
+		Slug:         evt.Slug,
+		PlanID:       evt.PlanID,
+		RunID:        runID,
+		Level:        evt.Mode,
+		Passed:       passed,
+		Failures:     failures,
+		SkippedTests: skippedTests,
+		Artifacts:    artifacts,
+		DurationMs:   durationMs,
+		TraceID:      evt.TraceID,
 	}
 }
 
@@ -369,7 +378,19 @@ func (h *qaHandler) archiveLog(slug, runID, relPath, content, purpose string) []
 	}
 }
 
-func integrationSkippedTestEvidence(mode workflow.QALevel, workDir string) []string {
+// maxSkippedTestsReported bounds how many skipped tests the executor surfaces to
+// qa-reviewer. Bounded so a suite with hundreds of (legitimately) skipped tests
+// can't bloat the verdict payload; the agent reasons over a representative set.
+const maxSkippedTestsReported = 50
+
+// integrationSkippedTests best-effort parses the JUnit-format reports a sandbox
+// test run leaves behind and returns the tests reported as SKIPPED, identified
+// by suite + name so qa-reviewer can open each one's source and judge whether
+// the skip is a legitimate sandbox limitation or gaming. The skip REASON is not
+// returned: Gradle's JUnit XML routinely emits a bare <skipped/> (no message),
+// so the reason is recovered from the test source by the reviewer, not parsed
+// here. Non-JUnit projects yield nothing; the agent still has the full test log.
+func integrationSkippedTests(mode workflow.QALevel, workDir string) []workflow.QASkippedTest {
 	if mode != workflow.QALevelIntegration || workDir == "" {
 		return nil
 	}
@@ -378,34 +399,79 @@ func integrationSkippedTestEvidence(mode workflow.QALevel, workDir string) []str
 		filepath.Join(workDir, "target", "surefire-reports"),
 		filepath.Join(workDir, "target", "failsafe-reports"),
 	}
-	var evidence []string
+	var skipped []workflow.QASkippedTest
 	for _, root := range roots {
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
 		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() || len(evidence) >= 5 {
+			if err != nil || d.IsDir() || len(skipped) >= maxSkippedTestsReported {
 				return nil
 			}
-			ext := strings.ToLower(filepath.Ext(path))
-			if ext != ".xml" {
+			if strings.ToLower(filepath.Ext(path)) != ".xml" {
 				return nil
 			}
 			data, err := os.ReadFile(path)
 			if err != nil {
 				return nil
 			}
-			if strings.Contains(strings.ToLower(string(data)), "<skipped") {
-				rel, relErr := filepath.Rel(workDir, path)
-				if relErr != nil {
-					rel = path
-				}
-				evidence = append(evidence, rel)
+			rel, relErr := filepath.Rel(workDir, path)
+			if relErr != nil {
+				rel = path
 			}
+			skipped = append(skipped, parseSkippedJUnitCases(data, rel, maxSkippedTestsReported-len(skipped))...)
 			return nil
 		})
 	}
-	return evidence
+	return skipped
+}
+
+// parseSkippedJUnitCases extracts skipped <testcase> entries from one JUnit XML
+// report. Handles both a single <testsuite> root and a <testsuites> wrapper.
+// Returns at most `limit` entries.
+func parseSkippedJUnitCases(data []byte, file string, limit int) []workflow.QASkippedTest {
+	if limit <= 0 {
+		return nil
+	}
+	type junitCase struct {
+		Name      string    `xml:"name,attr"`
+		Classname string    `xml:"classname,attr"`
+		Skipped   *struct{} `xml:"skipped"` // non-nil iff a <skipped> child is present
+	}
+	// junitSuite is recursive: aggregate reports can nest <testsuite> elements,
+	// and a skip buried in a nested suite must not be silently dropped (that
+	// would weaken the no-false-green guard).
+	type junitSuite struct {
+		Cases  []junitCase  `xml:"testcase"`
+		Suites []junitSuite `xml:"testsuite"`
+	}
+	var root struct {
+		Cases  []junitCase  `xml:"testcase"`  // when the document root is <testsuite>
+		Suites []junitSuite `xml:"testsuite"` // when the document root is <testsuites> (possibly nested)
+	}
+	if err := xml.Unmarshal(data, &root); err != nil {
+		return nil
+	}
+	var out []workflow.QASkippedTest
+	var walk func(cases []junitCase, suites []junitSuite)
+	walk = func(cases []junitCase, suites []junitSuite) {
+		for _, tc := range cases {
+			if len(out) >= limit {
+				return
+			}
+			if tc.Skipped != nil {
+				out = append(out, workflow.QASkippedTest{Suite: tc.Classname, Name: tc.Name, File: file})
+			}
+		}
+		for _, s := range suites {
+			if len(out) >= limit {
+				return
+			}
+			walk(s.Cases, s.Suites)
+		}
+	}
+	walk(root.Cases, root.Suites)
+	return out
 }
 
 // publishCompleted wraps evt in a BaseMessage envelope and publishes it to

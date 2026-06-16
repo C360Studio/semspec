@@ -97,14 +97,15 @@ func (c *Component) handleQACompleted(lifecycleCtx, msgCtx context.Context, msg 
 	}
 
 	qaRun := &workflow.QARun{
-		RunID:       evt.RunID,
-		Passed:      evt.Passed,
-		Failures:    evt.Failures,
-		Artifacts:   evt.Artifacts,
-		DurationMs:  evt.DurationMs,
-		RunnerError: evt.RunnerError,
-		TraceID:     evt.TraceID,
-		CompletedAt: time.Now(),
+		RunID:        evt.RunID,
+		Passed:       evt.Passed,
+		Failures:     evt.Failures,
+		SkippedTests: evt.SkippedTests,
+		Artifacts:    evt.Artifacts,
+		DurationMs:   evt.DurationMs,
+		RunnerError:  evt.RunnerError,
+		TraceID:      evt.TraceID,
+		CompletedAt:  time.Now(),
 	}
 
 	c.triggersProcessed.Add(1)

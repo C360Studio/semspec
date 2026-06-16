@@ -944,6 +944,13 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 	case workflow.StatusAwaitingReview:
 		return "awaiting_review"
 	case workflow.StatusComplete:
+		// A conditionally-approved plan is terminal-complete but NOT all-green:
+		// the sandbox verified all it could and deferred some behavior to the
+		// operator-CI e2e tier (ADR-045). Surface it as a distinct yellow stage
+		// so consumers never render it as a plain green "complete".
+		if plan.QAVerdictSummary != nil && plan.QAVerdictSummary.Verdict == workflow.QAVerdictConditionallyApproved {
+			return "complete_with_deferrals"
+		}
 		return "complete"
 	case workflow.StatusChanged:
 		return "changed"

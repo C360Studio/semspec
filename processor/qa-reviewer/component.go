@@ -669,7 +669,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"had_test_data", hadTestData)
 
 	verdict := buildQAVerdictEvent(slug, plan, result)
-	c.recordQARejectionLesson(ctx, slug, result)
+	// Record the lesson on the PUBLISHED verdict, not the raw agent output: the
+	// skip-guard can coerce approved→needs_changes, and we want the reviewer to
+	// learn from exactly that failure mode (it approved a skipped run).
+	c.recordQARejectionLesson(ctx, slug, verdict.Verdict, verdict.Summary, result)
 	c.publishQAVerdict(ctx, verdict)
 	// Clear retry state AFTER the verdict mutation is dispatched. publishQAVerdict
 	// doesn't currently surface mutation errors back here (logged + swallowed),
@@ -689,11 +692,23 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 	if forced := forcedExecutableQAVerdict(slug, plan, level); forced != nil {
 		return forced
 	}
+
+	// Deterministic safety net over the LLM's skip judgment: the agent is told to
+	// never return `approved` when tests were skipped (it must use
+	// conditionally_approved for legitimate deferrals or needs_changes for
+	// gaming). reconcileSkipVerdict enforces that invariant in code so a
+	// misbehaving review can't produce a false all-green.
+	var qaRun *workflow.QARun
+	if plan != nil {
+		qaRun = plan.QARun
+	}
+	finalVerdict, skipNote := reconcileSkipVerdict(result.Verdict, qaRun)
+
 	verdict := &workflow.QAVerdictEvent{
 		Slug:    slug,
 		Level:   level,
-		Verdict: workflow.QAVerdict(result.Verdict),
-		Summary: result.Summary,
+		Verdict: finalVerdict,
+		Summary: appendVerdictNote(result.Summary, skipNote),
 		Dimensions: workflow.QAVerdictDimensions{
 			RequirementFulfillment: result.Dimensions.RequirementFulfillment,
 			CapabilityEvidence:     result.Dimensions.CapabilityEvidence,
@@ -706,7 +721,7 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 	if plan != nil {
 		verdict.PlanID = plan.ID
 	}
-	if workflow.QAVerdict(result.Verdict) != workflow.QAVerdictNeedsChanges || len(result.PlanDecisions) == 0 {
+	if finalVerdict != workflow.QAVerdictNeedsChanges || len(result.PlanDecisions) == 0 {
 		return verdict
 	}
 	now := time.Now()
@@ -732,6 +747,48 @@ func buildQAVerdictEvent(slug string, plan *workflow.Plan, result *qaReviewOutpu
 		verdict.PlanDecisionIDs = append(verdict.PlanDecisionIDs, proposal.ID)
 	}
 	return verdict
+}
+
+// reconcileSkipVerdict is the deterministic safety net over the LLM's skip
+// judgment. By the time it runs, the executor reported Passed (build + every
+// executed test succeeded — real failures already short-circuited to red in
+// forcedExecutableQAVerdict). It enforces, in code, the invariant that a run
+// with skipped tests is never reported as a full all-green `approved`:
+//
+//   - approved + skips present          → needs_changes (fail closed: the agent
+//     approved without classifying the skips; bias to red so a retry/human
+//     resolves it — a skipped test must never silently pass as green)
+//   - conditionally_approved + no skips → approved (nothing was deferred)
+//   - everything else passes through unchanged
+//
+// Returns the reconciled verdict and an optional note appended to the summary.
+func reconcileSkipVerdict(raw string, qaRun *workflow.QARun) (workflow.QAVerdict, string) {
+	v := workflow.QAVerdict(raw)
+	hasSkips := qaRun != nil && len(qaRun.SkippedTests) > 0
+	switch {
+	case hasSkips && v == workflow.QAVerdictApproved:
+		return workflow.QAVerdictNeedsChanges, fmt.Sprintf(
+			"[skip-guard] coerced approved→needs_changes: %d test(s) were skipped but the review approved without classifying them; a run with skipped tests cannot be all-green. Classify each skip (legitimate sandbox limitation → conditionally_approved; gaming → needs_changes).",
+			len(qaRun.SkippedTests))
+	case !hasSkips && v == workflow.QAVerdictConditionallyApproved:
+		// Nothing was actually deferred — a conditional approval with no skips is
+		// just an approval.
+		return workflow.QAVerdictApproved, ""
+	default:
+		return v, ""
+	}
+}
+
+// appendVerdictNote joins a coercion note onto the reviewer's summary.
+func appendVerdictNote(summary, note string) string {
+	switch {
+	case note == "":
+		return summary
+	case summary == "":
+		return note
+	default:
+		return summary + "\n\n" + note
+	}
 }
 
 func forcedExecutableQAVerdict(slug string, plan *workflow.Plan, level workflow.QALevel) *workflow.QAVerdictEvent {
@@ -810,15 +867,15 @@ func summarizeQAFailures(level workflow.QALevel, run *workflow.QARun) string {
 // evidence); otherwise fall back to a stable citation pointing at the plan
 // artifact (`.semspec/plans/<slug>/plan.json`) so the writer's evidence
 // requirement is satisfied.
-func (c *Component) recordQARejectionLesson(ctx context.Context, slug string, result *qaReviewOutput) {
-	if workflow.QAVerdict(result.Verdict) != workflow.QAVerdictNeedsChanges || c.lessonWriter == nil {
+func (c *Component) recordQARejectionLesson(ctx context.Context, slug string, finalVerdict workflow.QAVerdict, finalSummary string, result *qaReviewOutput) {
+	if finalVerdict != workflow.QAVerdictNeedsChanges || c.lessonWriter == nil {
 		return
 	}
 	evidenceFiles := qaEvidenceFiles(slug, result)
 	lesson := workflow.Lesson{
 		Source:        "qa-review",
 		ScenarioID:    slug,
-		Summary:       fmt.Sprintf("QA rejection: %s", result.Summary),
+		Summary:       fmt.Sprintf("QA rejection: %s", finalSummary),
 		Role:          string(prompt.RolePlanQAReviewer),
 		EvidenceFiles: evidenceFiles,
 	}
@@ -1016,6 +1073,7 @@ func buildQAReviewContext(plan *workflow.Plan) *prompt.QAReviewContext {
 	if plan.QARun != nil {
 		qrc.Passed = plan.QARun.Passed
 		qrc.Failures = plan.QARun.Failures
+		qrc.SkippedTests = plan.QARun.SkippedTests
 		qrc.Artifacts = plan.QARun.Artifacts
 		qrc.RunnerError = plan.QARun.RunnerError
 	}
@@ -1220,15 +1278,16 @@ func parseQAReviewResult(result string) (*qaReviewOutput, error) {
 	}
 
 	if !isValidQAVerdict(output.Verdict) {
-		return nil, fmt.Errorf("invalid qa verdict %q: must be approved|needs_changes|rejected", output.Verdict)
+		return nil, fmt.Errorf("invalid qa verdict %q: must be approved|conditionally_approved|needs_changes|rejected", output.Verdict)
 	}
 
 	return &output, nil
 }
 
-// isValidQAVerdict returns true for the three accepted verdict strings.
+// isValidQAVerdict returns true for the accepted verdict strings.
 func isValidQAVerdict(v string) bool {
 	return v == string(workflow.QAVerdictApproved) ||
+		v == string(workflow.QAVerdictConditionallyApproved) ||
 		v == string(workflow.QAVerdictNeedsChanges) ||
 		v == string(workflow.QAVerdictRejected)
 }
