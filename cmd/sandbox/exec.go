@@ -26,6 +26,10 @@ import (
 // dev agent's `go run generator.go` hangs left 14 zombie processes over
 // 33 minutes of accumulation).
 func execCommand(ctx context.Context, dir, cmd string, timeout time.Duration, maxOutputBytes int) (stdout, stderr string, exitCode int, timedOut bool) {
+	return execCommandWithEnv(ctx, dir, cmd, timeout, maxOutputBytes, nil)
+}
+
+func execCommandWithEnv(ctx context.Context, dir, cmd string, timeout time.Duration, maxOutputBytes int, extraEnv []string) (stdout, stderr string, exitCode int, timedOut bool) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -35,13 +39,13 @@ func execCommand(ctx context.Context, dir, cmd string, timeout time.Duration, ma
 	c := exec.Command("/bin/sh", "-c", cmd)
 	c.Dir = dir
 	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	c.Env = []string{
+	c.Env = append([]string{
 		"PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/go/bin",
 		"HOME=/home/sandbox",
 		"GOPATH=/go",
 		"GOMODCACHE=/go/pkg/mod",
 		"NODE_PATH=/usr/local/lib/node_modules",
-	}
+	}, extraEnv...)
 
 	var outBuf, errBuf cappedWriter
 	outBuf.limit = maxOutputBytes

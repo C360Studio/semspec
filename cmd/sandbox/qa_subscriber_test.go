@@ -64,6 +64,46 @@ func TestSelectQAWorkDir(t *testing.T) {
 	}
 }
 
+func TestPrepareQAIsolation_ReturnsColdBuildCacheEnvAndCleanup(t *testing.T) {
+	env, cleanup, summary, err := prepareQAIsolation("mavlink/hard", "run:1")
+	if err != nil {
+		t.Fatalf("prepareQAIsolation: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	var gradleHome string
+	var mavenRepo string
+	for _, entry := range env {
+		switch {
+		case strings.HasPrefix(entry, "GRADLE_USER_HOME="):
+			gradleHome = strings.TrimPrefix(entry, "GRADLE_USER_HOME=")
+		case strings.HasPrefix(entry, "MAVEN_OPTS=-Dmaven.repo.local="):
+			mavenRepo = strings.TrimPrefix(entry, "MAVEN_OPTS=-Dmaven.repo.local=")
+		}
+	}
+	if gradleHome == "" {
+		t.Fatalf("GRADLE_USER_HOME env missing: %v", env)
+	}
+	if mavenRepo == "" {
+		t.Fatalf("MAVEN_OPTS maven.repo.local env missing: %v", env)
+	}
+	if !strings.Contains(summary, "QA cache isolation enabled") {
+		t.Fatalf("summary = %q, want cache isolation evidence", summary)
+	}
+
+	root := filepath.Dir(gradleHome)
+	if err := os.MkdirAll(gradleHome, 0o755); err != nil {
+		t.Fatalf("mkdir gradle home: %v", err)
+	}
+	if err := os.MkdirAll(mavenRepo, 0o755); err != nil {
+		t.Fatalf("mkdir maven repo: %v", err)
+	}
+	cleanup()
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("cache root still exists after cleanup or unexpected stat error: %v", err)
+	}
+}
+
 func TestRunSandboxQAIntegrationFailsOnSkippedJUnitTests(t *testing.T) {
 	dir := t.TempDir()
 	resultsDir := filepath.Join(dir, "build", "test-results", "test")

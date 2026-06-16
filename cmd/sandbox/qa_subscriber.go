@@ -211,10 +211,32 @@ func (h *qaHandler) runSandboxQA(
 		h.logger.Warn("QA worktree not found — running QA command against repo root (may be the unmerged baseline)",
 			"slug", evt.Slug, "workspace", evt.Workspace)
 	}
-	stdout, stderr, exitCode, timedOut := execCommand(
-		ctx, workDir, evt.TestCommand, timeout, h.srv.maxOutputBytes)
+	qaEnv, cleanup, isolationSummary, err := prepareQAIsolation(evt.Slug, runID)
+	if err != nil {
+		h.logger.Error("Failed to prepare isolated QA cache", "slug", evt.Slug, "run_id", runID, "error", err)
+		return &workflow.QACompletedEvent{
+			Slug:        evt.Slug,
+			PlanID:      evt.PlanID,
+			RunID:       runID,
+			Level:       evt.Mode,
+			Passed:      false,
+			DurationMs:  time.Since(start).Milliseconds(),
+			RunnerError: fmt.Sprintf("prepare isolated QA cache: %v", err),
+			TraceID:     evt.TraceID,
+		}
+	}
+	defer cleanup()
 
-	combined := stdout
+	stdout, stderr, exitCode, timedOut := execCommandWithEnv(
+		ctx, workDir, evt.TestCommand, timeout, h.srv.maxOutputBytes, qaEnv)
+
+	combined := isolationSummary
+	if stdout != "" {
+		if combined != "" {
+			combined += "\n"
+		}
+		combined += stdout
+	}
 	if stderr != "" {
 		if combined != "" {
 			combined += "\n"
@@ -265,6 +287,45 @@ func (h *qaHandler) runSandboxQA(
 		DurationMs: durationMs,
 		TraceID:    evt.TraceID,
 	}
+}
+
+func prepareQAIsolation(slug, runID string) (env []string, cleanup func(), summary string, err error) {
+	tmpRoot, err := os.MkdirTemp("", "semspec-qa-"+safeQAToken(slug)+"-"+safeQAToken(runID)+"-")
+	if err != nil {
+		return nil, func() {}, "", err
+	}
+	cleanup = func() {
+		_ = os.RemoveAll(tmpRoot)
+	}
+
+	gradleHome := filepath.Join(tmpRoot, "gradle")
+	mavenRepo := filepath.Join(tmpRoot, "m2", "repository")
+	env = []string{
+		"GRADLE_USER_HOME=" + gradleHome,
+		"MAVEN_OPTS=-Dmaven.repo.local=" + mavenRepo,
+	}
+	summary = "QA cache isolation enabled: GRADLE_USER_HOME=" + gradleHome + " MAVEN_OPTS=-Dmaven.repo.local=" + mavenRepo
+	return env, cleanup, summary, nil
+}
+
+func safeQAToken(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		}
+	}
+	if b.Len() == 0 {
+		return "run"
+	}
+	return b.String()
 }
 
 // archiveLog writes the combined test output to the artifact path under repoPath
