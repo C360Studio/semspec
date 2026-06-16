@@ -31,6 +31,12 @@ func TestUndeliveredScopeFiles(t *testing.T) {
 			want:      nil,
 		},
 		{
+			name:      "nothing delivered → all declared missing (zero-work assembly, C1)",
+			declared:  []string{"a.go", "b.go"},
+			delivered: nil,
+			want:      []string{"a.go", "b.go"},
+		},
+		{
 			name:      "path normalization: ./x matches x",
 			declared:  []string{"./src/A.java", "src/B.java"},
 			delivered: []string{"src/A.java", "./src/B.java"},

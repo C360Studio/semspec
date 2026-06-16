@@ -63,13 +63,25 @@ func undeliveredScopeFiles(declared, delivered []string) []string {
 // the world are unaffected). A sandbox error is returned so the caller can treat
 // it as infra (stall), not as a completeness violation.
 func (c *Component) scopeCompletenessGap(ctx context.Context, plan *workflow.Plan) ([]string, error) {
-	if c.sandbox == nil || plan.AssembledBranch == "" || len(plan.Scope.Create) == 0 {
+	if c.sandbox == nil || len(plan.Scope.Create) == 0 {
+		// No sandbox → can't inspect the tree (test envs / no-sandbox runs). No
+		// declared creates → nothing to enforce. Either way the gate is a no-op.
 		return nil, nil
 	}
-	delivered, err := c.assembledTrackedFiles(ctx, plan)
-	if err != nil {
-		return nil, err
+	var delivered []string
+	if plan.AssembledBranch != "" {
+		var err error
+		delivered, err = c.assembledTrackedFiles(ctx, plan)
+		if err != nil {
+			return nil, err
+		}
 	}
+	// AssembledBranch=="" means assembleRequirementBranches merged ZERO owner
+	// branches (e.g. mis-derived M:N ownership) — no work was assembled, so
+	// delivered stays empty and every declared scope.create file is undelivered.
+	// Failing closed here (rather than the prior no-op) is the point: a zero-work
+	// deliverable with a non-empty declared scope is the exact false-green the
+	// gate exists to stop.
 	return undeliveredScopeFiles(plan.Scope.Create, delivered), nil
 }
 
@@ -79,7 +91,10 @@ func (c *Component) scopeCompletenessGap(ctx context.Context, plan *workflow.Pla
 // deliverable actually contains.
 func (c *Component) assembledTrackedFiles(ctx context.Context, plan *workflow.Plan) ([]string, error) {
 	qaID := workflow.QAWorktreeID(plan.Slug)
-	res, err := c.sandbox.Exec(ctx, qaID, "git ls-files", lsFilesTimeoutMs)
+	// -z → NUL-separated paths; core.quotePath=false → non-ASCII/space paths are
+	// emitted raw (not octal-escaped or double-quoted), so they string-match the
+	// scope.create entries instead of producing false ScopeIncomplete misses.
+	res, err := c.sandbox.Exec(ctx, qaID, "git -c core.quotePath=false ls-files -z", lsFilesTimeoutMs)
 	if err != nil {
 		return nil, fmt.Errorf("list assembled files in worktree %q: %w", qaID, err)
 	}
@@ -90,7 +105,11 @@ func (c *Component) assembledTrackedFiles(ctx context.Context, plan *workflow.Pl
 		}
 		return nil, fmt.Errorf("git ls-files in worktree %q exited %d", qaID, code)
 	}
-	return strings.Split(strings.TrimSpace(res.Stdout), "\n"), nil
+	raw := strings.Trim(res.Stdout, "\x00")
+	if raw == "" {
+		return nil, nil // empty tree → no delivered files (NOT []string{""})
+	}
+	return strings.Split(raw, "\x00"), nil
 }
 
 const lsFilesTimeoutMs = 15000
