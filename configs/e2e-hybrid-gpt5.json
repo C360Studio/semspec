@@ -939,6 +939,7 @@
         "accepted_subject": "workflow.events.plan-decision.accepted",
         "auto_accept_recovery": true,
         "timeout_seconds": 120,
+        "max_auto_architecture_revises": 2,
         "ports": {
           "inputs": [
             {
