@@ -155,10 +155,29 @@ func connectNATSQA(ctx context.Context, srv *Server, url string, logger *slog.Lo
 		slog.Error("NATS connection timed out", "url", url, "error", err)
 		os.Exit(1)
 	}
-	slog.Info("NATS connected — QA subscriber enabled", "url", url)
+	slog.Info("NATS connected — attaching QA subscriber in background", "url", url)
 
-	if err := startQASubscriber(ctx, srv, nc, logger); err != nil {
-		slog.Error("failed to start QA subscriber", "error", err)
-		os.Exit(1)
-	}
+	// Attach the QA subscriber in the background, retrying until the WORKFLOW
+	// stream exists. On a cold start the sandbox can come up before semspec
+	// creates that stream (semspec is gated behind semembed/seminstruct, which
+	// are slow under WITH_EPIC). Exiting here would make the sandbox unhealthy
+	// and fail `up --wait` (and block the whole run) for a transient ordering
+	// race. The HTTP server (dev/validator exec + healthcheck) does not need the
+	// subscriber, so keep serving and attach once the stream appears.
+	go func() {
+		for {
+			if err := startQASubscriber(ctx, srv, nc, logger); err != nil {
+				slog.Warn("QA subscriber not ready yet (WORKFLOW stream missing?) — retrying",
+					"error", err)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(10 * time.Second):
+					continue
+				}
+			}
+			slog.Info("QA subscriber attached")
+			return
+		}
+	}()
 }
