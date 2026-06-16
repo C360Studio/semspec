@@ -396,6 +396,14 @@ type QAReviewContext struct {
 	// Empty for synthesis-level review or when Passed is true.
 	Failures []workflow.QAFailure
 
+	// SkippedTests lists tests the executor ran but reported as SKIPPED. These
+	// are NOT failures — the reviewer must read each skipped test's source to
+	// decide whether the skip is a legitimate sandbox limitation (the test needs
+	// a live external harness this sandbox can't provide → conditionally_approved)
+	// or gaming (a disabled test dodging a failure → needs_changes). A run with
+	// skipped tests must NEVER be approved (all-green).
+	SkippedTests []workflow.QASkippedTest
+
 	// Artifacts lists workspace-relative references to logs, screenshots, traces,
 	// and coverage reports produced by the QA run.
 	Artifacts []workflow.QAArtifactRef

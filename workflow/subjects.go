@@ -137,6 +137,21 @@ type QAFailure struct {
 	LogExcerpt string `json:"log_excerpt,omitempty"`
 }
 
+// QASkippedTest identifies a single test the executor reported as SKIPPED (not
+// run). The executor does NOT decide whether a skip is acceptable — that is a
+// judgment call for qa-reviewer, which reads each skipped test's source to tell
+// a legitimate environment/sandbox limitation (e.g. a test gated on a live
+// SITL/hardware endpoint the sandbox can't provide) from a gamed skip (e.g. a
+// disabled test dodging a failure). The skip *reason* is deliberately absent:
+// it is frequently not present in machine-readable test output (Gradle's JUnit
+// XML emits a bare <skipped/>), so the reason is recovered by the reviewer from
+// the test source, not parsed here. See ADR — QA skip reasoning.
+type QASkippedTest struct {
+	Suite string `json:"suite,omitempty"` // test suite / class (e.g. JUnit classname)
+	Name  string `json:"name"`            // test method / case name
+	File  string `json:"file,omitempty"`  // workspace-relative report file the skip was read from
+}
+
 // QAArtifactRef is a workspace-relative reference to an artifact produced by a
 // QA run (logs, screenshots, traces, coverage reports).
 type QAArtifactRef struct {
@@ -149,16 +164,21 @@ type QAArtifactRef struct {
 // qa-reviewer consumes it and produces a QAVerdictEvent. plan-manager does
 // NOT consume this event directly.
 type QACompletedEvent struct {
-	Slug        string          `json:"slug"`
-	PlanID      string          `json:"plan_id"`
-	RunID       string          `json:"run_id"`
-	Level       QALevel         `json:"level"` // level the executor ran at
-	Passed      bool            `json:"passed"`
-	Failures    []QAFailure     `json:"failures,omitempty"`
-	Artifacts   []QAArtifactRef `json:"artifacts,omitempty"`
-	DurationMs  int64           `json:"duration_ms"`
-	RunnerError string          `json:"runner_error,omitempty"` // executor infra error, distinct from test failures
-	TraceID     string          `json:"trace_id,omitempty"`
+	Slug     string      `json:"slug"`
+	PlanID   string      `json:"plan_id"`
+	RunID    string      `json:"run_id"`
+	Level    QALevel     `json:"level"` // level the executor ran at
+	Passed   bool        `json:"passed"`
+	Failures []QAFailure `json:"failures,omitempty"`
+	// SkippedTests lists tests the executor ran but reported as SKIPPED. A skip
+	// is NOT a failure here (Passed reflects only build + executed-test success);
+	// qa-reviewer reasons about whether each skip is a legitimate sandbox
+	// limitation (→ conditionally_approved) or gaming (→ needs_changes).
+	SkippedTests []QASkippedTest `json:"skipped_tests,omitempty"`
+	Artifacts    []QAArtifactRef `json:"artifacts,omitempty"`
+	DurationMs   int64           `json:"duration_ms"`
+	RunnerError  string          `json:"runner_error,omitempty"` // executor infra error, distinct from test failures
+	TraceID      string          `json:"trace_id,omitempty"`
 }
 
 // QAVerdict describes qa-reviewer's release-readiness decision.
@@ -166,8 +186,18 @@ type QAVerdict string
 
 const (
 	// QAVerdictApproved means the plan passes qa-reviewer's judgment and can
-	// proceed to complete (or awaiting_review when gated).
+	// proceed to complete (or awaiting_review when gated). Only valid when the
+	// executor ran with NO skipped tests — a fully-green run.
 	QAVerdictApproved QAVerdict = "approved"
+	// QAVerdictConditionallyApproved means everything the sandbox could execute
+	// passed, but some tests were SKIPPED because they require an environment
+	// the sandbox cannot provide (e.g. a live SITL/hardware endpoint), and
+	// qa-reviewer judged those skips to be legitimate deferrals — not gaming.
+	// The plan reaches a terminal "complete with deferrals" state: as verified
+	// as this tier allows, but explicitly NOT all-green — the deferred behavior
+	// must be verified in the operator-CI e2e tier (ADR-045). Distinct from
+	// approved so it is never rendered as "good to go."
+	QAVerdictConditionallyApproved QAVerdict = "conditionally_approved"
 	// QAVerdictNeedsChanges means qa-reviewer found issues fixable with a
 	// retry. PlanDecisions accompany this verdict.
 	QAVerdictNeedsChanges QAVerdict = "needs_changes"

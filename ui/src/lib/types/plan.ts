@@ -61,6 +61,7 @@ export type PlanStage =
 	| 'reviewing_qa' // QA in progress (sandbox unit tests or qa-runner act)
 	| 'reviewing_rollup' // Plan rollup review in progress
 	| 'complete' // All tasks completed successfully
+	| 'complete_with_deferrals' // Terminal-complete, but QA was conditionally_approved: some behavior deferred to operator-CI e2e (ADR-045)
 	| 'archived' // Plan archived (soft deleted)
 	| 'failed'; // Execution failed
 
@@ -178,7 +179,8 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		'implementing',
 		'executing',
 		'reviewing_rollup',
-		'complete'
+		'complete',
+		'complete_with_deferrals'
 	];
 	const reqsActiveStages: PlanStage[] = [
 		'approved',
@@ -198,7 +200,10 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 
 	// Determine execute phase state
 	let executeState: PlanPhaseState = 'none';
-	if (stage === 'complete') {
+	if (stage === 'complete' || stage === 'complete_with_deferrals') {
+		// complete_with_deferrals is terminal-complete (work assembled); the
+		// "not all-green" nuance is carried by the stage label, not the pipeline
+		// phase, so the execute phase reads as done rather than stalled.
 		executeState = 'complete';
 	} else if (stage === 'failed') {
 		executeState = 'failed';
@@ -220,7 +225,7 @@ export const LOCKED_STAGES: readonly string[] = [
 	'drafting', 'reviewing_draft', 'approved',
 	'generating_requirements', 'generating_architecture', 'generating_scenarios',
 	'reviewing_scenarios', 'implementing', 'executing',
-	'reviewing_rollup', 'complete', 'failed', 'archived',
+	'reviewing_rollup', 'complete', 'complete_with_deferrals', 'failed', 'archived',
 ] as const;
 
 /**
@@ -249,6 +254,7 @@ export function getStageLabel(stage: PlanStage): string {
 		executing: 'Executing',
 		reviewing_rollup: 'Reviewing',
 		complete: 'Complete',
+		complete_with_deferrals: 'Complete — e2e deferred',
 		archived: 'Archived',
 		failed: 'Failed'
 	};

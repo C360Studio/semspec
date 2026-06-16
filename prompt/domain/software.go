@@ -2549,9 +2549,12 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 				if qc.QALevel == workflow.QALevelSynthesis {
 					sb.WriteString("**Level: synthesis** — No test execution was performed. Your assessment is based on the implementation completeness and requirement fulfillment inferred from the plan artifacts and files modified.\n\n")
 				} else {
-					if qc.Passed {
+					switch {
+					case qc.Passed && len(qc.SkippedTests) > 0:
+						sb.WriteString("**Overall: PASSED WITH SKIPS** — The build and every test that RAN passed, but some tests were SKIPPED (listed below). A run with skipped tests is NOT all-green: you MUST classify each skip before choosing a verdict, and you may NOT return `approved`.\n\n")
+					case qc.Passed:
 						sb.WriteString("**Overall: PASSED** — The QA executor reported no test failures.\n\n")
-					} else {
+					default:
 						sb.WriteString("**Overall: FAILED** — The QA executor reported test failures.\n\n")
 					}
 
@@ -2570,6 +2573,29 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 							}
 						}
 						sb.WriteString("\n")
+					}
+
+					if len(qc.SkippedTests) > 0 {
+						sb.WriteString("**Skipped tests (NOT run — you MUST reason about each):**\n")
+						for _, s := range qc.SkippedTests {
+							if s.Suite != "" {
+								sb.WriteString(fmt.Sprintf("- %s / %s", s.Suite, s.Name))
+							} else {
+								sb.WriteString(fmt.Sprintf("- %s", s.Name))
+							}
+							if s.File != "" {
+								sb.WriteString(fmt.Sprintf("  (reported in %s)", s.File))
+							}
+							sb.WriteString("\n")
+						}
+						sb.WriteString("\nThese tests were SKIPPED, not executed. The skip reason is usually ABSENT from the report — OPEN each test's source with bash and read its skip condition (e.g. `assumeTrue(...)`, `@Disabled`, an env-var guard).\n\n")
+						sb.WriteString("Classify every skip:\n")
+						sb.WriteString("- **Legitimate sandbox limitation** — the test needs an environment this sandbox cannot provide (a live simulator / SITL endpoint, real hardware, an external network service). These are deferrals to the operator-CI e2e tier (ADR-045), not defects.\n")
+						sb.WriteString("- **Gaming / unjustified** — the test was disabled to dodge a failure, or its precondition SHOULD hold in the sandbox (no external dependency). This is a defect.\n\n")
+						sb.WriteString("Then choose your verdict:\n")
+						sb.WriteString("- EVERY skip a legitimate sandbox limitation AND everything that ran passed → **`conditionally_approved`** (NOT `approved`): name the deferred behavior and state it must be verified in operator-CI e2e.\n")
+						sb.WriteString("- ANY skip gaming/unjustified, or you cannot justify a skip from its source → **`needs_changes`** with a plan_decision. When uncertain, choose `needs_changes`.\n")
+						sb.WriteString("- NEVER return `approved` when any test was skipped.\n\n")
 					}
 
 					if len(qc.Artifacts) > 0 {
@@ -2692,8 +2718,9 @@ Needs-changes example (integration/full — flaky test):
 				}
 
 				sb.WriteString("Verdict semantics:\n")
-				sb.WriteString("- `approved`: ship it — all assessed dimensions pass\n")
-				sb.WriteString("- `needs_changes`: specific fixable issues found — include plan_decisions\n")
+				sb.WriteString("- `approved`: ship it — all assessed dimensions pass AND no test was skipped\n")
+				sb.WriteString("- `conditionally_approved`: build + all executed tests pass, but some tests were SKIPPED because they need an environment this sandbox can't provide (e.g. a live SITL/hardware endpoint), and you judged every such skip a legitimate deferral. Terminal but NOT all-green — name the deferred behavior; it must be verified in operator-CI e2e. Use this INSTEAD of `approved` whenever tests were skipped for legitimate environmental reasons.\n")
+				sb.WriteString("- `needs_changes`: specific fixable issues found (including a test skipped to dodge a failure) — include plan_decisions\n")
 				sb.WriteString("- `rejected`: escalate to human — systemic failure, cannot be automatically retried\n\n")
 				sb.WriteString("Respond ONLY via the submit_work tool call. No markdown prose, no preamble, no explanation outside the tool call.")
 
