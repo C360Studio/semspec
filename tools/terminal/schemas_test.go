@@ -1,7 +1,10 @@
 package terminal
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
@@ -120,6 +123,58 @@ func TestQAReviewSchema_ADR044CapabilityEvidenceDimension(t *testing.T) {
 	}
 	if !found {
 		t.Error("dimensions.required[] missing capability_evidence — strict mode rejects responses without it; persona will be schema-blocked from emitting the dimension")
+	}
+}
+
+// TestQAReviewSchema_VerdictEnumMatchesConstants pins the #200 fix AND prevents
+// its whole bug class. The LLM-facing verdict enum MUST equal the
+// workflow.QAVerdict* constant set. #200 was exactly a drift here: the Go enum,
+// the qa-reviewer parser/reconcileSkipVerdict guard, and plan-manager's terminal
+// path all handled conditionally_approved, but the schema enum didn't — so strict
+// mode schema-blocked Murat from emitting it, approved+skips coerced to
+// needs_changes, and the 2026-06-16 hybrid-gpt5 plan false-rejected. Binding this
+// test to the constants makes a future verdict added to workflow/subjects.go
+// without the schema (or vice versa) fail the build instead of shipping.
+func TestQAReviewSchema_VerdictEnumMatchesConstants(t *testing.T) {
+	schema := qaReviewSchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing properties")
+	}
+	verdict, ok := props["verdict"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing verdict")
+	}
+	enum, ok := verdict["enum"].([]string)
+	if !ok {
+		t.Fatalf("verdict.enum missing or not []string: %T", verdict["enum"])
+	}
+
+	// Source of truth: the QAVerdict constants. Adding a verdict here forces a
+	// schema update (and vice versa) or this parity check fails.
+	want := map[string]bool{
+		string(workflow.QAVerdictApproved):              false,
+		string(workflow.QAVerdictConditionallyApproved): false,
+		string(workflow.QAVerdictNeedsChanges):          false,
+		string(workflow.QAVerdictRejected):              false,
+	}
+	for _, v := range enum {
+		if _, known := want[v]; !known {
+			t.Errorf("verdict.enum has %q, not a workflow.QAVerdict* constant — schema/constant drift", v)
+			continue
+		}
+		want[v] = true
+	}
+	for v, seen := range want {
+		if !seen {
+			t.Errorf("verdict.enum missing %q — schema drifted from workflow.QAVerdict* constants (the #200 bug class)", v)
+		}
+	}
+
+	// The description must name conditionally_approved, or the model has no
+	// guidance on when to select it over approved.
+	if desc, _ := verdict["description"].(string); !strings.Contains(desc, "conditionally_approved") {
+		t.Errorf("verdict.description does not mention conditionally_approved; model has no selection guidance: %q", desc)
 	}
 }
 

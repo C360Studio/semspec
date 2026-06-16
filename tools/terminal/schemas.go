@@ -819,8 +819,8 @@ func qaReviewSchema() map[string]any {
 		"properties": map[string]any{
 			"verdict": map[string]any{
 				"type":        "string",
-				"description": "Release-readiness verdict: approved (ship it), needs_changes (fixable with change proposals), or rejected (escalate to human — cannot be automatically retried)",
-				"enum":        []string{"approved", "needs_changes", "rejected"},
+				"description": "Release-readiness verdict: approved (ship it, all-green); conditionally_approved (build + all executed tests pass, but some tests were SKIPPED because they need an environment this sandbox can't provide — e.g. a live SITL/hardware endpoint — and you judged every such skip a legitimate deferral; terminal but NOT all-green; name the deferred behavior, to be verified in operator-CI e2e; use this INSTEAD of approved whenever tests were skipped for legitimate environmental reasons); needs_changes (fixable with change proposals); rejected (escalate to human — cannot be automatically retried)",
+				"enum":        []string{"approved", "conditionally_approved", "needs_changes", "rejected"},
 			},
 			"summary": map[string]any{
 				"type":        "string",
@@ -860,7 +860,7 @@ func qaReviewSchema() map[string]any {
 			},
 			"plan_decisions": map[string]any{
 				"type":        "array",
-				"description": "Structured change proposals. Populate ONLY when verdict is needs_changes; emit [] when verdict is approved or rejected.",
+				"description": "Structured change proposals. Populate ONLY when verdict is needs_changes; emit [] when verdict is approved, conditionally_approved, or rejected.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
