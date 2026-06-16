@@ -82,6 +82,42 @@ func TestIsJunkArtifact(t *testing.T) {
 	}
 }
 
+func TestIsIgnorableBuildArtifact(t *testing.T) {
+	cases := map[string]bool{
+		"javac.20260616_030142.args":        true,
+		"javac.args":                        true,
+		"jar.123.args":                      true,
+		"javadoc.x.args":                    true,
+		"build/tmp/compileJava/source.args": true,
+		"src/test/resources/cli.args":       false, // a real .args deliverable must NOT be ignored
+		"cli.args":                          false, // root .args without a tool prefix
+		"FindClass.java":                    false,
+		"src/main/java/org/x/Foo.java":      false,
+		"README.md":                         false,
+		"build.gradle":                      false,
+	}
+	for p, want := range cases {
+		if got := isIgnorableBuildArtifact(p); got != want {
+			t.Errorf("isIgnorableBuildArtifact(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
+func TestFirstSegment(t *testing.T) {
+	cases := map[string]string{
+		"FindClass.java":     "", // root-level (no dir) → scratch, not a deliverable
+		"javac.123.args":     "",
+		"src/main/X.java":    "src",
+		"other/pkg/New.java": "other",
+		"./src/main/X.java":  "src",
+	}
+	for p, want := range cases {
+		if got := firstSegment(p); got != want {
+			t.Errorf("firstSegment(%q) = %q, want %q", p, got, want)
+		}
+	}
+}
+
 func TestDecideOwnership(t *testing.T) {
 	tests := []struct {
 		name                  string
@@ -92,6 +128,7 @@ func TestDecideOwnership(t *testing.T) {
 		wantModUnowned        []string // advisory: non-owner editing non-doc
 		wantNewUnowned        []string // advisory: new file in-territory / new doc
 		wantNewOutOfTerritory []string // hard-fail: new source/test outside territory
+		wantRootScratch       []string // hard-fail (dev-retry): root-level source scratch
 	}{
 		{
 			name:              "modified non-owned DOC (README wedge) hard-fails",
@@ -144,6 +181,25 @@ func TestDecideOwnership(t *testing.T) {
 			porcelain:             "?? src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java",
 			owned:                 ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
 			wantNewOutOfTerritory: []string{"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java"},
+		},
+		{
+			name:      "javac @argfile (build byproduct) is ignored — not a planning gap",
+			porcelain: "?? javac.20260616_030142.args",
+			owned:     ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			// no want* — fully ignored (the run #5 wedge: javac.<ts>.args tripped
+			// the ADR-049 ownership gap).
+		},
+		{
+			name:            "root-level source scratch (FindClass.java) is dev-cleanup, NOT a planning gap and NOT advisory",
+			porcelain:       "?? FindClass.java",
+			owned:           ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantRootScratch: []string{"FindClass.java"},
+		},
+		{
+			name:           "root-level NON-source new file stays advisory",
+			porcelain:      "?? NOTES.txt",
+			owned:          ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNewUnowned: []string{"NOTES.txt"},
 		},
 		{
 			name:      "new Java companion test for owned main class is clean",
@@ -253,6 +309,9 @@ func TestDecideOwnership(t *testing.T) {
 			}
 			if !equalSets(v.NewUnownedOutOfTerritory, tc.wantNewOutOfTerritory) {
 				t.Errorf("newUnownedOutOfTerritory = %v, want %v", sortedCopy(v.NewUnownedOutOfTerritory), sortedCopy(tc.wantNewOutOfTerritory))
+			}
+			if !equalSets(v.RootScratch, tc.wantRootScratch) {
+				t.Errorf("rootScratch = %v, want %v", sortedCopy(v.RootScratch), sortedCopy(tc.wantRootScratch))
 			}
 		})
 	}

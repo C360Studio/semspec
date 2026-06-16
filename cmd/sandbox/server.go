@@ -1652,6 +1652,60 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, gitStatusResponse{Output: output})
 }
 
+// removeTransientBuildArtifacts deletes UNTRACKED compiler @argfiles
+// (javac.<ts>.args et al.) from the worktree so they are never staged by
+// `git add -A`. javac writes these when the compile classpath is long (the
+// osh-core source composite makes it very long); they are toolchain byproducts
+// that must never ride onto the branch.
+//
+// Scoped two ways to stay safe as a global commit hook:
+//   - UNTRACKED only (`git ls-files --others --exclude-standard`) — a tracked
+//     deliverable such as src/test/resources/cli.args is never touched;
+//   - tool-argfile shape only (isCompilerArgFile) — an untracked but legitimate
+//     `*.args` the dev authored is left for the ownership gate to classify.
+//
+// Best-effort: errors are logged, never fatal.
+func removeTransientBuildArtifacts(ctx context.Context, worktree string, logger *slog.Logger) {
+	out, err := gitOutput(ctx, worktree, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		if logger != nil {
+			logger.Warn("could not list untracked files for argfile cleanup", "error", err)
+		}
+		return
+	}
+	for _, rel := range strings.Split(out, "\n") {
+		rel = strings.TrimSpace(rel)
+		if rel == "" || !isCompilerArgFile(rel) {
+			continue
+		}
+		if rmErr := os.Remove(filepath.Join(worktree, rel)); rmErr != nil && logger != nil {
+			logger.Warn("could not remove transient compiler argfile", "path", rel, "error", rmErr)
+		}
+	}
+}
+
+// isCompilerArgFile reports whether an UNTRACKED path is a JDK/Gradle tool
+// @argfile (javac./jar./javadoc.<ts>.args, or an *.args under a build/ dir).
+// Mirrors structuralvalidator.isIgnorableBuildArtifact — deliberately NOT "any
+// *.args", so a dev's untracked cli.args fixture is left for the gate.
+func isCompilerArgFile(rel string) bool {
+	norm := strings.ReplaceAll(rel, "\\", "/")
+	base := filepath.Base(norm)
+	if !strings.HasSuffix(base, ".args") {
+		return false
+	}
+	switch {
+	case strings.HasPrefix(base, "javac."),
+		strings.HasPrefix(base, "jar."),
+		strings.HasPrefix(base, "javadoc."):
+		return true
+	case strings.HasPrefix(norm, "build/"), strings.Contains(norm, "/build/"):
+		return true
+	default:
+		return false
+	}
+}
+
 // handleGitCommit stages all changes in a worktree and commits them.
 // POST /git/commit  {"task_id": "abc", "message": "feat: add handler"}
 func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
@@ -1671,6 +1725,13 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 
 	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
 	ctx := r.Context()
+
+	// Drop transient compiler @argfiles (javac.<ts>.args et al.) before staging.
+	// `git add -A` would otherwise stage them onto the branch in any repo whose
+	// .gitignore lacks the pattern — silent branch pollution. Scoped to UNTRACKED
+	// tool-generated argfiles only (never a tracked deliverable). Mirrors the
+	// structural-validator's isIgnorableBuildArtifact.
+	removeTransientBuildArtifacts(ctx, worktreePath, s.logger)
 
 	if err := runGit(ctx, worktreePath, "add", "-A"); err != nil {
 		writeError(w, http.StatusInternalServerError, "git add failed: "+err.Error())

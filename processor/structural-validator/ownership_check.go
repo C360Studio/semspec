@@ -83,14 +83,24 @@ type ownershipVerdict struct {
 	// lands here) plus new docs outside ownership (hygiene-only); too noisy to
 	// hard-fail.
 	NewUnowned []string
+	// RootScratch are newly-created SOURCE files at the worktree ROOT (no package
+	// directory) — e.g. a dev's throwaway FindClass.java probe. A real source/
+	// test deliverable always lives in a package dir, so a root-level source file
+	// is never a deliverable; but it is NOT a planning gap (it doesn't signal a
+	// wrong partition) and must NOT be left advisory either, because the commit
+	// path stages everything (`git add -A`) and it would silently pollute the
+	// branch. Hard fail routed to DEV-RETRY: the developer must remove it.
+	RootScratch []string
 }
 
 // clean reports whether there are no hard-fail violations (scratch artefacts,
-// a shared-doc co-write, or an out-of-territory new source/test file).
+// a shared-doc co-write, an out-of-territory new source/test file, or
+// root-level source scratch the dev must clean up).
 func (v ownershipVerdict) clean() bool {
 	return len(v.JunkViolations) == 0 &&
 		len(v.ModifiedDocUnowned) == 0 &&
-		len(v.NewUnownedOutOfTerritory) == 0
+		len(v.NewUnownedOutOfTerritory) == 0 &&
+		len(v.RootScratch) == 0
 }
 
 // parsePorcelain parses `git status --porcelain=v1` output into entries. It is
@@ -150,6 +160,65 @@ func isJunkArtifact(p string) (pattern string, ok bool) {
 	}
 }
 
+// isIgnorableBuildArtifact reports whether a path is a transient byproduct the
+// TOOLCHAIN (not the developer) emits, which must never be treated as a
+// deliverable, a planning gap, or even committable scratch. The canonical case:
+// javac writes a timestamped @argfile (javac.<ts>.args) when the compile
+// classpath is long — which the osh-core source composite (ADR build-self-
+// containment) makes very long. These appear as untracked `??` files and would
+// otherwise be misclassified as an out-of-territory new source file (ADR-049
+// planning gap), wedging the node — a developer cannot "stop creating" a file
+// the build regenerates every compile, so it must be IGNORED, not hard-failed.
+// (They are also .gitignored in the fixtures so `git add -A` never commits them;
+// this is the portable fallback for repos lacking that ignore.)
+func isIgnorableBuildArtifact(p string) bool {
+	norm := strings.ReplaceAll(p, "\\", "/")
+	base := path.Base(norm)
+	if !strings.HasSuffix(base, ".args") {
+		return false
+	}
+	// Narrow to TOOL-generated @argfiles only — never a deliverable. A legitimate
+	// tracked/owned `*.args` (e.g. src/test/resources/cli.args) must NOT match, or
+	// it would silently vanish from both validation and the commit.
+	//   - JDK tools write "<tool>.<timestamp>.args": javac./jar./javadoc.
+	//   - Gradle/Maven write @argfiles under a build/ output directory.
+	switch {
+	case strings.HasPrefix(base, "javac."),
+		strings.HasPrefix(base, "jar."),
+		strings.HasPrefix(base, "javadoc."):
+		return true
+	case strings.HasPrefix(norm, "build/"), strings.Contains(norm, "/build/"):
+		return true
+	default:
+		return false
+	}
+}
+
+// sourceFileExts are extensions for compiled/interpreted source that must live
+// in a package/module directory — a file with one of these at the worktree root
+// is never a deliverable, only dev scratch (e.g. a FindClass.java probe).
+var sourceFileExts = map[string]struct{}{
+	".java": {}, ".kt": {}, ".kts": {}, ".scala": {}, ".groovy": {},
+	".go": {}, ".py": {}, ".rb": {}, ".rs": {}, ".ts": {}, ".js": {},
+	".c": {}, ".cc": {}, ".cpp": {}, ".cxx": {}, ".h": {}, ".hpp": {}, ".cs": {},
+}
+
+// isSourceFile reports whether the basename has a source-code extension.
+func isSourceFile(p string) bool {
+	_, ok := sourceFileExts[strings.ToLower(path.Ext(path.Base(p)))]
+	return ok
+}
+
+// firstSegment returns the top-level path component, or "" for a root-level file
+// with no directory (e.g. "FindClass.java" → "", "src/main/java/X.java" → "src").
+func firstSegment(p string) string {
+	p = strings.TrimPrefix(strings.ReplaceAll(p, "\\", "/"), "./")
+	if i := strings.Index(p, "/"); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}
+
 // ownedTerritory returns the set of directory prefixes the story owns, derived
 // from the directories of its owned files. A new file under one of these
 // directories is a legitimate in-package split; a new file outside all of them
@@ -187,6 +256,12 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 		if norm == "" {
 			continue
 		}
+		// Transient toolchain byproducts (javac.<ts>.args et al.) are neither
+		// deliverables, junk-to-clean, nor planning gaps — a dev can't stop the
+		// build regenerating them. Ignore before any classification.
+		if isIgnorableBuildArtifact(norm) {
+			continue
+		}
 		if pattern, ok := isJunkArtifact(norm); ok {
 			v.JunkViolations = append(v.JunkViolations, fmt.Sprintf("%s (%s)", norm, pattern))
 			continue
@@ -213,11 +288,26 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// case, so this only guards direct callers), or an in-package
 				// class split: advisory, matching pre-ADR-049 behavior.
 				v.NewUnowned = append(v.NewUnowned, norm)
+			case firstSegment(norm) == "" && isSourceFile(norm):
+				// A new SOURCE file at the worktree ROOT (no package directory) — a
+				// dev's throwaway probe (FindClass.java). Never a deliverable (source
+				// must live in a package dir) and never a planning gap (it doesn't
+				// signal a wrong partition), but it must NOT be left advisory: the
+				// commit path stages everything (`git add -A`), so an advisory file
+				// silently pollutes the branch. Hard fail routed to dev-retry so the
+				// developer removes it.
+				v.RootScratch = append(v.RootScratch, norm)
+			case firstSegment(norm) == "":
+				// A new NON-source file at the root (a stray note, an undeclared
+				// root config) — not a deliverable parallel stories converge on, and
+				// not unambiguously scratch. Advisory, surfaced to the reviewer.
+				v.NewUnowned = append(v.NewUnowned, norm)
 			default:
-				// A new source/test file OUTSIDE the declared territory is the
-				// 2026-06-14 wedge: parallel stories converge on the same
-				// fabricated path and collide at assembly. Hard fail at the node
-				// so the planning/ownership gap surfaces in seconds (ADR-049).
+				// A new source/test file in a package directory but OUTSIDE the
+				// declared territory is the 2026-06-14 wedge: parallel stories
+				// converge on the same fabricated DELIVERABLE path and collide at
+				// assembly. Hard fail so the planning/ownership gap surfaces in
+				// seconds (ADR-049 move 3).
 				v.NewUnownedOutOfTerritory = append(v.NewUnownedOutOfTerritory, norm)
 			}
 		case workflow.IsDocumentationPath(norm):
@@ -301,10 +391,14 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 
 	var results []payloads.CheckResult
 
-	// Required gate 1 (#175/#177): scratch artefacts + a non-owner co-writing a
-	// shared doc — the unmergeable shapes a developer CAN fix by retrying (stop
-	// committing scratch / stop editing the shared doc). Routed to dev-retry.
-	containmentClean := len(verdict.JunkViolations) == 0 && len(verdict.ModifiedDocUnowned) == 0
+	// Required gate 1 (#175/#177): scratch artefacts, a non-owner co-writing a
+	// shared doc, or root-level source scratch — the shapes a developer CAN fix
+	// by retrying (remove the scratch / stop editing the shared doc). Routed to
+	// dev-retry, NOT recovery, and never left advisory (the commit path stages
+	// everything, so advisory scratch silently pollutes the branch).
+	containmentClean := len(verdict.JunkViolations) == 0 &&
+		len(verdict.ModifiedDocUnowned) == 0 &&
+		len(verdict.RootScratch) == 0
 	containment := payloads.CheckResult{
 		Name:     checkName,
 		Passed:   containmentClean,
@@ -318,6 +412,9 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 		var b strings.Builder
 		if len(verdict.JunkViolations) > 0 {
 			fmt.Fprintf(&b, "Scratch/merge artefacts must not be committed (write scratch to /tmp, not the worktree): %s. ", strings.Join(verdict.JunkViolations, ", "))
+		}
+		if len(verdict.RootScratch) > 0 {
+			fmt.Fprintf(&b, "Root-level source file(s) that are not deliverables must be removed before submit (a source file belongs in a package directory, not the worktree root — write throwaway probes to /tmp): %s. ", strings.Join(verdict.RootScratch, ", "))
 		}
 		if len(verdict.ModifiedDocUnowned) > 0 {
 			fmt.Fprintf(&b, "Modified shared documentation this story does not own: %s. A doc owned by no story (or by another story) is co-written by parallel stories and cannot be merged at assembly — only edit docs in your file scope; if a deliverable doc isn't yours, surface it as a planning gap. ", strings.Join(verdict.ModifiedDocUnowned, ", "))
