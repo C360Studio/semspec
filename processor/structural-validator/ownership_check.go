@@ -172,10 +172,26 @@ func isJunkArtifact(p string) (pattern string, ok bool) {
 // (They are also .gitignored in the fixtures so `git add -A` never commits them;
 // this is the portable fallback for repos lacking that ignore.)
 func isIgnorableBuildArtifact(p string) bool {
-	base := path.Base(strings.ReplaceAll(p, "\\", "/"))
-	// Compiler/tool @argfiles: javac.<ts>.args, and the same shape from jar /
-	// javadoc. Always tool-generated, never a deliverable.
-	return strings.HasSuffix(base, ".args")
+	norm := strings.ReplaceAll(p, "\\", "/")
+	base := path.Base(norm)
+	if !strings.HasSuffix(base, ".args") {
+		return false
+	}
+	// Narrow to TOOL-generated @argfiles only — never a deliverable. A legitimate
+	// tracked/owned `*.args` (e.g. src/test/resources/cli.args) must NOT match, or
+	// it would silently vanish from both validation and the commit.
+	//   - JDK tools write "<tool>.<timestamp>.args": javac./jar./javadoc.
+	//   - Gradle/Maven write @argfiles under a build/ output directory.
+	switch {
+	case strings.HasPrefix(base, "javac."),
+		strings.HasPrefix(base, "jar."),
+		strings.HasPrefix(base, "javadoc."):
+		return true
+	case strings.HasPrefix(norm, "build/"), strings.Contains(norm, "/build/"):
+		return true
+	default:
+		return false
+	}
 }
 
 // sourceFileExts are extensions for compiled/interpreted source that must live

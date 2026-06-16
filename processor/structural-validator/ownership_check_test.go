@@ -86,7 +86,11 @@ func TestIsIgnorableBuildArtifact(t *testing.T) {
 	cases := map[string]bool{
 		"javac.20260616_030142.args":        true,
 		"javac.args":                        true,
+		"jar.123.args":                      true,
+		"javadoc.x.args":                    true,
 		"build/tmp/compileJava/source.args": true,
+		"src/test/resources/cli.args":       false, // a real .args deliverable must NOT be ignored
+		"cli.args":                          false, // root .args without a tool prefix
 		"FindClass.java":                    false,
 		"src/main/java/org/x/Foo.java":      false,
 		"README.md":                         false,
