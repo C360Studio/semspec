@@ -11,6 +11,7 @@
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
+	import RunVisibilityPanel from '$lib/components/plan/RunVisibilityPanel.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
 	import { ReviewDashboard } from '$lib/components/review';
@@ -25,6 +26,7 @@
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { activePhaseProgress } from '$lib/types/activePlanProgress';
 	import { selectFreshestPlan } from '$lib/types/planFreshness';
+	import { mergeTaskSse } from '$lib/types/runVisibility';
 	import { mergeLiveTrajectoryItems } from '$lib/types/trajectoryActivityProjection';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
@@ -60,6 +62,9 @@
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
 	const liveTrajectoryItems = $derived(
 		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
+	);
+	const liveExecutionTasks = $derived(
+		mergeTaskSse(data.executionTasks ?? [], feedStore.taskStages, slug ?? '')
 	);
 
 	// ---------------------------------------------------------------------------
@@ -581,6 +586,13 @@
 					startedAt={progressPanel.startedAt}
 				/>
 			{/if}
+
+			<RunVisibilityPanel
+				{plan}
+				executionTasks={liveExecutionTasks}
+				trajectoryItems={liveTrajectoryItems}
+				lessons={data.lessons ?? []}
+			/>
 
 			<!-- Agent pipeline during execution -->
 			{#if plan.active_loops && plan.active_loops.length > 0}

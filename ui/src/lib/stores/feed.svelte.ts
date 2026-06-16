@@ -202,8 +202,20 @@ class FeedStore {
 		// and consumers should see them without a server round-trip.
 		this.currentPlan = payload;
 
-		// Lazily connect execution SSE when plan reaches execution
-		const execStages = ['implementing', 'executing', 'reviewing_rollup'];
+		// Lazily connect execution SSE once a plan reaches execution and keep it
+		// eligible through QA/terminal gates; users often open the detail page
+		// after implementation starts and still need task-attempt context.
+		const execStages = [
+			'implementing',
+			'executing',
+			'ready_for_qa',
+			'reviewing_qa',
+			'reviewing_rollup',
+			'complete',
+			'complete_with_deferrals',
+			'failed',
+			'rejected'
+		];
 		if (execStages.includes(stage) && !this.execSSE && this.currentSlug) {
 			this.connectExecutionSSE(this.currentSlug);
 		}
