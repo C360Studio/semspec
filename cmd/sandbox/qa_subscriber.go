@@ -305,6 +305,22 @@ func prepareQAIsolation(slug, runID string) (env []string, cleanup func(), summa
 		"MAVEN_OPTS=-Dmaven.repo.local=" + mavenRepo,
 	}
 	summary = "QA cache isolation enabled: GRADLE_USER_HOME=" + gradleHome + " MAVEN_OPTS=-Dmaven.repo.local=" + mavenRepo
+
+	// Make OpenSensorHub upstream resolvable from source (WITH_EPIC /sources) so
+	// generated OSH driver builds don't fail on an authenticated registry 401.
+	// Fail closed: when /sources holds OSH but staging fails, surface a hard
+	// error so the caller fails the QA run with a clear harness message, rather
+	// than silently falling back to registry resolution and emitting another
+	// noisy 401. Absent /sources is a clean no-op (empty summary, nil error).
+	oshSummary, oshErr := stageOSHSourceSubstitution(gradleHome, defaultOSHSourceConfig())
+	if oshErr != nil {
+		cleanup()
+		return nil, func() {}, "", fmt.Errorf("OSH source substitution (harness setup): %w", oshErr)
+	}
+	if oshSummary != "" {
+		summary += "\n" + oshSummary
+	}
+
 	return env, cleanup, summary, nil
 }
 

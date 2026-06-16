@@ -90,6 +90,17 @@ func main() {
 	defer cancel()
 	go srv.CleanupLoop(ctx, *cleanupInterval, *cleanupAge)
 
+	// Install OSH source substitution for dev/validator builds (plain exec, no
+	// isolated GRADLE_USER_HOME), so the dev loop resolves OpenSensorHub from
+	// source (WITH_EPIC /sources) instead of an authenticated registry — not
+	// just QA. Fails closed: if /sources holds OSH but staging fails, exit so a
+	// broken environment contract is an immediate harness red, not a noisy 401
+	// in every dev loop. Absent /sources is a clean no-op.
+	if err := installOSHSourceSubstitutionForDev(logger); err != nil {
+		slog.Error("OSH source substitution setup failed — failing closed", "error", err)
+		os.Exit(1)
+	}
+
 	// Optional NATS subscriber for sandbox-executable QA requests.
 	// When -nats-url is empty and NATS_URL is unset, the sandbox runs HTTP-only
 	// — existing callers are unaffected.
