@@ -32,9 +32,9 @@ import (
 func TestResetRequirementExecutions_All_ClearsTaskNodeKeys(t *testing.T) {
 	c := setupTestComponent(t)
 	c.execBucket = resetKVStub{keys: []string{
-		"req.demo.1",                            // requirement-level execution
-		"task.demo.node-eb2926e6097b66c7-aaaa",  // approved task node
-		"task.demo.node-0ea0bba39b5a2ac6-bbbb",  // escalated task node (the orphan)
+		"req.demo.1",                           // requirement-level execution
+		"task.demo.node-eb2926e6097b66c7-aaaa", // approved task node
+		"task.demo.node-0ea0bba39b5a2ac6-bbbb", // escalated task node (the orphan)
 	}}
 	var reset []string
 	c.reqResetSender = func(_ context.Context, key string) error {
@@ -68,4 +68,82 @@ func TestResetRequirementExecutions_All_ClearsTaskNodeKeys(t *testing.T) {
 			t.Errorf("task-node execution %q was NOT reset by scope=all — architecture_revise leaves it orphaned, which blocks re-dispatch (the ready_for_execution wedge)", want)
 		}
 	}
+}
+
+func TestResetRequirementExecutionsByID_ClearsScopedTaskNodeKeys(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.contract",
+			"task.demo.node-contract",
+			"req.demo.unrelated",
+			"task.demo.node-unrelated",
+		},
+		values: map[string][]byte{
+			"task.demo.node-contract":  []byte(`{"requirement_id":"contract"}`),
+			"task.demo.node-unrelated": []byte(`{"requirement_id":"unrelated"}`),
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	n, err := c.resetRequirementExecutionsByID(context.Background(), "demo", []string{"contract"})
+	if err != nil {
+		t.Fatalf("resetRequirementExecutionsByID returned error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("reset count = %d, want 2 (req + task for contract)", n)
+	}
+	assertResetKeys(t, reset, []string{
+		"req.demo.contract",
+		"task.demo.node-contract",
+	})
+	assertNoResetKeys(t, reset, []string{
+		"req.demo.unrelated",
+		"task.demo.node-unrelated",
+	})
+}
+
+func TestResetRequirementExecutions_Failed_ClearsEscalatedTaskNodeKeys(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.contract",
+			"task.demo.node-contract",
+			"req.demo.unrelated",
+			"task.demo.node-unrelated",
+		},
+		values: map[string][]byte{
+			"req.demo.contract":       []byte(`{"stage":"failed"}`),
+			"task.demo.node-contract": []byte(`{"requirement_id":"contract","stage":"escalated"}`),
+			"req.demo.unrelated":      []byte(`{"stage":"approved"}`),
+			"task.demo.node-unrelated": []byte(
+				`{"requirement_id":"unrelated","stage":"approved"}`,
+			),
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	n, err := c.resetRequirementExecutions(context.Background(), "demo", "failed", nil)
+	if err != nil {
+		t.Fatalf("resetRequirementExecutions returned error: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("reset count = %d, want 2 (failed req + escalated task)", n)
+	}
+	assertResetKeys(t, reset, []string{
+		"req.demo.contract",
+		"task.demo.node-contract",
+	})
+	assertNoResetKeys(t, reset, []string{
+		"req.demo.unrelated",
+		"task.demo.node-unrelated",
+	})
 }

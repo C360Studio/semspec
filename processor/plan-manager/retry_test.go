@@ -114,3 +114,36 @@ func TestHandleRetryPlan_RequirementsScopeShape(t *testing.T) {
 		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusConflict, w.Body.String())
 	}
 }
+
+func TestResetStoriesForRetry_ReopensAffectedStories(t *testing.T) {
+	plan := &workflow.Plan{
+		Stories: []workflow.Story{
+			{ID: "story.failed", RequirementIDs: []string{"req-1"}, Status: workflow.StoryStatusFailed},
+			{ID: "story.complete", RequirementIDs: []string{"req-1"}, Status: workflow.StoryStatusComplete},
+			{ID: "story.executing", RequirementIDs: []string{"req-2"}, Status: workflow.StoryStatusExecuting},
+			{ID: "story.ready", RequirementIDs: []string{"req-1"}, Status: workflow.StoryStatusReady},
+			{ID: "story.unrelated", RequirementIDs: []string{"req-3"}, Status: workflow.StoryStatusFailed},
+		},
+	}
+
+	reset := resetStoriesForRetry(plan, []string{"req-1"})
+
+	if reset != 2 {
+		t.Fatalf("reset count = %d, want 2", reset)
+	}
+	if plan.Stories[0].Status != workflow.StoryStatusReady {
+		t.Fatalf("failed story status = %s, want ready", plan.Stories[0].Status)
+	}
+	if plan.Stories[1].Status != workflow.StoryStatusReady {
+		t.Fatalf("complete story status = %s, want ready", plan.Stories[1].Status)
+	}
+	if plan.Stories[2].Status != workflow.StoryStatusExecuting {
+		t.Fatalf("unaffected executing story status = %s, want executing", plan.Stories[2].Status)
+	}
+	if plan.Stories[3].Status != workflow.StoryStatusReady {
+		t.Fatalf("ready story status = %s, want ready", plan.Stories[3].Status)
+	}
+	if plan.Stories[4].Status != workflow.StoryStatusFailed {
+		t.Fatalf("unrelated story status = %s, want failed", plan.Stories[4].Status)
+	}
+}

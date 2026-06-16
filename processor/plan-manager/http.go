@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -1166,6 +1167,26 @@ type retryPlanResponse struct {
 	ResetCount int    `json:"reset_count"`
 }
 
+func readRetryPlanRequest(r *http.Request) (retryPlanRequest, string) {
+	var req retryPlanRequest
+	// Body is optional — ignore decode errors; default scope applies.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Scope == "" {
+		req.Scope = "failed"
+	}
+	switch req.Scope {
+	case "failed", "all":
+		return req, ""
+	case "requirements":
+		if len(req.RequirementIDs) == 0 {
+			return req, `scope "requirements" requires a non-empty requirement_ids list`
+		}
+		return req, ""
+	default:
+		return req, `scope must be "failed", "all", or "requirements"`
+	}
+}
+
 // execMutationResponse mirrors ExecMutationResponse from execution-manager.
 // Defined locally to avoid a cross-package import.
 type execMutationResponse struct {
@@ -1208,22 +1229,9 @@ func (c *Component) requestRequirementReset(ctx context.Context, key string) err
 func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req retryPlanRequest
-	// Body is optional — ignore decode errors; default scope applies.
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.Scope == "" {
-		req.Scope = "failed"
-	}
-	switch req.Scope {
-	case "failed", "all":
-		// valid; RequirementIDs are ignored by the reset routine for these scopes.
-	case "requirements":
-		if len(req.RequirementIDs) == 0 {
-			writeJSONError(w, `scope "requirements" requires a non-empty requirement_ids list`, http.StatusBadRequest)
-			return
-		}
-	default:
-		writeJSONError(w, `scope must be "failed", "all", or "requirements"`, http.StatusBadRequest)
+	req, reqErr := readRetryPlanRequest(r)
+	if reqErr != "" {
+		writeJSONError(w, reqErr, http.StatusBadRequest)
 		return
 	}
 
@@ -1262,6 +1270,8 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 		return
 	}
 
+	retryReqIDs := c.requirementIDsForRetryScope(r.Context(), plan, req.Scope, req.RequirementIDs)
+
 	// Reset requirement executions via execution-manager mutations.
 	resetCount, err := c.resetRequirementExecutions(r.Context(), slug, req.Scope, req.RequirementIDs)
 	if err != nil {
@@ -1274,7 +1284,15 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 	pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
 	defer pubCancel()
 
+	storyResetCount := resetStoriesForRetry(plan, retryReqIDs)
 	if effectiveStatus == workflow.StatusImplementing {
+		if storyResetCount > 0 {
+			if err := c.savePlanCached(pubCtx, plan); err != nil {
+				c.logger.Error("Failed to reset Story status for retry", "slug", slug, "error", err)
+				writeJSONError(w, "Failed to update plan stories: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
 		// Already implementing — re-trigger orchestrator without a status change.
 		if err := c.triggerScenarioOrchestrator(pubCtx, plan); err != nil {
 			c.logger.Error("Failed to re-trigger orchestrator", "slug", slug, "error", err)
@@ -1290,7 +1308,7 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 		}
 	}
 
-	c.logger.Info("Plan retry initiated", "slug", slug, "scope", req.Scope, "reset_count", resetCount)
+	c.logger.Info("Plan retry initiated", "slug", slug, "scope", req.Scope, "reset_count", resetCount, "story_reset_count", storyResetCount)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -1299,6 +1317,174 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 		Scope:      req.Scope,
 		ResetCount: resetCount,
 	})
+}
+
+func (c *Component) requirementIDsForRetryScope(ctx context.Context, plan *workflow.Plan, scope string, requirementIDs []string) []string {
+	switch scope {
+	case "all":
+		out := make([]string, 0, len(plan.Requirements))
+		for _, req := range plan.Requirements {
+			if req.ID != "" {
+				out = append(out, req.ID)
+			}
+		}
+		sort.Strings(out)
+		return out
+	case "requirements":
+		return uniqueSortedStrings(requirementIDs)
+	case "failed":
+		return c.failedRequirementIDsFromExecutions(ctx, plan.Slug)
+	default:
+		return nil
+	}
+}
+
+func (c *Component) failedRequirementIDsFromExecutions(ctx context.Context, slug string) []string {
+	bucket, err := c.getExecBucket(ctx)
+	if err != nil {
+		return nil
+	}
+	reqPrefix := "req." + slug + "."
+	taskPrefix := "task." + slug + "."
+	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
+	if err != nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	for _, key := range keys {
+		isReq := strings.HasPrefix(key, reqPrefix)
+		isTask := strings.HasPrefix(key, taskPrefix)
+		if !isReq && !isTask {
+			continue
+		}
+		entry, getErr := bucket.Get(ctx, key)
+		if getErr != nil {
+			continue
+		}
+		var execMeta struct {
+			RequirementID string `json:"requirement_id"`
+			Stage         string `json:"stage"`
+		}
+		if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
+			continue
+		}
+		if !isFailedRetryStage(execMeta.Stage) {
+			continue
+		}
+		reqID := execMeta.RequirementID
+		if reqID == "" && isReq {
+			reqID = strings.TrimPrefix(key, reqPrefix)
+		}
+		if reqID != "" {
+			seen[reqID] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func resetStoriesForRetry(plan *workflow.Plan, requirementIDs []string) int {
+	if len(requirementIDs) == 0 {
+		return 0
+	}
+	reqSet := make(map[string]struct{}, len(requirementIDs))
+	for _, id := range requirementIDs {
+		if id != "" {
+			reqSet[id] = struct{}{}
+		}
+	}
+	var resetCount int
+	now := time.Now()
+	for i := range plan.Stories {
+		if !storyCoversAnyRequirement(plan.Stories[i], reqSet) {
+			continue
+		}
+		switch plan.Stories[i].Status {
+		case workflow.StoryStatusExecuting, workflow.StoryStatusComplete, workflow.StoryStatusFailed:
+			plan.Stories[i].Status = workflow.StoryStatusReady
+			plan.Stories[i].UpdatedAt = now
+			resetCount++
+		}
+	}
+	return resetCount
+}
+
+func storyCoversAnyRequirement(story workflow.Story, reqSet map[string]struct{}) bool {
+	for _, id := range story.RequirementIDs {
+		if _, ok := reqSet[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func requirementIDSet(requirementIDs []string) map[string]struct{} {
+	idSet := make(map[string]struct{}, len(requirementIDs))
+	for _, id := range requirementIDs {
+		if id != "" {
+			idSet[id] = struct{}{}
+		}
+	}
+	return idSet
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for value := range seen {
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (c *Component) shouldResetExecutionEntry(ctx context.Context, bucket jetstream.KeyValue, key, reqPrefix, scope string, idSet map[string]struct{}) bool {
+	switch scope {
+	case "failed":
+		entry, getErr := bucket.Get(ctx, key)
+		if getErr != nil {
+			c.logger.Debug("Failed to get execution entry during retry scan", "key", key, "error", getErr)
+			return false
+		}
+		var execMeta struct {
+			Stage string `json:"stage"`
+		}
+		if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
+			c.logger.Debug("Failed to unmarshal execution entry during retry scan", "key", key, "error", jsonErr)
+			return false
+		}
+		return isFailedRetryStage(execMeta.Stage)
+	case "requirements":
+		reqID := strings.TrimPrefix(key, reqPrefix)
+		if !strings.HasPrefix(key, reqPrefix) {
+			entry, getErr := bucket.Get(ctx, key)
+			if getErr != nil {
+				c.logger.Debug("Failed to get task execution entry during requirements scan", "key", key, "error", getErr)
+				return false
+			}
+			var execMeta struct {
+				RequirementID string `json:"requirement_id"`
+			}
+			if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
+				c.logger.Debug("Failed to unmarshal task execution entry during requirements scan", "key", key, "error", jsonErr)
+				return false
+			}
+			reqID = execMeta.RequirementID
+		}
+		_, ok := idSet[reqID]
+		return ok
+	default:
+		return true
+	}
 }
 
 // resetRequirementExecutions scans EXECUTION_STATES for this plan's execution
@@ -1337,15 +1523,9 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 		return 0, fmt.Errorf("list execution keys: %w", err)
 	}
 
-	// Build a quick lookup set for scope="requirements".
-	var idSet map[string]struct{}
+	idSet := map[string]struct{}{}
 	if scope == "requirements" {
-		idSet = make(map[string]struct{}, len(requirementIDs))
-		for _, id := range requirementIDs {
-			if id != "" {
-				idSet[id] = struct{}{}
-			}
-		}
+		idSet = requirementIDSet(requirementIDs)
 	}
 
 	var resetCount int
@@ -1356,50 +1536,8 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 			continue
 		}
 
-		switch scope {
-		case "failed":
-			// Only reset entries currently in a failed or error stage. Applies
-			// to both req and task entries — both carry a "stage" field.
-			entry, getErr := bucket.Get(ctx, key)
-			if getErr != nil {
-				c.logger.Debug("Failed to get execution entry during retry scan", "key", key, "error", getErr)
-				continue
-			}
-			var execMeta struct {
-				Stage string `json:"stage"`
-			}
-			if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
-				c.logger.Debug("Failed to unmarshal execution entry during retry scan", "key", key, "error", jsonErr)
-				continue
-			}
-			if execMeta.Stage != "failed" && execMeta.Stage != "error" {
-				continue
-			}
-		case "requirements":
-			// Match against the allow-list. req.* keys carry the requirement id
-			// as the key suffix; task.* keys carry it in the entry body (the
-			// key suffix is the node id, not a requirement id).
-			reqID := ""
-			if isReq {
-				reqID = strings.TrimPrefix(key, reqPrefix)
-			} else {
-				entry, getErr := bucket.Get(ctx, key)
-				if getErr != nil {
-					c.logger.Debug("Failed to get task execution entry during requirements scan", "key", key, "error", getErr)
-					continue
-				}
-				var execMeta struct {
-					RequirementID string `json:"requirement_id"`
-				}
-				if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
-					c.logger.Debug("Failed to unmarshal task execution entry during requirements scan", "key", key, "error", jsonErr)
-					continue
-				}
-				reqID = execMeta.RequirementID
-			}
-			if _, ok := idSet[reqID]; !ok {
-				continue
-			}
+		if !c.shouldResetExecutionEntry(ctx, bucket, key, reqPrefix, scope, idSet) {
+			continue
 		}
 
 		if resetErr := c.requestRequirementReset(ctx, key); resetErr != nil {
@@ -1410,6 +1548,15 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 	}
 
 	return resetCount, nil
+}
+
+func isFailedRetryStage(stage string) bool {
+	switch stage {
+	case "failed", "error", "escalated", "rejected":
+		return true
+	default:
+		return false
+	}
 }
 
 // triggerScenarioOrchestrator publishes a scenario orchestration trigger for the plan.

@@ -70,6 +70,46 @@ func TestAbandonExecsForSlug_Empty(t *testing.T) {
 	}
 }
 
+func TestAbandonExecsForRequirements_Scoped(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+
+	contract := newAwaitingExec("generic-plan", "contract")
+	contract.EntityID = "entity-contract"
+	consumer := newAwaitingExec("generic-plan", "consumer")
+	consumer.EntityID = "entity-consumer"
+	unrelated := newAwaitingExec("generic-plan", "unrelated")
+	unrelated.EntityID = "entity-unrelated"
+	otherPlan := newAwaitingExec("other-plan", "contract")
+	otherPlan.EntityID = "entity-other-contract"
+
+	c.activeExecs.Set(contract.EntityID, contract)
+	c.activeExecs.Set(consumer.EntityID, consumer)
+	c.activeExecs.Set(unrelated.EntityID, unrelated)
+	c.activeExecs.Set(otherPlan.EntityID, otherPlan)
+
+	abandoned := c.abandonExecsForRequirements("generic-plan", []string{"contract", "consumer", "contract"})
+
+	if abandoned != 2 {
+		t.Fatalf("abandoned = %d, want 2", abandoned)
+	}
+	for _, exec := range []*requirementExecution{contract, consumer} {
+		if _, ok := c.activeExecs.Get(exec.EntityID); ok {
+			t.Fatalf("%s should have been removed from activeExecs", exec.RequirementID)
+		}
+		if !exec.terminated {
+			t.Fatalf("%s should be marked terminated", exec.RequirementID)
+		}
+	}
+	for _, exec := range []*requirementExecution{unrelated, otherPlan} {
+		if _, ok := c.activeExecs.Get(exec.EntityID); !ok {
+			t.Fatalf("%s should remain active", exec.EntityID)
+		}
+		if exec.terminated {
+			t.Fatalf("%s should not be terminated", exec.EntityID)
+		}
+	}
+}
+
 func TestHandlePlanDecisionAccepted_StoryReprepareAbandonsInsteadOfResuming(t *testing.T) {
 	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
 

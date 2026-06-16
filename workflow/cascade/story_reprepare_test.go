@@ -44,6 +44,36 @@ func TestPlanDecision_StoryReprepare_ExplicitStoryIDs(t *testing.T) {
 	}
 }
 
+func TestPlanDecision_StoryReprepare_StoryIDsPopulateRequirementScope(t *testing.T) {
+	proposal := &workflow.PlanDecision{
+		ID:               "plan-decision.demo.recovery.story-only",
+		Kind:             workflow.PlanDecisionKindStoryReprepare,
+		AffectedStoryIDs: []string{"story.demo.contract"},
+	}
+	stories := []workflow.Story{
+		{ID: "story.demo.contract", RequirementIDs: []string{"contract", "consumer"}, ComponentName: "driver"},
+		{ID: "story.demo.unrelated", RequirementIDs: []string{"unrelated"}, ComponentName: "ui"},
+	}
+	scenarios := []workflow.Scenario{
+		{ID: "scen.contract", RequirementID: "contract", StoryID: "story.demo.contract"},
+		{ID: "scen.unrelated", RequirementID: "unrelated", StoryID: "story.demo.unrelated"},
+	}
+
+	result, err := PlanDecision(proposal, stories, scenarios)
+	if err != nil {
+		t.Fatalf("PlanDecision: %v", err)
+	}
+
+	sort.Strings(result.AffectedRequirementIDs)
+	wantReqs := []string{"consumer", "contract"}
+	if !reflect.DeepEqual(result.AffectedRequirementIDs, wantReqs) {
+		t.Fatalf("AffectedRequirementIDs = %v, want %v", result.AffectedRequirementIDs, wantReqs)
+	}
+	if wantScenarios := []string{"scen.contract"}; !reflect.DeepEqual(result.AffectedScenarioIDs, wantScenarios) {
+		t.Fatalf("AffectedScenarioIDs = %v, want %v", result.AffectedScenarioIDs, wantScenarios)
+	}
+}
+
 // TestPlanDecision_StoryReprepare_FallbackToReqScope pins the back-compat
 // path: when proposal.AffectedStoryIDs is empty but Kind=story_reprepare
 // AND AffectedReqIDs is populated, the cascade dirty-marks every Story

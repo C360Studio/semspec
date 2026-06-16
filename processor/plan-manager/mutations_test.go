@@ -38,6 +38,49 @@ func marshalRevision(t *testing.T, req RevisionMutationRequest) []byte {
 	return data
 }
 
+func TestHandleReadyForExecutionMutation_AutoStartsExecution(t *testing.T) {
+	ctx := context.Background()
+	c := setupTestComponent(t)
+	plan := setupTestPlan(t, c, "auto-start")
+	plan.Status = workflow.StatusReviewingScenarios
+	plan.Requirements = []workflow.Requirement{{ID: "contract", Title: "External dependency API contract"}}
+	plan.Scenarios = []workflow.Scenario{{ID: "scen.contract", RequirementID: "contract"}}
+	if err := c.plans.save(ctx, plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	published := false
+	c.orchestratorTriggerPublisher = func(_ context.Context, got *workflow.Plan) error {
+		published = true
+		if got.Slug != plan.Slug {
+			t.Fatalf("published plan slug = %q, want %q", got.Slug, plan.Slug)
+		}
+		if got.EffectiveStatus() != workflow.StatusImplementing {
+			t.Fatalf("published plan status = %s, want implementing", got.EffectiveStatus())
+		}
+		return nil
+	}
+
+	body, err := json.Marshal(ReadyForExecutionMutationRequest{Slug: plan.Slug})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	resp := c.handleReadyForExecutionMutation(ctx, body)
+	if !resp.Success {
+		t.Fatalf("handleReadyForExecutionMutation failed: %s", resp.Error)
+	}
+	if !published {
+		t.Fatal("expected scenario orchestrator trigger to be published")
+	}
+	got, ok := c.plans.get(plan.Slug)
+	if !ok {
+		t.Fatal("plan missing after mutation")
+	}
+	if got.EffectiveStatus() != workflow.StatusImplementing {
+		t.Fatalf("plan status = %s, want implementing", got.EffectiveStatus())
+	}
+}
+
 func TestHandleRevisionMutation(t *testing.T) {
 	ctx := context.Background()
 

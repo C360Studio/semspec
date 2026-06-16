@@ -15,6 +15,7 @@ import (
 
 	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/cascade"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
@@ -987,7 +988,46 @@ func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []
 	}
 
 	c.logger.Info("Plan ready for execution via mutation", "slug", req.Slug)
+	if c.shouldAutoStartExecution() {
+		if err := c.startExecutionFromReady(ctx, plan); err != nil {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("start execution: %v", err)}
+		}
+	}
 	return MutationResponse{Success: true}
+}
+
+func (c *Component) shouldAutoStartExecution() bool {
+	return c.natsClient != nil || c.orchestratorTriggerPublisher != nil
+}
+
+func (c *Component) startExecutionFromReady(ctx context.Context, plan *workflow.Plan) error {
+	if len(plan.Requirements) == 0 {
+		return fmt.Errorf("plan has no requirements")
+	}
+	if len(plan.Scenarios) == 0 {
+		return fmt.Errorf("plan has no scenarios")
+	}
+
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+
+	if err := c.setPlanStatusCached(pubCtx, plan, workflow.StatusImplementing); err != nil {
+		return fmt.Errorf("set implementing: %w", err)
+	}
+	if err := c.publishScenarioOrchestrator(pubCtx, plan); err != nil {
+		c.logger.Error("Failed to auto-trigger execution, rolling back status", "slug", plan.Slug, "error", err)
+		_ = c.setPlanStatusCached(pubCtx, plan, workflow.StatusReadyForExecution)
+		return fmt.Errorf("trigger scenario orchestrator: %w", err)
+	}
+	c.logger.Info("Auto-triggered scenario execution after ready_for_execution approval", "slug", plan.Slug)
+	return nil
+}
+
+func (c *Component) publishScenarioOrchestrator(ctx context.Context, plan *workflow.Plan) error {
+	if c.orchestratorTriggerPublisher != nil {
+		return c.orchestratorTriggerPublisher(ctx, plan)
+	}
+	return c.triggerScenarioOrchestrator(ctx, plan)
 }
 
 // escalateRevision transitions the plan to StatusRejected when the review iteration
@@ -1805,37 +1845,16 @@ func (c *Component) handleGitHubPRMetadataMutation(ctx context.Context, data []b
 	return MutationResponse{Success: true}
 }
 
-// resetRequirementExecutionsByID resets specific requirement executions by ID,
-// regardless of their current stage. Used by PR feedback to reset completed
-// requirements for re-execution.
-//
-// KNOWN GAP / TRACKED (2026-06-16, not fixing now): this only constructs and
-// resets "req.<slug>.<reqID>" keys — it cannot reach the "task.<slug>.node-*"
-// per-node executions for those requirements, so escalated task nodes orphan
-// here exactly as they did in the architecture_revise wedge that
-// resetRequirementExecutions(scope="all") was fixed for. Same raw-key smell
-// (see execution-manager ReqResetRequest). When fixed, mirror the scope=
-// "requirements" task-key handling from resetRequirementExecutions.
 func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug string, reqIDs []string) (int, error) {
-	var resetCount int
-	for _, reqID := range reqIDs {
-		key := "req." + slug + "." + reqID
-		if err := c.requestRequirementReset(ctx, key); err != nil {
-			c.logger.Warn("Failed to reset requirement execution by ID",
-				"key", key, "error", err)
-			return resetCount, fmt.Errorf("reset requirement execution %s: %w", key, err)
-		}
-		resetCount++
-	}
-	return resetCount, nil
+	return c.resetRequirementExecutions(ctx, slug, "requirements", reqIDs)
 }
 
 // applyArchitectureRevise performs the state mutation for an accepted
 // architecture_revise PlanDecision (RecoveryActionArchitectureRevise). It is
 // the execution-phase counterpart of determineR2ReentryPoint's "architecture"
 // case: capture the prior architecture so the architect REVISES rather than
-// rewrites, wipe Architecture + Stories + Scenarios, reset every requirement
-// execution so the re-run cannot reuse stale Story owner evidence via Tier-1 dedup,
+// rewrites, wipe Architecture + Stories + Scenarios, reset affected requirement
+// executions so the re-run cannot reuse stale Story owner evidence via Tier-1 dedup,
 // route the recovery diagnosis into ReviewFormattedFindings (the channel the
 // architecture-generator already reads on revision rounds — component.go:301),
 // and drive the back-transition implementing → requirements_generated so the
@@ -1851,7 +1870,8 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 // context into a future developer prompt).
 //
 // The EXECUTION_STATES reset is I/O (NATS request/reply via resetRequirement-
-// Executions, scope "all"); a reset error is returned so the caller can fail
+// Executions, scoped when the PlanDecision identifies affected requirements,
+// otherwise conservative "all"); a reset error is returned so the caller can fail
 // the accept rather than half-apply the revision. A back-transition that the
 // DAG rejects (plan already moved past implementing while a human-review
 // window was open) leaves the plan in place and logs a warning — consistent
@@ -1868,13 +1888,14 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 		return nil
 	}
 
-	// Reset all requirement executions BEFORE the in-memory wipe so a reset
+	// Reset affected requirement executions BEFORE the in-memory wipe so a reset
 	// failure aborts the accept with the plan untouched (no half-applied
 	// revision). Detached context: the reset is N sequential NATS request/
 	// replies and must finish even if the caller's request context is
 	// cancelled mid-accept (closes go-reviewer H2/M3). Clearing EXECUTION_STATES
 	// stops the re-run from fast-completing via the executor's Tier-1 dedup.
-	resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), plan.Slug, "all", nil)
+	resetScope, resetReqIDs := planDecisionResetScope(plan, proposal)
+	resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), plan.Slug, resetScope, resetReqIDs)
 	if err != nil {
 		return fmt.Errorf("reset requirement executions for architecture_revise: %w", err)
 	}
@@ -1884,6 +1905,8 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 	c.logger.Info("Architecture revise applied — plan re-queued for architecture regeneration",
 		"slug", plan.Slug,
 		"proposal_id", proposal.ID,
+		"reset_scope", resetScope,
+		"reset_requirements", len(resetReqIDs),
 		"reset_count", resetCount,
 		"from_status", from,
 		"had_previous_architecture", plan.PreviousArchitectureJSON != "")
@@ -1895,15 +1918,15 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 // both stay byte-identical. Branches on proposal.Kind:
 //
 //   - architecture_revise → applyArchitectureRevise (capture prior architecture,
-//     wipe Architecture + Stories + Scenarios, reset all requirement executions,
+//     wipe Architecture + Stories + Scenarios, reset affected requirement executions,
 //     drive implementing → requirements_generated). Routes the diagnosis through
 //     ReviewFormattedFindings, so the recovery-hint + story_reprepare branches
 //     are intentionally skipped.
 //   - any other kind → apply the recovery hint when proposed_by=recovery-agent,
 //     and for story_reprepare drive stories_generated/implementing →
 //     preparing_stories so Sarah re-runs with Story.RecoveryHint set (Train C
-//     step 4). The implementing path also resets requirement executions so
-//     stale dev loops do not resume against the old story shape.
+//     step 4). The implementing path also resets affected requirement executions
+//     so stale dev loops do not resume against the old story shape.
 //
 // The status mutations are done IN PLACE (NOT setPlanStatusCached): the caller's
 // trailing save is the sole persist point, avoiding a double save / double
@@ -1936,13 +1959,16 @@ func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan
 
 	affectedReqIDs := affectedRequirementIDsForStoryReprepare(plan, proposal)
 	if current == workflow.StatusImplementing {
-		resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), slug, "all", nil)
+		resetScope, resetReqIDs := resetScopeFromRequirements(plan, affectedReqIDs)
+		resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), slug, resetScope, resetReqIDs)
 		if err != nil {
 			return fmt.Errorf("reset requirement executions for story_reprepare: %w", err)
 		}
 		c.logger.Info("Story reprepare reset requirement executions",
 			"slug", slug,
 			"proposal_id", proposal.ID,
+			"reset_scope", resetScope,
+			"reset_requirements", len(resetReqIDs),
 			"reset_count", resetCount)
 	}
 
@@ -1987,6 +2013,18 @@ func affectedRequirementIDsForStoryReprepare(plan *workflow.Plan, proposal *work
 	}
 	sort.Strings(out)
 	return out
+}
+
+func planDecisionResetScope(plan *workflow.Plan, proposal *workflow.PlanDecision) (string, []string) {
+	return resetScopeFromRequirements(plan, affectedRequirementIDsForStoryReprepare(plan, proposal))
+}
+
+func resetScopeFromRequirements(plan *workflow.Plan, affectedReqIDs []string) (string, []string) {
+	closure := cascade.ExpandRequirementClosure(plan.Requirements, affectedReqIDs)
+	if len(closure) == 0 {
+		return "all", nil
+	}
+	return "requirements", closure
 }
 
 func removeScenariosForStoryReprepare(scenarios []workflow.Scenario, proposal *workflow.PlanDecision, affectedReqIDs []string) []workflow.Scenario {

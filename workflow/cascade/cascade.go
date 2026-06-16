@@ -5,6 +5,7 @@ package cascade
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/c360studio/semspec/workflow"
 )
@@ -44,10 +45,10 @@ type Result struct {
 //   - Kind=execution_exhausted: terminal acknowledgement; cascade is a
 //     no-op (callers shouldn't invoke PlanDecision for this kind, but
 //     the function returns empty Result safely if they do).
-//   - Kind=architecture_revise: no-op. The plan-manager accept handler
-//     already wiped Architecture + Stories + Scenarios and reset all
-//     requirement executions inline; the re-run regenerates everything
-//     from the architect down, so there is nothing to dirty-mark.
+//   - Kind=architecture_revise: no-op for Story/Scenario dirty marks. The
+//     plan-manager accept handler wipes Architecture + Stories + Scenarios
+//     and resets execution rows for the affected requirement closure inline;
+//     the re-run regenerates from the architect down.
 //
 // Pure business logic — no I/O. Caller loads the plan from KV and passes
 // stories + scenarios. Returns the IDs that were dirty-marked so
@@ -82,6 +83,20 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 		for _, id := range affectedStories {
 			affectedStorySet[id] = true
 		}
+		for _, story := range stories {
+			if !affectedStorySet[story.ID] {
+				continue
+			}
+			for _, id := range story.RequirementIDs {
+				if id == "" {
+					continue
+				}
+				if !affectedReqs[id] {
+					affectedReqs[id] = true
+					result.AffectedRequirementIDs = append(result.AffectedRequirementIDs, id)
+				}
+			}
+		}
 		// Scenarios are dirty when their parent Story is dirty. Falls back
 		// to "scenarios for affected reqs" when no Story IDs were resolved
 		// (e.g. legacy plan with empty plan.Stories but Kind=story_reprepare
@@ -104,11 +119,11 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 		// rejected, so there is nothing to dirty-cascade.
 
 	case workflow.PlanDecisionKindArchitectureRevise:
-		// The plan-manager accept handler already wiped Architecture +
-		// Stories + Scenarios and reset all requirement executions inline,
-		// then drove implementing → requirements_generated. There is nothing
-		// left for the dirty-cascade to mark — the re-run regenerates every
-		// entity from the architect down. No-op beyond the recorded
+		// The plan-manager accept handler wipes Architecture + Stories +
+		// Scenarios and resets scoped execution rows inline, then drives
+		// implementing → requirements_generated. There is nothing left for
+		// the dirty-cascade to mark — the re-run regenerates those entities
+		// from the architect down. No-op beyond the recorded
 		// AffectedRequirementIDs (caller telemetry).
 
 	default:
@@ -156,5 +171,53 @@ func storiesForReprepare(proposal *workflow.PlanDecision, stories []workflow.Sto
 			}
 		}
 	}
+	return out
+}
+
+// ExpandRequirementClosure returns the affected requirement IDs plus every
+// downstream requirement that depends on one of them, transitively. It never
+// walks upstream to prerequisites: if a leaf requirement is affected, the
+// closure is only that leaf. Callers use this to invalidate work that may have
+// been built on a stale contract without throwing away unrelated completed
+// requirements.
+func ExpandRequirementClosure(requirements []workflow.Requirement, seeds []string) []string {
+	selected := make(map[string]struct{}, len(seeds))
+	for _, id := range seeds {
+		if id == "" {
+			continue
+		}
+		selected[id] = struct{}{}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+
+	for {
+		changed := false
+		for _, req := range requirements {
+			if req.ID == "" {
+				continue
+			}
+			if _, ok := selected[req.ID]; ok {
+				continue
+			}
+			for _, dep := range req.DependsOn {
+				if _, ok := selected[dep]; ok {
+					selected[req.ID] = struct{}{}
+					changed = true
+					break
+				}
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+
+	out := make([]string, 0, len(selected))
+	for id := range selected {
+		out = append(out, id)
+	}
+	sort.Strings(out)
 	return out
 }
