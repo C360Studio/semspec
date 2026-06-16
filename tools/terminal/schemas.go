@@ -173,6 +173,11 @@ func planSchema() map[string]any {
 				"type":        "string",
 				"description": "Current state, why this matters, key constraints",
 			},
+			"constraints": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Hard constraints lifted VERBATIM from the request — the must/must-not rules that bind the WHOLE implementation, not any single requirement. Capture every: prohibition (\"do not stub X\", \"do not hand-roll Y\", \"never Z\"), coverage/quality mandate (\"full coverage\", \"machine-checkable inventory\", \"at least one live test\"), and baseline-preservation requirement (\"preserve existing outputs/inputs\"). These are re-injected into developer, reviewer, and QA prompts, which otherwise never see the original request. Emit [] only when the request states no hard constraints.",
+			},
 			"scope": map[string]any{
 				"type":        "object",
 				"description": "File scope boundaries. Use 'include' for files that already EXIST and may be modified; use 'create' for files this plan will create that don't exist yet. Putting nonexistent paths in 'include' will be rejected at submit_work — see scope.create description. Emit empty arrays for unused fields, never omit them.",
@@ -202,7 +207,7 @@ func planSchema() map[string]any {
 				"additionalProperties": false,
 			},
 		},
-		"required":             []string{"goal", "context", "scope"},
+		"required":             []string{"goal", "context", "constraints", "scope"},
 		"additionalProperties": false,
 	}
 }

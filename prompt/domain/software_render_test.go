@@ -294,6 +294,50 @@ func TestAssemblerEndToEnd_RequirementGenerator(t *testing.T) {
 	}
 }
 
+// TestAssembler_PlanConstraintsReachDeveloper pins #204's re-injection: the
+// plan's hard constraints (extracted by the planner) must appear in the
+// developer/validator/reviewer prompt, which decomposition otherwise never
+// carries them to. Without this, a dev can satisfy thin scenarios while
+// violating a stated prohibition ("do not stub") it never saw.
+func TestAssembler_PlanConstraintsReachDeveloper(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	const constraint = "do not stub MAVSDK/OSH classes"
+	out := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+		TaskContext: &prompt.TaskContext{
+			PlanGoal:        "Implement the driver",
+			PlanConstraints: []string{constraint, "full Connected Systems API coverage"},
+			WorktreePath:    "/work/wt",
+		},
+	})
+	if out.RenderError != nil {
+		t.Fatalf("unexpected RenderError: %v", out.RenderError)
+	}
+	combined := out.SystemMessage + "\n" + out.UserMessage
+	if !strings.Contains(combined, "PLAN CONSTRAINTS") {
+		t.Errorf("developer prompt missing the PLAN CONSTRAINTS block — #204 re-injection regressed")
+	}
+	if !strings.Contains(combined, constraint) {
+		t.Errorf("developer prompt missing the verbatim constraint %q", constraint)
+	}
+
+	// Belt-and-suspenders: no constraints → no constraints block (no empty header).
+	out2 := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+		TaskContext:    &prompt.TaskContext{PlanGoal: "g", WorktreePath: "/work/wt"},
+	})
+	if strings.Contains(out2.SystemMessage+out2.UserMessage, "PLAN CONSTRAINTS") {
+		t.Errorf("empty PlanConstraints should render no constraints block")
+	}
+}
+
 // TestRenderPlanReviewerPrompt_R1PhaseBoundaries pins the take-19 fix from the
 // 2026-05-08 OpenRouter @easy run: llama-3.3-70b's reviewer rejected a
 // well-formed /health plan two rounds in a row, demanding "specific details

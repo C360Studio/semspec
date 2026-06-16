@@ -153,6 +153,26 @@ Before writing the new file, read ONE existing sibling and the project's module 
 These are not stylistic preferences. The compiler / interpreter / type checker enforces them, and a mismatched package declaration or bare-vs-fully-qualified import produces a deterministic build failure on the first compile. Two TDD cycles wasted on this is two too many — read the sibling first.`,
 		},
 		{
+			// #204: re-inject the plan's hard constraints (do-not-stub, coverage
+			// mandates, baseline-preservation) into the dev/validator/reviewer
+			// prompt. Decomposition never carried the original request's
+			// prohibitions to these roles, so a dev could satisfy thin scenarios
+			// while violating a stated rule. Priority -2 so it frames the work
+			// ahead of the workspace contract. Empty PlanConstraints → no output.
+			ID:       "software.execution.plan-constraints",
+			Category: prompt.CategoryRoleContext,
+			Priority: -2,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				if ctx.TaskContext == nil || len(ctx.TaskContext.PlanConstraints) == 0 {
+					return ""
+				}
+				return "## PLAN CONSTRAINTS (must hold — from the original request)\n\n" +
+					"Hard rules the plan must satisfy. They override convenience: if a constraint conflicts with the easiest path, honor the constraint. Violating one is a rejectable defect even if every test passes.\n\n- " +
+					strings.Join(ctx.TaskContext.PlanConstraints, "\n- ") + "\n"
+			},
+		},
+		{
 			// Workspace contract: tells the developer agent how its environment
 			// works without teaching it git workflow. Added 2026-04-29 after
 			// the bug-#9 claim/observation guard fired twice on a Gemini @easy
@@ -670,6 +690,7 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`
 {
   "goal": "Add /goodbye endpoint with JSON response and tests",
   "context": "Flask API with /hello endpoint. Need parallel /goodbye.",
+  "constraints": ["do not hand-roll HTTP framing", "preserve the existing /hello behavior"],
   "scope": {
     "include": ["api/app.py"],
     "create": ["api/test_goodbye.py"],
@@ -678,7 +699,17 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`
   }
 }
 
-Required: goal (string), context (string), scope (object with include/create/exclude/do_not_touch arrays — emit empty arrays for unused fields, never omit).`,
+Required: goal (string), context (string), constraints (array of strings), scope (object with include/create/exclude/do_not_touch arrays — emit empty arrays for unused fields, never omit).
+
+CRITICAL — constraints carry the request's HARD must/must-not rules VERBATIM. They
+bind the whole implementation and are re-injected into the developer, reviewer, and
+QA prompts, which never see the original request — so a rule you drop here is a rule
+no downstream agent will ever enforce. Capture every prohibition ("do not stub X",
+"do not hand-roll Y", "never Z"), coverage/quality mandate ("full coverage",
+"machine-checkable inventory", "at least one live test"), and baseline-preservation
+requirement ("preserve existing outputs/inputs"). Quote the request's wording — do
+NOT soften a prohibition into a goal. Emit [] only when the request states no hard
+constraints.`,
 					`CRITICAL — scope.include is for files that ALREADY EXIST in the project tree;
 scope.create is for files the plan intends to CREATE that don't exist yet.
 Putting a not-yet-existing file in include will be flagged as a hallucinated
@@ -2465,7 +2496,14 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 				sb.WriteString("## Plan Under Review\n\n")
 				sb.WriteString(fmt.Sprintf("**Title:** %s\n", qc.PlanTitle))
 				sb.WriteString(fmt.Sprintf("**Goal:** %s\n", qc.PlanGoal))
-				sb.WriteString(fmt.Sprintf("**QA Level:** %s\n\n", qc.QALevel))
+				sb.WriteString(fmt.Sprintf("**QA Level:** %s\n", qc.QALevel))
+				if len(qc.PlanConstraints) > 0 {
+					// #204: hard constraints from the original request. A deliverable
+					// that violated one (e.g. stubbed a class the request said not to)
+					// is not release-ready even if every executed test passed.
+					sb.WriteString("**Constraints (must hold):**\n- " + strings.Join(qc.PlanConstraints, "\n- ") + "\n")
+				}
+				sb.WriteString("\n")
 
 				if len(qc.Requirements) > 0 {
 					sb.WriteString("## Requirements\n\n")

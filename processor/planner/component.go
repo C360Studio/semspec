@@ -475,11 +475,12 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 
 	mutReq := draftedMutationRequest{
-		Slug:    slug,
-		Title:   planContent.Title,
-		Goal:    planContent.Goal,
-		Context: planContent.Context,
-		Scope:   scope,
+		Slug:        slug,
+		Title:       planContent.Title,
+		Goal:        planContent.Goal,
+		Context:     planContent.Context,
+		Constraints: planContent.Constraints,
+		Scope:       scope,
 	}
 	data, err := json.Marshal(mutReq)
 	if err != nil {
@@ -1169,20 +1170,22 @@ const mutationDraftedSubject = "plan.mutation.drafted"
 
 // draftedMutationRequest is sent to plan-manager after drafting a plan.
 type draftedMutationRequest struct {
-	Slug    string          `json:"slug"`
-	Title   string          `json:"title,omitempty"`
-	Goal    string          `json:"goal"`
-	Context string          `json:"context"`
-	Scope   *workflow.Scope `json:"scope,omitempty"`
-	TraceID string          `json:"trace_id,omitempty"`
+	Slug        string          `json:"slug"`
+	Title       string          `json:"title,omitempty"`
+	Goal        string          `json:"goal"`
+	Context     string          `json:"context"`
+	Constraints []string        `json:"constraints,omitempty"`
+	Scope       *workflow.Scope `json:"scope,omitempty"`
+	TraceID     string          `json:"trace_id,omitempty"`
 }
 
 // PlanContent holds the LLM-generated plan fields.
 type PlanContent struct {
-	Title   string `json:"title,omitempty"`
-	Goal    string `json:"goal"`
-	Context string `json:"context"`
-	Scope   struct {
+	Title       string   `json:"title,omitempty"`
+	Goal        string   `json:"goal"`
+	Context     string   `json:"context"`
+	Constraints []string `json:"constraints,omitempty"`
+	Scope       struct {
 		Include    []string `json:"include,omitempty"`
 		Exclude    []string `json:"exclude,omitempty"`
 		DoNotTouch []string `json:"do_not_touch,omitempty"`

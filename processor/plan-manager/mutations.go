@@ -94,6 +94,7 @@ type DraftedMutationRequest struct {
 	Title            string          `json:"title,omitempty"`
 	Goal             string          `json:"goal"`
 	Context          string          `json:"context"`
+	Constraints      []string        `json:"constraints,omitempty"`
 	Scope            *workflow.Scope `json:"scope,omitempty"`
 	SkipArchitecture bool            `json:"skip_architecture,omitempty"`
 	TraceID          string          `json:"trace_id,omitempty"`
@@ -698,6 +699,7 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	}
 	plan.Goal = req.Goal
 	plan.Context = req.Context
+	plan.Constraints = req.Constraints
 	if req.Scope != nil {
 		plan.Scope = *req.Scope
 	}

@@ -616,6 +616,13 @@ type Plan struct {
 	// Context describes the current state and why this matters
 	Context string `json:"context,omitempty"`
 
+	// Constraints are the hard must/must-not rules lifted verbatim from the
+	// request by the planner (#204): prohibitions ("do not stub"), coverage/
+	// quality mandates ("full coverage"), and baseline-preservation rules. They
+	// bind the whole implementation, so they are re-injected into the developer,
+	// reviewer, and QA prompts — which otherwise never see the original request.
+	Constraints []string `json:"constraints,omitempty"`
+
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
 
