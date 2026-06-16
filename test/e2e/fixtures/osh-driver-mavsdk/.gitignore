@@ -4,6 +4,11 @@ build/
 *.class
 *.jar
 *.war
+# Compiler @argfiles (javac.<ts>.args et al.) — javac writes these when the
+# compile classpath is long, which the osh-core source composite makes very
+# long. Tool-generated and transient; must never ride onto the branch (they
+# also otherwise trip the ADR-049 ownership gate as untracked new files).
+*.args
 # Re-include the Gradle Wrapper jar — convention is to commit it so
 # contributors don't need Gradle pre-installed. Without this negation
 # the *.jar pattern above silently excludes the wrapper, which makes

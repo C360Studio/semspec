@@ -150,6 +150,34 @@ func isJunkArtifact(p string) (pattern string, ok bool) {
 	}
 }
 
+// isIgnorableBuildArtifact reports whether a path is a transient byproduct the
+// TOOLCHAIN (not the developer) emits, which must never be treated as a
+// deliverable, a planning gap, or even committable scratch. The canonical case:
+// javac writes a timestamped @argfile (javac.<ts>.args) when the compile
+// classpath is long — which the osh-core source composite (ADR build-self-
+// containment) makes very long. These appear as untracked `??` files and would
+// otherwise be misclassified as an out-of-territory new source file (ADR-049
+// planning gap), wedging the node — a developer cannot "stop creating" a file
+// the build regenerates every compile, so it must be IGNORED, not hard-failed.
+// (They are also .gitignored in the fixtures so `git add -A` never commits them;
+// this is the portable fallback for repos lacking that ignore.)
+func isIgnorableBuildArtifact(p string) bool {
+	base := path.Base(strings.ReplaceAll(p, "\\", "/"))
+	// Compiler/tool @argfiles: javac.<ts>.args, and the same shape from jar /
+	// javadoc. Always tool-generated, never a deliverable.
+	return strings.HasSuffix(base, ".args")
+}
+
+// firstSegment returns the top-level path component, or "" for a root-level file
+// with no directory (e.g. "FindClass.java" → "", "src/main/java/X.java" → "src").
+func firstSegment(p string) string {
+	p = strings.TrimPrefix(strings.ReplaceAll(p, "\\", "/"), "./")
+	if i := strings.Index(p, "/"); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}
+
 // ownedTerritory returns the set of directory prefixes the story owns, derived
 // from the directories of its owned files. A new file under one of these
 // directories is a legitimate in-package split; a new file outside all of them
@@ -187,6 +215,12 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 		if norm == "" {
 			continue
 		}
+		// Transient toolchain byproducts (javac.<ts>.args et al.) are neither
+		// deliverables, junk-to-clean, nor planning gaps — a dev can't stop the
+		// build regenerating them. Ignore before any classification.
+		if isIgnorableBuildArtifact(norm) {
+			continue
+		}
 		if pattern, ok := isJunkArtifact(norm); ok {
 			v.JunkViolations = append(v.JunkViolations, fmt.Sprintf("%s (%s)", norm, pattern))
 			continue
@@ -213,11 +247,20 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// case, so this only guards direct callers), or an in-package
 				// class split: advisory, matching pre-ADR-049 behavior.
 				v.NewUnowned = append(v.NewUnowned, norm)
+			case firstSegment(norm) == "":
+				// A new file at the worktree ROOT (no package directory) — a dev's
+				// throwaway probe (FindClass.java) or other non-deliverable scratch.
+				// A real source/test deliverable always lives in a package dir, so a
+				// root-level new file is never the path parallel stories converge on:
+				// advisory, NOT a node-killing planning gap. (#176 assembly-merge
+				// still fails honestly if such a file somehow collides.)
+				v.NewUnowned = append(v.NewUnowned, norm)
 			default:
-				// A new source/test file OUTSIDE the declared territory is the
-				// 2026-06-14 wedge: parallel stories converge on the same
-				// fabricated path and collide at assembly. Hard fail at the node
-				// so the planning/ownership gap surfaces in seconds (ADR-049).
+				// A new source/test file in a package directory but OUTSIDE the
+				// declared territory is the 2026-06-14 wedge: parallel stories
+				// converge on the same fabricated DELIVERABLE path and collide at
+				// assembly. Hard fail so the planning/ownership gap surfaces in
+				// seconds (ADR-049 move 3).
 				v.NewUnownedOutOfTerritory = append(v.NewUnownedOutOfTerritory, norm)
 			}
 		case workflow.IsDocumentationPath(norm):
