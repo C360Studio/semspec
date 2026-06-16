@@ -769,6 +769,20 @@ tasks:
             mavlink-decode)     echo '100m' ;;  # PW cap 80m + 20m
             *)                  echo '40m' ;;   # easy/medium PW cap 20m + 20m
           esac
+      # Per-tier active-poll implementing wedge threshold. #182 made the
+      # implementing wedge clock node-aware: this is the max time with NO node
+      # progress before a stall warns, not total time in implementing. On hard
+      # tiers a single node (cold gradle build + slow gpt-5.5 coding/reviewing
+      # calls, 900s request_timeout each) legitimately runs past the 1800s
+      # script default and tripped false WEDGE_DETECTs. Raise headroom for hard;
+      # keep easy/medium tight so genuine stalls still surface.
+      WEDGE_IMPLEMENTING_SECONDS:
+        sh: |
+          case "$(echo '{{.CLI_ARGS}}' | awk '{print $2}')" in
+            hard|mavlink-hard)  echo '5400' ;;  # 90min — slowest legit single node on hard/hybrid
+            mavlink-decode)     echo '3600' ;;  # 60min
+            *)                  echo '1800' ;;  # easy/medium (script default)
+          esac
     # Export E2E_FIXTURE to docker-compose env so semspec's /workspace mount
     # ($E2E_FIXTURE:-go-project in ui/docker-compose.e2e.yml) matches what the
     # epic overlay hardcodes for sandbox + workspace semsource. Without this
@@ -790,6 +804,8 @@ tasks:
       SEMSPEC_EXECUTION_MANAGER_TIMEOUT_SECONDS: "{{.REQ_EXECUTOR_TIMEOUT_SECONDS}}"
       SEMSPEC_SCENARIO_ORCH_TIMEOUT: "{{.REQ_EXECUTOR_TIMEOUT_SECONDS}}s"
       SEMSPEC_MAX_REQUIREMENT_RETRIES: "{{.MAX_REQUIREMENT_RETRIES}}"
+      # Per-tier active-poll implementing wedge threshold (consumed by active-poll.sh).
+      WEDGE_THRESHOLD_IMPLEMENTING: "{{.WEDGE_IMPLEMENTING_SECONDS}}"
     cmds:
       - |
         if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
