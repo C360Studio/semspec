@@ -64,11 +64,33 @@
 	// planning activity. `architecture-generation` was previously missing,
 	// causing those loops to land in the Execution section (caught 2026-05-21).
 	const PLAN_STEPS = new Set([
+		'exploring',
 		'drafting',
 		'reviewing',
 		'requirement-generation',
 		'architecture-generation',
-		'scenario-generation',
+		'story-preparation',
+		'scenario-generation'
+	]);
+
+	const PLAN_ROLES = new Set([
+		'planner',
+		'plan-reviewer',
+		'requirement-generator',
+		'architect',
+		'story-preparer',
+		'scenario-generator'
+	]);
+
+	const EXECUTION_SECTION_STAGES = new Set<PlanStage>([
+		'implementing',
+		'executing',
+		'ready_for_qa',
+		'reviewing_qa',
+		'reviewing_rollup',
+		'complete',
+		'complete_with_deferrals',
+		'failed'
 	]);
 
 	// Map TrajectoryListItem fields to the shape used throughout this component.
@@ -92,14 +114,18 @@
 
 	const planLoops = $derived(
 		loopEntries
-			.filter((l) => PLAN_STEPS.has(l.workflow_step ?? '') || isPlanRole(l))
+			.filter(isPlanLoop)
 			.sort(byCreatedAt)
 	);
 
 	const executionLoops = $derived(
 		loopEntries
-			.filter((l) => !PLAN_STEPS.has(l.workflow_step ?? '') && !isPlanRole(l))
+			.filter((l) => !isPlanLoop(l))
 			.sort(byCreatedAt)
+	);
+	const executionStageReached = $derived(EXECUTION_SECTION_STAGES.has(stage));
+	const visibleExecutionLoops = $derived(
+		executionStageReached ? executionLoops : []
 	);
 
 	// ── Collapse state management ──────────────────────────────────
@@ -119,7 +145,7 @@
 
 	// Execution phase: auto-expanded when implementing/executing
 	const execPhaseActive = $derived(
-		['implementing', 'executing', 'reviewing_rollup'].includes(stage)
+		['implementing', 'executing', 'reviewing_qa', 'reviewing_rollup'].includes(stage)
 	);
 	const execPhaseExpanded = $derived(
 		userToggles.has('exec-phase')
@@ -148,7 +174,10 @@
 	// Minimal shape required by helper functions — matches loopEntries items
 	interface LoopEntry {
 		loop_id: string;
+		task_id?: string;
+		workflow_slug?: string;
 		workflow_step?: string | null;
+		role?: string;
 		state: string;
 		created_at: string;
 	}
@@ -172,14 +201,14 @@
 	}
 
 	const planStats = $derived(phaseStats(planLoops));
-	const execStats = $derived(phaseStats(executionLoops));
+	const execStats = $derived(phaseStats(visibleExecutionLoops));
 
 	// ── Trajectory fetching ────────────────────────────────────────
 	// Fetch trajectories for visible loops
 	$effect(() => {
 		const loopsToFetch = [
 			...(planPhaseExpanded ? planLoops : []),
-			...(execPhaseExpanded ? executionLoops : [])
+			...(execPhaseExpanded ? visibleExecutionLoops : [])
 		];
 		for (const loop of loopsToFetch) {
 			fetchTrajectory(loop.loop_id);
@@ -200,7 +229,7 @@
 	$effect(() => {
 		const allPlanLoopIds = new Set([
 			...planLoops.map((l) => l.loop_id),
-			...executionLoops.map((l) => l.loop_id)
+			...visibleExecutionLoops.map((l) => l.loop_id)
 		]);
 
 		const unsubscribe = activityStore.onEvent((event) => {
@@ -214,9 +243,22 @@
 	});
 
 	// ── Helpers ────────────────────────────────────────────────────
-	function isPlanRole(loop: LoopEntry): boolean {
+	function isPlanLoop(loop: LoopEntry): boolean {
+		const workflowSlug = loop.workflow_slug ?? '';
 		const step = loop.workflow_step ?? '';
-		return step.startsWith('plan') || step.includes('requirement-gen') || step.includes('scenario-gen');
+		const taskID = loop.task_id ?? '';
+		const role = loop.role ?? '';
+		return (
+			workflowSlug === 'semspec-planning' ||
+			PLAN_STEPS.has(step) ||
+			step.startsWith('plan') ||
+			step.includes('requirement-gen') ||
+			step.includes('scenario-gen') ||
+			step.includes('architecture-gen') ||
+			step.includes('story-prep') ||
+			PLAN_ROLES.has(role) ||
+			/^(analyst|plan|review|reqgen|archgen|storyprep|scengen)-/.test(taskID)
+		);
 	}
 
 	function byCreatedAt(a: LoopEntry, b: LoopEntry): number {
@@ -326,8 +368,8 @@
 		<!-- Execution Phase. Same ghost-when-empty pattern as Planning so the
 		     workflow roadmap (Planning → Execution) is visible from plan
 		     creation onward. -->
-		<div class="phase-section" class:phase-section--ghost={executionLoops.length === 0}>
-			{#if executionLoops.length === 0}
+		<div class="phase-section" class:phase-section--ghost={visibleExecutionLoops.length === 0}>
+			{#if visibleExecutionLoops.length === 0}
 				<div class="phase-header phase-header--ghost">
 					<div class="phase-left">
 						<Icon name="circle" size={14} />
@@ -342,7 +384,7 @@
 						<Icon name={execPhaseExpanded ? 'chevron-down' : 'chevron-right'} size={14} />
 						<Icon name="play" size={14} />
 						<span class="phase-title">Execution</span>
-						<span class="phase-count">{executionLoops.length} loop{executionLoops.length !== 1 ? 's' : ''}</span>
+						<span class="phase-count">{visibleExecutionLoops.length} loop{visibleExecutionLoops.length !== 1 ? 's' : ''}</span>
 					</div>
 					<div class="phase-stats">
 						{#if execStats.llmCalls > 0}
@@ -362,7 +404,7 @@
 
 				{#if execPhaseExpanded}
 					<div class="phase-content">
-						{#each executionLoops as loop (loop.loop_id)}
+						{#each visibleExecutionLoops as loop (loop.loop_id)}
 							<div class="loop-block">
 								<div class="loop-row">
 									<button class="loop-header" onclick={() => toggle(loop.loop_id)}>

@@ -1,6 +1,7 @@
 package planmanager
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -113,5 +114,118 @@ func TestReviseArchitectureState_NoPriorArchitecture(t *testing.T) {
 	}
 	if plan.PreviousArchitectureJSON != "" {
 		t.Errorf("PreviousArchitectureJSON should be cleared when no architecture exists, got %q", plan.PreviousArchitectureJSON)
+	}
+}
+
+func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.bootstrap",
+			"task.demo.node-bootstrap",
+			"req.demo.unrelated",
+			"task.demo.node-unrelated",
+			"req.demo.contract",
+			"task.demo.node-contract",
+			"req.demo.consumer",
+			"task.demo.node-consumer",
+		},
+		values: map[string][]byte{
+			"task.demo.node-bootstrap": []byte(`{"requirement_id":"bootstrap"}`),
+			"task.demo.node-unrelated": []byte(`{"requirement_id":"unrelated"}`),
+			"task.demo.node-contract":  []byte(`{"requirement_id":"contract"}`),
+			"task.demo.node-consumer":  []byte(`{"requirement_id":"consumer"}`),
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	plan := &workflow.Plan{
+		Slug:   "demo",
+		Status: workflow.StatusImplementing,
+		Requirements: []workflow.Requirement{
+			{ID: "bootstrap", Title: "Project bootstrap"},
+			{ID: "unrelated", Title: "Independent feature"},
+			{ID: "contract", Title: "External dependency API contract", DependsOn: []string{"bootstrap"}},
+			{ID: "consumer", Title: "Consumer integration", DependsOn: []string{"contract"}},
+		},
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
+		Stories:      []workflow.Story{{ID: "story.contract", RequirementIDs: []string{"contract"}}},
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.contract", RequirementID: "contract"},
+			{ID: "scen.consumer", RequirementID: "consumer"},
+			{ID: "scen.unrelated", RequirementID: "unrelated"},
+		},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.demo.recovery.contract",
+		Kind:           workflow.PlanDecisionKindArchitectureRevise,
+		Rationale:      "Add a verified external dependency and API contract instead of hand-rolled protocol behavior.",
+		AffectedReqIDs: []string{"contract"},
+	}
+
+	if err := c.applyArchitectureRevise(context.Background(), plan, proposal); err != nil {
+		t.Fatalf("applyArchitectureRevise: %v", err)
+	}
+
+	assertResetKeys(t, reset, []string{
+		"req.demo.contract",
+		"task.demo.node-contract",
+		"req.demo.consumer",
+		"task.demo.node-consumer",
+	})
+	assertNoResetKeys(t, reset, []string{
+		"req.demo.bootstrap",
+		"task.demo.node-bootstrap",
+		"req.demo.unrelated",
+		"task.demo.node-unrelated",
+	})
+	if plan.Status != workflow.StatusRequirementsGenerated {
+		t.Fatalf("plan.Status = %s, want requirements_generated", plan.Status)
+	}
+}
+
+func TestPlanDecisionResetScope_UnscopedFallsBackToAll(t *testing.T) {
+	scope, reqIDs := planDecisionResetScope(&workflow.Plan{
+		Requirements: []workflow.Requirement{{ID: "contract"}},
+	}, &workflow.PlanDecision{Kind: workflow.PlanDecisionKindArchitectureRevise})
+
+	if scope != "all" {
+		t.Fatalf("scope = %q, want all", scope)
+	}
+	if reqIDs != nil {
+		t.Fatalf("reqIDs = %v, want nil", reqIDs)
+	}
+}
+
+func assertResetKeys(t *testing.T, got []string, want []string) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(got))
+	for _, key := range got {
+		seen[key] = struct{}{}
+	}
+	for _, key := range want {
+		if _, ok := seen[key]; !ok {
+			t.Fatalf("reset keys = %v, missing %q", got, key)
+		}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("reset keys = %v, want exactly %v", got, want)
+	}
+}
+
+func assertNoResetKeys(t *testing.T, got []string, forbidden []string) {
+	t.Helper()
+	seen := make(map[string]struct{}, len(got))
+	for _, key := range got {
+		seen[key] = struct{}{}
+	}
+	for _, key := range forbidden {
+		if _, ok := seen[key]; ok {
+			t.Fatalf("reset keys = %v, should not include %q", got, key)
+		}
 	}
 }

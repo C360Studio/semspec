@@ -616,6 +616,13 @@ type Plan struct {
 	// Context describes the current state and why this matters
 	Context string `json:"context,omitempty"`
 
+	// Constraints are the hard must/must-not rules lifted verbatim from the
+	// request by the planner (#204): prohibitions ("do not stub"), coverage/
+	// quality mandates ("full coverage"), and baseline-preservation rules. They
+	// bind the whole implementation, so they are re-injected into the developer,
+	// reviewer, and QA prompts — which otherwise never see the original request.
+	Constraints []string `json:"constraints,omitempty"`
+
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
 
@@ -1813,6 +1820,17 @@ const (
 	// timeout). The prevention is the file-ownership gates (#175); this is the
 	// honest backstop when an undeclared shared file slips through.
 	PlanDecisionKindAssemblyConflict PlanDecisionKind = "assembly_conflict"
+
+	// PlanDecisionKindScopeIncomplete marks a decision recording that the
+	// Level-0 completeness gate (#204) found declared plan.Scope.Create files
+	// missing from the assembled branch. Distinct from assembly_conflict
+	// (branches merged fine) and execution_exhausted (code converged for the
+	// scenarios it had): the scenarios passed but the plan under-delivered its
+	// declared file scope — declared scope is an acceptance contract, not just
+	// an edit permission. plan-manager records this directly and fails the plan
+	// closed to a recoverable rejected state (retry re-drives execution to
+	// deliver the files, or a planning decision revises scope.create).
+	PlanDecisionKindScopeIncomplete PlanDecisionKind = "scope_incomplete"
 )
 
 // String returns the string representation of the plan decision kind.

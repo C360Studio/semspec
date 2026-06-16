@@ -43,6 +43,7 @@
 	let graph: MultiDirectedGraph | null = null;
 	let layout: LayoutController | null = null;
 	let lastEntityCount = 0;
+	let renderError = $state<string | null>(null);
 
 	// Initialise Sigma once the container is in the DOM — SSR safe
 	$effect(() => {
@@ -164,14 +165,21 @@
 		void relationships.length;
 		if (entities.length === 0 && graph.order === 0) return;
 
-		const prevCount = lastEntityCount;
-		syncStoreToGraph(graph, entities, relationships);
-		// Only restart layout when new data arrives (load/expand), not on filter toggle
-		if (entities.length !== prevCount) {
-			layout.start(graph);
-			lastEntityCount = entities.length;
+		try {
+			const prevCount = lastEntityCount;
+			syncStoreToGraph(graph, entities, relationships);
+			// Only restart layout when new data arrives (load/expand), not on filter toggle
+			if (entities.length !== prevCount) {
+				layout.start(graph);
+				lastEntityCount = entities.length;
+			}
+			sigma.refresh();
+			renderError = null;
+		} catch (err) {
+			layout.stop();
+			renderError = err instanceof Error ? err.message : 'Graph rendering failed';
+			console.error('Graph rendering failed', err);
 		}
-		sigma.refresh();
 	});
 
 	// Refresh renderer when selection or hover state changes
@@ -200,8 +208,15 @@
 
 	function handleRefreshLayout() {
 		if (!graph || !layout || !sigma) return;
-		layout.start(graph);
-		sigma.refresh();
+		try {
+			layout.start(graph);
+			sigma.refresh();
+			renderError = null;
+		} catch (err) {
+			layout.stop();
+			renderError = err instanceof Error ? err.message : 'Graph rendering failed';
+			console.error('Graph layout refresh failed', err);
+		}
 	}
 </script>
 
@@ -251,8 +266,16 @@
 		</div>
 	{/if}
 
+	<!-- Renderer failures stay local so the surrounding app shell remains usable. -->
+	{#if renderError}
+		<div class="empty-state" role="alert">
+			<p>Graph rendering failed.</p>
+			<p class="empty-hint">{renderError}</p>
+		</div>
+	{/if}
+
 	<!-- Empty state -->
-	{#if !loading && entities.length === 0}
+	{#if !loading && !renderError && entities.length === 0}
 		<div class="empty-state">
 			<p>No entities to display.</p>
 			<p class="empty-hint">Load initial data or adjust filters.</p>

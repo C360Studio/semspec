@@ -137,6 +137,13 @@ type TaskContext struct {
 	// PlanGoal is the parent plan goal.
 	PlanGoal string
 
+	// PlanConstraints are the plan's hard must/must-not rules (#204), lifted
+	// verbatim from the request by the planner. Re-injected here so the
+	// developer/validator/reviewer honor prohibitions ("do not stub"), coverage
+	// mandates, and baseline-preservation that the original request stated but
+	// that decomposition never carried to this role.
+	PlanConstraints []string
+
 	// Feedback is reviewer feedback for retry prompts.
 	Feedback string
 
@@ -362,6 +369,12 @@ type QAReviewContext struct {
 
 	// PlanGoal is the plan's stated goal.
 	PlanGoal string
+
+	// PlanConstraints are the plan's hard must/must-not rules (#204), lifted
+	// verbatim from the request by the planner. Re-injected into Murat's
+	// release-readiness prompt so QA can flag a deliverable that violated a
+	// stated prohibition / coverage mandate even when all executed tests pass.
+	PlanConstraints []string
 
 	// Requirements summarises each requirement's execution status.
 	Requirements []RequirementSummary

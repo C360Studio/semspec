@@ -23,6 +23,10 @@
 	import { promotePlan, executePlan, retryFailed } from '$lib/actions/plans';
 	import RetrySelectedPicker from '$lib/components/plan/RetrySelectedPicker.svelte';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
+	import { activePhaseProgress } from '$lib/types/activePlanProgress';
+	import { selectFreshestPlan } from '$lib/types/planFreshness';
+	import { mergeLiveTrajectoryItems } from '$lib/types/trajectoryActivityProjection';
+	import { activityStore } from '$lib/stores/activity.svelte';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
@@ -42,23 +46,38 @@
 	// Prefer the SSE-fed feedStore mirror for the active slug — it carries the
 	// same PlanWithStatus shape the loader returns, and updates without a
 	// full loader re-run. Fall back to load-function data for initial render
-	// (before the first SSE event arrives) and for stale slugs.
+	// (before the first SSE event arrives) and for stale slugs. When loader
+	// data has advanced farther than the SSE mirror, prefer the loader; this
+	// prevents a stale "Generating scenarios" header from coexisting with
+	// freshly loaded execution trajectories.
 	const plan = $derived(
-		feedStore.currentPlan && feedStore.currentPlan.slug === slug
-			? feedStore.currentPlan
-			: data.plan
+		selectFreshestPlan(feedStore.currentPlan, data.plan, slug ?? '')
 	);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
 	const requirements = $derived(data.requirements);
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
+	const liveTrajectoryItems = $derived(
+		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
+	);
 
 	// ---------------------------------------------------------------------------
 	// View mode — toggle between Doc, Graph, and Files
 	// ---------------------------------------------------------------------------
 	type ViewMode = 'doc' | 'artifacts' | 'graph' | 'files';
+	const FILES_VIEW_STAGES = new Set([
+		'implementing',
+		'executing',
+		'ready_for_qa',
+		'reviewing_qa',
+		'reviewing_rollup',
+		'complete',
+		'complete_with_deferrals',
+		'failed'
+	]);
 	let viewMode = $state<ViewMode>('doc');
+	const showFilesView = $derived(plan ? FILES_VIEW_STAGES.has(plan.stage) : false);
 
 	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
 	const planGraphAdapter: GraphStoreAdapter = {
@@ -66,7 +85,7 @@
 			// Load entities connected to this plan via pathSearch. Depth=3 is
 			// required to cover plan → requirement → scenario → dag-node — depth=2
 			// stopped at requirements and rendered a near-empty view (bug #7.3).
-			const planEntityId = `semspec.plan.${slug}`;
+			const planEntityId = plan?.id ?? `semspec.plan.${slug}`;
 			const result = await graphApi.pathSearch(planEntityId, 3, limit);
 			const entities = transformPathSearchResult(result);
 			return { entities };
@@ -160,9 +179,9 @@
 		}
 	}
 
-	// Reset files mode if plan becomes unapproved (e.g. via invalidate)
+	// Reset files mode if the plan is not in an execution/result stage.
 	$effect(() => {
-		if (plan && !plan.approved && viewMode === 'files') {
+		if (plan && !showFilesView && viewMode === 'files') {
 			viewMode = 'doc';
 		}
 	});
@@ -177,6 +196,24 @@
 	const planGuidance = $derived(
 		plan ? deriveGuidance(plan.approved, plan.stage, requirements.length) : null
 	);
+	const activeProgress = $derived(activePhaseProgress(liveTrajectoryItems));
+	const progressPanel = $derived.by(() => {
+		if (activeProgress) {
+			return {
+				title: activeProgress.title,
+				detail: activeProgress.detail,
+				startedAt: activeProgress.startedAt
+			};
+		}
+		if (planGuidance?.isLoading && plan) {
+			return {
+				title: stageTitle(plan.stage),
+				detail: planGuidance.message,
+				startedAt: stageStartedAt(plan)
+			};
+		}
+		return null;
+	});
 
 	// Pick the best available timestamp to drive the in-progress panel's
 	// elapsed-time ticker for the CURRENT stage. The plan API doesn't yet
@@ -408,7 +445,7 @@
 					<Icon name="git-merge" size={14} />
 					<span>Graph</span>
 				</button>
-				{#if plan.approved}
+				{#if showFilesView}
 					<button
 						class="toggle-btn"
 						class:active={viewMode === 'files'}
@@ -537,11 +574,11 @@
 			     context/scope sections haven't been populated yet. Reuses
 			     planGuidance — same predicate that gates the small chip
 			     inside PlanDetail — so the panel and chip stay in sync. -->
-			{#if planGuidance?.isLoading}
+			{#if progressPanel}
 				<InProgressPanel
-					title={stageTitle(plan.stage)}
-					detail={planGuidance.message}
-					startedAt={stageStartedAt(plan)}
+					title={progressPanel.title}
+					detail={progressPanel.detail}
+					startedAt={progressPanel.startedAt}
 				/>
 			{/if}
 
@@ -589,7 +626,7 @@
 			{/if}
 
 			<!-- Trajectory timeline: plan phase + execution loops -->
-			<ExecutionTimeline slug={plan.slug} stage={plan.stage} trajectoryItems={data.trajectoryItems} />
+			<ExecutionTimeline slug={plan.slug} stage={plan.stage} trajectoryItems={liveTrajectoryItems} />
 
 			<!-- Requirements + Scenarios are shown inline within PlanDetail above -->
 		</div>

@@ -69,6 +69,12 @@ type Component struct {
 	// without a live execution-manager. Nil means "send the real NATS request."
 	reqResetSender func(ctx context.Context, key string) error
 
+	// orchestratorTriggerPublisher is the seam tests use to assert automatic
+	// execution start without requiring a live JetStream connection. Nil means
+	// "publish through triggerScenarioOrchestrator." Production code never sets
+	// this; tests can install a stub that captures the plan and returns an error.
+	orchestratorTriggerPublisher func(ctx context.Context, plan *workflow.Plan) error
+
 	// slugMutexes serializes mutation handlers per plan slug. NATS dispatches
 	// each subscription's handler in its own goroutine, so two mutations for
 	// the same plan can interleave their get → mutate → save sequence and

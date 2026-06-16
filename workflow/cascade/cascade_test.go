@@ -1,6 +1,7 @@
 package cascade
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
@@ -65,5 +66,26 @@ func TestPlanDecision_ArchitectureRevise_NoOp(t *testing.T) {
 	// resume) in-flight execs.
 	if result.Kind != workflow.PlanDecisionKindArchitectureRevise {
 		t.Errorf("Result.Kind = %q, want architecture_revise", result.Kind)
+	}
+}
+
+func TestExpandRequirementClosure_DownstreamOnly(t *testing.T) {
+	requirements := []workflow.Requirement{
+		{ID: "req.bootstrap"},
+		{ID: "req.contract", DependsOn: []string{"req.bootstrap"}},
+		{ID: "req.consumer", DependsOn: []string{"req.contract"}},
+		{ID: "req.unrelated"},
+	}
+
+	got := ExpandRequirementClosure(requirements, []string{"req.contract"})
+	want := []string{"req.consumer", "req.contract"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExpandRequirementClosure = %v, want %v", got, want)
+	}
+
+	got = ExpandRequirementClosure(requirements, []string{"req.consumer"})
+	want = []string{"req.consumer"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("leaf closure = %v, want %v", got, want)
 	}
 }

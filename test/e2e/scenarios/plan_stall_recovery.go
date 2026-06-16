@@ -306,6 +306,12 @@ func (s *PlanStallRecoveryScenario) stageWaitForApproval(ctx context.Context, re
 func (s *PlanStallRecoveryScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
+	if plan, err := s.http.GetPlan(ctx, slug); err == nil && executionAlreadyStarted(plan.Status, plan.Stage) {
+		result.SetDetail("execution_already_started", true)
+		result.SetDetail("execution_stage", plan.Stage)
+		return nil
+	}
+
 	resp, err := s.http.ExecutePlan(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("execute plan: %w", err)

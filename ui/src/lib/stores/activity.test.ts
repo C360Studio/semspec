@@ -13,7 +13,7 @@
  * production API clean and forces this test to be obvious about poking
  * internals.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { activityStore } from '$lib/stores/activity.svelte';
 import type { ActivityEvent } from '$lib/types';
 
@@ -36,6 +36,11 @@ describe('ActivityStore — loopLastSeen', () => {
 		for (const id of keys) {
 			tick({ type: 'loop_deleted', loop_id: id });
 		}
+		(activityStore as unknown as { markDisconnected: () => void }).markDisconnected();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	it('records a timestamp on loop_created', () => {
@@ -128,5 +133,63 @@ describe('ActivityStore — loopLastSeen', () => {
 			tick({ type: 'loop_deleted', loop_id: 'loop-i' });
 			expect(activityStore.idleMsForLoop('loop-i')).toBeNull();
 		});
+	});
+});
+
+describe('ActivityStore — connection state', () => {
+	beforeEach(() => {
+		(activityStore as unknown as { markDisconnected: () => void }).markDisconnected();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('keeps connected true during transient EventSource reconnects', () => {
+		vi.useFakeTimers();
+		const store = activityStore as unknown as {
+			connected: boolean;
+			markConnected: () => void;
+			handleStreamError: (readyState: number | undefined) => void;
+		};
+
+		store.markConnected();
+		store.handleStreamError(0);
+
+		expect(store.connected).toBe(true);
+		vi.advanceTimersByTime(14_999);
+		expect(store.connected).toBe(true);
+		vi.advanceTimersByTime(1);
+		expect(store.connected).toBe(false);
+	});
+
+	it('cancels the disconnect grace timer when the stream reconnects', () => {
+		vi.useFakeTimers();
+		const store = activityStore as unknown as {
+			connected: boolean;
+			markConnected: () => void;
+			handleStreamError: (readyState: number | undefined) => void;
+		};
+
+		store.markConnected();
+		store.handleStreamError(0);
+		vi.advanceTimersByTime(5_000);
+		store.markConnected();
+		vi.advanceTimersByTime(20_000);
+
+		expect(store.connected).toBe(true);
+	});
+
+	it('marks disconnected immediately when the EventSource is closed', () => {
+		const store = activityStore as unknown as {
+			connected: boolean;
+			markConnected: () => void;
+			handleStreamError: (readyState: number | undefined) => void;
+		};
+
+		store.markConnected();
+		store.handleStreamError(2);
+
+		expect(store.connected).toBe(false);
 	});
 });

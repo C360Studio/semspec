@@ -354,14 +354,13 @@ func (c *Component) findAwaitingByRequirement(slug, requirementID string) *requi
 }
 
 // abandonExecsForSlug tears down every active requirement execution for a slug.
-// Called when an architecture_revise PlanDecision is accepted: the plan is
-// restarting from the architect, so all in-flight execs (the wedged one in
-// awaiting-recovery plus any siblings still running in parallel) are stale and
-// must be dropped before the re-run reaches execution. For each exec it stops
-// timers, marks it terminated (so any late cross-component callback — a task
-// completion that lands after the wipe — hits the terminated guard and no-ops
-// instead of writing to the deterministic req.<slug>.<reqID> key the fresh exec
-// will reuse), and removes it from activeExecs via cleanupExecutionLocked.
+// It is the conservative fallback for older/unscoped planning re-entry events.
+// Scoped architecture_revise/story_reprepare events normally call
+// abandonExecsForRequirements instead. For each exec it stops timers, marks it
+// terminated (so any late cross-component callback — a task completion that
+// lands after the wipe — hits the terminated guard and no-ops instead of
+// writing to the deterministic req.<slug>.<reqID> key the fresh exec will
+// reuse), and removes it from activeExecs via cleanupExecutionLocked.
 //
 // Returns the count abandoned. The in-flight agentic loops themselves are not
 // force-cancelled here (req-executor has no cancellation channel to them); they
@@ -414,6 +413,27 @@ func (c *Component) abandonExecsForSlug(slug string) int {
 		c.cleanupExecutionLocked(exec, false)
 		exec.mu.Unlock()
 		abandoned++
+	}
+	return abandoned
+}
+
+func (c *Component) abandonExecsForRequirements(slug string, reqIDs []string) int {
+	if len(reqIDs) == 0 {
+		return c.abandonExecsForSlug(slug)
+	}
+	abandoned := 0
+	seen := make(map[string]struct{}, len(reqIDs))
+	for _, reqID := range reqIDs {
+		if reqID == "" {
+			continue
+		}
+		if _, ok := seen[reqID]; ok {
+			continue
+		}
+		seen[reqID] = struct{}{}
+		if c.abandonLiveExecForRequirement(slug, reqID) {
+			abandoned++
+		}
 	}
 	return abandoned
 }
@@ -480,14 +500,17 @@ func (c *Component) handlePlanDecisionAccepted(lifecycleCtx, msgCtx context.Cont
 	// phase: plan-manager has already reset the relevant EXECUTION_STATES rows
 	// and moved the plan out of implementing. The wedged exec(s) must NOT be
 	// resumed — resuming would re-decompose against the stale DAG and race the
-	// regenerated execution. Abandon every active exec for the slug instead,
-	// then return before the resume loop below. The re-run creates clean execs
-	// once it reaches execution again.
+	// regenerated execution. Abandon the event's scoped affected requirements
+	// (expanded by plan-decision-handler to include downstream dependents); fall
+	// back to every active exec for the slug only when older/unscoped events
+	// do not carry affected requirement IDs. The re-run creates clean execs once
+	// it reaches execution again.
 	if evt.Kind == workflow.PlanDecisionKindArchitectureRevise ||
 		evt.Kind == workflow.PlanDecisionKindStoryReprepare {
-		abandoned := c.abandonExecsForSlug(evt.Slug)
+		abandoned := c.abandonExecsForRequirements(evt.Slug, evt.AffectedRequirementIDs)
 		c.logger.Info("Abandoned in-flight execs on planning re-entry accept",
-			"slug", evt.Slug, "proposal_id", evt.ProposalID, "kind", evt.Kind, "abandoned", abandoned)
+			"slug", evt.Slug, "proposal_id", evt.ProposalID, "kind", evt.Kind,
+			"affected_requirements", len(evt.AffectedRequirementIDs), "abandoned", abandoned)
 		_ = msg.Ack()
 		return
 	}

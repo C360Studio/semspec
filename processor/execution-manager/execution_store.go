@@ -257,13 +257,20 @@ func (s *executionStore) saveReq(ctx context.Context, key string, exec *workflow
 	return nil
 }
 
-// deleteReq removes a requirement execution from cache and KV.
+// deleteReq removes a requirement OR task execution from cache and KV. Despite
+// the name it handles both key families: plan-manager's resetRequirementExecutions
+// (#203) now routes task.<slug>.node-* keys here too, and getTask reads taskCache
+// FIRST — so clearing only reqCache would leave an escalated task-node orphan
+// live in-process (the 2026-06-16 re-dispatch wedge the #203 reset targets). We
+// delete from BOTH caches: a key only ever lives in one, so the other Delete is
+// a harmless no-op.
 // Cache delete errors are non-fatal (cache may already be cleared via TTL).
 // KV delete errors are logged at INFO — a silent failure here can leave the
 // KV entry stranded and break post-/retry recovery (the orchestrator's
 // subsequent re-create would fail with "req execution already exists").
 func (s *executionStore) deleteReq(ctx context.Context, key string) {
-	s.reqCache.Delete(key) //nolint:errcheck
+	s.reqCache.Delete(key)  //nolint:errcheck
+	s.taskCache.Delete(key) //nolint:errcheck
 	if s.kvStore != nil {
 		if err := s.kvStore.Delete(ctx, key); err != nil {
 			s.logger.Info("deleteReq: KV delete failed (cache cleared, KV may have stranded entry)",

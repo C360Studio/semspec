@@ -1041,9 +1041,10 @@ func (c *Component) publishQAVerdict(ctx context.Context, verdict *workflow.QAVe
 // QACompletedEvent). Synthesis-level plans have QARun == nil.
 func buildQAReviewContext(plan *workflow.Plan) *prompt.QAReviewContext {
 	qrc := &prompt.QAReviewContext{
-		PlanTitle: plan.Title,
-		PlanGoal:  plan.Goal,
-		QALevel:   plan.EffectiveQALevel(),
+		PlanTitle:       plan.Title,
+		PlanGoal:        plan.Goal,
+		PlanConstraints: append([]string(nil), plan.Constraints...),
+		QALevel:         plan.EffectiveQALevel(),
 	}
 
 	// Populate requirements summary.

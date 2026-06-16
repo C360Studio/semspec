@@ -4,18 +4,44 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 type resetKVStub struct {
-	keys []string
+	keys   []string
+	values map[string][]byte
 }
 
-func (s resetKVStub) Get(context.Context, string) (jetstream.KeyValueEntry, error) {
-	return nil, errors.New("not implemented")
+func (s resetKVStub) Get(_ context.Context, key string) (jetstream.KeyValueEntry, error) {
+	return s.get(key)
 }
+
+func (s resetKVStub) get(key string) (jetstream.KeyValueEntry, error) {
+	if s.values == nil {
+		return nil, errors.New("key not found")
+	}
+	value, ok := s.values[key]
+	if !ok {
+		return nil, errors.New("key not found")
+	}
+	return resetKVEntry{key: key, value: append([]byte(nil), value...)}, nil
+}
+
+type resetKVEntry struct {
+	key   string
+	value []byte
+}
+
+func (e resetKVEntry) Bucket() string                  { return "EXECUTION_STATES" }
+func (e resetKVEntry) Key() string                     { return e.key }
+func (e resetKVEntry) Value() []byte                   { return append([]byte(nil), e.value...) }
+func (e resetKVEntry) Revision() uint64                { return 1 }
+func (e resetKVEntry) Created() time.Time              { return time.Time{} }
+func (e resetKVEntry) Delta() uint64                   { return 0 }
+func (e resetKVEntry) Operation() jetstream.KeyValueOp { return jetstream.KeyValuePut }
 
 func (s resetKVStub) GetRevision(context.Context, string, uint64) (jetstream.KeyValueEntry, error) {
 	return nil, errors.New("not implemented")
@@ -94,13 +120,13 @@ func TestApplyStoryReprepare_ResetFailureLeavesPlanUntouched(t *testing.T) {
 		Slug:   "demo",
 		Status: workflow.StatusImplementing,
 		Scenarios: []workflow.Scenario{
-			{ID: "scen.target", RequirementID: "req.demo.1", StoryID: "story.demo.1"},
+			{ID: "scen.target", RequirementID: "1", StoryID: "story.demo.1"},
 		},
 	}
 	proposal := &workflow.PlanDecision{
 		ID:               "plan-decision.demo.recovery.story",
 		Kind:             workflow.PlanDecisionKindStoryReprepare,
-		AffectedReqIDs:   []string{"req.demo.1"},
+		AffectedReqIDs:   []string{"1"},
 		AffectedStoryIDs: []string{"story.demo.1"},
 	}
 

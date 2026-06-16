@@ -39,8 +39,8 @@ export function getEventLinkText(event: FeedEvent): string {
 /**
  * Count events by `source` field for the filter dropdown (bug #7.5).
  * Returns totals for "all" plus each known source, so the dropdown can show
- * "All events (42) / Plan (5) / Execution (37) / Questions (0)" and the user
- * can tell at a glance which source dominates.
+ * "All events (42) / Plan (5) / Execution (37) / Activity (2) / Questions (0)"
+ * and the user can tell at a glance which source dominates.
  *
  * `knownSources` is typed off FeedEvent['source'] so the compiler fails the
  * component build if the wire-level union grows and the component's filter

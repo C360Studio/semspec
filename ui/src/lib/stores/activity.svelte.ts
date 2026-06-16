@@ -8,6 +8,7 @@ import type { ActivityEvent } from '$lib/types';
 import { settingsStore } from '$lib/stores/settings.svelte';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
+const RECONNECT_GRACE_MS = 15_000;
 
 type ActivityCallback = (event: ActivityEvent) => void;
 
@@ -27,6 +28,7 @@ class ActivityStore {
 	private mockCleanup: (() => void) | null = null;
 	private currentFilter: string | undefined;
 	private callbacks: Set<ActivityCallback> = new Set();
+	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 	// Cached derived — avoids untracked getter reads inside addEvent
 	private maxEvents = $derived(settingsStore.activityLimit);
@@ -56,16 +58,17 @@ class ActivityStore {
 		// events, and all loop mutations as 'event: activity' with the type
 		// (loop_created/loop_updated/loop_deleted) inside data.type.
 		this.eventSource.addEventListener('connected', () => {
-			this.connected = true;
+			this.markConnected();
 		});
 
 		this.eventSource.addEventListener('activity', (event) => {
+			this.markConnected();
 			const activity = JSON.parse((event as MessageEvent).data) as ActivityEvent;
 			this.addEvent(activity);
 		});
 
 		this.eventSource.onerror = () => {
-			this.connected = false;
+			this.handleStreamError(this.eventSource?.readyState);
 			// Native EventSource auto-reconnect handles backoff; backend sends retry: 5000.
 		};
 	}
@@ -129,11 +132,44 @@ class ActivityStore {
 			this.mockCleanup = null;
 			stopMockActivityStream();
 		}
-		this.connected = false;
+		this.markDisconnected();
 	}
 
 	clear(): void {
 		this.recent = [];
+	}
+
+	private markConnected(): void {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		this.connected = true;
+	}
+
+	private markDisconnected(): void {
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		this.connected = false;
+	}
+
+	private handleStreamError(readyState: number | undefined): void {
+		const closed = typeof EventSource !== 'undefined' ? EventSource.CLOSED : 2;
+		if (readyState === closed) {
+			this.markDisconnected();
+			return;
+		}
+
+		// EventSource reports transient reconnect attempts through `error`.
+		// Keep the UI steady during the browser's normal retry window; if the
+		// stream stays down, then surface a real disconnected state.
+		if (this.reconnectTimer) return;
+		this.reconnectTimer = setTimeout(() => {
+			this.reconnectTimer = null;
+			this.connected = false;
+		}, RECONNECT_GRACE_MS);
 	}
 }
 

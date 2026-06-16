@@ -173,6 +173,11 @@ func planSchema() map[string]any {
 				"type":        "string",
 				"description": "Current state, why this matters, key constraints",
 			},
+			"constraints": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string"},
+				"description": "Hard constraints lifted VERBATIM from the request — the must/must-not rules that bind the WHOLE implementation, not any single requirement. Capture every: prohibition (\"do not stub X\", \"do not hand-roll Y\", \"never Z\"), coverage/quality mandate (\"full coverage\", \"machine-checkable inventory\", \"at least one live test\"), and baseline-preservation requirement (\"preserve existing outputs/inputs\"). These are re-injected into developer, reviewer, and QA prompts, which otherwise never see the original request. Emit [] only when the request states no hard constraints.",
+			},
 			"scope": map[string]any{
 				"type":        "object",
 				"description": "File scope boundaries. Use 'include' for files that already EXIST and may be modified; use 'create' for files this plan will create that don't exist yet. Putting nonexistent paths in 'include' will be rejected at submit_work — see scope.create description. Emit empty arrays for unused fields, never omit them.",
@@ -202,7 +207,7 @@ func planSchema() map[string]any {
 				"additionalProperties": false,
 			},
 		},
-		"required":             []string{"goal", "context", "scope"},
+		"required":             []string{"goal", "context", "constraints", "scope"},
 		"additionalProperties": false,
 	}
 }
@@ -819,8 +824,8 @@ func qaReviewSchema() map[string]any {
 		"properties": map[string]any{
 			"verdict": map[string]any{
 				"type":        "string",
-				"description": "Release-readiness verdict: approved (ship it), needs_changes (fixable with change proposals), or rejected (escalate to human — cannot be automatically retried)",
-				"enum":        []string{"approved", "needs_changes", "rejected"},
+				"description": "Release-readiness verdict: approved (ship it, all-green); conditionally_approved (build + all executed tests pass, but some tests were SKIPPED because they need an environment this sandbox can't provide — e.g. a live SITL/hardware endpoint — and you judged every such skip a legitimate deferral; terminal but NOT all-green; name the deferred behavior, to be verified in operator-CI e2e; use this INSTEAD of approved whenever tests were skipped for legitimate environmental reasons); needs_changes (fixable with change proposals); rejected (escalate to human — cannot be automatically retried)",
+				"enum":        []string{"approved", "conditionally_approved", "needs_changes", "rejected"},
 			},
 			"summary": map[string]any{
 				"type":        "string",
@@ -860,7 +865,7 @@ func qaReviewSchema() map[string]any {
 			},
 			"plan_decisions": map[string]any{
 				"type":        "array",
-				"description": "Structured change proposals. Populate ONLY when verdict is needs_changes; emit [] when verdict is approved or rejected.",
+				"description": "Structured change proposals. Populate ONLY when verdict is needs_changes; emit [] when verdict is approved, conditionally_approved, or rejected.",
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{

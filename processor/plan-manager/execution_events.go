@@ -369,6 +369,28 @@ func (c *Component) handleConvergenceAllSucceeded(ctx context.Context, plan *wor
 			c.routeAssemblyConflict(ctx, plan, err)
 			return
 		}
+		// Level-0 completeness gate (#204): every declared plan.Scope.Create file
+		// must exist on the assembled branch, or we fail closed (recoverable)
+		// rather than advance to QA on an incomplete deliverable. Declared scope
+		// is an acceptance contract, not just an edit permission.
+		missing, gapErr := c.scopeCompletenessGap(ctx, plan)
+		if gapErr != nil {
+			// Unverifiable deliverable (sandbox error) — stall in implementing
+			// pending retry, like a non-conflict assembly failure. Do NOT advance
+			// to QA on a tree we couldn't inspect.
+			now := time.Now()
+			plan.LastError = fmt.Sprintf("Level-0 completeness gate could not run: %v", gapErr)
+			plan.LastErrorAt = &now
+			if saveErr := c.savePlanCached(ctx, plan); saveErr != nil {
+				c.logger.Error("Failed to persist LastError after completeness-gate error", "slug", slug, "error", saveErr)
+			}
+			c.logger.Error("Level-0 completeness gate errored — plan stalls in implementing pending retry", "slug", slug, "error", gapErr)
+			return
+		}
+		if len(missing) > 0 {
+			c.failPlanOnIncompleteScope(ctx, plan, missing)
+			return
+		}
 	}
 
 	c.logger.Info("All requirements completed — transitioning to review",

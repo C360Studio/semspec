@@ -300,6 +300,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 	if err != nil {
 		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}
+	expandPlanningReentryClosure(result, plan.Requirements)
 
 	c.logger.Info("cascade complete",
 		"proposal_id", req.ProposalID,
@@ -330,6 +331,16 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 	}
 
 	return result, nil
+}
+
+func expandPlanningReentryClosure(result *cascade.Result, requirements []workflow.Requirement) {
+	if result == nil {
+		return
+	}
+	switch result.Kind {
+	case workflow.PlanDecisionKindArchitectureRevise, workflow.PlanDecisionKindStoryReprepare:
+		result.AffectedRequirementIDs = cascade.ExpandRequirementClosure(requirements, result.AffectedRequirementIDs)
+	}
 }
 
 // publishAcceptedEvent publishes a plan_decision.accepted event to JetStream.

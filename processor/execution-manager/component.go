@@ -1623,6 +1623,11 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			Scenarios:           scenariosToSpecs(exec.Scenarios),
 			UpstreamResolutions: prompt.ProjectUpstreams(planArchitecture(plan)),
 		}
+		if plan != nil {
+			// #204: re-inject the plan's hard constraints into the dev/validator/
+			// reviewer prompt — decomposition otherwise never carries them here.
+			asmCtx.TaskContext.PlanConstraints = append([]string(nil), plan.Constraints...)
+		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
 		// so even first-time errors surface in the retry prompt. Graph reads use

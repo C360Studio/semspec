@@ -138,8 +138,20 @@ type ReqPhaseRequest struct {
 
 // ReqResetRequest deletes a requirement execution entry from EXECUTION_STATES.
 // Called by plan-manager's retry handler to clear failed/error entries before re-dispatch.
+//
+// SMELL / TRACKED (2026-06-16, not fixing now): this crosses the
+// plan-manager↔execution-manager boundary as a raw, untyped KV key string —
+// plan-manager builds the key by string concatenation, execution-manager
+// blindly deletes whatever it receives. That stringly-typed coupling is the
+// root cause of the 2026-06-16 architecture_revise re-dispatch wedge: the
+// plan-manager reset matched only the "req.<slug>." prefix and silently missed
+// the "task.<slug>.node-*" entries, which orphaned and blocked re-dispatch.
+// Two reset paths shared the blind spot (resetRequirementExecutions and
+// resetRequirementExecutionsByID). A typed descriptor — (entityKind, slug, id)
+// instead of a pre-joined key — would make a missed key family a compile error
+// rather than a silent prod wedge. Follow-up: see the tracking issue.
 type ReqResetRequest struct {
-	Key string `json:"key"` // KV key: req.<slug>.<reqID>
+	Key string `json:"key"` // KV key: req.<slug>.<reqID> | task.<slug>.node-<...>
 }
 
 // ReqResetNodeResultsRequest replaces the NodeResults slice on an

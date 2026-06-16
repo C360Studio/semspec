@@ -294,6 +294,50 @@ func TestAssemblerEndToEnd_RequirementGenerator(t *testing.T) {
 	}
 }
 
+// TestAssembler_PlanConstraintsReachDeveloper pins #204's re-injection: the
+// plan's hard constraints (extracted by the planner) must appear in the
+// developer/validator/reviewer prompt, which decomposition otherwise never
+// carries them to. Without this, a dev can satisfy thin scenarios while
+// violating a stated prohibition ("do not stub") it never saw.
+func TestAssembler_PlanConstraintsReachDeveloper(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	a := prompt.NewAssembler(r)
+
+	const constraint = "do not stub MAVSDK/OSH classes"
+	out := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+		TaskContext: &prompt.TaskContext{
+			PlanGoal:        "Implement the driver",
+			PlanConstraints: []string{constraint, "full Connected Systems API coverage"},
+			WorktreePath:    "/work/wt",
+		},
+	})
+	if out.RenderError != nil {
+		t.Fatalf("unexpected RenderError: %v", out.RenderError)
+	}
+	combined := out.SystemMessage + "\n" + out.UserMessage
+	if !strings.Contains(combined, "PLAN CONSTRAINTS") {
+		t.Errorf("developer prompt missing the PLAN CONSTRAINTS block — #204 re-injection regressed")
+	}
+	if !strings.Contains(combined, constraint) {
+		t.Errorf("developer prompt missing the verbatim constraint %q", constraint)
+	}
+
+	// Belt-and-suspenders: no constraints → no constraints block (no empty header).
+	out2 := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"bash", "submit_work"},
+		TaskContext:    &prompt.TaskContext{PlanGoal: "g", WorktreePath: "/work/wt"},
+	})
+	if strings.Contains(out2.SystemMessage+out2.UserMessage, "PLAN CONSTRAINTS") {
+		t.Errorf("empty PlanConstraints should render no constraints block")
+	}
+}
+
 // TestRenderPlanReviewerPrompt_R1PhaseBoundaries pins the take-19 fix from the
 // 2026-05-08 OpenRouter @easy run: llama-3.3-70b's reviewer rejected a
 // well-formed /health plan two rounds in a row, demanding "specific details
@@ -320,6 +364,26 @@ func TestRenderPlanReviewerPrompt_R1PhaseBoundaries(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("R1 prompt missing pinned string %q\nGot:\n%s", want, out)
 		}
+	}
+}
+
+// TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity pins #204's R2 gate:
+// the round-2 reviewer must judge whether the requirements+scenarios cover the
+// breadth the plan's `constraints` demand, catching the "full-coverage goal
+// decomposed into a thin scenario slice" under-scoping the 2026-06-16 run hit.
+func TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x","constraints":["full Connected Systems API coverage"]}`,
+		Round:       2,
+	})
+	if !strings.Contains(out, "Constraint & scope-coverage fidelity") {
+		t.Errorf("R2 prompt missing the #204 constraint/scope coverage-fidelity criterion\nGot:\n%s", out)
+	}
+	// R1 must NOT carry it (R1 is pre-requirements/scenarios — nothing to judge yet).
+	r1 := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{Slug: "abc123", PlanContent: `{"goal":"x"}`, Round: 1})
+	if strings.Contains(r1, "Constraint & scope-coverage fidelity") {
+		t.Errorf("R1 prompt should NOT carry the R2 coverage-fidelity criterion")
 	}
 }
 
