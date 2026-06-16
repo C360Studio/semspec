@@ -1813,6 +1813,17 @@ const (
 	// timeout). The prevention is the file-ownership gates (#175); this is the
 	// honest backstop when an undeclared shared file slips through.
 	PlanDecisionKindAssemblyConflict PlanDecisionKind = "assembly_conflict"
+
+	// PlanDecisionKindScopeIncomplete marks a decision recording that the
+	// Level-0 completeness gate (#204) found declared plan.Scope.Create files
+	// missing from the assembled branch. Distinct from assembly_conflict
+	// (branches merged fine) and execution_exhausted (code converged for the
+	// scenarios it had): the scenarios passed but the plan under-delivered its
+	// declared file scope — declared scope is an acceptance contract, not just
+	// an edit permission. plan-manager records this directly and fails the plan
+	// closed to a recoverable rejected state (retry re-drives execution to
+	// deliver the files, or a planning decision revises scope.create).
+	PlanDecisionKindScopeIncomplete PlanDecisionKind = "scope_incomplete"
 )
 
 // String returns the string representation of the plan decision kind.
