@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -1652,6 +1653,33 @@ func (s *Server) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, gitStatusResponse{Output: output})
 }
 
+// removeTransientBuildArtifacts deletes compiler @argfiles (javac.<ts>.args et
+// al.) from the worktree so they are never staged by `git add -A`. javac writes
+// these when the compile classpath is long (the osh-core source composite makes
+// it very long); they are toolchain byproducts that must never ride onto the
+// branch. Mirrors structuralvalidator.isIgnorableBuildArtifact (kept in sync via
+// the *.args suffix — the gate ignores them, this guarantees they don't commit).
+// Best-effort: a removal error is logged, never fatal.
+func removeTransientBuildArtifacts(root string, logger *slog.Logger) {
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(d.Name(), ".args") {
+			if rmErr := os.Remove(p); rmErr != nil && logger != nil {
+				logger.Warn("could not remove transient build artifact", "path", p, "error", rmErr)
+			}
+		}
+		return nil
+	})
+}
+
 // handleGitCommit stages all changes in a worktree and commits them.
 // POST /git/commit  {"task_id": "abc", "message": "feat: add handler"}
 func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
@@ -1671,6 +1699,13 @@ func (s *Server) handleGitCommit(w http.ResponseWriter, r *http.Request) {
 
 	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
 	ctx := r.Context()
+
+	// Drop transient toolchain byproducts (javac.<ts>.args et al.) before
+	// staging. `git add -A` would otherwise stage them onto the branch in any
+	// repo whose .gitignore lacks the pattern — silent branch pollution. This
+	// mirrors the structural-validator's isIgnorableBuildArtifact (the ownership
+	// gate ignores them; this guarantees they are never committed).
+	removeTransientBuildArtifacts(worktreePath, s.logger)
 
 	if err := runGit(ctx, worktreePath, "add", "-A"); err != nil {
 		writeError(w, http.StatusInternalServerError, "git add failed: "+err.Error())

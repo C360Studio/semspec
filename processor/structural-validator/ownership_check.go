@@ -83,14 +83,24 @@ type ownershipVerdict struct {
 	// lands here) plus new docs outside ownership (hygiene-only); too noisy to
 	// hard-fail.
 	NewUnowned []string
+	// RootScratch are newly-created SOURCE files at the worktree ROOT (no package
+	// directory) — e.g. a dev's throwaway FindClass.java probe. A real source/
+	// test deliverable always lives in a package dir, so a root-level source file
+	// is never a deliverable; but it is NOT a planning gap (it doesn't signal a
+	// wrong partition) and must NOT be left advisory either, because the commit
+	// path stages everything (`git add -A`) and it would silently pollute the
+	// branch. Hard fail routed to DEV-RETRY: the developer must remove it.
+	RootScratch []string
 }
 
 // clean reports whether there are no hard-fail violations (scratch artefacts,
-// a shared-doc co-write, or an out-of-territory new source/test file).
+// a shared-doc co-write, an out-of-territory new source/test file, or
+// root-level source scratch the dev must clean up).
 func (v ownershipVerdict) clean() bool {
 	return len(v.JunkViolations) == 0 &&
 		len(v.ModifiedDocUnowned) == 0 &&
-		len(v.NewUnownedOutOfTerritory) == 0
+		len(v.NewUnownedOutOfTerritory) == 0 &&
+		len(v.RootScratch) == 0
 }
 
 // parsePorcelain parses `git status --porcelain=v1` output into entries. It is
@@ -166,6 +176,21 @@ func isIgnorableBuildArtifact(p string) bool {
 	// Compiler/tool @argfiles: javac.<ts>.args, and the same shape from jar /
 	// javadoc. Always tool-generated, never a deliverable.
 	return strings.HasSuffix(base, ".args")
+}
+
+// sourceFileExts are extensions for compiled/interpreted source that must live
+// in a package/module directory — a file with one of these at the worktree root
+// is never a deliverable, only dev scratch (e.g. a FindClass.java probe).
+var sourceFileExts = map[string]struct{}{
+	".java": {}, ".kt": {}, ".kts": {}, ".scala": {}, ".groovy": {},
+	".go": {}, ".py": {}, ".rb": {}, ".rs": {}, ".ts": {}, ".js": {},
+	".c": {}, ".cc": {}, ".cpp": {}, ".cxx": {}, ".h": {}, ".hpp": {}, ".cs": {},
+}
+
+// isSourceFile reports whether the basename has a source-code extension.
+func isSourceFile(p string) bool {
+	_, ok := sourceFileExts[strings.ToLower(path.Ext(path.Base(p)))]
+	return ok
 }
 
 // firstSegment returns the top-level path component, or "" for a root-level file
@@ -247,13 +272,19 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// case, so this only guards direct callers), or an in-package
 				// class split: advisory, matching pre-ADR-049 behavior.
 				v.NewUnowned = append(v.NewUnowned, norm)
+			case firstSegment(norm) == "" && isSourceFile(norm):
+				// A new SOURCE file at the worktree ROOT (no package directory) — a
+				// dev's throwaway probe (FindClass.java). Never a deliverable (source
+				// must live in a package dir) and never a planning gap (it doesn't
+				// signal a wrong partition), but it must NOT be left advisory: the
+				// commit path stages everything (`git add -A`), so an advisory file
+				// silently pollutes the branch. Hard fail routed to dev-retry so the
+				// developer removes it.
+				v.RootScratch = append(v.RootScratch, norm)
 			case firstSegment(norm) == "":
-				// A new file at the worktree ROOT (no package directory) — a dev's
-				// throwaway probe (FindClass.java) or other non-deliverable scratch.
-				// A real source/test deliverable always lives in a package dir, so a
-				// root-level new file is never the path parallel stories converge on:
-				// advisory, NOT a node-killing planning gap. (#176 assembly-merge
-				// still fails honestly if such a file somehow collides.)
+				// A new NON-source file at the root (a stray note, an undeclared
+				// root config) — not a deliverable parallel stories converge on, and
+				// not unambiguously scratch. Advisory, surfaced to the reviewer.
 				v.NewUnowned = append(v.NewUnowned, norm)
 			default:
 				// A new source/test file in a package directory but OUTSIDE the
@@ -344,10 +375,14 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 
 	var results []payloads.CheckResult
 
-	// Required gate 1 (#175/#177): scratch artefacts + a non-owner co-writing a
-	// shared doc — the unmergeable shapes a developer CAN fix by retrying (stop
-	// committing scratch / stop editing the shared doc). Routed to dev-retry.
-	containmentClean := len(verdict.JunkViolations) == 0 && len(verdict.ModifiedDocUnowned) == 0
+	// Required gate 1 (#175/#177): scratch artefacts, a non-owner co-writing a
+	// shared doc, or root-level source scratch — the shapes a developer CAN fix
+	// by retrying (remove the scratch / stop editing the shared doc). Routed to
+	// dev-retry, NOT recovery, and never left advisory (the commit path stages
+	// everything, so advisory scratch silently pollutes the branch).
+	containmentClean := len(verdict.JunkViolations) == 0 &&
+		len(verdict.ModifiedDocUnowned) == 0 &&
+		len(verdict.RootScratch) == 0
 	containment := payloads.CheckResult{
 		Name:     checkName,
 		Passed:   containmentClean,
@@ -361,6 +396,9 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 		var b strings.Builder
 		if len(verdict.JunkViolations) > 0 {
 			fmt.Fprintf(&b, "Scratch/merge artefacts must not be committed (write scratch to /tmp, not the worktree): %s. ", strings.Join(verdict.JunkViolations, ", "))
+		}
+		if len(verdict.RootScratch) > 0 {
+			fmt.Fprintf(&b, "Root-level source file(s) that are not deliverables must be removed before submit (a source file belongs in a package directory, not the worktree root — write throwaway probes to /tmp): %s. ", strings.Join(verdict.RootScratch, ", "))
 		}
 		if len(verdict.ModifiedDocUnowned) > 0 {
 			fmt.Fprintf(&b, "Modified shared documentation this story does not own: %s. A doc owned by no story (or by another story) is co-written by parallel stories and cannot be merged at assembly — only edit docs in your file scope; if a deliverable doc isn't yours, surface it as a planning gap. ", strings.Join(verdict.ModifiedDocUnowned, ", "))

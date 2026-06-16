@@ -124,6 +124,7 @@ func TestDecideOwnership(t *testing.T) {
 		wantModUnowned        []string // advisory: non-owner editing non-doc
 		wantNewUnowned        []string // advisory: new file in-territory / new doc
 		wantNewOutOfTerritory []string // hard-fail: new source/test outside territory
+		wantRootScratch       []string // hard-fail (dev-retry): root-level source scratch
 	}{
 		{
 			name:              "modified non-owned DOC (README wedge) hard-fails",
@@ -185,10 +186,16 @@ func TestDecideOwnership(t *testing.T) {
 			// the ADR-049 ownership gap).
 		},
 		{
-			name:           "root-level dev scratch (FindClass.java) is advisory, NOT a planning gap",
-			porcelain:      "?? FindClass.java",
+			name:            "root-level source scratch (FindClass.java) is dev-cleanup, NOT a planning gap and NOT advisory",
+			porcelain:       "?? FindClass.java",
+			owned:           ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantRootScratch: []string{"FindClass.java"},
+		},
+		{
+			name:           "root-level NON-source new file stays advisory",
+			porcelain:      "?? NOTES.txt",
 			owned:          ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
-			wantNewUnowned: []string{"FindClass.java"},
+			wantNewUnowned: []string{"NOTES.txt"},
 		},
 		{
 			name:      "new Java companion test for owned main class is clean",
@@ -298,6 +305,9 @@ func TestDecideOwnership(t *testing.T) {
 			}
 			if !equalSets(v.NewUnownedOutOfTerritory, tc.wantNewOutOfTerritory) {
 				t.Errorf("newUnownedOutOfTerritory = %v, want %v", sortedCopy(v.NewUnownedOutOfTerritory), sortedCopy(tc.wantNewOutOfTerritory))
+			}
+			if !equalSets(v.RootScratch, tc.wantRootScratch) {
+				t.Errorf("rootScratch = %v, want %v", sortedCopy(v.RootScratch), sortedCopy(tc.wantRootScratch))
 			}
 		})
 	}
