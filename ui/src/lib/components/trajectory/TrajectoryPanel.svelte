@@ -2,6 +2,13 @@
 	import Icon from '../shared/Icon.svelte';
 	import TrajectoryEntryCard from './TrajectoryEntryCard.svelte';
 	import { api } from '$lib/api/client';
+	import {
+		calculateCostAccounting,
+		formatCostLabel,
+		formatRateSourceLabel,
+		measureTrajectoryUsage,
+		type ProviderRate
+	} from '$lib/types/costAccounting';
 	import type { Trajectory } from '$lib/types/trajectory';
 
 	interface Props {
@@ -9,9 +16,10 @@
 		compact?: boolean;
 		/** Pre-loaded trajectory — skips client fetch when provided */
 		initialTrajectory?: Trajectory | null;
+		providerRates?: ProviderRate[];
 	}
 
-	let { loopId, compact = false, initialTrajectory = null }: Props = $props();
+	let { loopId, compact = false, initialTrajectory = null, providerRates = [] }: Props = $props();
 
 	let trajectory = $state<Trajectory | null>(null);
 
@@ -49,6 +57,8 @@
 	const totalTokens = $derived(
 		entries.reduce((sum, e) => sum + (e.tokens_in ?? 0) + (e.tokens_out ?? 0), 0)
 	);
+	const tokenUsage = $derived(measureTrajectoryUsage(entries));
+	const costAccounting = $derived(calculateCostAccounting(tokenUsage, providerRates));
 	const totalDurationMs = $derived(
 		entries.reduce((sum, e) => sum + (e.duration ?? 0), 0)
 	);
@@ -108,6 +118,11 @@
 				<span class="summary-stat" title="Total tokens">
 					<Icon name="cpu" size={12} />
 					{formatTokens(totalTokens)} tokens
+				</span>
+				<span class="summary-divider" aria-hidden="true">·</span>
+				<span class="summary-stat" title={formatRateSourceLabel(costAccounting)}>
+					<Icon name="info" size={12} />
+					{formatCostLabel(costAccounting, compact)}
 				</span>
 			{/if}
 			{#if totalDurationMs > 0}

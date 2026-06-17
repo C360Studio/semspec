@@ -4,6 +4,16 @@
 	import TrajectoryEntryCard from './TrajectoryEntryCard.svelte';
 	import { api } from '$lib/api/client';
 	import { activityStore } from '$lib/stores/activity.svelte';
+	import {
+		calculateCostAccounting,
+		formatCostLabel,
+		formatRateSourceLabel,
+		measureSummaryUsage,
+		measureTrajectoryUsage,
+		mergeMeasuredUsage,
+		type MeasuredTokenUsage,
+		type ProviderRate
+	} from '$lib/types/costAccounting';
 	import type { PlanStage } from '$lib/types/plan';
 	import type { Trajectory, TrajectoryListItem } from '$lib/types/trajectory';
 
@@ -14,9 +24,10 @@
 		stage: PlanStage;
 		/** Prefetched trajectory summaries from page load — drives all loop display */
 		trajectoryItems?: TrajectoryListItem[];
+		providerRates?: ProviderRate[];
 	}
 
-	let { slug, stage, trajectoryItems = [] }: Props = $props();
+	let { slug, stage, trajectoryItems = [], providerRates = [] }: Props = $props();
 
 	// ── Local trajectory cache ──────────────────────────────────────
 	// Keyed by loop_id. Replaces global trajectoryStore.
@@ -178,6 +189,10 @@
 		workflow_slug?: string;
 		workflow_step?: string | null;
 		role?: string;
+		model?: string;
+		duration?: number;
+		total_tokens_in?: number;
+		total_tokens_out?: number;
 		state: string;
 		created_at: string;
 	}
@@ -187,17 +202,36 @@
 		let totalDuration = 0;
 		let llmCalls = 0;
 		let toolCalls = 0;
+		const usages: MeasuredTokenUsage[] = [];
 
 		for (const loop of phaseLoops) {
 			const traj = getTrajectory(loop.loop_id);
 			if (traj) {
-				totalTokens += traj.total_tokens_in + traj.total_tokens_out;
+				const usage = measureTrajectoryUsage(traj.steps, { model: loop.model });
+				usages.push(usage);
+				totalTokens += usage.totalTokens;
 				totalDuration += traj.duration;
 				llmCalls += traj.steps.filter((s) => s.step_type === 'model_call').length;
 				toolCalls += traj.steps.filter((s) => s.step_type === 'tool_call').length;
+			} else {
+				const usage = measureSummaryUsage({
+					model: loop.model,
+					tokens_in: loop.total_tokens_in,
+					tokens_out: loop.total_tokens_out
+				});
+				usages.push(usage);
+				totalTokens += usage.totalTokens;
+				totalDuration += loop.duration ?? 0;
 			}
 		}
-		return { totalTokens, totalDuration, llmCalls, toolCalls };
+		const tokenUsage = mergeMeasuredUsage(usages);
+		return {
+			totalTokens,
+			totalDuration,
+			llmCalls,
+			toolCalls,
+			costAccounting: calculateCostAccounting(tokenUsage, providerRates)
+		};
 	}
 
 	const planStats = $derived(phaseStats(planLoops));
@@ -322,6 +356,9 @@
 					{/if}
 					{#if planStats.totalTokens > 0}
 						<span class="stat">{formatTokens(planStats.totalTokens)} tok</span>
+						<span class="stat" title={formatRateSourceLabel(planStats.costAccounting)}>
+							{formatCostLabel(planStats.costAccounting, true)}
+						</span>
 					{/if}
 					{#if planStats.totalDuration > 0}
 						<span class="stat">{formatDuration(planStats.totalDuration)}</span>
@@ -340,6 +377,7 @@
 											state={loop.state}
 											trajectory={getTrajectory(loop.loop_id)}
 											summary={getSummary(loop.loop_id)}
+											{providerRates}
 										/>
 									</button>
 									{@render trajectoryLink(loop)}
@@ -395,6 +433,9 @@
 						{/if}
 						{#if execStats.totalTokens > 0}
 							<span class="stat">{formatTokens(execStats.totalTokens)} tok</span>
+							<span class="stat" title={formatRateSourceLabel(execStats.costAccounting)}>
+								{formatCostLabel(execStats.costAccounting, true)}
+							</span>
 						{/if}
 						{#if execStats.totalDuration > 0}
 							<span class="stat">{formatDuration(execStats.totalDuration)}</span>
@@ -413,6 +454,7 @@
 											state={loop.state}
 											trajectory={getTrajectory(loop.loop_id)}
 											summary={getSummary(loop.loop_id)}
+											{providerRates}
 										/>
 									</button>
 									{@render trajectoryLink(loop)}

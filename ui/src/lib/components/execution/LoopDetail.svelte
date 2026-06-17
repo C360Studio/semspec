@@ -10,6 +10,13 @@
 	import Icon from '../shared/Icon.svelte';
 	import TrajectoryEntryCard from '../trajectory/TrajectoryEntryCard.svelte';
 	import { api } from '$lib/api/client';
+	import {
+		calculateCostAccounting,
+		formatCostLabel,
+		formatRateSourceLabel,
+		measureTrajectoryUsage,
+		type ProviderRate
+	} from '$lib/types/costAccounting';
 	import type { Trajectory } from '$lib/types/trajectory';
 	import type { AgentLoop } from '$lib/types/execution';
 	import { getAgentLoopStatusClass } from '$lib/types/execution';
@@ -20,9 +27,11 @@
 		onClose: () => void;
 		/** Pre-loaded trajectory — skips client fetch when provided */
 		initialTrajectory?: Trajectory | null;
+		/** Optional configured provider rates; absence must render as unknown, not guessed */
+		providerRates?: ProviderRate[];
 	}
 
-	let { loop, onClose, initialTrajectory = null }: Props = $props();
+	let { loop, onClose, initialTrajectory = null, providerRates = [] }: Props = $props();
 
 	let fetchedTrajectory = $state<Trajectory | null>(null);
 	let trajectoryLoading = $state(false);
@@ -52,9 +61,8 @@
 
 	const toolCalls = $derived(entries.filter((e) => e.step_type === 'tool_call'));
 	const modelCalls = $derived(entries.filter((e) => e.step_type === 'model_call'));
-
-	const totalTokensIn = $derived(entries.reduce((sum, e) => sum + (e.tokens_in ?? 0), 0));
-	const totalTokensOut = $derived(entries.reduce((sum, e) => sum + (e.tokens_out ?? 0), 0));
+	const tokenUsage = $derived(measureTrajectoryUsage(entries, { model: loop.model }));
+	const costAccounting = $derived(calculateCostAccounting(tokenUsage, providerRates));
 
 	const statusClass = $derived(getAgentLoopStatusClass(loop.status));
 
@@ -166,7 +174,7 @@
 		</section>
 
 		<!-- Token usage summary -->
-		{#if totalTokensIn + totalTokensOut > 0}
+		{#if tokenUsage.totalTokens > 0}
 			<section class="token-section" aria-label="Token usage">
 				<h3 class="section-title">
 					<Icon name="cpu" size={14} />
@@ -175,15 +183,15 @@
 				<div class="token-grid">
 					<div class="token-stat">
 						<span class="token-label">Input</span>
-						<span class="token-value">{formatTokens(totalTokensIn)}</span>
+						<span class="token-value">{formatTokens(tokenUsage.inputTokens)}</span>
 					</div>
 					<div class="token-stat">
 						<span class="token-label">Output</span>
-						<span class="token-value">{formatTokens(totalTokensOut)}</span>
+						<span class="token-value">{formatTokens(tokenUsage.outputTokens)}</span>
 					</div>
 					<div class="token-stat total">
 						<span class="token-label">Total</span>
-						<span class="token-value">{formatTokens(totalTokensIn + totalTokensOut)}</span>
+						<span class="token-value">{formatTokens(tokenUsage.totalTokens)}</span>
 					</div>
 					{#if modelCalls.length > 0}
 						<div class="token-stat">
@@ -191,6 +199,14 @@
 							<span class="token-value">{modelCalls.length}</span>
 						</div>
 					{/if}
+					<div class="token-stat cost">
+						<span class="token-label">Cost</span>
+						<span class="token-value">{formatCostLabel(costAccounting, true)}</span>
+					</div>
+				</div>
+				<div class="cost-source" title={formatRateSourceLabel(costAccounting)}>
+					<Icon name="info" size={12} />
+					<span>{formatRateSourceLabel(costAccounting)}</span>
 				</div>
 			</section>
 		{/if}
@@ -415,7 +431,7 @@
 
 	.token-grid {
 		display: grid;
-		grid-template-columns: repeat(4, 1fr);
+		grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
 		gap: var(--space-2);
 	}
 
@@ -448,6 +464,20 @@
 
 	.token-stat.total .token-value {
 		color: var(--color-accent);
+	}
+
+	.token-stat.cost .token-value {
+		font-size: var(--font-size-sm);
+	}
+
+	.cost-source {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		margin-top: var(--space-2);
+		color: var(--color-text-muted);
+		font-size: var(--font-size-xs);
+		line-height: 1.4;
 	}
 
 	.children-list {
