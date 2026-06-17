@@ -9,6 +9,12 @@ import type {
 import type { Question } from '$lib/types';
 import { questionsStore } from './questions.svelte';
 import { settingsStore } from './settings.svelte';
+import {
+	annotateExecutionSummary,
+	classifyExecutionFeedKind,
+	classifyPlanFeedKind,
+	planFeedEventKey
+} from './feedEvents';
 
 /**
  * Plan-scoped feed store. Aggregates plan SSE + execution SSE + questions
@@ -43,6 +49,7 @@ class FeedStore {
 	private execSSE: EventSource | null = null;
 	private maxEvents = $derived(settingsStore.activityLimit);
 	private lastPlanStage: string | null = null;
+	private lastPlanEventKey: string | null = null;
 	private seenQuestionIds = new Set<string>();
 	private planStageCallbacks: Set<(stage: string) => void> = new Set();
 
@@ -66,6 +73,7 @@ class FeedStore {
 
 			this.currentSlug = slug;
 			this.lastPlanStage = null;
+			this.lastPlanEventKey = null;
 			this.seenQuestionIds.clear();
 
 			// Only connect plan SSE initially. Execution SSE connects lazily
@@ -85,6 +93,7 @@ class FeedStore {
 			this.connected = false;
 			this.currentSlug = null;
 			this.lastPlanStage = null;
+			this.lastPlanEventKey = null;
 			this.seenQuestionIds.clear();
 			this.requirementStages = new Map();
 			this.currentPlan = null;
@@ -111,6 +120,7 @@ class FeedStore {
 			timestamp: question.answered_at ?? question.created_at ?? new Date().toISOString(),
 			source: 'question',
 			type,
+			kind: 'question',
 			summary: summaries[type] ?? type,
 			slug: question.plan_slug,
 			data: question as unknown as Record<string, unknown>
@@ -120,6 +130,7 @@ class FeedStore {
 	clear(): void {
 		this.events = [];
 		this.lastPlanStage = null;
+		this.lastPlanEventKey = null;
 		this.seenQuestionIds.clear();
 		this.currentPlan = null;
 	}
@@ -144,6 +155,7 @@ class FeedStore {
 				timestamp: new Date().toISOString(),
 				source: 'plan',
 				type: 'plan_deleted',
+				kind: 'plan_deleted',
 				summary: 'Plan deleted',
 				slug
 			});
@@ -194,7 +206,11 @@ class FeedStore {
 	private handlePlanUpdated(payload: PlanSSEPayload): void {
 		const stage = payload.stage;
 		const prevStage = this.lastPlanStage;
+		const kind = classifyPlanFeedKind(payload);
+		const eventKey = planFeedEventKey(payload, kind);
+		const prevEventKey = this.lastPlanEventKey;
 		this.lastPlanStage = stage;
+		this.lastPlanEventKey = eventKey;
 
 		// Mirror the full plan payload into the store on EVERY update (not just
 		// stage transitions) — within-stage updates still carry meaningful
@@ -208,8 +224,9 @@ class FeedStore {
 			this.connectExecutionSSE(this.currentSlug);
 		}
 
-		// Skip duplicate stage events — no feed entry, no invalidation needed.
-		if (prevStage === stage) {
+		// Skip exact duplicate lifecycle rows, but keep same-stage changes such
+		// as a new recovery decision or a wait/stale transition visible.
+		if (prevStage === stage && prevEventKey === eventKey) {
 			return;
 		}
 
@@ -220,8 +237,9 @@ class FeedStore {
 		const event: FeedEvent = {
 			id: `plan-${payload.slug}-${stage}-${Date.now()}`,
 			timestamp: new Date().toISOString(),
-			source: 'plan',
+			source: kind === 'execution_phase' ? 'execution' : 'plan',
 			type: 'plan_updated',
+			kind,
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
@@ -252,12 +270,15 @@ class FeedStore {
 		} else {
 			summary = `Task ${formatTaskStage(stage)}: ${title}${iter}${cycle}`;
 		}
+		const kind = classifyExecutionFeedKind(payload, this.currentSlug, 'execution_task');
+		summary = annotateExecutionSummary(summary, kind);
 
 		const event: FeedEvent = {
 			id: `task-${payload.task_id}-${stage}-${Date.now()}`,
 			timestamp: new Date().toISOString(),
 			source: 'execution',
 			type: eventType,
+			kind,
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
@@ -267,7 +288,9 @@ class FeedStore {
 		// Mirror the latest payload per task so PlanCard / detail views can derive
 		// "is this working?" signals without re-wiring the SSE stream. Must replace
 		// the Map to trigger Svelte 5 reactivity (Maps are not deeply reactive).
-		this.taskStages = new Map(this.taskStages).set(payload.task_id, payload);
+		if (kind === 'execution_task') {
+			this.taskStages = new Map(this.taskStages).set(payload.task_id, payload);
+		}
 	}
 
 	private handleRequirementUpdated(payload: RequirementSSEPayload, eventType: string): void {
@@ -283,12 +306,15 @@ class FeedStore {
 		} else {
 			summary = `Requirement ${formatReqStage(stage)}: ${title}${progress}`;
 		}
+		const kind = classifyExecutionFeedKind(payload, this.currentSlug, 'execution_requirement');
+		summary = annotateExecutionSummary(summary, kind);
 
 		const event: FeedEvent = {
 			id: `req-${payload.requirement_id}-${stage}-${Date.now()}`,
 			timestamp: new Date().toISOString(),
 			source: 'execution',
 			type: eventType,
+			kind,
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
@@ -297,7 +323,9 @@ class FeedStore {
 
 		// Update live execution stage for this requirement.
 		// Must create a new Map to trigger Svelte 5 reactivity — Maps are not deeply reactive.
-		this.requirementStages = new Map(this.requirementStages).set(payload.requirement_id, payload);
+		if (kind === 'execution_requirement') {
+			this.requirementStages = new Map(this.requirementStages).set(payload.requirement_id, payload);
+		}
 	}
 
 	private addEvent(event: FeedEvent): void {

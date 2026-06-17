@@ -57,6 +57,10 @@
 	);
 
 	function getEventIcon(event: FeedEvent): string {
+		if (event.kind === 'plan_recovery') return 'refresh-cw';
+		if (event.kind === 'plan_wait') return 'clock';
+		if (event.kind === 'plan_stale' || event.kind === 'execution_stale') return 'wifi-off';
+		if (event.kind === 'execution_orphaned') return 'unlink';
 		switch (event.source) {
 			case 'plan':
 				if (event.type === 'plan_deleted') return 'trash-2';
@@ -85,6 +89,11 @@
 	}
 
 	function getEventColor(event: FeedEvent): string {
+		if (event.kind === 'plan_recovery') return 'var(--color-warning, var(--color-accent))';
+		if (event.kind === 'plan_wait') return 'var(--color-warning, var(--color-text-muted))';
+		if (event.kind === 'plan_stale' || event.kind === 'execution_stale' || event.kind === 'execution_orphaned') {
+			return 'var(--color-warning, var(--color-error))';
+		}
 		switch (event.source) {
 			case 'plan': {
 				const stage = (event.data?.stage as string) ?? '';
@@ -269,6 +278,7 @@
 						class="event-item event-item--link"
 						href={href}
 						data-testid="activity-feed-row"
+						data-kind={event.kind}
 						data-href={href}
 					>
 						<div class="event-icon" style="color: {getEventColor(event)}">
@@ -287,7 +297,7 @@
 						</div>
 					</a>
 				{:else}
-					<div class="event-item" data-testid="activity-feed-row">
+					<div class="event-item" data-testid="activity-feed-row" data-kind={event.kind}>
 						<div class="event-icon" style="color: {getEventColor(event)}">
 							<Icon name={getEventIcon(event)} size={14} />
 						</div>

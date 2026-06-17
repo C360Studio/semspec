@@ -12,6 +12,7 @@ const baseEvent = (over: Partial<FeedEvent> = {}): FeedEvent => ({
 	timestamp: '2026-04-21T00:00:00Z',
 	source: 'execution',
 	type: 'task_updated',
+	kind: 'execution_task',
 	summary: 'sum',
 	...over
 });

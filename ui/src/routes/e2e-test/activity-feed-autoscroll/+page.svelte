@@ -24,6 +24,7 @@
 			timestamp: new Date().toISOString(),
 			source: 'execution',
 			type: 'task_updated',
+			kind: 'execution_task',
 			summary: `Synthetic event #${nextId}`,
 			slug: 'harness'
 		};

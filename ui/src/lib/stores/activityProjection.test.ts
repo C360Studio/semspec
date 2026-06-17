@@ -28,6 +28,7 @@ describe('activityEventToFeedEvent', () => {
 		const fe = activityEventToFeedEvent(activity({ type: 'loop_created' }));
 		expect(fe.source).toBe('activity');
 		expect(fe.type).toBe('loop_created');
+		expect(fe.kind).toBe('activity_loop');
 		expect(fe.summary).toMatch(/Loop started/);
 		expect(fe.summary).toContain('01234567');
 	});
@@ -43,6 +44,7 @@ describe('activityEventToFeedEvent', () => {
 			}
 		}));
 		expect(fe.source).toBe('plan');
+		expect(fe.kind).toBe('activity_loop');
 		expect(fe.data?.workflow_slug).toBe('semspec-planning');
 		expect(fe.data?.workflow_step).toBe('scenario-generation');
 		expect(fe.data?.task_id).toBe('scengen-4');
@@ -60,6 +62,7 @@ describe('activityEventToFeedEvent', () => {
 			}
 		}));
 		expect(fe.source).toBe('execution');
+		expect(fe.kind).toBe('activity_loop');
 	});
 
 	it('labels task-execution workflow loop data as execution activity', () => {

@@ -90,6 +90,7 @@ export function activityEventToFeedEvent(event: ActivityEvent): FeedEvent {
 		timestamp: event.timestamp,
 		source: sourceForLoop(loop),
 		type: event.type,
+		kind: 'activity_loop',
 		summary,
 		data
 	};
