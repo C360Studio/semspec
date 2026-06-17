@@ -263,6 +263,62 @@ func TestApplyArchitectureRevise_UnscopedWithoutPhaseEvidenceLeavesPlanUntouched
 	}
 }
 
+func TestApplyArchitectureRevise_PreservesUnrelatedCompletedExecutions(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.contract",
+			"task.demo.node-contract",
+			"req.demo.consumer",
+			"task.demo.node-consumer",
+			"req.demo.completed-unrelated",
+			"task.demo.node-completed-unrelated",
+		},
+		values: map[string][]byte{
+			"task.demo.node-contract":            []byte(`{"requirement_id":"contract","stage":"escalated"}`),
+			"task.demo.node-consumer":            []byte(`{"requirement_id":"consumer","stage":"pending"}`),
+			"task.demo.node-completed-unrelated": []byte(`{"requirement_id":"completed-unrelated","stage":"completed"}`),
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	plan := &workflow.Plan{
+		Slug:   "demo",
+		Status: workflow.StatusImplementing,
+		Requirements: []workflow.Requirement{
+			{ID: "contract"},
+			{ID: "consumer", DependsOn: []string{"contract"}},
+			{ID: "completed-unrelated"},
+		},
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.demo.recovery.arch",
+		Kind:           workflow.PlanDecisionKindArchitectureRevise,
+		AffectedReqIDs: []string{"contract"},
+		Rationale:      "Repair the architecture contract for the dependency branch.",
+	}
+
+	if err := c.applyArchitectureRevise(context.Background(), plan, proposal); err != nil {
+		t.Fatalf("applyArchitectureRevise: %v", err)
+	}
+
+	assertResetKeys(t, reset, []string{
+		"req.demo.contract",
+		"task.demo.node-contract",
+		"req.demo.consumer",
+		"task.demo.node-consumer",
+	})
+	assertNoResetKeys(t, reset, []string{
+		"req.demo.completed-unrelated",
+		"task.demo.node-completed-unrelated",
+	})
+}
+
 func assertResetKeys(t *testing.T, got []string, want []string) {
 	t.Helper()
 	seen := make(map[string]struct{}, len(got))

@@ -28,7 +28,7 @@
 - [x] 4.2 Add validation that compares current scope and Story coverage against the root contract plus accepted amendments
 - [x] 4.3 Add scope-shrinkage guardrails that require explicit amendment provenance for dropped obligations
 - [x] 4.4 Update recovery accept effects so dirty marking and execution resets use the smallest correct dependency closure
-- [ ] 4.5 Add tests proving unrelated completed work survives late architecture/story recovery
+- [x] 4.5 Add tests proving unrelated completed work survives late architecture/story recovery
 - [x] 4.6 Add tests proving whole-phase reset requires explicit contract impact evidence
 
 ## 5. Execution Observability API
