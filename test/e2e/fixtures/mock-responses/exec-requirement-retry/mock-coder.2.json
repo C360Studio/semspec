@@ -1,12 +1,12 @@
 {
-  "content": "Tests written. Submitting work.",
+  "content": "Implemented /goodbye endpoint with tests.",
   "tool_calls": [
     {
-      "id": "call_submit_test",
+      "id": "call_cycle0_submit",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\"}"
+        "arguments": "{\"summary\": \"Implemented /goodbye GET endpoint returning JSON, with a unit test.\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
       }
     }
   ],

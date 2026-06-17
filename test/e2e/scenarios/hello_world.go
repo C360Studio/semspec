@@ -68,10 +68,15 @@ func WithIterationExhaustion() HelloWorldOption {
 	}
 }
 
-// WithRequirementRetry creates a variant where the requirement-level reviewer
-// rejects with a "fixable" verdict on the first attempt, triggering dirty-node
-// re-execution. The retry attempt succeeds. Tests the full retry pipeline:
-// decompose → TDD → requirement review (reject) → dirty-node retry → TDD → review (approve).
+// WithRequirementRetry creates a variant where the in-TDD-cycle code reviewer
+// rejects the developer's first submission with a needs_changes/"fixable"
+// verdict, then approves the retry. Exercises the per-node TDD retry pipeline:
+// developer → structural validation → code review (needs_changes/fixable)
+// → developer retry (TDDCycle++) → code review (approved) → node merges
+// → requirement review (approved) → requirement complete.
+// stageVerifyMockStats asserts mock-code-reviewer was called >= 2 times; fewer
+// means the reject never fired and the first submission was approved outright
+// (the false-green this scenario guards against).
 func WithRequirementRetry() HelloWorldOption {
 	return func(s *HelloWorldScenario) {
 		s.variant.EnableCodeExecution = true
@@ -872,6 +877,10 @@ func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *R
 		return err
 	}
 
+	if err := s.verifyRequirementRetryStats(stats, result); err != nil {
+		return err
+	}
+
 	s.recordHappyPathStats(stats, result)
 
 	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
@@ -882,7 +891,13 @@ func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *R
 // requiredMockModels returns the list of model names that must appear in /stats
 // before assertions can run, based on the current variant.
 func (s *HelloWorldScenario) requiredMockModels() []string {
-	return []string{"mock-planner", "mock-reviewer"}
+	models := []string{"mock-planner", "mock-reviewer"}
+	if s.variant.ExpectRequirementRetry {
+		// The retry variant asserts on the in-TDD-cycle code reviewer, so it
+		// must appear in /stats before pollUntilModelsReady lets the assertion run.
+		models = append(models, "mock-code-reviewer")
+	}
+	return models
 }
 
 // pollUntilModelsReady polls the mock LLM stats endpoint until all required
@@ -950,6 +965,26 @@ func (s *HelloWorldScenario) verifyPlanRevisionStats(stats *client.MockStats, re
 	}
 	result.SetDetail("mock_reviewer_calls", reviewerCalls)
 	result.SetDetail("mock_reviewer_expected", expectedCalls)
+	return nil
+}
+
+// verifyRequirementRetryStats asserts the requirement-retry variant actually
+// drove a code-review reject→retry→approve cycle. The mock-code-reviewer fixture
+// rejects (needs_changes/fixable) on its first call and approves on the second,
+// so the in-TDD-cycle reviewer must be called at least twice. Fewer than two
+// calls means the reject never fired and the developer's first submission was
+// approved outright — the false-green this scenario exists to catch. (The
+// post-merge requirement reviewer uses mock-reviewer, a different model, so this
+// count is isolated to the code-review TDD loop.)
+func (s *HelloWorldScenario) verifyRequirementRetryStats(stats *client.MockStats, result *Result) error {
+	if !s.variant.ExpectRequirementRetry {
+		return nil
+	}
+	reviewerCalls := stats.CallsByModel["mock-code-reviewer"]
+	if reviewerCalls < 2 {
+		return fmt.Errorf("mock-code-reviewer calls: got %d, want >= 2 (cycle-0 fixable reject + cycle-1 approve); the TDD-cycle retry never fired", reviewerCalls)
+	}
+	result.SetDetail("mock_code_reviewer_calls", reviewerCalls)
 	return nil
 }
 

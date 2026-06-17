@@ -1,0 +1,14 @@
+{
+  "content": "Code review complete. Verdict: needs_changes.",
+  "tool_calls": [
+    {
+      "id": "call_code_review_reject",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"verdict\": \"needs_changes\", \"rejection_type\": \"fixable\", \"feedback\": \"The /goodbye endpoint handles GET but performs no input validation for POST requests. Add a 400 response when the request body is missing a 'name' field, and add a test covering that case.\", \"summary\": \"Needs input validation on POST before approval.\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

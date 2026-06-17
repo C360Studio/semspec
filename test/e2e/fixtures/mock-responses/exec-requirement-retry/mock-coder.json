@@ -1,12 +1,12 @@
 {
-  "content": "Work complete.",
+  "content": "Submitting work.",
   "tool_calls": [
     {
-      "id": "call_submit_fallback",
+      "id": "call_submit_base",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Task completed successfully\"}"
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests.\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
       }
     }
   ],
