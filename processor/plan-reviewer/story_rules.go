@@ -28,6 +28,11 @@ import (
 //   - story.depends_on_orphan: Story.DependsOn entry that doesn't match
 //     any other Story.ID in the plan.
 //   - story.depends_on_cycle: DAG cycle in the cross-story DependsOn graph.
+//   - story.files_owned_outside_component: Story.FilesOwned contains a file not
+//     owned by the Story's selected architecture component or deterministic
+//     companion-test expansion.
+//   - story.topology_unapproved_build_root: Story.FilesOwned contains a
+//     build/workspace/package manifest not authorized by the contract topology.
 //   - task.missing_within_story: Story with empty Tasks list.
 //   - task.depends_on_cycle: DAG cycle in a Story's intra-story Tasks
 //     DependsOn graph.
@@ -52,6 +57,7 @@ func mergeStoryFindings(plan *workflow.Plan, result *workflow.PlanReviewResult) 
 
 	original := len(result.Findings)
 	result.Findings = append(result.Findings, storyStructuralFindings(plan)...)
+	result.Findings = append(result.Findings, storyOwnershipFindings(plan)...)
 	result.Findings = append(result.Findings, storyDependsOnFindings(plan)...)
 	result.Findings = append(result.Findings, taskDependsOnFindings(plan)...)
 
@@ -174,6 +180,106 @@ func storyStructuralFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
 	return findings
 }
 
+// storyOwnershipFindings keeps Sarah's Story ownership derived from the
+// selected architecture component and the root contract topology. It rejects
+// baseline-erasing "own everything" stories and standalone build-root smuggling
+// before scenario-orchestrator can dispatch a developer.
+func storyOwnershipFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
+	if plan == nil || len(plan.Stories) == 0 {
+		return nil
+	}
+
+	components := architectureComponentsByName(plan)
+	knownTopology := map[string]struct{}{}
+	explicitTopology := map[string]struct{}{}
+	hasTopologyContract := plan.Contract != nil && len(plan.Contract.TopologyFacts) > 0
+	if hasTopologyContract {
+		knownTopology = contractTopologyManifestPaths(plan.Contract.TopologyFacts)
+		explicitTopology = contractExplicitTopologyCreatePaths(plan.Contract.Scope)
+	}
+
+	var findings []workflow.PlanReviewFinding
+	seen := map[string]struct{}{}
+	for _, s := range plan.Stories {
+		if s.Status == workflow.StoryStatusPending {
+			continue
+		}
+
+		component, ok := components[s.ComponentName]
+		if !ok {
+			continue // story.unresolved_component reports this shape.
+		}
+		componentFiles := componentOwnedFiles(component)
+		for _, raw := range s.FilesOwned {
+			file := workflow.NormalizeFilePath(raw)
+			if file == "" {
+				continue
+			}
+
+			if hasTopologyContract && isTopologyControlledPath(file) {
+				if _, known := knownTopology[file]; !known {
+					if _, explicit := explicitTopology[file]; !explicit {
+						key := "topology\x00" + s.ID + "\x00" + file
+						if _, dup := seen[key]; !dup {
+							seen[key] = struct{}{}
+							findings = append(findings, workflow.PlanReviewFinding{
+								SOPID:       "story.topology_unapproved_build_root",
+								SOPTitle:    "Story owns an unapproved build/workspace root",
+								Severity:    "error",
+								Status:      "violation",
+								Category:    "structural",
+								Phase:       "stories",
+								TargetID:    s.ID,
+								Action:      "remove",
+								TargetField: fmt.Sprintf("story.%s.files_owned", s.ID),
+								TargetValue: file,
+								Issue:       fmt.Sprintf("Story %s owns topology-controlled file %q, but the root contract has no detected topology fact and no scope.create/include entry authorizing that build/workspace/package manifest.", s.ID, file),
+								Suggestion:  fmt.Sprintf("Remove %q from story.%s.files_owned and route it back through architecture/contract amendment if a new build root is genuinely required.", file, s.ID),
+								Evidence:    fmt.Sprintf("contract.topology_facts does not contain %q", file),
+							})
+						}
+					}
+				}
+			}
+
+			if _, owned := componentFiles[file]; owned {
+				continue
+			}
+			key := "component\x00" + s.ID + "\x00" + file
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			findings = append(findings, workflow.PlanReviewFinding{
+				SOPID:       "story.files_owned_outside_component",
+				SOPTitle:    "Story owns a file outside its selected component",
+				Severity:    "error",
+				Status:      "violation",
+				Category:    "structural",
+				Phase:       "stories",
+				TargetID:    s.ID,
+				Action:      "remove",
+				TargetField: fmt.Sprintf("story.%s.files_owned", s.ID),
+				TargetValue: file,
+				Issue:       fmt.Sprintf("Story %s anchors to component %q but files_owned includes %q, which is not in that component's implementation_files or deterministic companion-test expansion. Sarah must not widen ownership beyond the architecture component; that erases the brownfield/file-ownership partition before execution.", s.ID, s.ComponentName, file),
+				Suggestion:  fmt.Sprintf("Remove %q from story.%s.files_owned. If component %q truly owns it, revise architecture.component_boundaries[%q].implementation_files first, then re-prepare stories.", file, s.ID, s.ComponentName, s.ComponentName),
+			})
+		}
+	}
+	return findings
+}
+
+func componentOwnedFiles(component workflow.ComponentDef) map[string]struct{} {
+	files := workflow.ExpandFileScopeWithCompanionTests(component.ImplementationFiles)
+	out := make(map[string]struct{}, len(files))
+	for _, file := range files {
+		if normalized := workflow.NormalizeFilePath(file); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
+}
+
 // storyDependsOnFindings emits findings for cross-story DependsOn invariants
 // (orphan refs + DAG cycles).
 func storyDependsOnFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
@@ -256,6 +362,19 @@ func architectureComponentNames(plan *workflow.Plan) map[string]struct{} {
 		}
 	}
 	return names
+}
+
+func architectureComponentsByName(plan *workflow.Plan) map[string]workflow.ComponentDef {
+	if plan == nil || plan.Architecture == nil {
+		return nil
+	}
+	components := make(map[string]workflow.ComponentDef, len(plan.Architecture.ComponentBoundaries))
+	for _, c := range plan.Architecture.ComponentBoundaries {
+		if c.Name != "" {
+			components[c.Name] = c
+		}
+	}
+	return components
 }
 
 // planRequirementIDs returns a set of all Requirement.ID entries on the plan.
