@@ -11,6 +11,7 @@ export type FeedEventKind =
 	| 'execution_requirement'
 	| 'execution_orphaned'
 	| 'execution_stale'
+	| 'lesson_activity'
 	| 'activity_loop'
 	| 'question';
 

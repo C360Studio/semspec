@@ -61,6 +61,7 @@
 		if (event.kind === 'plan_wait') return 'clock';
 		if (event.kind === 'plan_stale' || event.kind === 'execution_stale') return 'wifi-off';
 		if (event.kind === 'execution_orphaned') return 'unlink';
+		if (event.kind === 'lesson_activity') return 'lightbulb';
 		switch (event.source) {
 			case 'plan':
 				if (event.type === 'plan_deleted') return 'trash-2';
@@ -94,6 +95,7 @@
 		if (event.kind === 'plan_stale' || event.kind === 'execution_stale' || event.kind === 'execution_orphaned') {
 			return 'var(--color-warning, var(--color-error))';
 		}
+		if (event.kind === 'lesson_activity') return 'var(--color-accent)';
 		switch (event.source) {
 			case 'plan': {
 				const stage = (event.data?.stage as string) ?? '';
