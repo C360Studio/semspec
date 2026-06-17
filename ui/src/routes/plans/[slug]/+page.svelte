@@ -31,6 +31,7 @@
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
+	import type { PlanPhaseSummary } from '$lib/types/feed';
 	import { graphApi } from '$lib/services/graphApi';
 	import { transformPathSearchResult, transformGlobalSearchResult } from '$lib/services/graphTransform';
 	import type { ClassificationMeta } from '$lib/api/graph-types';
@@ -198,10 +199,21 @@
 	);
 	const activeProgress = $derived(activePhaseProgress(liveTrajectoryItems));
 	const progressPanel = $derived.by(() => {
+		if (plan?.phase_summary && shouldShowPhaseSummaryBanner(plan.phase_summary)) {
+			return {
+				title: plan.phase_summary.title,
+				detail: phaseSummaryDetail(plan.phase_summary),
+				phase: plan.phase_summary.phase,
+				state: plan.phase_summary.state,
+				startedAt: activeProgress?.startedAt ?? stageStartedAt(plan)
+			};
+		}
 		if (activeProgress) {
 			return {
 				title: activeProgress.title,
 				detail: activeProgress.detail,
+				phase: 'activity',
+				state: 'active',
 				startedAt: activeProgress.startedAt
 			};
 		}
@@ -209,11 +221,27 @@
 			return {
 				title: stageTitle(plan.stage),
 				detail: planGuidance.message,
+				phase: 'planning',
+				state: 'active',
 				startedAt: stageStartedAt(plan)
 			};
 		}
 		return null;
 	});
+
+	function shouldShowPhaseSummaryBanner(summary: PlanPhaseSummary): boolean {
+		if (summary.phase === 'terminal') return false;
+		if (summary.state === 'active' || summary.state === 'waiting') return true;
+		return summary.phase === 'execution' || summary.phase === 'recovery' || summary.phase === 'qa';
+	}
+
+	function phaseSummaryDetail(summary: PlanPhaseSummary): string | undefined {
+		if (summary.detail) return summary.detail;
+		if (summary.wait?.policy_reason) return summary.wait.policy_reason;
+		if (summary.recovery?.summary) return summary.recovery.summary;
+		if (summary.qa?.summary) return summary.qa.summary;
+		return undefined;
+	}
 
 	// Pick the best available timestamp to drive the in-progress panel's
 	// elapsed-time ticker for the CURRENT stage. The plan API doesn't yet
@@ -232,7 +260,12 @@
 			case 'reviewing_scenarios':
 			case 'generating_requirements':
 			case 'generating_architecture':
+			case 'preparing_stories':
+			case 'stories_generated':
 			case 'generating_scenarios':
+			case 'ready_for_execution':
+			case 'implementing':
+			case 'ready_for_qa':
 				// Post-approval phases: approved_at is the closest stage-start
 				// proxy we have. Falls back to reviewed_at, then created_at.
 				return p.approved_at ?? p.reviewed_at ?? p.created_at;
@@ -266,9 +299,18 @@
 				return 'Generating requirements…';
 			case 'generating_architecture':
 				return 'Generating architecture…';
+			case 'preparing_stories':
+				return 'Preparing Stories…';
+			case 'stories_generated':
+				return 'Stories generated';
 			case 'requirements_generated':
 			case 'generating_scenarios':
 				return 'Generating scenarios…';
+			case 'ready_for_execution':
+				return 'Ready for execution';
+			case 'implementing':
+			case 'executing':
+				return 'Execution…';
 			case 'reviewing_scenarios':
 				return 'Reviewing scenarios…';
 			case 'reviewing_qa':
@@ -578,6 +620,8 @@
 				<InProgressPanel
 					title={progressPanel.title}
 					detail={progressPanel.detail}
+					phase={progressPanel.phase}
+					phaseState={progressPanel.state}
 					startedAt={progressPanel.startedAt}
 				/>
 			{/if}
