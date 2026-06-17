@@ -2673,14 +2673,23 @@ func (c *HTTPClient) WaitForPlanApproveEligible(ctx context.Context, slug string
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
+	// Track the last-seen state so a timeout names the status the plan wedged
+	// in (created → planner never triggered; drafting → planner loop hung;
+	// reviewing_draft → reviewer loop hung) instead of an opaque deadline.
+	lastStatus := "<never-fetched>"
+	goalSeen := false
 	for {
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("timeout waiting for plan %q to become approve-eligible: %w", slug, ctx.Err())
+			return nil, fmt.Errorf("timeout waiting for plan %q to become approve-eligible (last status=%q, goal_set=%t): %w", slug, lastStatus, goalSeen, ctx.Err())
 		case <-ticker.C:
 			plan, err := c.GetPlan(ctx, slug)
 			if err != nil {
 				continue
+			}
+			lastStatus = plan.Status
+			if plan.Goal != "" {
+				goalSeen = true
 			}
 			if plan.Goal == "" {
 				continue

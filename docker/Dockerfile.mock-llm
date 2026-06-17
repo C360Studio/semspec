@@ -30,6 +30,6 @@ EXPOSE 11434
 HEALTHCHECK --interval=5s --timeout=3s --start-period=2s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:11434/health || exit 1
 
-ENV MOCK_SCENARIO=hello-world
+ENV MOCK_SCENARIO=plan-smoke
 
 ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/mock-llm -fixtures /fixtures/${MOCK_SCENARIO} -port 11434"]

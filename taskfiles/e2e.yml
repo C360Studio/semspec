@@ -273,7 +273,7 @@ tasks:
     deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
     vars:
       SCENARIO:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
     cmds:
       - |
         echo "[UP:MOCK] Starting mock infrastructure for {{.SCENARIO}}..."
@@ -318,7 +318,7 @@ tasks:
     deps: [build]
     vars:
       SCENARIO:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
     cmds:
       - |
         echo "[MOCK:RUN] Running {{.SCENARIO}} against existing mock infrastructure..."
@@ -329,7 +329,7 @@ tasks:
     deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
     vars:
       SCENARIO:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
     cmds:
       - |
         echo "[DEBUG:MOCK] Starting mock infrastructure for {{.SCENARIO}}..."
@@ -398,7 +398,7 @@ tasks:
     deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
     vars:
       SCENARIO:
-        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
     cmds:
       - |
         echo "[E2E:MOCK] Scenario: {{.SCENARIO}}"
@@ -408,7 +408,8 @@ tasks:
         # exercising different runtime routing.
         FIXTURE_SCENARIO="{{.SCENARIO}}"
         case "$FIXTURE_SCENARIO" in
-          qa-cycle-integration) FIXTURE_SCENARIO="qa-cycle" ;;
+          qa-integration) FIXTURE_SCENARIO="qa-unit" ;;
+          stall-complete|stall-reject) FIXTURE_SCENARIO="stall-retry" ;;
         esac
         FIXTURE_DIR="test/e2e/fixtures/mock-responses/$FIXTURE_SCENARIO"
         if [ ! -d "$FIXTURE_DIR" ]; then

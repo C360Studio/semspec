@@ -43,42 +43,20 @@ func rootCmd() *cobra.Command {
 		Short: "Run semspec e2e tests",
 		Long: `Run end-to-end tests for semspec workflow system.
 
-Tier 1 — Component Tests (no LLM):
-  plan-workflow       - Tests CreatePlan, PromotePlan, ExecutePlan via REST API (ADR-003)
-  questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
-  scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
-  reactive-execution  - Tests full reactive execution lifecycle: decomposition → node dispatch → completion
-  plan-decision     - Tests PlanDecision CRUD, status transitions, cascade response, and error handling
-  sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
-  graph-sources       - Tests graph source registry: semsource readiness, GraphQL entity indexing
-  graph-tools         - Tests all graph tool paths: graph_summary, graph_query, graph_search
-  doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
-  openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
-  plan-state-machine  - Tests plan retry/complete/reject endpoint guard clauses
-  contract-observability - Tests contract/recovery/topology/execution summary surfaces
+Scenarios are organized in two tiers:
+  Tier 1 — Component tests: REST/CRUD/state-machine coverage (most need no LLM).
+  Tier 2 — Pipeline tests: drive the mock-LLM agent pipeline end to end.
 
-Tier 2 — Pipeline Tests (mock LLM):
-  hello-world                    - Greenfield Python+JS: add /goodbye endpoint with semantic validation
-  hello-world-code-execution     - Hello-world with full TDD pipeline execution
-  hello-world-requirement-retry  - Hello-world with requirement rejection → dirty-node retry → approval
-  hello-world-plan-rejection     - Hello-world with plan rejection → revision → approval
-  hello-world-plan-exhaustion    - Hello-world with plan review exhaustion → escalation
-  plan-phase                   - Full plan pipeline: plan → requirements → scenarios → review → approved
-  execution-phase              - Full execution pipeline: plan → approve → decompose → TDD → complete
-  plan-stall-retry             - Execution stall: failed requirement → retry → re-execution succeeds
-  plan-stall-complete          - Execution stall: failed requirement → force-complete
-  plan-stall-reject            - Execution stall: failed requirement → reject → retry from rejected
-  qa-cycle                     - QA phase at qa_level=unit: sandbox runs go test, qa-reviewer approves, plan → complete
-  qa-cycle-integration         - QA phase at qa_level=integration: same pipeline with integration mode
+Run 'e2e list' for the current scenario set. The list is derived from the
+scenario registry, so it cannot drift from what 'e2e <scenario>' accepts.
+Real-LLM scenarios run via Playwright E2E (task e2e:ui).
 
-Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) have moved
-to Playwright E2E — see docs/e2e-scenario-archive.md for details.
-
-  all                 - Run all scenarios (default)
+  all  - Run all scenarios (default)
 
 Examples:
   e2e                          # Run all scenarios
   e2e plan-workflow            # Run specific scenario
+  e2e list                     # List available scenarios
   e2e --json                   # Output results as JSON
   e2e --nats nats://host:4222  # Custom NATS URL
 `,
@@ -134,41 +112,71 @@ func listCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List available scenarios",
 		Run: func(_ *cobra.Command, _ []string) {
+			// Derive the catalogue from the registry so it can never drift from
+			// the runnable set. Config is irrelevant to Name()/Description().
+			scenarioList := buildScenarioList(&config.Config{})
+			width := 0
+			for _, s := range scenarioList {
+				if n := len(s.Name()); n > width {
+					width = n
+				}
+			}
 			fmt.Println("Available scenarios:")
 			fmt.Println()
-			fmt.Println("  Tier 1 — Component Tests (no LLM):")
-			fmt.Println("  plan-workflow       Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
-			fmt.Println("  questions-api       Tests Q&A HTTP API endpoints (list, get, answer)")
-			fmt.Println("  scenario-execution  Tests Requirement/Scenario CRUD and reactive workflow trigger")
-			fmt.Println("  reactive-execution  Tests full reactive execution: decomposition → dispatch → completion")
-			fmt.Println("  plan-decision     Tests PlanDecision CRUD, status transitions, cascade, and error handling")
-			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
-			fmt.Println("  graph-sources       Tests graph source registry: semsource readiness, GraphQL entities")
-			fmt.Println("  graph-tools         Tests all graph tool paths: summary, query, search")
-			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
-			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
-			fmt.Println("  plan-state-machine  Tests plan retry/complete/reject guard clauses")
-			fmt.Println("  contract-observability Tests contract/recovery/topology/execution summary surfaces")
+			for _, s := range scenarioList {
+				fmt.Printf("  %-*s  %s\n", width, s.Name(), s.Description())
+			}
 			fmt.Println()
-			fmt.Println("  Tier 2 — Pipeline Tests (mock LLM):")
-			fmt.Println("  hello-world                    Greenfield Python+JS: /goodbye endpoint")
-			fmt.Println("  hello-world-code-execution     Full TDD pipeline execution variant")
-			fmt.Println("  hello-world-requirement-retry  Requirement rejection → dirty-node retry variant")
-			fmt.Println("  hello-world-plan-rejection     Plan rejection → revision → approval variant")
-			fmt.Println("  hello-world-plan-exhaustion    Plan review exhaustion → escalation variant")
-			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
-			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
-			fmt.Println("  plan-stall-retry             Execution stall: failed req → retry → re-execute")
-			fmt.Println("  plan-stall-complete          Execution stall: failed req → force-complete")
-			fmt.Println("  plan-stall-reject            Execution stall: failed req → reject → retry")
-			fmt.Println("  qa-cycle                     QA phase at qa_level=unit: sandbox go test + qa-reviewer verdict pipeline")
-			fmt.Println("  qa-cycle-integration         QA phase at qa_level=integration: sandbox go test + qa-reviewer verdict pipeline")
-			fmt.Println()
-			fmt.Println("  Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic)")
-			fmt.Println("  have moved to Playwright E2E — see docs/e2e-scenario-archive.md")
-			fmt.Println()
+			fmt.Println("Real-LLM scenarios run via Playwright E2E (task e2e:ui).")
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
+	}
+}
+
+// buildScenarioList is the single source of truth for the runnable scenario
+// registry. run() executes from it and listCmd() derives the help output from
+// it, so the documented list can never drift from what `e2e <scenario>`
+// actually accepts. The order is the canonical run order.
+func buildScenarioList(cfg *config.Config) []scenarios.Scenario {
+	return []scenarios.Scenario{
+		// Component / API — REST, CRUD, and state-machine coverage. Most need
+		// no LLM; plan-workflow and requirement-crud use the mock planner only
+		// to bootstrap a plan to operate on.
+		scenarios.NewPlanWorkflowScenario(cfg),          // plan-workflow
+		scenarios.NewScenarioExecutionScenario(cfg),     // requirement-crud
+		scenarios.NewQuestionsAPIScenario(cfg),          // questions-api
+		scenarios.NewPlanDecisionScenario(cfg),          // plan-decision
+		scenarios.NewReactiveExecutionScenario(cfg),     // reactive-execution
+		scenarios.NewSandboxLifecycleScenario(cfg),      // sandbox-lifecycle
+		scenarios.NewGraphSourcesScenario(cfg),          // graph-sources (ADR-032)
+		scenarios.NewGraphToolsScenario(cfg),            // graph-tools
+		scenarios.NewDocIngestScenario(cfg),             // doc-ingest
+		scenarios.NewOpenSpecIngestScenario(cfg),        // openspec-ingest
+		scenarios.NewPlanStateMachineScenario(cfg),      // plan-state-machine
+		scenarios.NewStaleMutationScenario(cfg),         // stale-mutation
+		scenarios.NewContractObservabilityScenario(cfg), // contract-observability
+
+		// Mock pipeline — plan phase
+		scenarios.NewPlanPhaseScenario(cfg),                                   // plan-phase
+		scenarios.NewHelloWorldScenario(cfg),                                  // plan-smoke
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)), // plan-reject
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),  // plan-exhaust
+
+		// Mock pipeline — execution phase
+		scenarios.NewExecutionPhaseScenario(cfg),                               // execution-phase
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),    // exec-smoke
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()), // exec-requirement-retry
+		scenarios.NewParallelAssemblyScenario(cfg),                             // exec-ownership-gate (ADR-049 move-3)
+
+		// Mock pipeline — stall recovery
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithIterationExhaustion()),    // stall-iteration
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),    // stall-retry
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete), // stall-complete
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),   // stall-reject
+
+		// Mock pipeline — QA phase
+		scenarios.NewQACycleScenario(cfg),            // qa-unit
+		scenarios.NewQAIntegrationCycleScenario(cfg), // qa-integration
 	}
 }
 
@@ -182,43 +190,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	defer stop()
 
 	// Create scenario registry
-	scenarioList := []scenarios.Scenario{
-		// REST API scenarios
-		scenarios.NewPlanWorkflowScenario(cfg),
-		scenarios.NewQuestionsAPIScenario(cfg),
-		scenarios.NewScenarioExecutionScenario(cfg),
-		scenarios.NewReactiveExecutionScenario(cfg),
-		scenarios.NewPlanDecisionScenario(cfg),
-		scenarios.NewSandboxLifecycleScenario(cfg),
-		// Graph source registry (ADR-032)
-		scenarios.NewGraphSourcesScenario(cfg),
-		scenarios.NewGraphToolsScenario(cfg),
-		// Document processing scenarios (require source-ingester enabled)
-		scenarios.NewDocIngestScenario(cfg),
-		scenarios.NewOpenSpecIngestScenario(cfg),
-		// Tier 1: State machine guard clauses
-		scenarios.NewPlanStateMachineScenario(cfg),
-		scenarios.NewStaleMutationScenario(cfg),
-		scenarios.NewContractObservabilityScenario(cfg),
-		// Tier 2: Pipeline tests (mock LLM)
-		scenarios.NewPlanPhaseScenario(cfg),
-		scenarios.NewExecutionPhaseScenario(cfg),
-		// ADR-049 move-3: out-of-territory shared file caught at the dev node.
-		scenarios.NewParallelAssemblyScenario(cfg),
-		scenarios.NewHelloWorldScenario(cfg),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithIterationExhaustion()),
-		// Tier 2: Stall recovery variants (state machine refactor)
-		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
-		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete),
-		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),
-		// Tier 2: QA phase — sandbox executable QA + qa-reviewer verdict pipeline
-		scenarios.NewQACycleScenario(cfg),
-		scenarios.NewQAIntegrationCycleScenario(cfg),
-	}
+	scenarioList := buildScenarioList(cfg)
 
 	scenarioMap := make(map[string]scenarios.Scenario)
 	for _, s := range scenarioList {

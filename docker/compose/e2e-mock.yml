@@ -14,7 +14,7 @@ services:
       context: ../..
       dockerfile: docker/Dockerfile.mock-llm
     environment:
-      - MOCK_SCENARIO=${MOCK_SCENARIO:-hello-world}
+      - MOCK_SCENARIO=${MOCK_SCENARIO:-plan-smoke}
     ports:
       - "11535:11434"
     healthcheck:

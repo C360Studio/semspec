@@ -189,6 +189,9 @@ func (c *Component) handleGetScenario(w http.ResponseWriter, _ *http.Request, sl
 // handleCreateScenario handles POST /plans/{slug}/scenarios.
 // Single entity write — no batch save.
 func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request, slug string) {
+	// Serialize with async mutation handlers — see slugMutexes godoc.
+	defer c.lockSlug(slug)()
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var body CreateScenarioHTTPRequest
@@ -257,6 +260,9 @@ func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request,
 // handleUpdateScenario handles PATCH /plans/{slug}/scenarios/{scenarioId}.
 // Single entity write.
 func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
+	// Serialize with async mutation handlers — see slugMutexes godoc.
+	defer c.lockSlug(slug)()
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var body UpdateScenarioHTTPRequest
@@ -320,6 +326,9 @@ func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request,
 // handleDeleteScenario handles DELETE /plans/{slug}/scenarios/{scenarioId}.
 // Single tombstone write.
 func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
+	// Serialize with async mutation handlers — see slugMutexes godoc.
+	defer c.lockSlug(slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -336,7 +345,12 @@ func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request,
 		return
 	}
 
-	plan.Scenarios = append(plan.Scenarios[:idx], plan.Scenarios[idx+1:]...)
+	// Fresh slice rather than an in-place append-shift: ps.get's shallow copy
+	// aliases the cached plan's backing array that unlocked GET/List readers
+	// see (see handleDeleteRequirement's filter for the full reasoning).
+	remaining := make([]workflow.Scenario, 0, len(plan.Scenarios)-1)
+	remaining = append(remaining, plan.Scenarios[:idx]...)
+	plan.Scenarios = append(remaining, plan.Scenarios[idx+1:]...)
 	if err := ps.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to delete scenario", "scenario_id", scenarioID, "error", err)
 		http.Error(w, "Failed to delete scenario", http.StatusInternalServerError)

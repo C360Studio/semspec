@@ -1,0 +1,14 @@
+{
+  "content": "Implemented /goodbye endpoint with tests.",
+  "tool_calls": [
+    {
+      "id": "call_cycle0_submit",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Implemented /goodbye GET endpoint returning JSON, with a unit test.\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

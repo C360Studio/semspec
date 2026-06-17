@@ -575,7 +575,7 @@ func validateActors(d map[string]any) error {
 // integration entry.
 //
 // Relaxed 2026-05-15: previously rejected any empty array, which forced
-// pure-library scenarios (e.g. test/e2e/fixtures/mock-responses/qa-cycle*
+// pure-library scenarios (e.g. test/e2e/fixtures/mock-responses/qa-unit*
 // adding a Sub function to pkg/math) to declare stretched integrations
 // like "Go test toolchain" just to satisfy the validator. Now empty is
 // valid when the architecture has neither human actors nor integration_target

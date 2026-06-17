@@ -161,6 +161,11 @@ func (c *Component) handleGetRequirement(w http.ResponseWriter, _ *http.Request,
 // handleCreateRequirement handles POST /plans/{slug}/requirements.
 // Validates DAG with existing requirements + the new one, then saves.
 func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Request, slug string) {
+	// Serialize this get→mutate→save with the async NATS mutation handlers
+	// (see slugMutexes godoc); otherwise a concurrent wholesale requirement
+	// replace (e.g. requirements.generated) can clobber this HTTP write.
+	defer c.lockSlug(slug)()
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var body CreateRequirementHTTPRequest
@@ -226,6 +231,9 @@ func (c *Component) handleCreateRequirement(w http.ResponseWriter, r *http.Reque
 // handleUpdateRequirement handles PATCH /plans/{slug}/requirements/{reqId}.
 // Updates a single requirement. DAG validation only when dependencies change.
 func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
+	// Serialize with async mutation handlers — see slugMutexes godoc.
+	defer c.lockSlug(slug)()
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var body UpdateRequirementHTTPRequest
@@ -286,6 +294,9 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 // handleDeleteRequirement handles DELETE /plans/{slug}/requirements/{reqId}.
 // Cascade: deletes transitive dependents and their scenarios.
 func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
+	// Serialize with async mutation handlers — see slugMutexes godoc.
+	defer c.lockSlug(slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -304,8 +315,12 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 	// Compute blast radius.
 	toRemove := requirementBlastRadius(plan.Requirements, requirementID)
 
-	// Remove requirements in blast radius.
-	remaining := plan.Requirements[:0]
+	// Remove requirements in blast radius. Build a fresh slice rather than
+	// filtering in place: ps.get returns a shallow copy whose Requirements
+	// header aliases the cached plan's backing array, and the unlocked GET/List
+	// handlers read it concurrently — an in-place [:0] filter would mutate that
+	// shared array under them.
+	remaining := make([]workflow.Requirement, 0, len(plan.Requirements))
 	for _, req := range plan.Requirements {
 		if !toRemove[req.ID] {
 			remaining = append(remaining, req)
@@ -322,8 +337,9 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// Cascade: remove scenarios for deleted requirements.
-	survivingScenarios := plan.Scenarios[:0]
+	// Cascade: remove scenarios for deleted requirements (fresh slice — same
+	// shared-backing-array reasoning as the requirements filter above).
+	survivingScenarios := make([]workflow.Scenario, 0, len(plan.Scenarios))
 	for _, s := range plan.Scenarios {
 		if !toRemove[s.RequirementID] {
 			survivingScenarios = append(survivingScenarios, s)
@@ -394,6 +410,9 @@ func requirementBlastRadius(requirements []workflow.Requirement, rootID string) 
 // handleDeprecateRequirement handles POST /plans/{slug}/requirements/{reqId}/deprecate.
 // Cascade: deprecates transitive dependents and removes their scenarios.
 func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
+	// Serialize with async mutation handlers — see slugMutexes godoc.
+	defer c.lockSlug(slug)()
+
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -427,8 +446,10 @@ func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	// Cascade: remove scenarios for deprecated requirements.
-	surviving := plan.Scenarios[:0]
+	// Cascade: remove scenarios for deprecated requirements (fresh slice — the
+	// shallow copy from ps.get aliases the cached backing array that unlocked
+	// readers see; see the filter in handleDeleteRequirement).
+	surviving := make([]workflow.Scenario, 0, len(plan.Scenarios))
 	for _, s := range plan.Scenarios {
 		if !toDeprecate[s.RequirementID] {
 			surviving = append(surviving, s)

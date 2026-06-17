@@ -777,7 +777,7 @@ func (c *Component) checkAllApproved(s *projectStore) bool {
 // Tracking changes (rather than blindly overwriting) lets the PATCH handler
 // skip the save (and the UpdatedAt reseat that goes with it) on a true no-op
 // PATCH. Without this, committed e2e fixture project.json files drift on
-// every PATCH whose payload happens to match the current state (qa-cycle e2e
+// every PATCH whose payload happens to match the current state (qa-unit e2e
 // scenario re-asserts qa_level=integration against a fixture that already
 // has it).
 func applyConfigUpdate(pc workflow.ProjectConfig, req ConfigUpdateRequest) (workflow.ProjectConfig, bool) {
