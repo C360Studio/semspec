@@ -394,17 +394,18 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		}
 	}
 	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RoleArchitect,
-		Provider:          provider,
-		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
-		Domain:            "software",
-		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Standards:         prompt.LoadStandardsForRoleFromDisk(prompt.RoleArchitect),
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
-		ArchitectPrompt:   archCtx,
+		Role:               prompt.RoleArchitect,
+		Provider:           provider,
+		HasResponseFormat:  terminal.EndpointSupportsResponseFormatGated(endpoint, c.config.AttachResponseFormat),
+		Domain:             "software",
+		AvailableTools:     prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
+		SupportsTools:      true,
+		MaxTokens:          maxTokens,
+		Standards:          prompt.LoadStandardsForRoleFromDisk(prompt.RoleArchitect),
+		Persona:            prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
+		Vocabulary:         prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection: prompt.ArchitectContractProjection(plan),
+		ArchitectPrompt:    archCtx,
 	}
 
 	// Wire role-scoped lessons learned.

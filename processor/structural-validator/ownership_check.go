@@ -75,6 +75,11 @@ type ownershipVerdict struct {
 	// converge on and collide over at assembly; it signals the architect's
 	// partition or the story's FilesOwned is wrong.
 	NewUnownedOutOfTerritory []string
+	// NewTopologyControlled are newly-created build/workspace/package manifests
+	// or standalone-project files outside the story's declared ownership. These
+	// change repository topology and are a planning gap, not an in-loop class
+	// split or harmless advisory artifact.
+	NewTopologyControlled []string
 	// ModifiedUnowned are pre-existing non-doc files a non-owner modified
 	// (advisory — source/build edits usually merge; surfaced, not blocked).
 	ModifiedUnowned []string
@@ -100,6 +105,7 @@ func (v ownershipVerdict) clean() bool {
 	return len(v.JunkViolations) == 0 &&
 		len(v.ModifiedDocUnowned) == 0 &&
 		len(v.NewUnownedOutOfTerritory) == 0 &&
+		len(v.NewTopologyControlled) == 0 &&
 		len(v.RootScratch) == 0
 }
 
@@ -278,6 +284,12 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 		switch {
 		case c.isNew():
 			switch {
+			case workflow.IsTopologyControlledPath(norm):
+				// Creating a new build/workspace/package root outside declared
+				// ownership is a topology planning gap. Do this before the root
+				// non-source advisory branch so settings.gradle/package.json/
+				// gradlew cannot sneak through as "just a config file".
+				v.NewTopologyControlled = append(v.NewTopologyControlled, norm)
 			case workflow.IsDocumentationPath(norm):
 				// A NEW unowned doc is hygiene-only (an undeclared coverage
 				// matrix / scratch note); advisory, surfaced to the reviewer.
@@ -426,23 +438,35 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 	results = append(results, containment)
 
 	// Required gate 2 (ADR-049 move 3): a new source/test file created OUTSIDE
-	// the story's declared territory is a planning/ownership gap — the developer
-	// cannot fix it by retrying. Emitted as its own check so the execution-
-	// manager router fast-fails it to recovery (architecture_revise /
-	// story_reprepare) rather than burning the TDD budget. Only present when the
-	// gap exists, so a clean run carries no extra Required row.
-	if len(verdict.NewUnownedOutOfTerritory) > 0 {
+	// the story's declared territory, or a new topology-controlled project file
+	// created outside declared ownership, is a planning/ownership gap — the
+	// developer cannot fix it by retrying. Emitted as its own check so the
+	// execution-manager router fast-fails it to recovery (architecture_revise /
+	// story_reprepare) rather than burning the TDD budget. Only present when
+	// the gap exists, so a clean run carries no extra Required row.
+	if len(verdict.NewUnownedOutOfTerritory) > 0 || len(verdict.NewTopologyControlled) > 0 {
+		var b strings.Builder
+		if len(verdict.NewUnownedOutOfTerritory) > 0 {
+			fmt.Fprintf(&b, "New source/test file(s) created outside this story's declared file scope: %s. "+
+				"The story owns paths under: %s. A file the implementation requires but no story owns is created "+
+				"identically by every parallel story and collides at assembly — this is a planning/ownership gap "+
+				"(the component boundary or the story's files_owned is wrong), not a developer error. ",
+				strings.Join(verdict.NewUnownedOutOfTerritory, ", "), strings.Join(owned, ", "))
+		}
+		if len(verdict.NewTopologyControlled) > 0 {
+			fmt.Fprintf(&b, "New topology-controlled project/build file(s) created outside this story's declared file scope: %s. "+
+				"Build/workspace/package manifests and standalone wrapper files change repository topology; creating them from a dev loop "+
+				"usually means the architecture/story contract introduced a clean-room project root instead of integrating with the brownfield baseline. "+
+				"Owned paths: %s.",
+				strings.Join(verdict.NewTopologyControlled, ", "), strings.Join(owned, ", "))
+		}
 		results = append(results, payloads.CheckResult{
 			Name:     payloads.CheckFileOwnershipPlanningGap,
 			Passed:   false,
 			Required: true,
 			Command:  cmd,
 			ExitCode: 1,
-			Stderr: fmt.Sprintf("New source/test file(s) created outside this story's declared file scope: %s. "+
-				"The story owns paths under: %s. A file the implementation requires but no story owns is created "+
-				"identically by every parallel story and collides at assembly — this is a planning/ownership gap "+
-				"(the component boundary or the story's files_owned is wrong), not a developer error.",
-				strings.Join(verdict.NewUnownedOutOfTerritory, ", "), strings.Join(owned, ", ")),
+			Stderr:   strings.TrimSpace(b.String()),
 			Duration: duration,
 		})
 	}

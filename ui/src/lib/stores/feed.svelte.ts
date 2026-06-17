@@ -9,6 +9,14 @@ import type {
 import type { Question } from '$lib/types';
 import { questionsStore } from './questions.svelte';
 import { settingsStore } from './settings.svelte';
+import {
+	annotateExecutionSummary,
+	classifyExecutionFeedKind,
+	classifyPlanFeedKind,
+	planFeedEventKey
+} from './feedEvents';
+
+const RECONNECT_GRACE_MS = 15_000;
 
 /**
  * Plan-scoped feed store. Aggregates plan SSE + execution SSE + questions
@@ -21,6 +29,12 @@ import { settingsStore } from './settings.svelte';
 class FeedStore {
 	events = $state<FeedEvent[]>([]);
 	connected = $state(false);
+	planStreamConnected = $state(false);
+	executionStreamConnected = $state(false);
+	streamEverConnected = $state(false);
+	lastPlanUpdateAt = $state<string | null>(null);
+	lastExecutionUpdateAt = $state<string | null>(null);
+	lastSuccessfulUpdateAt = $state<string | null>(null);
 	currentSlug = $state<string | null>(null);
 	requirementStages = $state<Map<string, RequirementSSEPayload>>(new Map());
 	/** Latest task SSE payload keyed by task_id — consumers like PlanCard derive
@@ -41,8 +55,11 @@ class FeedStore {
 
 	private planSSE: EventSource | null = null;
 	private execSSE: EventSource | null = null;
+	private planReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private execReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private maxEvents = $derived(settingsStore.activityLimit);
 	private lastPlanStage: string | null = null;
+	private lastPlanEventKey: string | null = null;
 	private seenQuestionIds = new Set<string>();
 	private planStageCallbacks: Set<(stage: string) => void> = new Set();
 
@@ -65,14 +82,21 @@ class FeedStore {
 			if (this.currentSlug === slug && this.planSSE) return;
 
 			this.currentSlug = slug;
+			this.connected = false;
+			this.planStreamConnected = false;
+			this.executionStreamConnected = false;
+			this.streamEverConnected = false;
+			this.lastPlanUpdateAt = null;
+			this.lastExecutionUpdateAt = null;
+			this.lastSuccessfulUpdateAt = null;
 			this.lastPlanStage = null;
+			this.lastPlanEventKey = null;
 			this.seenQuestionIds.clear();
 
 			// Only connect plan SSE initially. Execution SSE connects lazily
 			// when the plan reaches execution stage — avoids consuming browser
 			// connections (HTTP/1.1 limit of 6 per origin) during planning phase.
 			this.connectPlanSSE(slug);
-			this.connected = true;
 		});
 	}
 
@@ -82,11 +106,21 @@ class FeedStore {
 			this.planSSE = null;
 			this.execSSE?.close();
 			this.execSSE = null;
+			this.clearReconnectTimer('plan');
+			this.clearReconnectTimer('execution');
 			this.connected = false;
+			this.planStreamConnected = false;
+			this.executionStreamConnected = false;
+			this.streamEverConnected = false;
+			this.lastPlanUpdateAt = null;
+			this.lastExecutionUpdateAt = null;
+			this.lastSuccessfulUpdateAt = null;
 			this.currentSlug = null;
 			this.lastPlanStage = null;
+			this.lastPlanEventKey = null;
 			this.seenQuestionIds.clear();
 			this.requirementStages = new Map();
+			this.taskStages = new Map();
 			this.currentPlan = null;
 		});
 	}
@@ -111,6 +145,7 @@ class FeedStore {
 			timestamp: question.answered_at ?? question.created_at ?? new Date().toISOString(),
 			source: 'question',
 			type,
+			kind: 'question',
 			summary: summaries[type] ?? type,
 			slug: question.plan_slug,
 			data: question as unknown as Record<string, unknown>
@@ -120,8 +155,11 @@ class FeedStore {
 	clear(): void {
 		this.events = [];
 		this.lastPlanStage = null;
+		this.lastPlanEventKey = null;
 		this.seenQuestionIds.clear();
 		this.currentPlan = null;
+		this.requirementStages = new Map();
+		this.taskStages = new Map();
 	}
 
 	// ── Private ────────────────────────────────────────────────────
@@ -130,7 +168,7 @@ class FeedStore {
 		const sse = new EventSource(`/plan-manager/plans/${slug}/stream`);
 
 		sse.addEventListener('connected', () => {
-			// Plan SSE connected
+			this.markPlanConnected();
 		});
 
 		sse.addEventListener('plan_updated', (event) => {
@@ -139,11 +177,13 @@ class FeedStore {
 		});
 
 		sse.addEventListener('plan_deleted', () => {
+			const timestamp = this.markPlanUpdated();
 			this.addEvent({
 				id: `plan-deleted-${Date.now()}`,
-				timestamp: new Date().toISOString(),
+				timestamp,
 				source: 'plan',
 				type: 'plan_deleted',
+				kind: 'plan_deleted',
 				summary: 'Plan deleted',
 				slug
 			});
@@ -157,7 +197,7 @@ class FeedStore {
 		});
 
 		sse.onerror = () => {
-			// Will auto-reconnect via EventSource
+			this.handleStreamError('plan', sse.readyState);
 		};
 
 		this.planSSE = sse;
@@ -167,7 +207,7 @@ class FeedStore {
 		const sse = new EventSource(`/execution-manager/plans/${slug}/stream`);
 
 		sse.addEventListener('connected', () => {
-			// Execution SSE connected
+			this.markExecutionConnected();
 		});
 
 		for (const name of ['task_updated', 'task_completed']) {
@@ -185,16 +225,21 @@ class FeedStore {
 		}
 
 		sse.onerror = () => {
-			// Will auto-reconnect via EventSource
+			this.handleStreamError('execution', sse.readyState);
 		};
 
 		this.execSSE = sse;
 	}
 
 	private handlePlanUpdated(payload: PlanSSEPayload): void {
+		const timestamp = this.markPlanUpdated();
 		const stage = payload.stage;
 		const prevStage = this.lastPlanStage;
+		const kind = classifyPlanFeedKind(payload);
+		const eventKey = planFeedEventKey(payload, kind);
+		const prevEventKey = this.lastPlanEventKey;
 		this.lastPlanStage = stage;
+		this.lastPlanEventKey = eventKey;
 
 		// Mirror the full plan payload into the store on EVERY update (not just
 		// stage transitions) — within-stage updates still carry meaningful
@@ -208,8 +253,9 @@ class FeedStore {
 			this.connectExecutionSSE(this.currentSlug);
 		}
 
-		// Skip duplicate stage events — no feed entry, no invalidation needed.
-		if (prevStage === stage) {
+		// Skip exact duplicate lifecycle rows, but keep same-stage changes such
+		// as a new recovery decision or a wait/stale transition visible.
+		if (prevStage === stage && prevEventKey === eventKey) {
 			return;
 		}
 
@@ -219,9 +265,10 @@ class FeedStore {
 
 		const event: FeedEvent = {
 			id: `plan-${payload.slug}-${stage}-${Date.now()}`,
-			timestamp: new Date().toISOString(),
-			source: 'plan',
+			timestamp,
+			source: kind === 'execution_phase' ? 'execution' : 'plan',
 			type: 'plan_updated',
+			kind,
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
@@ -235,6 +282,7 @@ class FeedStore {
 	}
 
 	private handleTaskUpdated(payload: TaskSSEPayload, eventType: string): void {
+		const timestamp = this.markExecutionUpdated();
 		const title = payload.title?.slice(0, 50) ?? payload.task_id;
 		const stage = payload.stage;
 		const iter = payload.iteration > 1 ? ` (iter ${payload.iteration})` : '';
@@ -252,12 +300,15 @@ class FeedStore {
 		} else {
 			summary = `Task ${formatTaskStage(stage)}: ${title}${iter}${cycle}`;
 		}
+		const kind = classifyExecutionFeedKind(payload, this.currentSlug, 'execution_task');
+		summary = annotateExecutionSummary(summary, kind);
 
 		const event: FeedEvent = {
 			id: `task-${payload.task_id}-${stage}-${Date.now()}`,
-			timestamp: new Date().toISOString(),
+			timestamp,
 			source: 'execution',
 			type: eventType,
+			kind,
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
@@ -267,10 +318,13 @@ class FeedStore {
 		// Mirror the latest payload per task so PlanCard / detail views can derive
 		// "is this working?" signals without re-wiring the SSE stream. Must replace
 		// the Map to trigger Svelte 5 reactivity (Maps are not deeply reactive).
-		this.taskStages = new Map(this.taskStages).set(payload.task_id, payload);
+		if (kind === 'execution_task') {
+			this.taskStages = new Map(this.taskStages).set(payload.task_id, payload);
+		}
 	}
 
 	private handleRequirementUpdated(payload: RequirementSSEPayload, eventType: string): void {
+		const timestamp = this.markExecutionUpdated();
 		const title = payload.title?.slice(0, 50) ?? payload.requirement_id;
 		const stage = payload.stage;
 		const progress = payload.node_count
@@ -283,12 +337,15 @@ class FeedStore {
 		} else {
 			summary = `Requirement ${formatReqStage(stage)}: ${title}${progress}`;
 		}
+		const kind = classifyExecutionFeedKind(payload, this.currentSlug, 'execution_requirement');
+		summary = annotateExecutionSummary(summary, kind);
 
 		const event: FeedEvent = {
 			id: `req-${payload.requirement_id}-${stage}-${Date.now()}`,
-			timestamp: new Date().toISOString(),
+			timestamp,
 			source: 'execution',
 			type: eventType,
+			kind,
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
@@ -297,11 +354,93 @@ class FeedStore {
 
 		// Update live execution stage for this requirement.
 		// Must create a new Map to trigger Svelte 5 reactivity — Maps are not deeply reactive.
-		this.requirementStages = new Map(this.requirementStages).set(payload.requirement_id, payload);
+		if (kind === 'execution_requirement') {
+			this.requirementStages = new Map(this.requirementStages).set(payload.requirement_id, payload);
+		}
 	}
 
 	private addEvent(event: FeedEvent): void {
 		this.events = [...this.events.slice(-(this.maxEvents - 1)), event];
+	}
+
+	private markPlanConnected(): void {
+		this.clearReconnectTimer('plan');
+		this.planStreamConnected = true;
+		this.streamEverConnected = true;
+		this.updateAggregateConnection();
+	}
+
+	private markExecutionConnected(): void {
+		this.clearReconnectTimer('execution');
+		this.executionStreamConnected = true;
+		this.streamEverConnected = true;
+		this.updateAggregateConnection();
+	}
+
+	private markPlanUpdated(): string {
+		const timestamp = new Date().toISOString();
+		this.lastPlanUpdateAt = timestamp;
+		this.lastSuccessfulUpdateAt = timestamp;
+		this.markPlanConnected();
+		return timestamp;
+	}
+
+	private markExecutionUpdated(): string {
+		const timestamp = new Date().toISOString();
+		this.lastExecutionUpdateAt = timestamp;
+		this.lastSuccessfulUpdateAt = timestamp;
+		this.markExecutionConnected();
+		return timestamp;
+	}
+
+	private handleStreamError(stream: 'plan' | 'execution', readyState: number | undefined): void {
+		const closed = typeof EventSource !== 'undefined' ? EventSource.CLOSED : 2;
+		if (readyState === closed) {
+			this.markStreamDisconnected(stream);
+			return;
+		}
+
+		const existing = stream === 'plan' ? this.planReconnectTimer : this.execReconnectTimer;
+		if (existing) return;
+		const timer = setTimeout(() => {
+			if (stream === 'plan') {
+				this.planReconnectTimer = null;
+			} else {
+				this.execReconnectTimer = null;
+			}
+			this.markStreamDisconnected(stream);
+		}, RECONNECT_GRACE_MS);
+
+		if (stream === 'plan') {
+			this.planReconnectTimer = timer;
+		} else {
+			this.execReconnectTimer = timer;
+		}
+	}
+
+	private markStreamDisconnected(stream: 'plan' | 'execution'): void {
+		this.clearReconnectTimer(stream);
+		if (stream === 'plan') {
+			this.planStreamConnected = false;
+		} else {
+			this.executionStreamConnected = false;
+		}
+		this.updateAggregateConnection();
+	}
+
+	private clearReconnectTimer(stream: 'plan' | 'execution'): void {
+		if (stream === 'plan' && this.planReconnectTimer) {
+			clearTimeout(this.planReconnectTimer);
+			this.planReconnectTimer = null;
+		}
+		if (stream === 'execution' && this.execReconnectTimer) {
+			clearTimeout(this.execReconnectTimer);
+			this.execReconnectTimer = null;
+		}
+	}
+
+	private updateAggregateConnection(): void {
+		this.connected = this.planStreamConnected || this.executionStreamConnected;
 	}
 }
 

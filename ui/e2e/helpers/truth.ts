@@ -170,6 +170,28 @@ export async function stubHealth(
 	});
 }
 
+export async function stubProjectConfigured(page: Page): Promise<void> {
+	await page.route('**/project-manager/status', async (route) => {
+		if (route.request().method() !== 'GET') {
+			await route.fallback();
+			return;
+		}
+		await fulfillJSON(route, {
+			initialized: true,
+			project_name: 'workspace ui test',
+			project_description: 'A test project for UI development',
+			project_org: 'semspec',
+			project_platform: 'local',
+			entity_prefix: 'semspec.local',
+			has_project_json: true,
+			has_checklist: true,
+			has_standards: true,
+			sop_count: 0,
+			workspace_path: '/workspace'
+		});
+	});
+}
+
 export interface ActivityEventSeed {
 	loop_id: string;
 	type: 'loop_created' | 'loop_updated' | 'loop_deleted' | 'loop_completed';
@@ -457,6 +479,7 @@ export async function stubBoardBackend(
 		activityEvents?: ActivityEventSeed[];
 	} = {}
 ): Promise<void> {
+	await stubProjectConfigured(page);
 	await stubPlans(page, args.plans ?? []);
 	await stubLoops(page, args.loops ?? []);
 	if (args.health !== undefined) {

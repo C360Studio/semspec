@@ -117,6 +117,36 @@ func TestReviseArchitectureState_NoPriorArchitecture(t *testing.T) {
 	}
 }
 
+func TestReviseArchitectureState_FromRejectedForPostQARecovery(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:         "mavlink-hard",
+		Status:       workflow.StatusRejected,
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
+		Stories:      []workflow.Story{{ID: "story-1"}},
+		Scenarios:    []workflow.Scenario{{ID: "scenario-1"}},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:        "plan-decision.mavlink-hard.recovery.post-qa",
+		Kind:      workflow.PlanDecisionKindArchitectureRevise,
+		Rationale: "QA found the architecture dependency contract was wrong.",
+	}
+
+	transitioned, from := reviseArchitectureState(plan, proposal)
+
+	if !transitioned {
+		t.Fatalf("expected rejected plan to transition for post-QA architecture recovery, from=%q", from)
+	}
+	if from != workflow.StatusRejected {
+		t.Fatalf("from = %s, want rejected", from)
+	}
+	if plan.Status != workflow.StatusRequirementsGenerated {
+		t.Fatalf("Status = %s, want requirements_generated", plan.Status)
+	}
+	if plan.Architecture != nil || plan.Stories != nil || plan.Scenarios != nil {
+		t.Fatalf("architecture/stories/scenarios were not wiped: arch=%v stories=%v scenarios=%v", plan.Architecture, plan.Stories, plan.Scenarios)
+	}
+}
+
 func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *testing.T) {
 	c := setupTestComponent(t)
 	c.execBucket = resetKVStub{
@@ -188,17 +218,135 @@ func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *te
 	}
 }
 
-func TestPlanDecisionResetScope_UnscopedFallsBackToAll(t *testing.T) {
-	scope, reqIDs := planDecisionResetScope(&workflow.Plan{
+func TestPlanDecisionResetScope_UnscopedRequiresExplicitEvidence(t *testing.T) {
+	scope, reqIDs, err := planDecisionResetScope(&workflow.Plan{
 		Requirements: []workflow.Requirement{{ID: "contract"}},
 	}, &workflow.PlanDecision{Kind: workflow.PlanDecisionKindArchitectureRevise})
 
+	if err == nil {
+		t.Fatal("planDecisionResetScope returned nil error; want explicit evidence required for unscoped reset")
+	}
+	if scope != "" {
+		t.Fatalf("scope = %q, want empty on rejected unscoped reset", scope)
+	}
+	if reqIDs != nil {
+		t.Fatalf("reqIDs = %v, want nil", reqIDs)
+	}
+}
+
+func TestPlanDecisionResetScope_UnscopedRequiresWholePhaseEvidence(t *testing.T) {
+	scope, reqIDs, err := planDecisionResetScope(&workflow.Plan{
+		Requirements: []workflow.Requirement{{ID: "contract"}},
+	}, &workflow.PlanDecision{
+		Kind: workflow.PlanDecisionKindArchitectureRevise,
+		ContractImpact: &workflow.ContractImpact{
+			Kind:        workflow.ContractImpactChange,
+			Summary:     "The accepted decision invalidates the architecture phase.",
+			AffectedIDs: []string{"contract.phase:architecture"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("planDecisionResetScope returned error: %v", err)
+	}
 	if scope != "all" {
 		t.Fatalf("scope = %q, want all", scope)
 	}
 	if reqIDs != nil {
 		t.Fatalf("reqIDs = %v, want nil", reqIDs)
 	}
+}
+
+func TestApplyArchitectureRevise_UnscopedWithoutPhaseEvidenceLeavesPlanUntouched(t *testing.T) {
+	c := setupTestComponent(t)
+	plan := &workflow.Plan{
+		Slug:         "demo",
+		Status:       workflow.StatusImplementing,
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior"},
+		Stories:      []workflow.Story{{ID: "story.unrelated"}},
+		Scenarios:    []workflow.Scenario{{ID: "scenario.unrelated"}},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:        "plan-decision.demo.recovery.unscoped",
+		Kind:      workflow.PlanDecisionKindArchitectureRevise,
+		Rationale: "Architecture needs another look, but no target was named.",
+		ContractImpact: &workflow.ContractImpact{
+			Kind:    workflow.ContractImpactRefine,
+			Summary: "No whole-phase contract change.",
+		},
+	}
+
+	if err := c.applyArchitectureRevise(context.Background(), plan, proposal); err == nil {
+		t.Fatal("applyArchitectureRevise returned nil; want unscoped reset rejected")
+	}
+	if plan.Status != workflow.StatusImplementing {
+		t.Fatalf("Status = %s, want implementing", plan.Status)
+	}
+	if plan.Architecture == nil || plan.Architecture.DataFlow != "prior" {
+		t.Fatalf("Architecture = %+v, want original preserved", plan.Architecture)
+	}
+	if len(plan.Stories) != 1 || plan.Stories[0].ID != "story.unrelated" {
+		t.Fatalf("Stories = %+v, want original preserved", plan.Stories)
+	}
+	if len(plan.Scenarios) != 1 || plan.Scenarios[0].ID != "scenario.unrelated" {
+		t.Fatalf("Scenarios = %+v, want original preserved", plan.Scenarios)
+	}
+}
+
+func TestApplyArchitectureRevise_PreservesUnrelatedCompletedExecutions(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.contract",
+			"task.demo.node-contract",
+			"req.demo.consumer",
+			"task.demo.node-consumer",
+			"req.demo.completed-unrelated",
+			"task.demo.node-completed-unrelated",
+		},
+		values: map[string][]byte{
+			"task.demo.node-contract":            []byte(`{"requirement_id":"contract","stage":"escalated"}`),
+			"task.demo.node-consumer":            []byte(`{"requirement_id":"consumer","stage":"pending"}`),
+			"task.demo.node-completed-unrelated": []byte(`{"requirement_id":"completed-unrelated","stage":"completed"}`),
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	plan := &workflow.Plan{
+		Slug:   "demo",
+		Status: workflow.StatusImplementing,
+		Requirements: []workflow.Requirement{
+			{ID: "contract"},
+			{ID: "consumer", DependsOn: []string{"contract"}},
+			{ID: "completed-unrelated"},
+		},
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.demo.recovery.arch",
+		Kind:           workflow.PlanDecisionKindArchitectureRevise,
+		AffectedReqIDs: []string{"contract"},
+		Rationale:      "Repair the architecture contract for the dependency branch.",
+	}
+
+	if err := c.applyArchitectureRevise(context.Background(), plan, proposal); err != nil {
+		t.Fatalf("applyArchitectureRevise: %v", err)
+	}
+
+	assertResetKeys(t, reset, []string{
+		"req.demo.contract",
+		"task.demo.node-contract",
+		"req.demo.consumer",
+		"task.demo.node-consumer",
+	})
+	assertNoResetKeys(t, reset, []string{
+		"req.demo.completed-unrelated",
+		"task.demo.node-completed-unrelated",
+	})
 }
 
 func assertResetKeys(t *testing.T, got []string, want []string) {

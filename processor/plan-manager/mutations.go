@@ -701,7 +701,25 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	plan.Goal = req.Goal
 	plan.Context = req.Context
 	plan.Constraints = req.Constraints
+	if plan.Contract == nil {
+		brief := req.Context
+		if brief == "" {
+			brief = req.Goal
+		}
+		plan.EnsureContractPacket(brief, time.Now())
+	}
+	if plan.Contract != nil && len(plan.Contract.Constraints) == 0 && len(req.Constraints) > 0 {
+		plan.Contract.Constraints = append([]string(nil), req.Constraints...)
+	}
 	if req.Scope != nil {
+		if plan.Contract != nil && contractScopeSnapshotEmpty(plan.Contract.Scope) {
+			plan.Contract.Scope = workflow.NewContractScopeSnapshot(*req.Scope)
+		} else if missing := unauthorizedContractScopeDrops(plan.Contract, *req.Scope); len(missing) > 0 {
+			return MutationResponse{
+				Success: false,
+				Error:   fmt.Sprintf("scope shrinkage requires accepted amendment provenance for dropped contract obligations: %s", strings.Join(missing, ", ")),
+			}
+		}
 		plan.Scope = *req.Scope
 	}
 	plan.SkipArchitecture = req.SkipArchitecture
@@ -714,6 +732,152 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	c.logger.Info("Plan drafted via mutation", "slug", req.Slug, "goal", req.Goal,
 		"skip_architecture", req.SkipArchitecture)
 	return MutationResponse{Success: true}
+}
+
+type contractScopeDrop struct {
+	Origin string
+	Path   string
+}
+
+func contractScopeSnapshotEmpty(scope workflow.ContractScopeSnapshot) bool {
+	return len(scope.Include) == 0 &&
+		len(scope.Exclude) == 0 &&
+		len(scope.DoNotTouch) == 0 &&
+		len(scope.Create) == 0
+}
+
+func unauthorizedContractScopeDrops(contract *workflow.ContractPacket, next workflow.Scope) []string {
+	if contract == nil {
+		return nil
+	}
+	amended := contractChangedScopeIDs(contract)
+	active := scopeActiveSet(next.Create, next.Include)
+	protected := scopePathSet(next.DoNotTouch)
+
+	var missing []string
+	for _, obligation := range contractScopeDropObligations(contract.Scope) {
+		if contractScopeDropAmended(obligation.Origin, obligation.Path, amended) {
+			continue
+		}
+		present := false
+		switch obligation.Origin {
+		case "do_not_touch":
+			_, present = protected[obligation.Path]
+		default:
+			_, present = active[obligation.Path]
+		}
+		if !present {
+			missing = append(missing, fmt.Sprintf("contract.scope.%s:%s", obligation.Origin, obligation.Path))
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func contractScopeDropObligations(scope workflow.ContractScopeSnapshot) []contractScopeDrop {
+	seen := map[string]struct{}{}
+	var out []contractScopeDrop
+	add := func(origin, raw string) {
+		p := workflow.NormalizeFilePath(raw)
+		if p == "" {
+			return
+		}
+		key := origin + "\x00" + p
+		if _, dup := seen[key]; dup {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, contractScopeDrop{Origin: origin, Path: p})
+	}
+	for _, p := range scope.Create {
+		add("create", p)
+	}
+	for _, p := range scope.Include {
+		add("include", p)
+	}
+	for _, p := range scope.DoNotTouch {
+		add("do_not_touch", p)
+	}
+	return out
+}
+
+func scopeActiveSet(create, include []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, p := range append(append([]string{}, create...), include...) {
+		if normalized := workflow.NormalizeFilePath(p); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
+}
+
+func scopePathSet(paths []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, p := range paths {
+		if normalized := workflow.NormalizeFilePath(p); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
+}
+
+func contractChangedScopeIDs(contract *workflow.ContractPacket) map[string]struct{} {
+	out := map[string]struct{}{}
+	if contract == nil {
+		return out
+	}
+	for _, amendment := range contract.Amendments {
+		if amendment.Impact.Kind != workflow.ContractImpactChange {
+			continue
+		}
+		for _, id := range amendment.Impact.AffectedIDs {
+			addChangedScopeID(out, id)
+		}
+	}
+	return out
+}
+
+func addChangedScopeID(out map[string]struct{}, id string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	out[id] = struct{}{}
+	if p := workflow.NormalizeFilePath(id); p != "" {
+		out[p] = struct{}{}
+	}
+	for _, prefix := range []string{
+		"scope:",
+		"scope.create:",
+		"scope.include:",
+		"scope.do_not_touch:",
+		"contract.scope:",
+		"contract.scope.create:",
+		"contract.scope.include:",
+		"contract.scope.do_not_touch:",
+	} {
+		if strings.HasPrefix(id, prefix) {
+			if p := workflow.NormalizeFilePath(strings.TrimPrefix(id, prefix)); p != "" {
+				out[p] = struct{}{}
+			}
+		}
+	}
+}
+
+func contractScopeDropAmended(origin, path string, amended map[string]struct{}) bool {
+	candidates := []string{
+		path,
+		"scope:" + path,
+		"scope." + origin + ":" + path,
+		"contract.scope:" + path,
+		"contract.scope." + origin + ":" + path,
+	}
+	for _, candidate := range candidates {
+		if _, ok := amended[candidate]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // handleReviewedMutation updates plan status to reviewed after reviewer verdict.
@@ -1300,17 +1464,20 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 	}
 
 	current := plan.EffectiveStatus()
-	if current != workflow.StatusReadyForQA {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in ready_for_qa, got %s", current)}
+	if current != workflow.StatusReadyForQA && current != workflow.StatusReviewingQA {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in ready_for_qa or reviewing_qa, got %s", current)}
 	}
-	if !current.CanTransitionTo(workflow.StatusReviewingQA) {
+	alreadyReviewing := current == workflow.StatusReviewingQA
+	if !alreadyReviewing && !current.CanTransitionTo(workflow.StatusReviewingQA) {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → reviewing_qa", current)}
 	}
 
 	if req.QARun != nil {
 		plan.QARun = req.QARun
 	}
-	plan.Status = workflow.StatusReviewingQA
+	if !alreadyReviewing {
+		plan.Status = workflow.StatusReviewingQA
+	}
 
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan after QA start", "slug", req.Slug, "error", err)
@@ -1320,7 +1487,9 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 	// Cold-path safety net: guarantee the QA worktree (staged at convergence)
 	// exists before qa-reviewer dispatches Murat, so the release-gate loop
 	// inspects the assembled implementation rather than the repo root.
-	c.ensureQAWorktree(ctx, plan)
+	if !alreadyReviewing {
+		c.ensureQAWorktree(ctx, plan)
+	}
 
 	level := plan.EffectiveQALevel()
 	c.logger.Info("QA review started",
@@ -1582,7 +1751,11 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 		return MutationResponse{Success: true}
 	}
 
-	plan, err := ps.create(ctx, slug, req.Title, c.resolveProjectQALevel(), nil)
+	brief := req.Description
+	if brief == "" {
+		brief = req.Title
+	}
+	plan, err := ps.create(ctx, slug, req.Title, brief, c.resolveProjectQALevel(), nil)
 	if err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("create plan: %v", err)}
 	}
@@ -1894,7 +2067,10 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 	// replies and must finish even if the caller's request context is
 	// cancelled mid-accept (closes go-reviewer H2/M3). Clearing EXECUTION_STATES
 	// stops the re-run from fast-completing via the executor's Tier-1 dedup.
-	resetScope, resetReqIDs := planDecisionResetScope(plan, proposal)
+	resetScope, resetReqIDs, err := planDecisionResetScope(plan, proposal)
+	if err != nil {
+		return err
+	}
 	resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), plan.Slug, resetScope, resetReqIDs)
 	if err != nil {
 		return fmt.Errorf("reset requirement executions for architecture_revise: %w", err)
@@ -1933,6 +2109,11 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 // watcher event. An out-of-window plan (already moved past the source status
 // while a human-review window was open) is left in place with a warning.
 func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		return err
+	}
+	applyAcceptedContractAmendment(plan, proposal)
+
 	if proposal.Kind == workflow.PlanDecisionKindArchitectureRevise {
 		return c.applyArchitectureRevise(ctx, plan, proposal)
 	}
@@ -1949,6 +2130,76 @@ func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *wo
 	return nil
 }
 
+func validatePlanDecisionAcceptContractImpact(proposal *workflow.PlanDecision) error {
+	if !planDecisionRequiresContractChange(proposal) {
+		return nil
+	}
+	if proposal.ContractImpact == nil || proposal.ContractImpact.Kind != workflow.ContractImpactChange {
+		return fmt.Errorf("accepting %s requires contract impact kind %q", proposal.Kind, workflow.ContractImpactChange)
+	}
+	return nil
+}
+
+func planDecisionRequiresContractChange(proposal *workflow.PlanDecision) bool {
+	if proposal == nil {
+		return false
+	}
+	switch proposal.Kind {
+	case workflow.PlanDecisionKindArchitectureRevise:
+		return true
+	case workflow.PlanDecisionKindRequirementChange:
+		return planDecisionMentionsRecoveryAction(proposal, "narrow_scope")
+	default:
+		return false
+	}
+}
+
+func planDecisionMentionsRecoveryAction(proposal *workflow.PlanDecision, action string) bool {
+	haystack := strings.ToLower(proposal.Title + "\n" + proposal.Rationale)
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return false
+	}
+	return strings.Contains(haystack, action) ||
+		strings.Contains(haystack, strings.ReplaceAll(action, "_", " "))
+}
+
+func applyAcceptedContractAmendment(plan *workflow.Plan, proposal *workflow.PlanDecision) {
+	if plan == nil || proposal == nil || proposal.ContractImpact == nil {
+		return
+	}
+	if proposal.ContractImpact.Kind != workflow.ContractImpactChange {
+		return
+	}
+	now := time.Now()
+	if proposal.DecidedAt != nil {
+		now = *proposal.DecidedAt
+	}
+	if plan.Contract == nil {
+		brief := plan.Context
+		if brief == "" {
+			brief = plan.Goal
+		}
+		plan.EnsureContractPacket(brief, now)
+	}
+	if plan.Contract == nil {
+		return
+	}
+	for _, existing := range plan.Contract.Amendments {
+		if existing.PlanDecisionID == proposal.ID {
+			return
+		}
+	}
+	impact := *proposal.ContractImpact
+	impact.AffectedIDs = append([]string(nil), proposal.ContractImpact.AffectedIDs...)
+	plan.Contract.Amendments = append(plan.Contract.Amendments, workflow.ContractAmendment{
+		ID:             "contract-amendment." + workflow.HashInstanceID(plan.Slug, proposal.ID),
+		PlanDecisionID: proposal.ID,
+		Impact:         impact,
+		CreatedAt:      now,
+	})
+}
+
 func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
 	current := plan.EffectiveStatus()
 	if !current.CanTransitionTo(workflow.StatusPreparingStories) {
@@ -1958,8 +2209,11 @@ func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan
 	}
 
 	affectedReqIDs := affectedRequirementIDsForStoryReprepare(plan, proposal)
+	resetScope, resetReqIDs, err := resetScopeFromRequirements(plan, affectedReqIDs, proposal, "stories")
+	if err != nil {
+		return err
+	}
 	if current == workflow.StatusImplementing {
-		resetScope, resetReqIDs := resetScopeFromRequirements(plan, affectedReqIDs)
 		resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), slug, resetScope, resetReqIDs)
 		if err != nil {
 			return fmt.Errorf("reset requirement executions for story_reprepare: %w", err)
@@ -1972,13 +2226,17 @@ func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan
 			"reset_count", resetCount)
 	}
 
-	plan.Scenarios = removeScenariosForStoryReprepare(plan.Scenarios, proposal, affectedReqIDs)
+	if resetScope == "all" {
+		plan.Scenarios = nil
+	} else {
+		plan.Scenarios = removeScenariosForStoryReprepare(plan.Scenarios, proposal, resetReqIDs)
+	}
 	plan.Status = workflow.StatusPreparingStories
 	c.logger.Info("Story reprepare applied — plan re-queued for story preparation",
 		"slug", slug,
 		"proposal_id", proposal.ID,
 		"from_status", current,
-		"affected_reqs", len(affectedReqIDs))
+		"affected_reqs", len(resetReqIDs))
 	return nil
 }
 
@@ -2015,16 +2273,43 @@ func affectedRequirementIDsForStoryReprepare(plan *workflow.Plan, proposal *work
 	return out
 }
 
-func planDecisionResetScope(plan *workflow.Plan, proposal *workflow.PlanDecision) (string, []string) {
-	return resetScopeFromRequirements(plan, affectedRequirementIDsForStoryReprepare(plan, proposal))
+func planDecisionResetScope(plan *workflow.Plan, proposal *workflow.PlanDecision) (string, []string, error) {
+	return resetScopeFromRequirements(plan, affectedRequirementIDsForStoryReprepare(plan, proposal), proposal, "architecture")
 }
 
-func resetScopeFromRequirements(plan *workflow.Plan, affectedReqIDs []string) (string, []string) {
+func resetScopeFromRequirements(plan *workflow.Plan, affectedReqIDs []string, proposal *workflow.PlanDecision, phase string) (string, []string, error) {
 	closure := cascade.ExpandRequirementClosure(plan.Requirements, affectedReqIDs)
 	if len(closure) == 0 {
-		return "all", nil
+		if contractImpactAllowsWholePhaseReset(proposal, phase) {
+			return "all", nil, nil
+		}
+		return "", nil, fmt.Errorf("%s reset requires affected requirements or explicit whole-phase contract change evidence", phase)
 	}
-	return "requirements", closure
+	return "requirements", closure, nil
+}
+
+func contractImpactAllowsWholePhaseReset(proposal *workflow.PlanDecision, phase string) bool {
+	if proposal == nil || proposal.ContractImpact == nil {
+		return false
+	}
+	if proposal.ContractImpact.Kind != workflow.ContractImpactChange {
+		return false
+	}
+	phase = strings.ToLower(strings.TrimSpace(phase))
+	for _, raw := range proposal.ContractImpact.AffectedIDs {
+		id := strings.ToLower(strings.TrimSpace(raw))
+		switch id {
+		case "phase:*", "phase:all", "contract.phase:*", "contract.phase:all", "reset:*", "reset:all":
+			return true
+		}
+		if phase != "" {
+			switch id {
+			case "phase:" + phase, "contract.phase:" + phase, "reset:" + phase:
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func removeScenariosForStoryReprepare(scenarios []workflow.Scenario, proposal *workflow.PlanDecision, affectedReqIDs []string) []workflow.Scenario {
@@ -2244,6 +2529,9 @@ func (c *Component) handlePlanDecisionAddMutation(ctx context.Context, data []by
 	if !req.Decision.Kind.IsValid() {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid decision kind: %q", req.Decision.Kind)}
 	}
+	if req.Decision.ContractImpact != nil && !req.Decision.ContractImpact.Kind.IsValid() {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid decision contract impact kind: %q", req.Decision.ContractImpact.Kind)}
+	}
 	if req.Decision.Status == "" {
 		req.Decision.Status = workflow.PlanDecisionStatusProposed
 	}
@@ -2348,6 +2636,9 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 	}
 	if !proposal.Status.CanTransitionTo(workflow.PlanDecisionStatusAccepted) {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("cannot accept in status %q", proposal.Status)}
+	}
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
 	now := time.Now()

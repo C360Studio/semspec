@@ -84,9 +84,14 @@ func TestPlanDecision_JSONRoundTrip(t *testing.T) {
 		Status:         PlanDecisionStatusProposed,
 		ProposedBy:     "user",
 		AffectedReqIDs: []string{"requirement.my-plan.1", "requirement.my-plan.2"},
-		CreatedAt:      now,
-		ReviewedAt:     &reviewedAt,
-		DecidedAt:      &decidedAt,
+		ContractImpact: &ContractImpact{
+			Kind:        ContractImpactRefine,
+			Summary:     "Refines downstream Stories without dropping obligations.",
+			AffectedIDs: []string{"requirement.my-plan.1"},
+		},
+		CreatedAt:  now,
+		ReviewedAt: &reviewedAt,
+		DecidedAt:  &decidedAt,
 	}
 
 	data, err := json.Marshal(proposal)
@@ -124,6 +129,15 @@ func TestPlanDecision_JSONRoundTrip(t *testing.T) {
 		if got.AffectedReqIDs[i] != id {
 			t.Errorf("AffectedReqIDs[%d] = %q, want %q", i, got.AffectedReqIDs[i], id)
 		}
+	}
+	if got.ContractImpact == nil {
+		t.Fatal("ContractImpact = nil, want round-tripped impact")
+	}
+	if got.ContractImpact.Kind != ContractImpactRefine {
+		t.Errorf("ContractImpact.Kind = %q, want refine", got.ContractImpact.Kind)
+	}
+	if got.ContractImpact.AffectedIDs[0] != "requirement.my-plan.1" {
+		t.Errorf("ContractImpact.AffectedIDs = %v", got.ContractImpact.AffectedIDs)
 	}
 	if !got.CreatedAt.Equal(proposal.CreatedAt) {
 		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, proposal.CreatedAt)

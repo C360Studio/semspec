@@ -272,7 +272,7 @@ func (c *Component) Start(ctx context.Context) error {
 
 	// Initialize plan store and reconcile from startup sources.
 	// Requirements and Scenarios are carried inline on the Plan struct.
-	ps, err := newPlanStore(childCtx, planBucket, tw, c.logger)
+	ps, err := newPlanStore(childCtx, planBucket, tw, c.logger, c.resolveRepoRoot())
 	if err != nil {
 		cancel()
 		return fmt.Errorf("create plan store: %w", err)

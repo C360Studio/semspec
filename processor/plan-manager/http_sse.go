@@ -123,12 +123,7 @@ func (c *Component) enrichPlanSSEPayload(ctx context.Context, raw []byte) any {
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		return json.RawMessage(raw)
 	}
-	pws := &PlanWithStatus{
-		Plan:  &plan,
-		Stage: c.determinePlanStage(&plan),
-	}
-	pws.ExecutionSummary = c.computeExecutionSummary(ctx, &plan)
-	return pws
+	return c.newPlanWithStatus(ctx, &plan)
 }
 
 // writeSSEEvent writes a named SSE event with JSON data.

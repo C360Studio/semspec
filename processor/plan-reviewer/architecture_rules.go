@@ -54,6 +54,11 @@ import (
 //     mavlink-hard ICommandStatus fingerprint. Scoped to source_build (explicit
 //     OR a VCS-source-shaped coordinate when the kind is omitted); maven_central
 //     (jar-verified) and unresolved (honest flag) never fire.
+//   - architecture.topology_unapproved_build_root: a ComponentDef declares a
+//     build/workspace/package manifest that is neither present in the contract's
+//     detected topology facts nor explicitly allowed by the root contract scope.
+//     This blocks clean-room standalone project shapes before developer
+//     execution while still permitting contract-authorized new modules.
 //
 // The component-boundary rules are skipped when plan.Architecture is nil (legacy
 // plans without the architecture-generator phase have no components to check),
@@ -89,6 +94,8 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 			capabilityUnresolvedInArchitectureFindings(plan)...)
 		result.Findings = append(result.Findings,
 			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries)...)
+		result.Findings = append(result.Findings,
+			topologyContractFindings(plan.Contract, plan.Architecture.ComponentBoundaries)...)
 	}
 
 	if len(result.Findings) > original {
@@ -645,4 +652,90 @@ func isConcreteScopedFile(p string) bool {
 		return true
 	}
 	return wellKnownExtensionlessDeliverables[path.Base(p)]
+}
+
+// topologyContractFindings rejects architecture component files that introduce
+// new build/workspace/package root manifests outside the authoritative contract.
+// The detector may be polyglot; this rule only compares paths and known
+// manifest shapes, so it stays generic across Java/Gradle, Go, Node, Python,
+// Rust, Maven, .NET, PHP, and Ruby workspaces.
+func topologyContractFindings(contract *workflow.ContractPacket, components []workflow.ComponentDef) []workflow.PlanReviewFinding {
+	if contract == nil || len(contract.TopologyFacts) == 0 {
+		return nil
+	}
+
+	known := contractTopologyManifestPaths(contract.TopologyFacts)
+	allowed := contractExplicitTopologyCreatePaths(contract.Scope)
+	var findings []workflow.PlanReviewFinding
+	seen := map[string]struct{}{}
+
+	for _, c := range components {
+		for _, raw := range c.ImplementationFiles {
+			file := workflow.NormalizeFilePath(raw)
+			if file == "" || !isTopologyControlledPath(file) {
+				continue
+			}
+			if _, ok := known[file]; ok {
+				continue
+			}
+			if _, ok := allowed[file]; ok {
+				continue
+			}
+			key := c.Name + "\x00" + file
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+
+			targetField := "component_boundaries[].implementation_files"
+			if c.Name != "" {
+				targetField = fmt.Sprintf("component_boundaries.%s.implementation_files", c.Name)
+			}
+			findings = append(findings, workflow.PlanReviewFinding{
+				SOPID:       "architecture.topology_unapproved_build_root",
+				SOPTitle:    "Architecture introduces an unapproved build/workspace root",
+				Severity:    "error",
+				Status:      "violation",
+				Category:    "structural",
+				Phase:       "architecture",
+				TargetID:    file,
+				Action:      "remove",
+				TargetField: targetField,
+				TargetValue: file,
+				Issue:       fmt.Sprintf("Component %q declares topology-controlled file %q, but the root contract has no detected topology fact and no scope.create/include entry authorizing that build/workspace/package manifest. This is the standalone clean-room project failure class: the architecture replaces or forks the brownfield build shape instead of integrating with it.", c.Name, file),
+				Suggestion:  fmt.Sprintf("Remove %q from %s and integrate through an existing topology fact path, or route an explicit contract amendment/scope.create entry before declaring a new build root.", file, targetField),
+				Evidence:    fmt.Sprintf("contract.topology_facts does not contain %q", file),
+			})
+		}
+	}
+	return findings
+}
+
+func contractTopologyManifestPaths(facts []workflow.TopologyFact) map[string]struct{} {
+	paths := make(map[string]struct{}, len(facts))
+	for _, fact := range facts {
+		switch fact.Kind {
+		case "build_root", "package_root", "workspace_root":
+			if p := workflow.NormalizeFilePath(fact.Path); p != "" {
+				paths[p] = struct{}{}
+			}
+		}
+	}
+	return paths
+}
+
+func contractExplicitTopologyCreatePaths(scope workflow.ContractScopeSnapshot) map[string]struct{} {
+	paths := map[string]struct{}{}
+	for _, raw := range append(append([]string{}, scope.Create...), scope.Include...) {
+		p := workflow.NormalizeFilePath(raw)
+		if p == "" || !isTopologyControlledPath(p) {
+			continue
+		}
+		paths[p] = struct{}{}
+	}
+	return paths
+}
+
+func isTopologyControlledPath(p string) bool {
+	return workflow.IsTopologyControlledPath(p)
 }

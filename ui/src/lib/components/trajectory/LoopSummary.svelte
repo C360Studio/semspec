@@ -1,5 +1,13 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
+	import {
+		calculateCostAccounting,
+		formatCostLabel,
+		formatRateSourceLabel,
+		measureSummaryUsage,
+		measureTrajectoryUsage,
+		type ProviderRate
+	} from '$lib/types/costAccounting';
 	import type { Trajectory, TrajectoryListItem } from '$lib/types/trajectory';
 
 	interface Props {
@@ -8,9 +16,10 @@
 		trajectory?: Trajectory;
 		/** Lightweight summary from list prefetch — used as fallback when full trajectory not loaded */
 		summary?: TrajectoryListItem;
+		providerRates?: ProviderRate[];
 	}
 
-	let { role, state, trajectory, summary }: Props = $props();
+	let { role, state, trajectory, summary, providerRates = [] }: Props = $props();
 
 	// Prefer full trajectory data; fall back to summary when available
 	const isActive = $derived(state === 'executing' || state === 'pending');
@@ -20,6 +29,20 @@
 		const summaryTokens = summary ? summary.total_tokens_in + summary.total_tokens_out : 0;
 		return isActive ? Math.max(trajectoryTokens, summaryTokens) : trajectoryTokens || summaryTokens;
 	});
+	const tokenUsage = $derived.by(() => {
+		if (trajectory) {
+			return measureTrajectoryUsage(trajectory.steps, { model: summary?.model });
+		}
+		if (summary) {
+			return measureSummaryUsage({
+				model: summary.model,
+				tokens_in: summary.total_tokens_in,
+				tokens_out: summary.total_tokens_out
+			});
+		}
+		return measureSummaryUsage({});
+	});
+	const costAccounting = $derived(calculateCostAccounting(tokenUsage, providerRates));
 
 	const displayDuration = $derived.by(() => {
 		const trajectoryDuration = trajectory?.duration ?? 0;
@@ -31,7 +54,7 @@
 		isActive && summary ? summary.iterations : trajectory ? null : summary ? summary.iterations : null
 	);
 
-	const isComplete = $derived(state === 'completed');
+	const isComplete = $derived(state === 'complete' || state === 'completed');
 	const isFailed = $derived(state === 'failed' || state === 'error');
 
 	function formatTokens(count: number): string {
@@ -90,6 +113,7 @@
 			{/if}
 			{#if totalTokens > 0}
 				<span class="loop-stat">{formatTokens(totalTokens)} tok</span>
+				<span class="loop-stat" title={formatRateSourceLabel(costAccounting)}>{formatCostLabel(costAccounting, true)}</span>
 			{/if}
 			{#if displayDuration > 0}
 				<span class="loop-stat">{formatDuration(displayDuration)}</span>
@@ -100,6 +124,7 @@
 			{/if}
 			{#if totalTokens > 0}
 				<span class="loop-stat">{formatTokens(totalTokens)} tok</span>
+				<span class="loop-stat" title={formatRateSourceLabel(costAccounting)}>{formatCostLabel(costAccounting, true)}</span>
 			{/if}
 			{#if displayDuration > 0}
 				<span class="loop-stat">{formatDuration(displayDuration)}</span>

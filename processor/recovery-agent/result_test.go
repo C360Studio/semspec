@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
@@ -24,7 +25,7 @@ func TestParseRecoveryResult(t *testing.T) {
 	})
 
 	t.Run("happy path refine_prompt", func(t *testing.T) {
-		raw := `{"action":"refine_prompt","diagnosis":"graph_search returned [project] org.sensorhub but agent ignored it.","refined_prompt":"Use the project entity from graph_search as the parent groupId.","recovery_succeeded":true}`
+		raw := `{"action":"refine_prompt","diagnosis":"graph_search returned [project] org.sensorhub but agent ignored it.","refined_prompt":"Use the project entity from graph_search as the parent groupId.","contract_impact":{"kind":"preserve","summary":"same contract, sharper prompt","affected_ids":["req.demo.1"]},"recovery_succeeded":true}`
 		got, err := parseRecoveryResult(raw)
 		if err != nil {
 			t.Fatalf("expected ok, got error: %v", err)
@@ -34,6 +35,12 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 		if got.RefinedPrompt == "" {
 			t.Error("RefinedPrompt: expected populated")
+		}
+		if got.ContractImpact == nil || got.ContractImpact.Kind != workflow.ContractImpactPreserve {
+			t.Fatalf("ContractImpact = %#v, want preserve", got.ContractImpact)
+		}
+		if len(got.ContractImpact.AffectedIDs) != 1 || got.ContractImpact.AffectedIDs[0] != "req.demo.1" {
+			t.Fatalf("ContractImpact.AffectedIDs = %v, want [req.demo.1]", got.ContractImpact.AffectedIDs)
 		}
 	})
 
@@ -197,6 +204,7 @@ func TestParseRecoveryResult(t *testing.T) {
 		{"missing action", `{"diagnosis":"x"}`, errResultMissingAction},
 		{"missing diagnosis", `{"action":"escalate_human"}`, errResultMissingDiag},
 		{"invalid action", `{"action":"bump_model","diagnosis":"need a smarter model"}`, errResultInvalidAction},
+		{"invalid contract impact", `{"action":"story_reprepare","diagnosis":"x","contract_impact":{"kind":"rewrite_everything"},"recovery_succeeded":true}`, errResultInvalidImpact},
 		{"refine without refined_prompt", `{"action":"refine_prompt","diagnosis":"x"}`, errResultRefineNeedsPrmt},
 		{"refine with whitespace refined_prompt", `{"action":"refine_prompt","diagnosis":"x","refined_prompt":"   \n  "}`, errResultRefineNeedsPrmt},
 	}

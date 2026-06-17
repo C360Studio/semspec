@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * Real-time activity events (SSE)
-         * @description Server-Sent Events stream of loop activity. Events include loop_created, loop_updated, loop_deleted. Connect with EventSource or curl -N.
+         * @description Server-Sent Events stream of loop activity. Events include loop_created, loop_updated, loop_deleted. Each event's data field is an ActivityEvent whose data field is a Loop (see #/components/schemas/Loop and #/components/schemas/ActivityEvent). Connect with EventSource or curl -N. Note: OpenAPI 3.0 cannot express per-event SSE JSON schema; consult the ActivityEvent and Loop component schemas.
          */
         get: {
             parameters: {
@@ -24,7 +24,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description SSE event stream */
+                /** @description SSE event stream of ActivityEvent objects. Each event's data field is a Loop (see #/components/schemas/ActivityEvent and #/components/schemas/Loop). */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1266,7 +1266,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": Record<string, never>;
+                        "application/json": components["schemas"]["Loop"][];
                     };
                 };
             };
@@ -1308,7 +1308,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": Record<string, never>;
+                        "application/json": components["schemas"]["Loop"];
                     };
                 };
                 /** @description Loop not found */
@@ -2098,13 +2098,498 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List registered workflow types
+         * @description Returns the workflow types registered with the Manager + per-phase instance counts. Per-workflow List errors surface as a `counts_error` field on the failing entry so partial degradation is visible without breaking the whole response.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Workflow types with instance counts */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Method not allowed (GET only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{type}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List instances of a workflow type
+         * @description Lists Participant instances for the given workflow type with filter + pagination query parameters. When ?stream=true is set, the connection is upgraded to a WebSocket that streams bootstrap + live updates from Manager.Watch.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Filter to instances in this phase */
+                    phase?: string;
+                    /** @description Filter to non-terminal instances when true */
+                    active?: boolean;
+                    /** @description Maximum results returned (default unlimited) */
+                    limit?: number;
+                    /** @description Skip the first N matching results for pagination */
+                    offset?: number;
+                    /** @description Field-equality filter (any number; one query param per field) */
+                    "match.<field>"?: string;
+                    /** @description Set to 'true' to upgrade to a WebSocket carrying Manager.Watch updates */
+                    stream?: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Workflow type identifier (matches Participant.Workflow()) */
+                    type: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Instance array (or WebSocket frames when ?stream=true) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Invalid query parameter */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description WebSocket streaming disabled (enable_websocket=false) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Workflow type not registered */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Method not allowed (GET only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{type}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get instance state
+         * @description Returns the full Participant state for the given workflow type + entity ID.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Workflow type identifier */
+                    type: string;
+                    /** @description Entity ID (Participant.EntityID()) */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Participant state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Workflow or entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Method not allowed (GET only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{type}/{id}/children": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List child instances
+         * @description Returns Participants whose ParentEntityID matches the given entity, across all registered workflows. The {type} segment is required for routing symmetry with the other endpoints; the underlying Manager.Children call scans cross-workflow.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Workflow type identifier (routing-only; cross-workflow scan ignores it) */
+                    type: string;
+                    /** @description Parent entity ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Child Participant array */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Method not allowed (GET only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{type}/{id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List phase-transition history
+         * @description Returns the phase-transition history derived from KV revision replay. Each entry includes from/to phases, wallclock timestamp, the TransitionSource (rule/operator/component/framework), and any operator-supplied note.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Workflow type identifier */
+                    type: string;
+                    /** @description Entity ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description TransitionEvent array */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Workflow or entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Method not allowed (GET only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{type}/{id}/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator patch (state mutation)
+         * @description Applies a JSON-body patch to the Participant. The body is a `{<field>: <value>}` map; every field MUST be tagged `lifecycle:"operator_writable"` on the registered state struct. Identity (`lifecycle:"id"`) and phase fields are protected by the same default-deny gate the rule layer enforces (ADR-047 § AssertRuleWritable).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Workflow type identifier */
+                    type: string;
+                    /** @description Entity ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description Field-name → value patch map */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StatePatchRequest"];
+                };
+            };
+            responses: {
+                /** @description Patch applied */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Invalid body OR field is not operator_writable OR type mismatch */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Workflow or entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Method not allowed (POST only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Optimistic-concurrency retries exhausted */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Request body exceeds max_body_bytes */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflows/{type}/{id}/transition": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Operator-initiated phase transition
+         * @description Transitions the Participant to the requested phase via Manager.Transition with TransitionSourceOperator. Phase must be declared in the workflow's Transitions table; current → target must be a declared edge; current must not be terminal.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Workflow type identifier */
+                    type: string;
+                    /** @description Entity ID */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            /** @description Target phase + optional operator note for the audit trail */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TransitionRequest"];
+                };
+            };
+            responses: {
+                /** @description Transition applied */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Invalid body OR target phase undeclared OR edge undeclared OR current phase terminal */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Workflow or entity not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Method not allowed (POST only) */
+                405: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Request body exceeds max_body_bytes */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         ActivityEvent: {
-            /** Format: byte */
-            data?: string;
+            data?: {
+                channel_type?: string;
+                error?: string;
+                iterations?: number;
+                loop_id: string;
+                max_iterations?: number;
+                outcome?: string;
+                parent_loop_id?: string;
+                pending_approval?: {
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                    call_id: string;
+                    reason?: string;
+                    /** Format: date-time */
+                    requested_at: string;
+                    tool_name: string;
+                    trace_id?: string;
+                } | null;
+                prompt?: string;
+                result?: string;
+                role?: string;
+                run_entity_id?: string;
+                run_id?: string;
+                state?: string;
+                task_id?: string;
+                tokens_in?: number;
+                tokens_out?: number;
+                user_id?: string;
+            } | null;
             loop_id: string;
             /** Format: date-time */
             timestamp: string;
@@ -2139,7 +2624,7 @@ export interface components {
             /** @description Technical protocol (udp, tcp, etc.) */
             protocol?: string;
             /** @description Component configuration schema */
-            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["github_webhook.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"];
+            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["github_webhook.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["lifecycle-gateway.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["research-graph-assess.v1"] | components["schemas"]["research-graph-classify.v1"] | components["schemas"]["research-graph-execute.v1"] | components["schemas"]["research-graph-route.v1"] | components["schemas"]["research-graph-synthesize.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"];
             /** @description Component type (input/processor/output/storage) */
             type: string;
             /** @description Component version */
@@ -2198,10 +2683,12 @@ export interface components {
             channel_id?: string;
             channel_type?: string;
             content: string;
+            in_reply_to?: string;
             metadata?: {
                 [key: string]: string;
             };
             reply_to?: string;
+            run_id?: string;
             user_id?: string;
         };
         HTTPMessageResponse: {
@@ -2219,6 +2706,36 @@ export interface components {
             level: string;
             message: string;
             source: string;
+        };
+        Loop: {
+            channel_type?: string;
+            error?: string;
+            iterations?: number;
+            loop_id: string;
+            max_iterations?: number;
+            outcome?: string;
+            parent_loop_id?: string;
+            pending_approval?: {
+                arguments?: {
+                    [key: string]: unknown;
+                };
+                call_id: string;
+                reason?: string;
+                /** Format: date-time */
+                requested_at: string;
+                tool_name: string;
+                trace_id?: string;
+            } | null;
+            prompt?: string;
+            result?: string;
+            role?: string;
+            run_entity_id?: string;
+            run_id?: string;
+            state?: string;
+            task_id?: string;
+            tokens_in?: number;
+            tokens_out?: number;
+            user_id?: string;
         };
         LoopInfo: {
             channel_id: string;
@@ -2365,6 +2882,9 @@ export interface components {
             signal: string;
             timestamp: string;
         };
+        StatePatchRequest: {
+            [key: string]: unknown;
+        };
         StatsResponse: {
             applied: number;
             human_approved: number;
@@ -2447,6 +2967,15 @@ export interface components {
                     is_error?: boolean;
                     name?: string;
                     reasoning_content?: string;
+                    reasoning_records?: {
+                        carrier_kind: string;
+                        item_id?: string;
+                        /** Format: byte */
+                        opaque?: string;
+                        provider: string;
+                        summary_text?: string;
+                        tool_call_id?: string;
+                    }[];
                     role: string;
                     tool_call_id?: string;
                     tool_calls?: {
@@ -2549,6 +3078,15 @@ export interface components {
                 is_error?: boolean;
                 name?: string;
                 reasoning_content?: string;
+                reasoning_records?: {
+                    carrier_kind: string;
+                    item_id?: string;
+                    /** Format: byte */
+                    opaque?: string;
+                    provider: string;
+                    summary_text?: string;
+                    tool_call_id?: string;
+                }[];
                 role: string;
                 tool_call_id?: string;
                 tool_calls?: {
@@ -2596,6 +3134,10 @@ export interface components {
             tool_result?: string;
             tool_status?: string;
             utilization?: number;
+        };
+        TransitionRequest: {
+            note?: string;
+            phase: string;
         };
         /**
          * a2a-adapter Configuration
@@ -2673,11 +3215,6 @@ export interface components {
              * @default false
              */
             enable_intent_classification: boolean;
-            /**
-             * @description Enable /onboard command for operating model interview
-             * @default false
-             */
-            enable_onboarding: boolean;
             /** @description Permission configuration */
             permissions?: {
                 /** @description approve */
@@ -2715,6 +3252,28 @@ export interface components {
             filter_chain?: {
                 /** @description Ordered list of filters to apply */
                 filters?: {
+                    /** @description Embedding classifier configuration (ADR-043 Phase 2) */
+                    classifier_config?: {
+                        /** @description Corpus files to load */
+                        corpus_sources?: {
+                            /** @description Tag identifying this corpus */
+                            domain?: string;
+                            /** @description JSONL file path */
+                            path?: string;
+                            /** @description Corpus revision */
+                            version?: string;
+                        }[];
+                        /**
+                         * @description Emit verdict but never block (calibration mode)
+                         * @default true
+                         */
+                        shadow_mode: boolean;
+                        /**
+                         * @description Cosine-similarity floor for a positive match (0.0-1.0)
+                         * @default 0.7
+                         */
+                        threshold: number;
+                    };
                     /** @description Content filter configuration */
                     content_config?: {
                         /**
@@ -2785,7 +3344,7 @@ export interface components {
                             severity: string;
                         }[];
                     };
-                    /** @description Filter name (pii_redaction injection_detection content_moderation rate_limiting) */
+                    /** @description Filter name (pii_redaction injection_detection injection_classifier content_moderation rate_limiting tool_call_governance) */
                     name?: string;
                     /** @description PII filter configuration */
                     pii_config?: {
@@ -2880,6 +3439,13 @@ export interface components {
                             type: string;
                         };
                     };
+                    /** @description Tool call governance filter configuration */
+                    tool_call_config?: {
+                        /** @description Substrings appended to the default bash command blocklist */
+                        blocked_command_patterns?: string[];
+                        /** @description Substrings appended to the default http_request URL blocklist */
+                        blocked_url_patterns?: string[];
+                    };
                 }[];
                 /**
                  * @description Violation handling policy (fail_fast continue log_only)
@@ -2927,16 +3493,6 @@ export interface components {
         "agentic-loop.v1": {
             /** @description Auto-reject pending approvals after this duration (e.g. 5m or 1h). Empty means wait indefinitely */
             approval_timeout?: string;
-            /**
-             * @description Enable Boid-style agent coordination (position tracking and steering signals)
-             * @default false
-             */
-            boid_enabled: boolean;
-            /**
-             * @description TTL for Boid steering signals before expiration (e.g. 30s or 1m)
-             * @default 30s
-             */
-            boid_signal_ttl: string;
             /** @description JetStream consumer tuning for long-running ports (agent.task/agent.response/tool.result) */
             consumer?: {
                 /**
@@ -2974,8 +3530,6 @@ export interface components {
                 headroom_ratio?: number;
                 /** @description Minimum token headroom floor — ratio-based headroom never goes below this value */
                 headroom_tokens?: number;
-                /** @description Inject operating model profile context into system prompt when available */
-                inject_profile_context?: boolean;
                 /** @description Hard token limit for context budget (overrides model limits when set) */
                 max_budget_tokens?: number;
                 /** @description Entity IDs to always keep in context during slicing */
@@ -3001,20 +3555,33 @@ export interface components {
             /** @description Port configuration for inputs and outputs */
             ports?: string;
             /**
-             * @description NATS KV bucket name for boid agent positions
-             * @default AGENT_POSITIONS
-             */
-            positions_bucket: string;
-            /**
              * @description JetStream stream name
              * @default AGENT
              */
             stream_name: string;
             /**
+             * @description Synthesize decide(needs_clarification) when a loop completes without a terminal tool call (#133). Belt-and-suspenders recovery for cheap-model substrates where models occasionally return text-only at completion despite persona prose
+             * @default false
+             */
+            synthesize_terminal_on_completion: boolean;
+            /**
              * @description Timeout duration for loop execution (e.g. 120s or 5m)
              * @default 120s
              */
             timeout: string;
+            /** @description Subject-mode tool-call governance (ADR-039). Default mode=disabled is no-op (no governance gate) */
+            tool_call_governance?: {
+                /**
+                 * @description Governance mode (disabled|audit|enforce). Default disabled means no governance gate
+                 * @default disabled
+                 */
+                mode: string;
+                /**
+                 * @description Per-call verdict wait window in enforce mode (e.g. 500ms or 2s). Default 1s
+                 * @default 1s
+                 */
+                timeout: string;
+            };
             /**
              * @description Maximum bytes for tool result content before truncation. 0 means no limit
              * @default 32768
@@ -3118,6 +3685,8 @@ export interface components {
             loops_bucket: string;
             /** @description Port configuration */
             ports?: string;
+            /** @description Decide-action names barred for every coordinator task (front-door and rule-spawned) — composes with and takes precedence over per-task action_allowlist; vocabulary-agnostic run/deployment clarification policy; empty means permissive default */
+            restricted_decide_actions?: string[];
             /**
              * @description JetStream stream name for agentic messages
              * @default AGENT
@@ -3136,6 +3705,36 @@ export interface components {
          * @description Registers agents with AGNTCY directories using OASF records
          */
         "directory-bridge.v1": {
+            /** @description agntcy_grpc backend settings */
+            agntcy_grpc?: {
+                /** @description Per-RPC OIDC auth (omit for unauthenticated) */
+                auth?: {
+                    /** @description OIDC client identifier (inline; prefer client_id_env) */
+                    client_id?: string;
+                    /** @description Env var name for OIDC client_id (wins over inline) */
+                    client_id_env?: string;
+                    /** @description Env var name for OIDC client_secret (secrets must not live in config) */
+                    client_secret_env?: string;
+                    /** @description OIDC token endpoint URL */
+                    issuer?: string;
+                    /** @description OIDC scope list */
+                    scopes?: string[];
+                    /**
+                     * @description Auth flow (none or oidc)
+                     * @default none
+                     */
+                    type: string;
+                };
+                /** @description gRPC endpoint host:port */
+                endpoint?: string;
+                /** @description Establish TLS on dial (required for the hosted hub) */
+                tls?: boolean;
+            };
+            /**
+             * @description Wire-format backend (http or agntcy_grpc)
+             * @default http
+             */
+            backend: string;
             /** @description Suffix for consumer names */
             consumer_name_suffix?: string;
             /**
@@ -3143,7 +3742,7 @@ export interface components {
              * @default false
              */
             delete_consumer_on_stop: boolean;
-            /** @description AGNTCY directory service URL */
+            /** @description AGNTCY directory service URL (HTTP backend only) */
             directory_url?: string;
             /**
              * @description Heartbeat interval
@@ -3595,6 +4194,20 @@ export interface components {
             remove_fields?: string[];
         };
         /**
+         * lifecycle-gateway Configuration
+         * @description Operator HTTP + WebSocket gateway over pkg/lifecycle.Manager (ADR-047)
+         */
+        "lifecycle-gateway.v1": {
+            /** @description WebSocket upgrade Origin allowlist as exact-match strings. Empty list permits all origins and logs a Warn at Start; set explicitly to restrict cross-origin upgrades. */
+            allowed_origins?: string[];
+            /** @description Enable WebSocket streaming on GET {prefix}/{type}?stream=true via Manager.Watch. Default true when omitted. Set to false to disable live-update streaming and keep the gateway poll-only. */
+            enable_websocket?: boolean;
+            /** @description Maximum bytes accepted in POST .../state and POST .../transition request bodies. Default 1048576 (1 MiB). Zero or negative means use default. */
+            max_body_bytes?: number;
+            /** @description URL path prefix mounted under the parent component prefix (e.g. "workflows" → /lifecycle-gateway/workflows). Default "workflows". Must be non-empty after stripping leading/trailing slashes. */
+            path_prefix?: string;
+        };
+        /**
          * oasf-generator Configuration
          * @description Generates OASF records from agent entity capabilities for AGNTCY directory registration
          */
@@ -3739,6 +4352,126 @@ export interface components {
             service_version: string;
         };
         /**
+         * research-graph-assess Configuration
+         * @description ADR-045 assess_sufficiency: structured-emit sufficient/refine decision over upstream ExecutionOutput evidence. Drives R3's synthesize-or-refine branch.
+         */
+        "research-graph-assess.v1": {
+            /**
+             * @description NATS KV bucket holding research-pipeline loops and trigger/completion keys
+             * @default AGENT_LOOPS
+             */
+            loops_bucket: string;
+            /**
+             * @description Cap on number of ExecutionOutput evidence items embedded in the assessor prompt. Top-N by Score; tighter caps keep prompts within small-model context windows. 0 means default (20)
+             * @default 20
+             */
+            max_evidence_in_prompt: number;
+            /**
+             * @description Cap on LLM response tokens. The JSON-shaped output is small; 1024 covers the worst case across decision paths
+             * @default 1024
+             */
+            max_response_tokens: number;
+            /**
+             * @description Cap on per-evidence SnippetText characters rendered in the assessor prompt. 0 means default (280)
+             * @default 280
+             */
+            max_snippet_chars_in_prompt: number;
+            /** @description Port configuration. assess_sufficiency requires one nats input subscribing to component.assess_sufficiency.> */
+            ports?: string;
+        };
+        /**
+         * research-graph-classify Configuration
+         * @description ADR-045 nl_classify: classify a research topic via the existing graph/query.ClassifierChain and surface initial candidate entities for downstream route_search.
+         */
+        "research-graph-classify.v1": {
+            /**
+             * @description NATS KV bucket name holding research-pipeline loops and trigger/completion keys
+             * @default AGENT_LOOPS
+             */
+            loops_bucket: string;
+            /**
+             * @description Cap on number of candidate entities to surface from the search_graph response (latency vs route_search prompt budget). 0 means default (25).
+             * @default 25
+             */
+            max_candidates: number;
+            /** @description Port configuration. nl_classify requires one nats input subscribing to component.nl_classify.> */
+            ports?: string;
+        };
+        /**
+         * research-graph-execute Configuration
+         * @description ADR-045 execute_subqueries: materialise sub-queries from RouteDecision intent + fan-out across Tier 0+1 retrieval + dedup + rank + budget. Emits ExecutionOutput for R3.
+         */
+        "research-graph-execute.v1": {
+            /**
+             * @description NATS KV bucket holding research-pipeline loops and trigger/completion keys
+             * @default AGENT_LOOPS
+             */
+            loops_bucket: string;
+            /**
+             * @description Concurrent sub-query execution cap. Keeps fan-out from saturating gateways. 0 means default (8)
+             * @default 8
+             */
+            max_parallelism: number;
+            /**
+             * @description Per-sub-query result count cap before ranking + budget enforcement. Prevents a runaway sub-query from dominating evidence. 0 means default (50)
+             * @default 50
+             */
+            max_results_per_subquery: number;
+            /** @description Port configuration. execute_subqueries requires one nats input subscribing to component.execute_subqueries.> */
+            ports?: string;
+        };
+        /**
+         * research-graph-route Configuration
+         * @description ADR-045 route_search: structured-emit routing decision over upstream ClassifierOutput. Emits one of synthesize_directly / retighten / walk_seeds / decompose for R2 dispatch.
+         */
+        "research-graph-route.v1": {
+            /**
+             * @description NATS KV bucket holding research-pipeline loops and trigger/completion keys
+             * @default AGENT_LOOPS
+             */
+            loops_bucket: string;
+            /**
+             * @description Cap on number of ClassifierOutput candidates embedded in the router prompt. Top-N by relevance; tighter caps keep prompts within small-model context windows. 0 means default (10)
+             * @default 10
+             */
+            max_candidates_in_prompt: number;
+            /**
+             * @description Cap on LLM response tokens. The JSON-shaped output is small; 512 covers the worst case across the four action shapes
+             * @default 512
+             */
+            max_response_tokens: number;
+            /** @description Port configuration. route_search requires one nats input subscribing to component.route_search.> */
+            ports?: string;
+        };
+        /**
+         * research-graph-synthesize Configuration
+         * @description ADR-045 synthesize_answer: terminal LLM stage. Quote-back-validated synthesis grounded in upstream evidence. Drives the continuation rule.
+         */
+        "research-graph-synthesize.v1": {
+            /**
+             * @description NATS KV bucket holding research-pipeline loops and trigger/completion keys
+             * @default AGENT_LOOPS
+             */
+            loops_bucket: string;
+            /**
+             * @description Cap on number of ExecutionOutput evidence items embedded in the synthesizer prompt. Top-N by Score; tighter caps keep prompts within small-model context windows. 0 means default (30)
+             * @default 30
+             */
+            max_evidence_in_prompt: number;
+            /**
+             * @description Cap on LLM response tokens for the synthesis output
+             * @default 2048
+             */
+            max_response_tokens: number;
+            /**
+             * @description Cap on per-evidence SnippetText characters rendered in the synthesizer prompt. 0 means default (480)
+             * @default 480
+             */
+            max_snippet_chars_in_prompt: number;
+            /** @description Port configuration. synthesize_answer requires one nats input subscribing to component.synthesize_answer.> */
+            ports?: string;
+        };
+        /**
          * rule-processor Configuration
          * @description Rule execution processor
          */
@@ -3773,14 +4506,12 @@ export interface components {
                 actions?: {
                     /** @description action_allowlist */
                     action_allowlist?: string[];
-                    /** @description boid_signal_type */
-                    boid_signal_type?: string;
-                    /** @description boid_strength */
-                    boid_strength?: number;
                     /** @description bucket */
                     bucket?: string;
-                    /** @description context_data */
-                    context_data?: Record<string, never>;
+                    /** @description for_each */
+                    for_each?: string;
+                    /** @description for_each_var */
+                    for_each_var?: string;
                     /** @description id */
                     id?: string;
                     /** @description key */
@@ -3795,6 +4526,8 @@ export interface components {
                     object?: string;
                     /** @description payload */
                     payload?: Record<string, never>;
+                    /** @description phase */
+                    phase?: string;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
@@ -3818,8 +4551,19 @@ export interface components {
                     };
                     /** @description role */
                     role?: string;
+                    /** @description run_scope */
+                    run_scope?: string;
+                    /** @description set */
+                    set?: Record<string, never>;
                     /** @description subject */
                     subject?: string;
+                    /** @description tool_choice */
+                    tool_choice?: {
+                        /** @description function_name */
+                        function_name?: string;
+                        /** @description mode */
+                        mode?: string;
+                    };
                     /** @description tools */
                     tools?: string[];
                     /** @description ttl */
@@ -3839,8 +4583,8 @@ export interface components {
                         /** @description value */
                         value?: string;
                     }[];
-                    /** @description workflow_id */
-                    workflow_id?: string;
+                    /** @description workflow */
+                    workflow?: string;
                     /** @description workflow_slug */
                     workflow_slug?: string;
                     /** @description workflow_step */
@@ -3888,14 +4632,12 @@ export interface components {
                 on_enter?: {
                     /** @description action_allowlist */
                     action_allowlist?: string[];
-                    /** @description boid_signal_type */
-                    boid_signal_type?: string;
-                    /** @description boid_strength */
-                    boid_strength?: number;
                     /** @description bucket */
                     bucket?: string;
-                    /** @description context_data */
-                    context_data?: Record<string, never>;
+                    /** @description for_each */
+                    for_each?: string;
+                    /** @description for_each_var */
+                    for_each_var?: string;
                     /** @description id */
                     id?: string;
                     /** @description key */
@@ -3910,6 +4652,8 @@ export interface components {
                     object?: string;
                     /** @description payload */
                     payload?: Record<string, never>;
+                    /** @description phase */
+                    phase?: string;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
@@ -3933,8 +4677,19 @@ export interface components {
                     };
                     /** @description role */
                     role?: string;
+                    /** @description run_scope */
+                    run_scope?: string;
+                    /** @description set */
+                    set?: Record<string, never>;
                     /** @description subject */
                     subject?: string;
+                    /** @description tool_choice */
+                    tool_choice?: {
+                        /** @description function_name */
+                        function_name?: string;
+                        /** @description mode */
+                        mode?: string;
+                    };
                     /** @description tools */
                     tools?: string[];
                     /** @description ttl */
@@ -3954,8 +4709,8 @@ export interface components {
                         /** @description value */
                         value?: string;
                     }[];
-                    /** @description workflow_id */
-                    workflow_id?: string;
+                    /** @description workflow */
+                    workflow?: string;
                     /** @description workflow_slug */
                     workflow_slug?: string;
                     /** @description workflow_step */
@@ -3965,14 +4720,12 @@ export interface components {
                 on_exit?: {
                     /** @description action_allowlist */
                     action_allowlist?: string[];
-                    /** @description boid_signal_type */
-                    boid_signal_type?: string;
-                    /** @description boid_strength */
-                    boid_strength?: number;
                     /** @description bucket */
                     bucket?: string;
-                    /** @description context_data */
-                    context_data?: Record<string, never>;
+                    /** @description for_each */
+                    for_each?: string;
+                    /** @description for_each_var */
+                    for_each_var?: string;
                     /** @description id */
                     id?: string;
                     /** @description key */
@@ -3987,6 +4740,8 @@ export interface components {
                     object?: string;
                     /** @description payload */
                     payload?: Record<string, never>;
+                    /** @description phase */
+                    phase?: string;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
@@ -4010,8 +4765,19 @@ export interface components {
                     };
                     /** @description role */
                     role?: string;
+                    /** @description run_scope */
+                    run_scope?: string;
+                    /** @description set */
+                    set?: Record<string, never>;
                     /** @description subject */
                     subject?: string;
+                    /** @description tool_choice */
+                    tool_choice?: {
+                        /** @description function_name */
+                        function_name?: string;
+                        /** @description mode */
+                        mode?: string;
+                    };
                     /** @description tools */
                     tools?: string[];
                     /** @description ttl */
@@ -4031,8 +4797,8 @@ export interface components {
                         /** @description value */
                         value?: string;
                     }[];
-                    /** @description workflow_id */
-                    workflow_id?: string;
+                    /** @description workflow */
+                    workflow?: string;
                     /** @description workflow_slug */
                     workflow_slug?: string;
                     /** @description workflow_step */
@@ -4042,14 +4808,12 @@ export interface components {
                 on_recovery?: {
                     /** @description action_allowlist */
                     action_allowlist?: string[];
-                    /** @description boid_signal_type */
-                    boid_signal_type?: string;
-                    /** @description boid_strength */
-                    boid_strength?: number;
                     /** @description bucket */
                     bucket?: string;
-                    /** @description context_data */
-                    context_data?: Record<string, never>;
+                    /** @description for_each */
+                    for_each?: string;
+                    /** @description for_each_var */
+                    for_each_var?: string;
                     /** @description id */
                     id?: string;
                     /** @description key */
@@ -4064,6 +4828,8 @@ export interface components {
                     object?: string;
                     /** @description payload */
                     payload?: Record<string, never>;
+                    /** @description phase */
+                    phase?: string;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
@@ -4087,8 +4853,19 @@ export interface components {
                     };
                     /** @description role */
                     role?: string;
+                    /** @description run_scope */
+                    run_scope?: string;
+                    /** @description set */
+                    set?: Record<string, never>;
                     /** @description subject */
                     subject?: string;
+                    /** @description tool_choice */
+                    tool_choice?: {
+                        /** @description function_name */
+                        function_name?: string;
+                        /** @description mode */
+                        mode?: string;
+                    };
                     /** @description tools */
                     tools?: string[];
                     /** @description ttl */
@@ -4108,8 +4885,8 @@ export interface components {
                         /** @description value */
                         value?: string;
                     }[];
-                    /** @description workflow_id */
-                    workflow_id?: string;
+                    /** @description workflow */
+                    workflow?: string;
                     /** @description workflow_slug */
                     workflow_slug?: string;
                     /** @description workflow_step */
@@ -4127,14 +4904,12 @@ export interface components {
                 while_true?: {
                     /** @description action_allowlist */
                     action_allowlist?: string[];
-                    /** @description boid_signal_type */
-                    boid_signal_type?: string;
-                    /** @description boid_strength */
-                    boid_strength?: number;
                     /** @description bucket */
                     bucket?: string;
-                    /** @description context_data */
-                    context_data?: Record<string, never>;
+                    /** @description for_each */
+                    for_each?: string;
+                    /** @description for_each_var */
+                    for_each_var?: string;
                     /** @description id */
                     id?: string;
                     /** @description key */
@@ -4149,6 +4924,8 @@ export interface components {
                     object?: string;
                     /** @description payload */
                     payload?: Record<string, never>;
+                    /** @description phase */
+                    phase?: string;
                     /** @description predicate */
                     predicate?: string;
                     /** @description prompt */
@@ -4172,8 +4949,19 @@ export interface components {
                     };
                     /** @description role */
                     role?: string;
+                    /** @description run_scope */
+                    run_scope?: string;
+                    /** @description set */
+                    set?: Record<string, never>;
                     /** @description subject */
                     subject?: string;
+                    /** @description tool_choice */
+                    tool_choice?: {
+                        /** @description function_name */
+                        function_name?: string;
+                        /** @description mode */
+                        mode?: string;
+                    };
                     /** @description tools */
                     tools?: string[];
                     /** @description ttl */
@@ -4193,16 +4981,45 @@ export interface components {
                         /** @description value */
                         value?: string;
                     }[];
-                    /** @description workflow_id */
-                    workflow_id?: string;
+                    /** @description workflow */
+                    workflow?: string;
                     /** @description workflow_slug */
                     workflow_slug?: string;
                     /** @description workflow_step */
                     workflow_step?: string;
                 }[];
             }[];
+            /** @description owner = rule-pack.<pack_id> */
+            pack_id?: string;
             /** @description Port configuration for inputs (KV watch: ENTITY_STATES PREDICATE_INDEX) and outputs (NATS: control commands) */
             ports?: string;
+            /** @description projection_contracts */
+            projection_contracts?: {
+                /** @description entity_pattern */
+                entity_pattern?: string;
+                /** @description foreign_edges */
+                foreign_edges?: {
+                    /** @description mode */
+                    mode?: string;
+                    /** @description predicate */
+                    predicate?: string;
+                    /** @description target_pattern */
+                    target_pattern?: string;
+                }[];
+                /** @description groups */
+                groups?: {
+                    /** @description mode */
+                    mode?: string;
+                    /** @description predicates */
+                    predicates?: string[];
+                }[];
+                /** @description indexing_profile */
+                indexing_profile?: string;
+                /** @description message_type */
+                message_type?: string;
+                /** @description name */
+                name?: string;
+            }[];
             /**
              * @description Dynamic rule definitions (rules.{rule_id} pattern)
              * @default {}

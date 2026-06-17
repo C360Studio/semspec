@@ -17,8 +17,13 @@
 
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
+import { stubProjectConfigured } from './helpers/truth';
 
 test.describe('@t0 execution-timeline ghost + categorization', () => {
+	test.beforeEach(async ({ page }) => {
+		await stubProjectConfigured(page);
+	});
+
 	test('both sections render as ghost when no loops have run', async ({ page }) => {
 		await page.goto('/e2e-test/execution-timeline?scenario=empty');
 		await waitForHydration(page);

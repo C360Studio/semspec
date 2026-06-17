@@ -1,3 +1,8 @@
+// Package planmanager HTTP file. Holds the request/response DTOs for the plan
+// HTTP API surface; the count of public structs is the API surface, not
+// architectural debt.
+//
+//revive:disable:max-public-structs
 package planmanager
 
 import (
@@ -212,6 +217,9 @@ func (c *Component) getRepoRoot(w http.ResponseWriter) string {
 // effects, for callers that run outside a request scope. Falls back to the
 // current working directory silently; logs a warning if even that fails.
 func (c *Component) resolveRepoRoot() string {
+	if c.config.RepoPath != "" {
+		return c.config.RepoPath
+	}
 	if v := os.Getenv("SEMSPEC_REPO_PATH"); v != "" {
 		return v
 	}
@@ -384,6 +392,73 @@ type ExecutionSummary struct {
 	Total     int `json:"total"`
 }
 
+// PlanPhaseSummary is the authoritative UI-facing summary for the current plan
+// phase. It is derived from plan-manager state, not activity feed rows.
+type PlanPhaseSummary struct {
+	Stage           string               `json:"stage"`
+	Phase           string               `json:"phase"`
+	State           string               `json:"state"`
+	Title           string               `json:"title"`
+	Detail          string               `json:"detail,omitempty"`
+	ActiveLoopCount int                  `json:"active_loop_count"`
+	Execution       *ExecutionSummary    `json:"execution,omitempty"`
+	Wait            *PlanWaitSummary     `json:"wait,omitempty"`
+	Recovery        *PlanRecoverySummary `json:"recovery,omitempty"`
+	Lessons         *PlanLessonSummary   `json:"lessons,omitempty"`
+	QA              *PlanQASummary       `json:"qa,omitempty"`
+	Freshness       PlanFreshnessSummary `json:"freshness"`
+}
+
+// PlanWaitSummary explains why a plan is intentionally not advancing.
+type PlanWaitSummary struct {
+	Reason         string `json:"reason"`
+	DecisionID     string `json:"decision_id,omitempty"`
+	PolicyReason   string `json:"policy_reason,omitempty"`
+	RequiredAction string `json:"required_action,omitempty"`
+}
+
+// PlanRecoverySummary points the UI at the governing recovery / change decision.
+type PlanRecoverySummary struct {
+	DecisionID             string   `json:"decision_id"`
+	Kind                   string   `json:"kind,omitempty"`
+	Status                 string   `json:"status"`
+	ProposedBy             string   `json:"proposed_by,omitempty"`
+	Summary                string   `json:"summary,omitempty"`
+	ContractImpactKind     string   `json:"contract_impact_kind,omitempty"`
+	ContractImpactSummary  string   `json:"contract_impact_summary,omitempty"`
+	AffectedRequirementIDs []string `json:"affected_requirement_ids,omitempty"`
+	AffectedStoryIDs       []string `json:"affected_story_ids,omitempty"`
+}
+
+// PlanLessonSummary exposes lesson activity without implying it can affect the
+// currently running phase.
+type PlanLessonSummary struct {
+	State            string `json:"state"`
+	CurrentRunEffect string `json:"current_run_effect"`
+	FutureRunEffect  string `json:"future_run_effect"`
+	Detail           string `json:"detail,omitempty"`
+}
+
+// PlanQASummary carries the persisted QA verdict or current QA run evidence.
+type PlanQASummary struct {
+	Level           string `json:"level,omitempty"`
+	Verdict         string `json:"verdict,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	RunID           string `json:"run_id,omitempty"`
+	Passed          *bool  `json:"passed,omitempty"`
+	FailureCategory string `json:"failure_category,omitempty"`
+}
+
+// PlanFreshnessSummary states when this summary was generated and from which
+// authority. The UI can layer connection age on top without treating stale feed
+// rows as live truth.
+type PlanFreshnessSummary struct {
+	Source      string    `json:"source"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Stale       bool      `json:"stale"`
+	Reason      string    `json:"reason,omitempty"`
+}
+
 // PlanWithStatus represents a plan with its current workflow status.
 // This is the response format for GET /plans and GET /plans/{slug}.
 type PlanWithStatus struct {
@@ -391,6 +466,7 @@ type PlanWithStatus struct {
 	Stage            string             `json:"stage"`
 	ActiveLoops      []ActiveLoopStatus `json:"active_loops"`
 	ExecutionSummary *ExecutionSummary  `json:"execution_summary,omitempty"`
+	PhaseSummary     *PlanPhaseSummary  `json:"phase_summary"`
 }
 
 // ActiveLoopStatus represents an active agent loop for a plan.
@@ -642,7 +718,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Create new plan — snapshot the project's current QA level onto the plan
 	// so its policy is immutable under project-config changes.
-	plan, err := ps.create(ctx, slug, title, c.resolveProjectQALevel(), req.AutoRejectOnExhaustion)
+	plan, err := ps.create(ctx, slug, title, req.Description, c.resolveProjectQALevel(), req.AutoRejectOnExhaustion)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)
@@ -680,11 +756,7 @@ func (c *Component) respondWithExistingPlan(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	resp := &PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}
-	resp.ExecutionSummary = c.computeExecutionSummary(r.Context(), plan)
+	resp := c.newPlanWithStatus(r.Context(), plan)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -706,12 +778,7 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	// Convert to PlanWithStatus
 	plans := make([]*PlanWithStatus, 0, len(allPlans))
 	for _, plan := range allPlans {
-		pws := &PlanWithStatus{
-			Plan:  plan,
-			Stage: c.determinePlanStage(plan),
-		}
-		pws.ExecutionSummary = c.computeExecutionSummary(r.Context(), plan)
-		plans = append(plans, pws)
+		plans = append(plans, c.newPlanWithStatus(r.Context(), plan))
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -734,11 +801,7 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 		return
 	}
 
-	resp := &PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}
-	resp.ExecutionSummary = c.computeExecutionSummary(r.Context(), plan)
+	resp := c.newPlanWithStatus(r.Context(), plan)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -801,10 +864,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		}
 	}
 
-	resp := &PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}
+	resp := c.newPlanWithStatus(r.Context(), plan)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -890,10 +950,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		"subject", subject,
 		"trace_id", tc.TraceID)
 
-	resp := &PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}
+	resp := c.newPlanWithStatus(ctx, plan)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
@@ -907,6 +964,10 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 	switch plan.EffectiveStatus() {
 	case workflow.StatusCreated, workflow.StatusDrafting:
 		return "drafting"
+	case workflow.StatusExploring:
+		return "exploring"
+	case workflow.StatusExplored:
+		return "explored"
 	case workflow.StatusDrafted, workflow.StatusReviewingDraft:
 		return "ready_for_approval"
 	case workflow.StatusReviewed:
@@ -924,6 +985,10 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "generating_architecture"
 	case workflow.StatusArchitectureGenerated:
 		return "architecture_generated"
+	case workflow.StatusPreparingStories:
+		return "preparing_stories"
+	case workflow.StatusStoriesGenerated:
+		return "stories_generated"
 	case workflow.StatusGeneratingScenarios:
 		return "generating_scenarios"
 	case workflow.StatusReviewingScenarios:
@@ -1042,10 +1107,7 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if err := json.NewEncoder(w).Encode(&PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	}); err != nil {
+	if err := json.NewEncoder(w).Encode(c.newPlanWithStatus(r.Context(), plan)); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
@@ -1137,10 +1199,7 @@ func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, 
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(&PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	})
+	_ = json.NewEncoder(w).Encode(c.newPlanWithStatus(r.Context(), plan))
 }
 
 // retryPlanRequest is the request body for POST /plans/{slug}/retry.
@@ -1678,10 +1737,7 @@ func (c *Component) handleForceCompletePlan(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(&PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	})
+	_ = json.NewEncoder(w).Encode(c.newPlanWithStatus(r.Context(), plan))
 }
 
 // handleRejectPlan handles POST /plans/{slug}/reject.
@@ -1713,8 +1769,5 @@ func (c *Component) handleRejectPlan(w http.ResponseWriter, r *http.Request, slu
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(&PlanWithStatus{
-		Plan:  plan,
-		Stage: c.determinePlanStage(plan),
-	})
+	_ = json.NewEncoder(w).Encode(c.newPlanWithStatus(r.Context(), plan))
 }

@@ -209,6 +209,7 @@ export function loopStateToSegmentState(loopState: string): SegmentState {
 		case 'blocked':
 			return 'blocked';
 		case 'complete':
+		case 'completed':
 		case 'success':
 			return 'complete';
 		case 'failed':

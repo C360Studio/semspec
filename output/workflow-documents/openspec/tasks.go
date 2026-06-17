@@ -30,6 +30,7 @@ func RenderTasks(plan *workflow.Plan, execs map[string]workflow.RequirementExecu
 	var sb strings.Builder
 	title := displayPlanTitle(plan)
 	fmt.Fprintf(&sb, "# Tasks: %s\n\n", title)
+	writeContractReference(&sb, plan)
 
 	for _, c := range plan.Exploration.Capabilities {
 		var reqs []workflow.Requirement

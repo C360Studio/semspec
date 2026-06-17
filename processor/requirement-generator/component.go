@@ -320,6 +320,9 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Vocabulary:           prompt.GlobalPersonas().Vocabulary(),
 		RequirementGenerator: buildRequirementGeneratorPromptContext(trigger, previousError, c.fetchProjectFileTree(ctx), reviewFindings...),
 	}
+	if plan, err := c.loadPlanFromKV(ctx, trigger.Slug); err == nil {
+		asmCtx.ContractProjection = prompt.RequirementGeneratorContractProjection(plan)
+	}
 
 	// Wire role-scoped lessons learned.
 	if c.lessonWriter != nil {

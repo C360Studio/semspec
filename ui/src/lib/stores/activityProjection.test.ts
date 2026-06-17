@@ -28,6 +28,7 @@ describe('activityEventToFeedEvent', () => {
 		const fe = activityEventToFeedEvent(activity({ type: 'loop_created' }));
 		expect(fe.source).toBe('activity');
 		expect(fe.type).toBe('loop_created');
+		expect(fe.kind).toBe('activity_loop');
 		expect(fe.summary).toMatch(/Loop started/);
 		expect(fe.summary).toContain('01234567');
 	});
@@ -43,6 +44,7 @@ describe('activityEventToFeedEvent', () => {
 			}
 		}));
 		expect(fe.source).toBe('plan');
+		expect(fe.kind).toBe('activity_loop');
 		expect(fe.data?.workflow_slug).toBe('semspec-planning');
 		expect(fe.data?.workflow_step).toBe('scenario-generation');
 		expect(fe.data?.task_id).toBe('scengen-4');
@@ -60,6 +62,7 @@ describe('activityEventToFeedEvent', () => {
 			}
 		}));
 		expect(fe.source).toBe('execution');
+		expect(fe.kind).toBe('activity_loop');
 	});
 
 	it('labels task-execution workflow loop data as execution activity', () => {
@@ -73,6 +76,39 @@ describe('activityEventToFeedEvent', () => {
 			}
 		}));
 		expect(fe.source).toBe('execution');
+	});
+
+	it('labels lesson-decomposer loops as future-only lesson activity', () => {
+		const fe = activityEventToFeedEvent(activity({
+			type: 'loop_updated',
+			data: {
+				task_id: 'decompose-demo-1',
+				workflow_slug: 'semspec-lesson-decomposition',
+				workflow_step: 'decompose',
+				role: 'lesson-decomposer'
+			}
+		}));
+		expect(fe.source).toBe('activity');
+		expect(fe.kind).toBe('lesson_activity');
+		expect(fe.summary).toContain('Lesson decomposer active');
+		expect(fe.summary).toContain('future-only');
+		expect(fe.data?.current_run_effect).toBe('none');
+		expect(fe.data?.future_run_effect).toBe('eligible_for_future_prompts');
+		expect(fe.data?.effect_label).toBe('future-only');
+	});
+
+	it('labels lesson-curator metadata as lesson activity', () => {
+		const fe = activityEventToFeedEvent(activity({
+			type: 'loop_completed',
+			data: {
+				task_id: 'lesson-curator-sweep',
+				workflow_step: 'lesson-decomposition',
+				role: 'lesson-curator'
+			}
+		}));
+		expect(fe.kind).toBe('lesson_activity');
+		expect(fe.summary).toContain('Lesson curator finished');
+		expect(fe.data?.current_run_effect).toBe('none');
 	});
 
 	it('maps loop_updated to a tick summary', () => {

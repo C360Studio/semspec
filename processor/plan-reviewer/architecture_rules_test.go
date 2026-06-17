@@ -743,6 +743,90 @@ func TestHasSourceFile_DelegatesToWorkflowClassifier(t *testing.T) {
 	}
 }
 
+func TestTopologyContractFindingsRejectsUnapprovedBuildRoot(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "topology-unapproved",
+		Contract: &workflow.ContractPacket{
+			TopologyFacts: []workflow.TopologyFact{
+				{Kind: "workspace_root", Path: "settings.gradle", Value: "gradle_settings"},
+				{Kind: "build_root", Path: "sensorhub-driver/build.gradle", Value: "gradle_project"},
+				{Kind: "package_root", Path: "ui/package.json", Value: "node_package"},
+			},
+		},
+		Exploration: &workflow.Exploration{
+			Capabilities: []workflow.Capability{{Name: "driver", Lifecycle: workflow.CapabilityNew, Description: "D."}},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{
+					Name: "clean-room-driver",
+					ImplementationFiles: []string{
+						"osh-core/settings.gradle",
+						"osh-core/build.gradle",
+						"osh-core/gradlew",
+						"sensorhub-driver/src/main/java/Driver.java",
+					},
+					Capabilities: []string{"driver"},
+				},
+			},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeArchitectureFindings(plan, result)
+
+	got := topologyFindingsByTarget(result.Findings)
+	for _, want := range []string{"osh-core/settings.gradle", "osh-core/build.gradle", "osh-core/gradlew"} {
+		f, ok := got[want]
+		if !ok {
+			t.Fatalf("expected topology finding for %q, got %v", want, keysOf(got))
+		}
+		if f.Severity != "error" || f.Action != "remove" {
+			t.Errorf("finding %q has wrong shape: severity=%q action=%q", want, f.Severity, f.Action)
+		}
+		if f.TargetField != "component_boundaries.clean-room-driver.implementation_files" || f.TargetValue != want {
+			t.Errorf("finding %q has non-executable action target: field=%q value=%q", want, f.TargetField, f.TargetValue)
+		}
+	}
+	if _, ok := got["sensorhub-driver/build.gradle"]; ok {
+		t.Errorf("existing contract topology path should not be flagged")
+	}
+	if result.Verdict != "needs_changes" {
+		t.Errorf("expected verdict needs_changes, got %q", result.Verdict)
+	}
+}
+
+func TestTopologyContractFindingsAllowsExplicitCreateScope(t *testing.T) {
+	findings := topologyContractFindings(&workflow.ContractPacket{
+		Scope: workflow.ContractScopeSnapshot{
+			Create: []string{"plugins/new-driver/package.json"},
+		},
+		TopologyFacts: []workflow.TopologyFact{
+			{Kind: "package_root", Path: "ui/package.json", Value: "node_package"},
+		},
+	}, []workflow.ComponentDef{
+		{
+			Name:                "new-driver",
+			ImplementationFiles: []string{"plugins/new-driver/package.json", "plugins/new-driver/src/index.ts"},
+			Capabilities:        []string{"driver"},
+		},
+	})
+
+	if len(findings) != 0 {
+		t.Fatalf("explicit contract scope.create path should be allowed, got %+v", findings)
+	}
+}
+
+func topologyFindingsByTarget(findings []workflow.PlanReviewFinding) map[string]workflow.PlanReviewFinding {
+	out := make(map[string]workflow.PlanReviewFinding)
+	for _, f := range findings {
+		if f.SOPID == "architecture.topology_unapproved_build_root" {
+			out[f.TargetID] = f
+		}
+	}
+	return out
+}
+
 // --- Gate 1: scoped-file ownership (issue #175) -----------------------------
 
 // countScopedUnowned returns the scoped_file_unowned findings keyed by TargetID.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semstreams/message"
@@ -34,6 +35,7 @@ type planStore struct {
 	kvBucket     jetstream.KeyValue // PLAN_STATES — may be nil (tests, no NATS)
 	tripleWriter *graphutil.TripleWriter
 	logger       *slog.Logger
+	repoPath     string
 }
 
 // newPlanStore creates a plan store backed by a TTL in-memory cache.
@@ -41,16 +43,21 @@ type planStore struct {
 // Plans that outlive the TTL (e.g., waiting for human review) are served
 // via KV fallback on cache miss (see get()). This is the reference pattern.
 // kv may be nil — store operates in cache+graph-only mode when absent.
-func newPlanStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger) (*planStore, error) {
+func newPlanStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger, repoPath ...string) (*planStore, error) {
 	c, err := sscache.NewTTL[*workflow.Plan](ctx, 30*time.Minute, 5*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("create plan cache: %w", err)
+	}
+	var root string
+	if len(repoPath) > 0 {
+		root = strings.TrimSpace(repoPath[0])
 	}
 	return &planStore{
 		cache:        c,
 		kvBucket:     kv,
 		tripleWriter: tw,
 		logger:       logger,
+		repoPath:     root,
 	}, nil
 }
 
@@ -166,7 +173,7 @@ func (s *planStore) exists(slug string) bool {
 // preserving existing production behaviour. Plumbed through create() so the
 // field is set on the in-memory plan before its first KV write — avoids a
 // double-write on the create path.
-func (s *planStore) create(ctx context.Context, slug, title string, qaLevel workflow.QALevel, autoRejectOverride *bool) (*workflow.Plan, error) {
+func (s *planStore) create(ctx context.Context, slug, title, brief string, qaLevel workflow.QALevel, autoRejectOverride *bool) (*workflow.Plan, error) {
 	if err := workflow.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -208,6 +215,11 @@ func (s *planStore) create(ctx context.Context, slug, title string, qaLevel work
 		QALevel:                qaLevel,
 		AutoRejectOnExhaustion: autoRejectOverride,
 	}
+	if brief == "" {
+		brief = title
+	}
+	plan.EnsureContractPacket(brief, now)
+	s.ensureRuntimeContractFacts(plan)
 
 	if err := s.save(ctx, plan); err != nil {
 		return nil, fmt.Errorf("save new plan: %w", err)
@@ -252,6 +264,14 @@ func (s *planStore) createImported(ctx context.Context, plan *workflow.Plan, qaL
 	if plan.CreatedAt.IsZero() {
 		plan.CreatedAt = now
 	}
+	if plan.Contract == nil {
+		brief := plan.Context
+		if brief == "" {
+			brief = plan.Title
+		}
+		plan.EnsureContractPacket(brief, now)
+	}
+	s.ensureRuntimeContractFacts(plan)
 	plan.QALevel = qaLevel
 	plan.AutoRejectOnExhaustion = autoRejectOverride
 	// Imports default to unapproved; the operator runs the normal approval
@@ -262,6 +282,30 @@ func (s *planStore) createImported(ctx context.Context, plan *workflow.Plan, qaL
 		return fmt.Errorf("save imported plan: %w", err)
 	}
 	return nil
+}
+
+func (s *planStore) ensureRuntimeContractFacts(plan *workflow.Plan) {
+	if plan == nil || plan.Contract == nil {
+		return
+	}
+	if len(plan.Contract.TopologyFacts) > 0 {
+		return
+	}
+	repoPath := strings.TrimSpace(s.repoPath)
+	if repoPath == "" {
+		return
+	}
+	result, err := workflow.NewFileSystemDetector().Detect(repoPath)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("Failed to detect topology facts for plan contract", "slug", plan.Slug, "repo_path", repoPath, "error", err)
+		}
+		return
+	}
+	if result == nil || len(result.TopologyFacts) == 0 {
+		return
+	}
+	plan.Contract.TopologyFacts = append([]workflow.TopologyFact(nil), result.TopologyFacts...)
 }
 
 // save persists a plan through all three layers in order:
@@ -361,6 +405,8 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 // re-persists on every mutation" framing is only true when a triple-mirrored
 // field actually changes. Combined reduction on a typical execution save:
 // ~20× fewer writes, ~14.5× fewer NATS round-trips.
+//
+//revive:disable-next-line:function-length // sequential triple marshaler; field order is the write-coalescing contract.
 func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error {
 	tw := s.tripleWriter
 	if tw == nil {
@@ -411,6 +457,32 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	}
 	if plan.LastErrorAt != nil {
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanLastErrorAt, Object: plan.LastErrorAt.Format(time.RFC3339)})
+	}
+	if plan.Contract != nil {
+		if plan.Contract.ID != "" {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractID, Object: plan.Contract.ID})
+		}
+		if blob, err := json.Marshal(plan.Contract); err == nil {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContract, Object: string(blob)})
+		}
+		for _, constraint := range plan.Contract.Constraints {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractConstraint, Object: constraint})
+		}
+		for _, fact := range plan.Contract.TopologyFacts {
+			if blob, err := json.Marshal(fact); err == nil {
+				triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractTopology, Object: string(blob)})
+			}
+		}
+		for _, amendment := range plan.Contract.Amendments {
+			if blob, err := json.Marshal(amendment); err == nil {
+				triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractAmendment, Object: string(blob)})
+			}
+		}
+		for _, finding := range plan.Contract.ValidationFindings {
+			if blob, err := json.Marshal(finding); err == nil {
+				triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractValidationFinding, Object: string(blob)})
+			}
+		}
 	}
 
 	// Scope lists (replace-as-a-set — emit full current list each write).
@@ -464,6 +536,12 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 			semspec.PlanReviewIteration,
 			semspec.PlanLastError,
 			semspec.PlanLastErrorAt,
+			semspec.PlanContractID,
+			semspec.PlanContract,
+			semspec.PlanContractConstraint,
+			semspec.PlanContractTopology,
+			semspec.PlanContractAmendment,
+			semspec.PlanContractValidationFinding,
 			semspec.PlanScopeInclude,
 			semspec.PlanScopeExclude,
 			semspec.PlanScopeProtected,

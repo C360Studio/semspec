@@ -39,6 +39,12 @@ func TestPredicatesRegistered(t *testing.T) {
 		// ADR-040: capability + exploration predicates
 		semspec.PlanExploration,
 		semspec.PlanOpenQuestions,
+		semspec.PlanContractID,
+		semspec.PlanContract,
+		semspec.PlanContractConstraint,
+		semspec.PlanContractTopology,
+		semspec.PlanContractAmendment,
+		semspec.PlanContractValidationFinding,
 		semspec.RequirementCapability,
 		semspec.RequirementExternalSpec,
 		semspec.CapabilityName,
@@ -98,6 +104,12 @@ func TestPlanPredicateValues(t *testing.T) {
 		{"PlanAuthor", semspec.PlanAuthor, "semspec.plan.author"},
 		{"PlanSlug", semspec.PlanSlug, "semspec.plan.slug"},
 		{"PlanCreatedAt", semspec.PlanCreatedAt, "semspec.plan.created_at"},
+		{"PlanContractID", semspec.PlanContractID, "semspec.plan.contract_id"},
+		{"PlanContract", semspec.PlanContract, "semspec.plan.contract"},
+		{"PlanContractConstraint", semspec.PlanContractConstraint, "semspec.plan.contract_constraint"},
+		{"PlanContractTopology", semspec.PlanContractTopology, "semspec.plan.contract_topology"},
+		{"PlanContractAmendment", semspec.PlanContractAmendment, "semspec.plan.contract_amendment"},
+		{"PlanContractValidationFinding", semspec.PlanContractValidationFinding, "semspec.plan.contract_validation"},
 	}
 
 	for _, tc := range tests {

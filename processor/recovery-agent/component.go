@@ -411,27 +411,30 @@ func capabilityForRequest(req *payloads.RecoveryRequested) model.Capability {
 	return model.CapabilityPlanWedgeRecovery
 }
 
-// readPlanArchitectureContext loads the wedged plan from PLAN_STATES and
-// pre-renders its architecture surface so recovery can diagnose what the wedge
-// actually was. Best-effort: returns "" when the bucket, plan, or architecture
-// is absent (early plan-layer wedges have no architecture yet).
-func (c *Component) readPlanArchitectureContext(ctx context.Context, slug string) string {
+func (c *Component) readPlan(ctx context.Context, slug string) *workflow.Plan {
 	if c.natsClient == nil || slug == "" {
-		return ""
+		return nil
 	}
 	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "PLAN_STATES")
 	if err != nil {
-		return ""
+		return nil
 	}
 	entry, err := bucket.Get(ctx, slug)
 	if err != nil {
-		return ""
+		return nil
 	}
 	var plan workflow.Plan
 	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-		return ""
+		return nil
 	}
-	return prompt.FormatArchitectureContext(prompt.ProjectArchitecture(plan.Architecture))
+	return &plan
+}
+
+func planArchitecture(plan *workflow.Plan) *workflow.ArchitectureDocument {
+	if plan == nil {
+		return nil
+	}
+	return plan.Architecture
 }
 
 // dispatchRecovery is the load-bearing path: fetch trajectory, build prompt,
@@ -460,6 +463,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 	}
 
 	steps := c.fetchTrajectorySteps(ctx, req)
+	plan := c.readPlan(ctx, req.Slug)
 	recCtx := &prompt.RecoveryPromptContext{
 		Layer:               string(req.Layer),
 		Slug:                req.Slug,
@@ -470,7 +474,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		EscalationReason:    req.EscalationReason,
 		LastFailureFeedback: req.LastFailureFeedback,
 		TrajectorySteps:     steps,
-		ArchitectureContext: c.readPlanArchitectureContext(ctx, req.Slug),
+		ArchitectureContext: prompt.FormatArchitectureContext(prompt.ProjectArchitecture(planArchitecture(plan))),
 	}
 
 	var (
@@ -486,16 +490,17 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 
 	availableTools := prompt.FilterTools(recoveryAvailableToolNames(), prompt.RoleRecoveryAgent)
 	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RoleRecoveryAgent,
-		Provider:          resolveProvider(modelName),
-		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, nil),
-		Domain:            "software",
-		AvailableTools:    availableTools,
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleRecoveryAgent),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
-		Recovery:          recCtx,
+		Role:               prompt.RoleRecoveryAgent,
+		Provider:           resolveProvider(modelName),
+		HasResponseFormat:  terminal.EndpointSupportsResponseFormatGated(endpoint, nil),
+		Domain:             "software",
+		AvailableTools:     availableTools,
+		SupportsTools:      true,
+		MaxTokens:          maxTokens,
+		Persona:            prompt.GlobalPersonas().ForRole(prompt.RoleRecoveryAgent),
+		Vocabulary:         prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection: prompt.RecoveryContractProjection(plan),
+		Recovery:           recCtx,
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)
@@ -665,7 +670,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 	c.updateLastActivity()
 
-	action, diagnosis, succeeded := c.deriveDecision(loop, disp.Req.EscalationReason)
+	action, diagnosis, succeeded, contractImpact := c.deriveDecision(loop, disp.Req.EscalationReason)
 
 	c.logger.Info("Recovery agent decision",
 		"slug", disp.Req.Slug,
@@ -677,7 +682,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"action", action,
 		"recovery_succeeded", succeeded)
 
-	c.emitPlanDecision(ctx, disp.Req, loop, action, diagnosis, succeeded)
+	c.emitPlanDecision(ctx, disp.Req, loop, action, diagnosis, succeeded, contractImpact)
 }
 
 // deriveDecision collapses the loop outcome + parse result into the action
@@ -688,7 +693,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // Returns escalate_human as the safe default for failure paths so the
 // PlanDecision lifecycle still reconciles (per ADR-037 stage-1 design
 // lock #3 — distinct failure signal beats silent drop).
-func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason string) (payloads.RecoveryActionKind, string, bool) {
+func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason string) (payloads.RecoveryActionKind, string, bool, *workflow.ContractImpact) {
 	if loop.Outcome != agentic.OutcomeSuccess {
 		c.completedFailed.Add(1)
 		c.logger.Warn("Recovery agent loop did not succeed",
@@ -696,10 +701,10 @@ func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason st
 			"loop_id", loop.ID,
 			"outcome", loop.Outcome,
 			"error", loop.Error)
-		return payloads.RecoveryActionEscalateHuman,
-			fmt.Sprintf("Recovery agent loop did not succeed (outcome=%s, error=%q). Original wedge: %s.",
-				loop.Outcome, loop.Error, escalationReason),
-			false
+		action := payloads.RecoveryActionEscalateHuman
+		diagnosis := fmt.Sprintf("Recovery agent loop did not succeed (outcome=%s, error=%q). Original wedge: %s.",
+			loop.Outcome, loop.Error, escalationReason)
+		return action, diagnosis, false, defaultRecoveryContractImpact(action, diagnosis, nil)
 	}
 
 	parsed, err := parseRecoveryResult(loop.Result)
@@ -710,14 +715,14 @@ func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason st
 			"loop_id", loop.ID,
 			"error", err,
 			"raw_head", clip(loop.Result, 512))
-		return payloads.RecoveryActionEscalateHuman,
-			fmt.Sprintf("Recovery agent returned an unparseable result (%v). Original wedge: %s.",
-				err, escalationReason),
-			false
+		action := payloads.RecoveryActionEscalateHuman
+		diagnosis := fmt.Sprintf("Recovery agent returned an unparseable result (%v). Original wedge: %s.",
+			err, escalationReason)
+		return action, diagnosis, false, defaultRecoveryContractImpact(action, diagnosis, nil)
 	}
 
 	c.completedSuccess.Add(1)
-	return parsed.Action, parsed.Diagnosis, parsed.RecoverySucceeded
+	return parsed.Action, parsed.Diagnosis, parsed.RecoverySucceeded, parsed.ContractImpact
 }
 
 // recoveryActionToPlanDecisionKind maps a RecoveryAction to the
@@ -767,7 +772,7 @@ func recoveryActionToPlanDecisionKind(action payloads.RecoveryActionKind) workfl
 // without needing a real natsClient. Called only from emitPlanDecision in
 // production. now is passed in rather than taking time.Now() inside so
 // tests get deterministic CreatedAt values.
-func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool, now time.Time) workflow.PlanDecision {
+func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool, contractImpact *workflow.ContractImpact, now time.Time) workflow.PlanDecision {
 	kind := recoveryActionToPlanDecisionKind(action)
 
 	title := fmt.Sprintf("Recovery: %s", action)
@@ -809,6 +814,10 @@ func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.Lo
 		affectedStories = append(affectedStories, req.AffectedStoryIDs...)
 	}
 
+	impactIDs := append([]string(nil), affectedReqs...)
+	impactIDs = append(impactIDs, affectedStories...)
+	impact := recoveryContractImpact(action, diagnosis, contractImpact, impactIDs)
+
 	return workflow.PlanDecision{
 		ID:               decisionID,
 		PlanID:           workflow.PlanEntityID(req.Slug),
@@ -819,19 +828,76 @@ func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.Lo
 		ProposedBy:       componentName,
 		AffectedReqIDs:   affectedReqs,
 		AffectedStoryIDs: affectedStories,
+		ContractImpact:   impact,
 		CreatedAt:        now,
+	}
+}
+
+func recoveryContractImpact(action payloads.RecoveryActionKind, diagnosis string, provided *workflow.ContractImpact, affectedIDs []string) *workflow.ContractImpact {
+	var impact workflow.ContractImpact
+	if provided != nil && provided.Kind.IsValid() {
+		impact = *provided
+		impact.AffectedIDs = append([]string(nil), provided.AffectedIDs...)
+	} else {
+		impact = *defaultRecoveryContractImpact(action, diagnosis, affectedIDs)
+	}
+	if len(impact.AffectedIDs) == 0 && len(affectedIDs) > 0 {
+		impact.AffectedIDs = append([]string(nil), affectedIDs...)
+	}
+	if recoveryActionRequiresContractChange(action) && impact.Kind != workflow.ContractImpactChange {
+		impact.Kind = workflow.ContractImpactChange
+	}
+	return &impact
+}
+
+func recoveryActionRequiresContractChange(action payloads.RecoveryActionKind) bool {
+	switch action {
+	case payloads.RecoveryActionNarrowScope, payloads.RecoveryActionArchitectureRevise:
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultRecoveryContractImpact(action payloads.RecoveryActionKind, diagnosis string, affectedIDs []string) *workflow.ContractImpact {
+	kind := workflow.ContractImpactPreserve
+	summary := "Recovery does not propose a contract change."
+	switch action {
+	case payloads.RecoveryActionRefinePrompt:
+		kind = workflow.ContractImpactPreserve
+		summary = "Refines the recovery prompt while preserving the current contract."
+	case payloads.RecoveryActionStoryReprepare, payloads.RecoveryActionSplitReq:
+		kind = workflow.ContractImpactRefine
+		summary = "Refines downstream plan structure while preserving the root contract."
+	case payloads.RecoveryActionNarrowScope:
+		kind = workflow.ContractImpactChange
+		summary = "Narrows scope and requires contract-change review before auto-accept."
+	case payloads.RecoveryActionArchitectureRevise:
+		kind = workflow.ContractImpactChange
+		summary = "Revises architecture and requires explicit contract-impact review before auto-accept."
+	case payloads.RecoveryActionEscalateHuman, payloads.RecoveryActionMarkUnrecoverable:
+		kind = workflow.ContractImpactPreserve
+		summary = "Records recovery diagnosis without applying an automatic contract mutation."
+	}
+	if strings.TrimSpace(diagnosis) != "" {
+		summary = summary + " Diagnosis: " + clip(diagnosis, 180)
+	}
+	return &workflow.ContractImpact{
+		Kind:        kind,
+		Summary:     summary,
+		AffectedIDs: append([]string(nil), affectedIDs...),
 	}
 }
 
 // emitPlanDecision sends a workflow.PlanDecision via plan.mutation.
 // plan_decision.add (same wire shape used by qa-reviewer + req-executor).
 // Best-effort: failure logs but does not block subsequent recovery work.
-func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool) {
+func (c *Component) emitPlanDecision(ctx context.Context, req *payloads.RecoveryRequested, loop *agentic.LoopEntity, action payloads.RecoveryActionKind, diagnosis string, succeeded bool, contractImpact *workflow.ContractImpact) {
 	if c.natsClient == nil {
 		return
 	}
 
-	decision := buildRecoveryPlanDecision(req, loop, action, diagnosis, succeeded, time.Now())
+	decision := buildRecoveryPlanDecision(req, loop, action, diagnosis, succeeded, contractImpact, time.Now())
 
 	addReq := struct {
 		Slug     string                `json:"slug"`

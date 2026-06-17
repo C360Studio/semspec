@@ -249,7 +249,11 @@ func TestBuildQAVerdictEvent_ExecutableQAFailClosed(t *testing.T) {
 			QARun: &workflow.QARun{
 				Passed: false,
 				Failures: []workflow.QAFailure{
-					{JobName: "integration", Message: "gradle test failed"},
+					{
+						JobName:    "integration",
+						Message:    "Gradle build failed during configuration: duplicate root element from standalone project",
+						LogExcerpt: "settings.gradle includeBuild('../osh-core') conflicts with composite substitution",
+					},
 				},
 			},
 		}
@@ -257,8 +261,14 @@ func TestBuildQAVerdictEvent_ExecutableQAFailClosed(t *testing.T) {
 		if got.Verdict != workflow.QAVerdictNeedsChanges {
 			t.Fatalf("Verdict = %q, want needs_changes", got.Verdict)
 		}
-		if !strings.Contains(got.Summary, "gradle test failed") {
+		if !strings.Contains(got.Summary, "duplicate root element") {
 			t.Errorf("Summary should include failure evidence, got %q", got.Summary)
+		}
+		if !strings.Contains(got.Summary, "category=topology") {
+			t.Errorf("Summary should include deterministic failure category, got %q", got.Summary)
+		}
+		if plan.QARun.Failures[0].Category != workflow.QAFailureCategoryTopology {
+			t.Errorf("failure category = %q, want topology", plan.QARun.Failures[0].Category)
 		}
 	})
 
@@ -277,6 +287,54 @@ func TestBuildQAVerdictEvent_ExecutableQAFailClosed(t *testing.T) {
 			t.Errorf("Summary = %q, want model summary", got.Summary)
 		}
 	})
+}
+
+func TestClassifyQAFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		in   workflow.QAFailure
+		want workflow.QAFailureCategory
+	}{
+		{
+			name: "topology beats generic gradle config",
+			in: workflow.QAFailure{
+				JobName:    "integration",
+				Message:    "Gradle build failed during configuration",
+				LogExcerpt: "duplicate root element from settings.gradle includeBuild",
+			},
+			want: workflow.QAFailureCategoryTopology,
+		},
+		{
+			name: "build configuration",
+			in: workflow.QAFailure{
+				JobName: "unit",
+				Message: "Could not resolve dependency declared in build.gradle",
+			},
+			want: workflow.QAFailureCategoryBuildConfig,
+		},
+		{
+			name: "test failure",
+			in: workflow.QAFailure{
+				JobName:  "unit",
+				TestName: "TestFallbackDispatch",
+				Message:  "assertion failed",
+			},
+			want: workflow.QAFailureCategoryTestFailure,
+		},
+		{
+			name: "unknown",
+			in:   workflow.QAFailure{JobName: "qa", Message: "process exited 1"},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyQAFailure(tt.in); got != tt.want {
+				t.Errorf("classifyQAFailure() = %q, want %q", got, tt.want)
+			}
+		})
+	}
 }
 
 // TestBuildQAReviewContext_ADR044CapabilityEvidence pins the ADR-044

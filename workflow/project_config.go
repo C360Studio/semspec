@@ -631,6 +631,11 @@ type DetectionResult struct {
 	// ExistingDocs are documentation files found in the repository.
 	ExistingDocs []DetectedDoc `json:"existing_docs"`
 
+	// TopologyFacts are generic brownfield repository/build/module facts found
+	// in the workspace. They are contract inputs, not implementation advice:
+	// planners and reviewers use them to preserve the existing repo shape.
+	TopologyFacts []TopologyFact `json:"topology_facts"`
+
 	// ProposedChecklist is the deterministic set of quality gate checks
 	// derived from the detected languages and tooling.
 	ProposedChecklist []Check `json:"proposed_checklist"`

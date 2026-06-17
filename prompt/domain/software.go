@@ -54,6 +54,10 @@ func formatChecklist(checks []workflow.Check) string {
 	return sb.String()
 }
 
+func contractProjectionCarriesConstraints(cp *prompt.ContractProjection) bool {
+	return cp != nil && len(cp.Constraints) > 0
+}
+
 // Software returns all prompt fragments for the software engineering domain.
 func Software() []*prompt.Fragment {
 	base := []*prompt.Fragment{
@@ -68,6 +72,33 @@ func Software() []*prompt.Fragment {
 				"The system tracks your iteration count and will terminate your loop if you exceed it — " +
 				"your work will be lost. Plan to complete well within the limit. " +
 				"Do not explore open-endedly. Every tool call must advance toward calling submit_work with a complete deliverable.",
+		},
+		{
+			ID:       "software.shared.contract-authority",
+			Category: prompt.CategoryRoleContext,
+			Priority: -4,
+			Roles: []prompt.Role{
+				prompt.RolePlanner,
+				prompt.RolePlanReviewer,
+				prompt.RoleRequirementGenerator,
+				prompt.RoleArchitect,
+				prompt.RoleStoryPreparer,
+				prompt.RoleScenarioGenerator,
+				prompt.RoleDeveloper,
+				prompt.RoleValidator,
+				prompt.RoleReviewer,
+				prompt.RoleTaskReviewer,
+				prompt.RoleScenarioReviewer,
+				prompt.RoleRecoveryAgent,
+				prompt.RoleQA,
+				prompt.RolePlanQAReviewer,
+			},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.ContractProjection != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				return renderContractProjection(ctx.ContractProjection)
+			},
 		},
 
 		// =====================================================================
@@ -164,7 +195,7 @@ These are not stylistic preferences. The compiler / interpreter / type checker e
 			Priority: -2,
 			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				if ctx.TaskContext == nil || len(ctx.TaskContext.PlanConstraints) == 0 {
+				if contractProjectionCarriesConstraints(ctx.ContractProjection) || ctx.TaskContext == nil || len(ctx.TaskContext.PlanConstraints) == 0 {
 					return ""
 				}
 				return "## PLAN CONSTRAINTS (must hold — from the original request)\n\n" +
@@ -1712,6 +1743,11 @@ abandoned. The shape is:
   {
     "action": "refine_prompt",            // REQUIRED FIRST — pick one from the set below
     "recovery_succeeded": true,
+    "contract_impact": {
+      "kind": "preserve",
+      "summary": "Same accepted contract; this only clarifies the wedged task prompt.",
+      "affected_ids": ["requirement.demo.1"]
+    },
     "diagnosis": "...",                    // REQUIRED — explains the action
     "refined_prompt": "..."               // only for refine_prompt
   }
@@ -1720,6 +1756,7 @@ Required fields:
 - action: one of refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise | escalate_human | mark_unrecoverable. REQUIRED — write it first.
 - diagnosis: 2-6 sentences describing what the trajectory shows the agent doing wrong and what the underlying mistake is. REQUIRED for every action.
 - recovery_succeeded: true when refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
+- contract_impact: REQUIRED. Object with kind preserve | refine | change, summary, and optional affected_ids. Use preserve when the root contract remains unchanged; refine when you are changing downstream plan/story/scenario shape while preserving obligations; change when accepting your action would remove, add, or replace contract obligations, topology constraints, acceptance scope, or baseline architecture.
 
 Action-specific fields:
 - refine_prompt requires: refined_prompt — a complete replacement task prompt that, when handed to the wedged role, would produce the work the agent should have produced.
@@ -1727,6 +1764,10 @@ Action-specific fields:
 - story_reprepare: no extra fields beyond diagnosis — the diagnosis becomes Sarah's RecoveryHint when she re-shards the requirement's Stories.
 - architecture_revise: no extra fields beyond diagnosis — the diagnosis becomes the architect's revision feedback (ReviewFormattedFindings) when the architecture is re-run.
 - escalate_human and mark_unrecoverable: no extra fields beyond diagnosis.
+
+Auto-accept policy:
+- preserve/refine may be auto-accepted when the decision is otherwise scoped and policy-safe.
+- change is human-gated. Choose change for scope shrinkage, topology replacement, baseline-erasing architecture changes, or any action that cannot honestly preserve the root contract.
 
 Choosing between actions (ADR-043 PR 4i):
 - refine_prompt: the dev had the answer in front of it but didn't act. Same task, sharper prompt.
@@ -2326,6 +2367,142 @@ Inverse direction matters too. If web_search has already surfaced a URL, http_re
 	return append(append(base, scenarioReviewerFragments()...), lessonDecomposerFragments()...)
 }
 
+func renderContractProjection(cp *prompt.ContractProjection) string {
+	if cp == nil {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## AUTHORITATIVE CONTRACT PACKET\n\n")
+	if cp.ID != "" {
+		fmt.Fprintf(&sb, "**Contract ID:** %s\n", cp.ID)
+	}
+	if cp.Version > 0 {
+		fmt.Fprintf(&sb, "**Version:** %d\n", cp.Version)
+	}
+	if cp.Profile != "" {
+		fmt.Fprintf(&sb, "**Role view:** %s\n", cp.Profile)
+	}
+	if cp.Brief != "" {
+		fmt.Fprintf(&sb, "\n**Root brief:** %s\n", cp.Brief)
+	}
+	writeContractSourceRefs(&sb, cp.SourceRefs)
+	writeContractList(&sb, "Hard constraints", cp.Constraints)
+	writeContractList(&sb, "Must-deliver obligations", cp.AcceptanceObligations)
+	writeContractList(&sb, "Forbidden moves", cp.ForbiddenMoves)
+	writeContractScope(&sb, cp.Scope)
+	writeContractTopologyFacts(&sb, cp.TopologyFacts)
+	writeContractAmendments(&sb, cp.Amendments)
+	writeContractFindings(&sb, cp.ValidationFindings)
+	sb.WriteString("\nThis packet is authoritative. Preserve these obligations unless an accepted amendment listed above changes them.\n")
+	return sb.String()
+}
+
+func writeContractSourceRefs(sb *strings.Builder, refs []workflow.ContractSourceRef) {
+	if len(refs) == 0 {
+		return
+	}
+	sb.WriteString("\n**Source references:**\n")
+	for _, ref := range refs {
+		switch {
+		case ref.Ref != "" && ref.Digest != "":
+			fmt.Fprintf(sb, "- %s: %s (%s)\n", ref.Kind, ref.Ref, ref.Digest)
+		case ref.Ref != "":
+			fmt.Fprintf(sb, "- %s: %s\n", ref.Kind, ref.Ref)
+		case ref.Digest != "":
+			fmt.Fprintf(sb, "- %s: %s\n", ref.Kind, ref.Digest)
+		default:
+			fmt.Fprintf(sb, "- %s\n", ref.Kind)
+		}
+	}
+}
+
+func writeContractList(sb *strings.Builder, title string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "\n**%s:**\n", title)
+	for _, item := range items {
+		fmt.Fprintf(sb, "- %s\n", item)
+	}
+}
+
+func writeContractScope(sb *strings.Builder, scope prompt.ContractScopeProjection) {
+	if len(scope.Include) == 0 && len(scope.Create) == 0 && len(scope.Exclude) == 0 && len(scope.DoNotTouch) == 0 {
+		return
+	}
+	sb.WriteString("\n**Root scope snapshot:**\n")
+	writeContractScopeLine(sb, "include", scope.Include)
+	writeContractScopeLine(sb, "create", scope.Create)
+	writeContractScopeLine(sb, "exclude", scope.Exclude)
+	writeContractScopeLine(sb, "do_not_touch", scope.DoNotTouch)
+}
+
+func writeContractScopeLine(sb *strings.Builder, label string, items []string) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(sb, "- %s: %s\n", label, strings.Join(items, ", "))
+}
+
+func writeContractTopologyFacts(sb *strings.Builder, facts []prompt.ContractTopologyFact) {
+	if len(facts) == 0 {
+		return
+	}
+	sb.WriteString("\n**Topology obligations:**\n")
+	for _, fact := range facts {
+		line := fact.Kind
+		if fact.Path != "" {
+			line += " " + fact.Path
+		}
+		if fact.Value != "" {
+			line += " = " + fact.Value
+		}
+		if len(fact.Evidence) > 0 {
+			line += " (evidence: " + strings.Join(fact.Evidence, ", ") + ")"
+		}
+		fmt.Fprintf(sb, "- %s\n", line)
+	}
+}
+
+func writeContractAmendments(sb *strings.Builder, amendments []prompt.ContractAmendmentProjection) {
+	if len(amendments) == 0 {
+		return
+	}
+	sb.WriteString("\n**Accepted amendments:**\n")
+	for _, amendment := range amendments {
+		label := amendment.ID
+		if amendment.PlanDecisionID != "" {
+			label += " via " + amendment.PlanDecisionID
+		}
+		fmt.Fprintf(sb, "- %s: %s", label, amendment.ImpactKind)
+		if amendment.ImpactSummary != "" {
+			fmt.Fprintf(sb, " — %s", amendment.ImpactSummary)
+		}
+		if len(amendment.AffectedIDs) > 0 {
+			fmt.Fprintf(sb, " (affected: %s)", strings.Join(amendment.AffectedIDs, ", "))
+		}
+		sb.WriteString("\n")
+	}
+}
+
+func writeContractFindings(sb *strings.Builder, findings []prompt.ContractValidationFindingProjection) {
+	if len(findings) == 0 {
+		return
+	}
+	sb.WriteString("\n**Contract validation findings:**\n")
+	for _, finding := range findings {
+		prefix := strings.Trim(strings.Join([]string{finding.Severity, finding.Category}, "/"), "/")
+		if prefix == "" {
+			prefix = "finding"
+		}
+		fmt.Fprintf(sb, "- [%s] %s", prefix, finding.Message)
+		if len(finding.Evidence) > 0 {
+			fmt.Fprintf(sb, " (evidence: %s)", strings.Join(finding.Evidence, ", "))
+		}
+		sb.WriteString("\n")
+	}
+}
+
 // =====================================================================
 // Scenario Reviewer fragments
 // =====================================================================
@@ -2497,7 +2674,7 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 				sb.WriteString(fmt.Sprintf("**Title:** %s\n", qc.PlanTitle))
 				sb.WriteString(fmt.Sprintf("**Goal:** %s\n", qc.PlanGoal))
 				sb.WriteString(fmt.Sprintf("**QA Level:** %s\n", qc.QALevel))
-				if len(qc.PlanConstraints) > 0 {
+				if len(qc.PlanConstraints) > 0 && !contractProjectionCarriesConstraints(ctx.ContractProjection) {
 					// #204: hard constraints from the original request. A deliverable
 					// that violated one (e.g. stubbed a class the request said not to)
 					// is not release-ready even if every executed test passed.
@@ -2602,6 +2779,9 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 							sb.WriteString(fmt.Sprintf("- **%s** / %s\n", f.JobName, f.StepName))
 							if f.TestName != "" {
 								sb.WriteString(fmt.Sprintf("  Test: %s\n", f.TestName))
+							}
+							if f.Category != "" {
+								sb.WriteString(fmt.Sprintf("  Category: %s\n", f.Category))
 							}
 							if f.Message != "" {
 								sb.WriteString(fmt.Sprintf("  Message: %s\n", f.Message))

@@ -61,20 +61,32 @@ const EXECUTION_ROLES = new Set([
 	'recovery-agent'
 ]);
 
+const LESSON_STEPS = new Set(['decompose', 'lesson-decompose', 'lesson-decomposition']);
+const LESSON_ROLES = new Set(['lesson-decomposer', 'lesson-curator']);
+
 /** Convert one ActivityEvent to a FeedEvent. Stable `id` enables dedup when
  * the component keys the `{#each}` block on it. Carries `requirement_id`
  * through when the raw event includes it so the feed UI can render the
  * per-requirement anchor pill (bug #7.9) without a separate KV lookup. */
 export function activityEventToFeedEvent(event: ActivityEvent): FeedEvent {
 	const loopShort = event.loop_id?.slice(0, 8) ?? 'unknown';
-	const summary = summaryFor(event.type, loopShort);
 	const loop = eventData(event);
+	const lessonLoop = loop !== null && isLessonLoop(loop);
+	const summary =
+		lessonLoop && loop
+			? lessonSummaryFor(event.type, loopShort, loop)
+			: summaryFor(event.type, loopShort);
 
 	const data: Record<string, unknown> = { loop_id: event.loop_id };
 	if (loop?.task_id) data.task_id = loop.task_id;
 	if (loop?.workflow_slug) data.workflow_slug = loop.workflow_slug;
 	if (loop?.workflow_step) data.workflow_step = loop.workflow_step;
 	if (loop?.role) data.role = loop.role;
+	if (lessonLoop) {
+		data.current_run_effect = 'none';
+		data.future_run_effect = 'eligible_for_future_prompts';
+		data.effect_label = 'future-only';
+	}
 	// The generated ActivityEvent doesn't declare requirement_id, but the wire
 	// payload sometimes carries it when the loop is scoped to a requirement.
 	// Narrow the intersection so we pull only the field we actually read.
@@ -90,6 +102,7 @@ export function activityEventToFeedEvent(event: ActivityEvent): FeedEvent {
 		timestamp: event.timestamp,
 		source: sourceForLoop(loop),
 		type: event.type,
+		kind: lessonLoop ? 'lesson_activity' : 'activity_loop',
 		summary,
 		data
 	};
@@ -115,6 +128,22 @@ function summaryFor(type: string, loopShort: string): string {
 	}
 }
 
+function lessonSummaryFor(type: string, loopShort: string, loop: ActivityLoopData): string {
+	const actor = loop.role === 'lesson-curator' ? 'Lesson curator' : 'Lesson decomposer';
+	const effect = 'future-only';
+	switch (type) {
+		case 'loop_created':
+			return `${actor} started (${effect}) · ${loopShort}`;
+		case 'loop_updated':
+			return `${actor} active (${effect}) · ${loopShort}`;
+		case 'loop_deleted':
+		case 'loop_completed':
+			return `${actor} finished (${effect}) · ${loopShort}`;
+		default:
+			return `${actor} ${type} (${effect}) · ${loopShort}`;
+	}
+}
+
 function eventData(event: ActivityEvent): ActivityLoopData | null {
 	const raw = (event as ActivityEvent & { data?: unknown }).data;
 	if (!raw || typeof raw !== 'object') return null;
@@ -123,9 +152,24 @@ function eventData(event: ActivityEvent): ActivityLoopData | null {
 
 function sourceForLoop(loop: ActivityLoopData | null): FeedEvent['source'] {
 	if (!loop) return 'activity';
+	if (isLessonLoop(loop)) return 'activity';
 	if (isPlanningLoop(loop)) return 'plan';
 	if (isExecutionLoop(loop)) return 'execution';
 	return 'activity';
+}
+
+function isLessonLoop(loop: ActivityLoopData): boolean {
+	const workflowSlug = loop.workflow_slug ?? '';
+	const step = loop.workflow_step ?? '';
+	const role = loop.role ?? '';
+	const taskID = loop.task_id ?? '';
+
+	return (
+		workflowSlug === 'semspec-lesson-decomposition' ||
+		LESSON_STEPS.has(step) ||
+		LESSON_ROLES.has(role) ||
+		/^(lesson|decompose)-/.test(taskID)
+	);
 }
 
 function isPlanningLoop(loop: ActivityLoopData): boolean {

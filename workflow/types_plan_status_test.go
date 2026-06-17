@@ -170,6 +170,8 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusRejected, StatusCreated, true},
 		// rejected -> approved (manual R2 restart — pre-existing)
 		{StatusRejected, StatusApproved, true},
+		// rejected -> requirements_generated (accepted post-QA architecture recovery)
+		{StatusRejected, StatusRequirementsGenerated, true},
 
 		// Negative: reviewing can't skip to wrong re-entry
 		{StatusReviewingDraft, StatusApproved, false},

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
@@ -25,11 +26,14 @@ func TestBuildRecoveryPlanDecision_ThreadsAffectedStoryIDsThrough(t *testing.T) 
 		EscalationReason: "wedge analysis points at Sarah's story-shaping",
 	}
 
-	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionStoryReprepare, "Story 2's files_owned missed src/x.go", true, time.Now())
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionStoryReprepare, "Story 2's files_owned missed src/x.go", true, nil, time.Now())
 
 	want := []string{"story.demo.1.1", "story.demo.1.2"}
 	if !reflect.DeepEqual(dec.AffectedStoryIDs, want) {
 		t.Errorf("AffectedStoryIDs = %v, want %v", dec.AffectedStoryIDs, want)
+	}
+	if dec.ContractImpact == nil || dec.ContractImpact.Kind != workflow.ContractImpactRefine {
+		t.Fatalf("ContractImpact = %#v, want refine for story_reprepare", dec.ContractImpact)
 	}
 }
 
@@ -48,7 +52,7 @@ func TestBuildRecoveryPlanDecision_EmptyAffectedStoryIDsOmitsField(t *testing.T)
 		// AffectedStoryIDs intentionally empty
 	}
 
-	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "refine the prompt", true, time.Now())
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "refine the prompt", true, nil, time.Now())
 
 	if dec.AffectedStoryIDs != nil {
 		t.Errorf("AffectedStoryIDs = %v, want nil (legacy wedge has no Stories in scope)", dec.AffectedStoryIDs)

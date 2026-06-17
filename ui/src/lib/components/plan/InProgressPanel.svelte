@@ -4,13 +4,24 @@
 	interface Props {
 		title: string;
 		detail?: string;
+		phase?: string;
+		phaseState?: string;
 		/** ISO timestamp marking when this stage started — used to render an
 		 * elapsed-time ticker so the user can tell "still moving" from "wedged"
 		 * during long LLM phases. Null/undefined hides the ticker. */
 		startedAt?: string | null;
 	}
 
-	let { title, detail, startedAt = null }: Props = $props();
+	let { title, detail, phase = 'planning', phaseState = 'active', startedAt = null }: Props = $props();
+
+	const iconName = $derived.by(() => {
+		if (phaseState === 'waiting') return 'pause';
+		if (phaseState === 'failed' || phaseState === 'error') return 'alert-triangle';
+		if (phaseState === 'complete') return 'check-circle';
+		if (phase === 'execution') return 'play';
+		return 'loader';
+	});
+	const spins = $derived(iconName === 'loader');
 
 	// Live-updating elapsed time. The $effect is purely side-effectful
 	// (registers and clears an interval) — the state assignment inside is
@@ -44,9 +55,9 @@
 	}
 </script>
 
-<section class="in-progress-panel" role="status" aria-live="polite">
+<section class="in-progress-panel" data-phase={phase} data-state={phaseState} role="status" aria-live="polite">
 	<div class="spinner-wrap" aria-hidden="true">
-		<Icon name="loader" size={28} />
+		<Icon name={iconName} size={28} class={spins ? 'spin' : ''} />
 	</div>
 	<div class="message">
 		<h3 class="title">{title}</h3>
@@ -98,7 +109,7 @@
 		flex-shrink: 0;
 	}
 
-	.spinner-wrap :global(svg) {
+	.spinner-wrap :global(svg.spin) {
 		animation: spin 1.6s linear infinite;
 	}
 

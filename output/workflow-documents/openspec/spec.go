@@ -67,6 +67,7 @@ func RenderSpec(plan *workflow.Plan, capName string) string {
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# Spec: %s\n\n", capability.Name)
+	writeContractReference(&sb, plan)
 
 	if capability.Description != "" {
 		sb.WriteString("## Overview\n\n")

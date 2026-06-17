@@ -37,6 +37,10 @@ func TestHandlePlanDecisionAddMutation_AppendsToPlan(t *testing.T) {
 			Rationale:      "retries=3/3",
 			AffectedReqIDs: []string{"R1"},
 			ProposedBy:     "requirement-executor",
+			ContractImpact: &workflow.ContractImpact{
+				Kind:    workflow.ContractImpactPreserve,
+				Summary: "records an exhausted execution without changing the contract",
+			},
 		},
 	})
 	resp := c.handlePlanDecisionAddMutation(context.Background(), body)
@@ -57,6 +61,9 @@ func TestHandlePlanDecisionAddMutation_AppendsToPlan(t *testing.T) {
 	}
 	if d.CreatedAt.IsZero() {
 		t.Error("CreatedAt should default to now when zero")
+	}
+	if d.ContractImpact == nil || d.ContractImpact.Kind != workflow.ContractImpactPreserve {
+		t.Fatalf("ContractImpact = %#v, want preserve", d.ContractImpact)
 	}
 }
 
@@ -248,6 +255,21 @@ func TestHandlePlanDecisionAddMutation_ValidationErrors(t *testing.T) {
 				},
 			}),
 			want: "invalid decision kind",
+		},
+		{
+			name: "invalid contract impact kind",
+			body: mustJSON(planDecisionAddRequest{
+				Slug: slug,
+				Decision: workflow.PlanDecision{
+					ID:     "x",
+					PlanID: "y",
+					Kind:   workflow.PlanDecisionKindRequirementChange,
+					ContractImpact: &workflow.ContractImpact{
+						Kind: "rewrite_everything",
+					},
+				},
+			}),
+			want: "invalid decision contract impact kind",
 		},
 	}
 	for _, tc := range cases {

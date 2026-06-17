@@ -913,6 +913,9 @@ func (c *Component) dispatchAnalyst(ctx context.Context, slug, title, descriptio
 			PreviousError:   previousError,
 		},
 	}
+	if plan, err := c.loadPlanFromKV(ctx, slug); err == nil {
+		asmCtx.ContractProjection = prompt.PlannerContractProjection(plan)
+	}
 
 	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
@@ -1042,6 +1045,9 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
 		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
 		PlannerPrompt:     buildPlannerPromptContext(title, isRevision, previousPlanJSON, revisionPrompt, previousError, projectFileTree),
+	}
+	if plan, err := c.loadPlanFromKV(ctx, slug); err == nil {
+		asmCtx.ContractProjection = prompt.PlannerContractProjection(plan)
 	}
 
 	// Wire role-scoped lessons learned.

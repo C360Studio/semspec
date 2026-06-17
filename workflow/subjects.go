@@ -127,14 +127,25 @@ type QARequestedEvent struct {
 	TraceID        string `json:"trace_id,omitempty"`
 }
 
+// QAFailureCategory is a deterministic machine-readable class for a QA failure.
+type QAFailureCategory string
+
+// QA failure categories — the deterministic closed set of QA failure classes.
+const (
+	QAFailureCategoryTopology    QAFailureCategory = "topology"
+	QAFailureCategoryBuildConfig QAFailureCategory = "build_configuration"
+	QAFailureCategoryTestFailure QAFailureCategory = "test_failure"
+)
+
 // QAFailure describes a single test or job failure surfaced by the QA executor.
 // qa-reviewer consumes these to produce targeted PlanDecisions.
 type QAFailure struct {
-	JobName    string `json:"job_name"`
-	StepName   string `json:"step_name,omitempty"`
-	TestName   string `json:"test_name,omitempty"`
-	Message    string `json:"message,omitempty"`
-	LogExcerpt string `json:"log_excerpt,omitempty"`
+	JobName    string            `json:"job_name"`
+	StepName   string            `json:"step_name,omitempty"`
+	TestName   string            `json:"test_name,omitempty"`
+	Category   QAFailureCategory `json:"category,omitempty"`
+	Message    string            `json:"message,omitempty"`
+	LogExcerpt string            `json:"log_excerpt,omitempty"`
 }
 
 // QASkippedTest identifies a single test the executor reported as SKIPPED (not

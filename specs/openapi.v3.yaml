@@ -1404,11 +1404,29 @@ components:
                             - marker
                         type: object
                     type: array
+                topology_facts:
+                    items:
+                        properties:
+                            evidence:
+                                items:
+                                    type: string
+                                type: array
+                            kind:
+                                type: string
+                            path:
+                                type: string
+                            value:
+                                type: string
+                        required:
+                            - kind
+                        type: object
+                    type: array
             required:
                 - languages
                 - frameworks
                 - tooling
                 - existing_docs
+                - topology_facts
                 - proposed_checklist
             type: object
         Flow:
@@ -1654,11 +1672,29 @@ components:
                                     - marker
                                 type: object
                             type: array
+                        topology_facts:
+                            items:
+                                properties:
+                                    evidence:
+                                        items:
+                                            type: string
+                                        type: array
+                                    kind:
+                                        type: string
+                                    path:
+                                        type: string
+                                    value:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
+                            type: array
                     required:
                         - languages
                         - frameworks
                         - tooling
                         - existing_docs
+                        - topology_facts
                         - proposed_checklist
                     type: object
                 existing_docs_content:
@@ -2304,8 +2340,141 @@ components:
                 auto_reject_on_exhaustion:
                     nullable: true
                     type: boolean
+                constraints:
+                    items:
+                        type: string
+                    type: array
                 context:
                     type: string
+                contract:
+                    nullable: true
+                    properties:
+                        acceptance_obligations:
+                            items:
+                                type: string
+                            type: array
+                        amendments:
+                            items:
+                                properties:
+                                    created_at:
+                                        format: date-time
+                                        type: string
+                                    id:
+                                        type: string
+                                    impact:
+                                        properties:
+                                            affected_ids:
+                                                items:
+                                                    type: string
+                                                type: array
+                                            kind:
+                                                type: string
+                                            summary:
+                                                type: string
+                                        required:
+                                            - kind
+                                        type: object
+                                    plan_decision_id:
+                                        type: string
+                                required:
+                                    - id
+                                    - impact
+                                    - created_at
+                                type: object
+                            type: array
+                        brief:
+                            type: string
+                        constraints:
+                            items:
+                                type: string
+                            type: array
+                        created_at:
+                            format: date-time
+                            type: string
+                        forbidden_moves:
+                            items:
+                                type: string
+                            type: array
+                        id:
+                            type: string
+                        scope:
+                            properties:
+                                create:
+                                    items:
+                                        type: string
+                                    type: array
+                                do_not_touch:
+                                    items:
+                                        type: string
+                                    type: array
+                                exclude:
+                                    items:
+                                        type: string
+                                    type: array
+                                include:
+                                    items:
+                                        type: string
+                                    type: array
+                            type: object
+                        source_refs:
+                            items:
+                                properties:
+                                    digest:
+                                        type: string
+                                    kind:
+                                        type: string
+                                    ref:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
+                            type: array
+                        topology_facts:
+                            items:
+                                properties:
+                                    evidence:
+                                        items:
+                                            type: string
+                                        type: array
+                                    kind:
+                                        type: string
+                                    path:
+                                        type: string
+                                    value:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
+                            type: array
+                        validation_findings:
+                            items:
+                                properties:
+                                    category:
+                                        type: string
+                                    created_at:
+                                        format: date-time
+                                        type: string
+                                    evidence:
+                                        items:
+                                            type: string
+                                        type: array
+                                    id:
+                                        type: string
+                                    message:
+                                        type: string
+                                    severity:
+                                        type: string
+                                required:
+                                    - message
+                                type: object
+                            type: array
+                        version:
+                            type: integer
+                    required:
+                        - id
+                        - version
+                        - created_at
+                    type: object
                 created_at:
                     format: date-time
                     type: string
@@ -2430,6 +2599,20 @@ components:
                                         - type
                                     type: object
                                 type: array
+                            contract_impact:
+                                nullable: true
+                                properties:
+                                    affected_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    kind:
+                                        type: string
+                                    summary:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
                             created_at:
                                 format: date-time
                                 type: string
@@ -2501,6 +2684,8 @@ components:
                         failures:
                             items:
                                 properties:
+                                    category:
+                                        type: string
                                     job_name:
                                         type: string
                                     log_excerpt:
@@ -2521,6 +2706,19 @@ components:
                             type: string
                         runner_error:
                             type: string
+                        skipped_tests:
+                            items:
+                                properties:
+                                    file:
+                                        type: string
+                                    name:
+                                        type: string
+                                    suite:
+                                        type: string
+                                required:
+                                    - name
+                                type: object
+                            type: array
                         trace_id:
                             type: string
                     required:
@@ -3041,8 +3239,141 @@ components:
                 auto_reject_on_exhaustion:
                     nullable: true
                     type: boolean
+                constraints:
+                    items:
+                        type: string
+                    type: array
                 context:
                     type: string
+                contract:
+                    nullable: true
+                    properties:
+                        acceptance_obligations:
+                            items:
+                                type: string
+                            type: array
+                        amendments:
+                            items:
+                                properties:
+                                    created_at:
+                                        format: date-time
+                                        type: string
+                                    id:
+                                        type: string
+                                    impact:
+                                        properties:
+                                            affected_ids:
+                                                items:
+                                                    type: string
+                                                type: array
+                                            kind:
+                                                type: string
+                                            summary:
+                                                type: string
+                                        required:
+                                            - kind
+                                        type: object
+                                    plan_decision_id:
+                                        type: string
+                                required:
+                                    - id
+                                    - impact
+                                    - created_at
+                                type: object
+                            type: array
+                        brief:
+                            type: string
+                        constraints:
+                            items:
+                                type: string
+                            type: array
+                        created_at:
+                            format: date-time
+                            type: string
+                        forbidden_moves:
+                            items:
+                                type: string
+                            type: array
+                        id:
+                            type: string
+                        scope:
+                            properties:
+                                create:
+                                    items:
+                                        type: string
+                                    type: array
+                                do_not_touch:
+                                    items:
+                                        type: string
+                                    type: array
+                                exclude:
+                                    items:
+                                        type: string
+                                    type: array
+                                include:
+                                    items:
+                                        type: string
+                                    type: array
+                            type: object
+                        source_refs:
+                            items:
+                                properties:
+                                    digest:
+                                        type: string
+                                    kind:
+                                        type: string
+                                    ref:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
+                            type: array
+                        topology_facts:
+                            items:
+                                properties:
+                                    evidence:
+                                        items:
+                                            type: string
+                                        type: array
+                                    kind:
+                                        type: string
+                                    path:
+                                        type: string
+                                    value:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
+                            type: array
+                        validation_findings:
+                            items:
+                                properties:
+                                    category:
+                                        type: string
+                                    created_at:
+                                        format: date-time
+                                        type: string
+                                    evidence:
+                                        items:
+                                            type: string
+                                        type: array
+                                    id:
+                                        type: string
+                                    message:
+                                        type: string
+                                    severity:
+                                        type: string
+                                required:
+                                    - message
+                                type: object
+                            type: array
+                        version:
+                            type: integer
+                    required:
+                        - id
+                        - version
+                        - created_at
+                    type: object
                 created_at:
                     format: date-time
                     type: string
@@ -3159,6 +3490,138 @@ components:
                                 type: object
                             type: array
                     type: object
+                phase_summary:
+                    nullable: true
+                    properties:
+                        active_loop_count:
+                            type: integer
+                        detail:
+                            type: string
+                        execution:
+                            nullable: true
+                            properties:
+                                completed:
+                                    type: integer
+                                failed:
+                                    type: integer
+                                pending:
+                                    type: integer
+                                total:
+                                    type: integer
+                            required:
+                                - completed
+                                - failed
+                                - pending
+                                - total
+                            type: object
+                        freshness:
+                            properties:
+                                generated_at:
+                                    format: date-time
+                                    type: string
+                                reason:
+                                    type: string
+                                source:
+                                    type: string
+                                stale:
+                                    type: boolean
+                            required:
+                                - source
+                                - generated_at
+                                - stale
+                            type: object
+                        lessons:
+                            nullable: true
+                            properties:
+                                current_run_effect:
+                                    type: string
+                                detail:
+                                    type: string
+                                future_run_effect:
+                                    type: string
+                                state:
+                                    type: string
+                            required:
+                                - state
+                                - current_run_effect
+                                - future_run_effect
+                            type: object
+                        phase:
+                            type: string
+                        qa:
+                            nullable: true
+                            properties:
+                                failure_category:
+                                    type: string
+                                level:
+                                    type: string
+                                passed:
+                                    nullable: true
+                                    type: boolean
+                                run_id:
+                                    type: string
+                                summary:
+                                    type: string
+                                verdict:
+                                    type: string
+                            type: object
+                        recovery:
+                            nullable: true
+                            properties:
+                                affected_requirement_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                affected_story_ids:
+                                    items:
+                                        type: string
+                                    type: array
+                                contract_impact_kind:
+                                    type: string
+                                contract_impact_summary:
+                                    type: string
+                                decision_id:
+                                    type: string
+                                kind:
+                                    type: string
+                                proposed_by:
+                                    type: string
+                                status:
+                                    type: string
+                                summary:
+                                    type: string
+                            required:
+                                - decision_id
+                                - status
+                            type: object
+                        stage:
+                            type: string
+                        state:
+                            type: string
+                        title:
+                            type: string
+                        wait:
+                            nullable: true
+                            properties:
+                                decision_id:
+                                    type: string
+                                policy_reason:
+                                    type: string
+                                reason:
+                                    type: string
+                                required_action:
+                                    type: string
+                            required:
+                                - reason
+                            type: object
+                    required:
+                        - stage
+                        - phase
+                        - state
+                        - title
+                        - active_loop_count
+                        - freshness
+                    type: object
                 plan_decisions:
                     items:
                         properties:
@@ -3184,6 +3647,20 @@ components:
                                         - type
                                     type: object
                                 type: array
+                            contract_impact:
+                                nullable: true
+                                properties:
+                                    affected_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    kind:
+                                        type: string
+                                    summary:
+                                        type: string
+                                required:
+                                    - kind
+                                type: object
                             created_at:
                                 format: date-time
                                 type: string
@@ -3255,6 +3732,8 @@ components:
                         failures:
                             items:
                                 properties:
+                                    category:
+                                        type: string
                                     job_name:
                                         type: string
                                     log_excerpt:
@@ -3275,6 +3754,19 @@ components:
                             type: string
                         runner_error:
                             type: string
+                        skipped_tests:
+                            items:
+                                properties:
+                                    file:
+                                        type: string
+                                    name:
+                                        type: string
+                                    suite:
+                                        type: string
+                                required:
+                                    - name
+                                type: object
+                            type: array
                         trace_id:
                             type: string
                     required:

@@ -1,8 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { feedModeRadio, plansModeRadio } from './helpers/selectors';
+import { stubProjectConfigured } from './helpers/truth';
 
 test.describe('@t0 activity-feed', () => {
+	test.beforeEach(async ({ page }) => {
+		await stubProjectConfigured(page);
+	});
+
 	test('switching to Feed mode shows activity feed', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
@@ -12,7 +17,9 @@ test.describe('@t0 activity-feed', () => {
 		await expect(feedModeRadio(page)).toHaveAttribute('aria-checked', 'true');
 
 		// Activity feed heading should appear
-		await expect(page.getByText('Activity Feed')).toBeVisible();
+		await expect(
+			page.getByTestId('panel-left').getByRole('heading', { name: 'Activity Feed' })
+		).toBeVisible();
 	});
 
 	test('activity feed shows connection status', async ({ page }) => {
@@ -37,7 +44,7 @@ test.describe('@t0 activity-feed', () => {
 		await feedModeRadio(page).click();
 
 		// Should show "N events" counter
-		await expect(page.getByText(/\d+ events/)).toBeVisible();
+		await expect(page.getByTestId('panel-left').getByText(/\d+ events/)).toBeVisible();
 	});
 
 	test('activity feed has event source filter', async ({ page }) => {
@@ -64,11 +71,13 @@ test.describe('@t0 activity-feed', () => {
 		// Switch to a specific source
 		await filter.selectOption('plan');
 		// Should still show the feed (not crash)
-		await expect(page.getByText('Activity Feed')).toBeVisible();
+		await expect(
+			page.getByTestId('panel-left').getByRole('heading', { name: 'Activity Feed' })
+		).toBeVisible();
 
 		// Switch back to all
 		await filter.selectOption('all');
-		await expect(page.getByText(/\d+ events/)).toBeVisible();
+		await expect(page.getByTestId('panel-left').getByText(/\d+ events/)).toBeVisible();
 	});
 
 	test('empty state or events list shows', async ({ page }) => {
@@ -95,14 +104,18 @@ test.describe('@t0 activity-feed', () => {
 
 		// Switch to Feed
 		await feedModeRadio(page).click();
-		await expect(page.getByText('Activity Feed')).toBeVisible();
+		await expect(
+			page.getByTestId('panel-left').getByRole('heading', { name: 'Activity Feed' })
+		).toBeVisible();
 
 		// Switch back to Plans
 		await plansModeRadio(page).click();
 		await expect(plansModeRadio(page)).toHaveAttribute('aria-checked', 'true');
 
 		// Activity Feed heading should no longer be visible
-		await expect(page.getByText('Activity Feed')).not.toBeVisible();
+		await expect(
+			page.getByTestId('panel-left').getByRole('heading', { name: 'Activity Feed' })
+		).not.toBeVisible();
 	});
 
 	test('activity page shows feed and loops panels', async ({ page }) => {
@@ -111,7 +124,10 @@ test.describe('@t0 activity-feed', () => {
 
 		// Activity page has its own dedicated view with Feed + Loops panels
 		// Should show at least one of: Feed heading or "No active loops"
-		const feedVisible = await page.getByText('Activity Feed').isVisible().catch(() => false);
+		const feedVisible = await page
+			.getByRole('heading', { name: 'Activity Feed' })
+			.isVisible()
+			.catch(() => false);
 		const activityVisible = await page.getByText(/Feed|Timeline/i).first().isVisible().catch(() => false);
 		expect(feedVisible || activityVisible).toBe(true);
 	});

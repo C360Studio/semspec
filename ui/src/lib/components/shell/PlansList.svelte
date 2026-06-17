@@ -19,7 +19,7 @@
 
 		if (f === 'active') {
 			filtered = filtered.filter(
-				(p) => p.approved && !['complete', 'failed', 'archived'].includes(p.stage)
+				(p) => p.approved && !isTerminalPlan(p)
 			);
 		} else if (f === 'draft') {
 			filtered = filtered.filter((p) => !p.approved);
@@ -40,7 +40,17 @@
 	];
 
 	// New Plan button is now a link — no handler needed
+	function isTerminalPlan(plan: PlanWithStatus): boolean {
+		return plan.phase_summary?.phase === 'terminal' || ['complete', 'failed', 'archived'].includes(plan.stage);
+	}
 
+	function stageBadgeLabel(plan: PlanWithStatus): string {
+		return plan.phase_summary?.title || getStageLabel(plan.stage);
+	}
+
+	function stageBadgePhase(plan: PlanWithStatus): string {
+		return plan.phase_summary?.phase || plan.stage;
+	}
 </script>
 
 <div class="plans-list">
@@ -78,7 +88,9 @@
 						<span class="plan-title">
 							{plan.title.length > 60 ? plan.title.slice(0, 60) + '…' : plan.title}
 						</span>
-						<span class="stage" data-stage={plan.stage}>{getStageLabel(plan.stage)}</span>
+						<span class="stage" data-stage={plan.stage} data-phase={stageBadgePhase(plan)}>
+							{stageBadgeLabel(plan)}
+						</span>
 					</div>
 					<div class="plan-slug">{plan.slug}</div>
 					{#if plan.approved}
@@ -220,7 +232,8 @@
 	}
 
 	.stage[data-stage='implementing'],
-	.stage[data-stage='executing'] {
+	.stage[data-stage='executing'],
+	.stage[data-phase='execution'] {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 	}
@@ -228,6 +241,11 @@
 	.stage[data-stage='complete'] {
 		background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
 		color: var(--color-success);
+	}
+
+	.stage[data-stage='complete_with_deferrals'] {
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
+		color: var(--color-warning);
 	}
 
 	.stage[data-stage='failed'] {

@@ -397,6 +397,7 @@ func (c *Component) dispatchStoryPreparer(ctx context.Context, plan *workflow.Pl
 		Standards:           prompt.LoadStandardsForRoleFromDisk(prompt.RoleStoryPreparer),
 		Persona:             prompt.GlobalPersonas().ForRole(prompt.RoleStoryPreparer),
 		Vocabulary:          prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection:  prompt.StoryPreparerContractProjection(plan),
 		StoryPreparerPrompt: storyCtx,
 	}
 

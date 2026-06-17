@@ -47,6 +47,8 @@ func writePlanTriples(ctx context.Context, tw *graphutil.TripleWriter, plan *Pla
 // JSON-encoded — per feedback_no_json_in_triples. UpsertEntity's
 // RemoveTriples = distinctPredicates(addTriples) replaces the whole list,
 // which is the same net effect as the prior ReplaceTripleList calls.
+//
+//revive:disable-next-line:function-length // sequential triple builder; predicate order is the contract.
 func buildPlanTriples(entityID string, plan *Plan) []message.Triple {
 	t := func(pred, obj string) message.Triple {
 		return message.Triple{Subject: entityID, Predicate: pred, Object: obj}
@@ -102,6 +104,32 @@ func buildPlanTriples(entityID string, plan *Plan) []message.Triple {
 	}
 	if plan.LastErrorAt != nil {
 		triples = append(triples, t(semspec.PlanLastErrorAt, plan.LastErrorAt.Format(time.RFC3339)))
+	}
+	if plan.Contract != nil {
+		if plan.Contract.ID != "" {
+			triples = append(triples, t(semspec.PlanContractID, plan.Contract.ID))
+		}
+		if blob, err := json.Marshal(plan.Contract); err == nil {
+			triples = append(triples, t(semspec.PlanContract, string(blob)))
+		}
+		for _, constraint := range plan.Contract.Constraints {
+			triples = append(triples, t(semspec.PlanContractConstraint, constraint))
+		}
+		for _, fact := range plan.Contract.TopologyFacts {
+			if blob, err := json.Marshal(fact); err == nil {
+				triples = append(triples, t(semspec.PlanContractTopology, string(blob)))
+			}
+		}
+		for _, amendment := range plan.Contract.Amendments {
+			if blob, err := json.Marshal(amendment); err == nil {
+				triples = append(triples, t(semspec.PlanContractAmendment, string(blob)))
+			}
+		}
+		for _, finding := range plan.Contract.ValidationFindings {
+			if blob, err := json.Marshal(finding); err == nil {
+				triples = append(triples, t(semspec.PlanContractValidationFinding, string(blob)))
+			}
+		}
 	}
 
 	// Scope lists — one triple per element (no JSON encoding).
@@ -184,6 +212,12 @@ func PlanFromTripleMap(entityID string, triples map[string]string) *Plan {
 	if v := triples[semspec.PlanLastErrorAt]; v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
 			plan.LastErrorAt = &t
+		}
+	}
+	if v := triples[semspec.PlanContract]; v != "" {
+		var contract ContractPacket
+		if err := json.Unmarshal([]byte(v), &contract); err == nil {
+			plan.Contract = &contract
 		}
 	}
 

@@ -99,7 +99,7 @@ func (c *Component) handleQACompleted(lifecycleCtx, msgCtx context.Context, msg 
 	qaRun := &workflow.QARun{
 		RunID:        evt.RunID,
 		Passed:       evt.Passed,
-		Failures:     evt.Failures,
+		Failures:     classifyQAFailures(evt.Failures),
 		SkippedTests: evt.SkippedTests,
 		Artifacts:    evt.Artifacts,
 		DurationMs:   evt.DurationMs,

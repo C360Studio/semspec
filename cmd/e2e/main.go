@@ -55,6 +55,7 @@ Tier 1 — Component Tests (no LLM):
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
   plan-state-machine  - Tests plan retry/complete/reject endpoint guard clauses
+  contract-observability - Tests contract/recovery/topology/execution summary surfaces
 
 Tier 2 — Pipeline Tests (mock LLM):
   hello-world                    - Greenfield Python+JS: add /goodbye endpoint with semantic validation
@@ -147,6 +148,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println("  plan-state-machine  Tests plan retry/complete/reject guard clauses")
+			fmt.Println("  contract-observability Tests contract/recovery/topology/execution summary surfaces")
 			fmt.Println()
 			fmt.Println("  Tier 2 — Pipeline Tests (mock LLM):")
 			fmt.Println("  hello-world                    Greenfield Python+JS: /goodbye endpoint")
@@ -197,6 +199,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// Tier 1: State machine guard clauses
 		scenarios.NewPlanStateMachineScenario(cfg),
 		scenarios.NewStaleMutationScenario(cfg),
+		scenarios.NewContractObservabilityScenario(cfg),
 		// Tier 2: Pipeline tests (mock LLM)
 		scenarios.NewPlanPhaseScenario(cfg),
 		scenarios.NewExecutionPhaseScenario(cfg),

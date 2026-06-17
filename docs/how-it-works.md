@@ -3,6 +3,9 @@
 This document explains what happens when you use semspec, from infrastructure to command execution.
 Start here before reading the architecture or component guides.
 
+For the comprehensive happy-path, retry-path, and SemTeams starter-spec view, see
+[SemSpec End-to-End Flow](e2e-flow.md).
+
 ## What is Semspec?
 
 Semspec is a spec-driven development agent with a **persistent knowledge graph**. It helps you:
@@ -18,34 +21,46 @@ team's coding standards.
 
 ## Execution Model
 
-Planning produces Requirements and Scenarios. Task decomposition happens at runtime for each
-Requirement:
+Planning produces Requirements, Architecture, Stories, and Scenarios. Runtime execution then
+dispatches Requirements while implementation work happens through Story-owned task DAGs:
 
 ```
-Plan approved → Requirements → Scenarios → ready_for_execution
-                                                  │
-                                          scenario-orchestrator
-                                                  │
-                          ┌───────────────────────┼───────────────────────┐
-                          ▼                       ▼                       ▼
-              requirement-execution-loop  requirement-execution-loop  requirement-execution-loop
-                   (Requirement 1)             (Requirement 2)           (Requirement N)
-                          │
-                 LLM: decompose_task
-                          │
-                       TaskDAG
-                          │
-                  dag-execution-loop
-                          │
-                ┌─────────┼─────────┐
-                ▼         ▼         ▼
-             node A     node B    node C
-                          │(after A)
+Plan approved -> Requirements -> Architecture -> Stories -> Scenarios -> ready_for_execution
+                                                                       |
+                                                               scenario-orchestrator
+                                                                       |
+                                              +------------------------+------------------------+
+                                              v                        v                        v
+                                      Requirement 1             Requirement 2             Requirement N
+                                              |
+                                      Story task DAG
+                                              |
+                                developer -> validator -> reviewer
+                                              |
+                                      Story scenario review
 ```
 
-Task decomposition happens at execution time because the best breakdown depends on what the code
-looks like now — not at planning time. The agent inspects the live codebase and chooses the right
-task structure for each Requirement when it is ready to execute.
+Task synthesis happens at execution time from Stories because the best node sequence depends on
+the accepted Story/file ownership surface and the current requirement branch. The executor does
+not invent new scope during implementation; it works the Story boundaries created during planning.
+
+### Contract Authority And Brownfield Topology
+
+Planning artifacts are not the authority by themselves. When a Plan is created, `plan-manager`
+creates a stable contract packet that captures the original brief, constraints, scope snapshot,
+topology facts, and later accepted amendments. BMAD/OpenSpec prompts receive role-specific
+projections of that same packet so planner, architect, story, developer, reviewer, recovery, and
+QA loops carry the same non-negotiable context.
+
+The root contract is immutable. Material changes are amendments attached through PlanDecisions
+with contract-impact evidence. Scope shrinkage is rejected unless the dropped obligation has
+accepted amendment provenance, and whole-phase resets require evidence that the whole phase is
+invalid. Recovery should dirty the smallest correct requirement/story/scenario closure instead of
+discarding unrelated work.
+
+Brownfield topology is part of that contract. Build roots, package manifests, workspace files,
+module boundaries, and standalone-project markers are treated as topology-controlled paths. A
+developer can extend the baseline, but cannot quietly replace it with a clean-room project shape.
 
 ### Agent Tool Set
 
@@ -79,8 +94,9 @@ When a PlanDecision is accepted during reactive execution, running scenario loop
 via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Scenarios are
 re-queued for fresh execution with the updated behavioral contracts.
 
-The `dag-execution-loop` and `requirement-execution-loop` reactive workflows are defined as
-declarative JSON rules in `configs/rules/`.
+The current execution path is component-owned: `scenario-orchestrator` dispatches ready
+requirements, `requirement-executor` synthesizes Story task DAGs, and `execution-manager` owns the
+TDD task pipeline.
 
 ## The Semstreams Relationship
 
@@ -158,7 +174,9 @@ sequence. A write to PLAN_STATES is the trigger (the KV Twofer pattern).
 ### Step 1: Plan created
 
 The user submits a plan description via the Web UI or REST API. The `plan-manager` creates a plan
-record in PLAN_STATES with status `created`.
+record in PLAN_STATES with status `created` and initializes the Plan contract packet. The packet
+keeps the original brief, initial scope, constraints, topology facts, and amendment ledger tied to
+one stable contract ID.
 
 ### Step 2: Planner drafts the plan
 
@@ -204,31 +222,38 @@ a revised plan incorporating the violation findings as LLM context, and sets sta
 **Verdict: reviewed** — If `auto_approve=true` is set, the plan-reviewer promotes directly to
 `approved`. Otherwise, a human approves via the UI or API.
 
-### Step 4: Architecture generation
+### Step 4: Requirement generation
 
-The `architecture-generator` watches PLAN_STATES for status `approved`. It dispatches an
-architect agent that produces technology decisions and component boundaries, then publishes
-the result via `submit_work`. The `plan-manager` stores the architecture and sets status to
-`generating_requirements`.
+The `requirement-generator` watches PLAN_STATES for approved plans. It calls the LLM to generate
+structured Requirements from the plan and the contract packet, then publishes a
+`RequirementsGeneratedEvent`. The `plan-manager` validates dependency shape, capability coverage,
+and scope continuity before setting status to `requirements_generated`.
 
-### Step 5: Requirement generation
+### Step 5: Architecture generation
 
-The `requirement-generator` watches PLAN_STATES for the requirements trigger. It calls the LLM to
-generate structured Requirements from the plan and publishes a `RequirementsGeneratedEvent`.
-The `plan-manager` receives the event, stores the Requirements, and sets status to
-`requirements_generated`.
+The `architecture-generator` watches PLAN_STATES for status `requirements_generated`. It dispatches
+an architect agent that produces technology decisions, component boundaries, implementation files,
+and topology-preserving guidance, then publishes the result via `submit_work`. The `plan-manager`
+stores the architecture and sets status to `architecture_generated`.
 
-### Step 6: Scenario generation
+### Step 6: Story preparation
 
-The `scenario-generator` watches for status `requirements_generated`. For each Requirement it
-generates BDD Scenarios (Given/When/Then) and publishes events. The `plan-manager` accumulates
-the Scenarios and sets status to `scenarios_generated` when all Requirements are covered.
+The `story-preparer` watches for status `architecture_generated`. It maps Requirements and
+Architecture into Stories with file ownership, dependencies, and scope create/include obligations.
+The `plan-manager` validates coverage, cycles, ownership, and contract continuity before setting
+status to `stories_generated`.
 
-### Step 7: Scenario review
+### Step 7: Scenario generation
+
+The `scenario-generator` watches for status `stories_generated`. For each Story it generates
+BDD Scenarios (Given/When/Then) and publishes events. The `plan-manager` accumulates the Scenarios
+and sets status to `scenarios_generated` when all executable Stories are covered.
+
+### Step 8: Scenario and Story review
 
 The `plan-reviewer` watches for status `scenarios_generated` and performs a second review pass,
-validating the Scenarios against standards and Requirements. On approval, status advances to
-`scenarios_reviewed` and then to `ready_for_execution`.
+validating the Scenarios, Stories, requirements, architecture, and contract obligations. On
+approval, status advances to `ready_for_execution`.
 
 ### Full flow summary
 
@@ -256,25 +281,31 @@ plan-reviewer: PlanReviewStrategy (standards + plan + file tree)
         ▼ (auto_approve=true OR human approves)
       PLAN_STATES ← { status: "approved" }
         │
-        ▼ (architecture-generator watches status=approved)
-      LLM → Architecture decisions published → plan-manager stores
-        │
-        ▼
-      PLAN_STATES ← { status: "architecture_generated" }
-        │
         ▼ (requirement-generator watches)
-      LLM → Requirements published → plan-manager stores
+      LLM → Requirements published → plan-manager stores + validates contract coverage
         │
         ▼
       PLAN_STATES ← { status: "requirements_generated" }
         │
+        ▼ (architecture-generator watches)
+      LLM → Architecture decisions + topology guidance published → plan-manager stores
+        │
+        ▼
+      PLAN_STATES ← { status: "architecture_generated" }
+        │
+        ▼ (story-preparer watches)
+      LLM → Stories, file ownership, dependency schedule → plan-manager stores
+        │
+        ▼
+      PLAN_STATES ← { status: "stories_generated" }
+        │
         ▼ (scenario-generator watches)
-      LLM → Scenarios per Requirement → plan-manager accumulates
+      LLM → Scenarios per Story → plan-manager accumulates
         │
         ▼
       PLAN_STATES ← { status: "scenarios_generated" }
         │
-        ▼ (plan-reviewer second pass)
+        ▼ (plan-reviewer scenario/story/contract pass)
       PLAN_STATES ← { status: "ready_for_execution" }
         │
         ▼
@@ -302,7 +333,7 @@ These files are git-friendly. Commit them to preserve context across sessions an
 
 ## Component Groups
 
-Semspec registers 22 components at startup alongside the full semstreams component suite.
+Semspec registers its project components at startup alongside the full semstreams component suite.
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
@@ -311,18 +342,20 @@ Semspec registers 22 components at startup alongside the full semstreams compone
 │                          validates against standards; sets reviewed or│
 │                          revision_needed; promotes to approved when   │
 │                          auto_approve=true                            │
-│  architecture-generator Watches PLAN_STATES=approved, generates       │
+│  requirement-generator  Watches approved/changed plans, generates     │
+│                          structured Requirements via LLM              │
+│  architecture-generator Watches requirements_generated plans, creates │
 │                          technology decisions and component boundaries│
-│  requirement-generator  Watches PLAN_STATES, generates structured     │
-│                          Requirements via LLM                        │
-│  scenario-generator     Generates BDD Scenarios from Requirements    │
+│  story-preparer         Watches architecture_generated plans, creates │
+│                          Stories and dependency scheduling            │
+│  scenario-generator     Generates Story-scoped Scenarios              │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
-│  scenario-orchestrator  Dispatches requirement-execution-loop per    │
-│                          pending Requirement                         │
-│  requirement-executor   Decomposes Requirements into DAGs, serial    │
-│                          node dispatch, and per-requirement review   │
+│  scenario-orchestrator  Dispatches ready Requirements by dependency  │
+│                          and Story availability                      │
+│  requirement-executor   Synthesizes Story task DAGs, handles serial  │
+│                          node dispatch, and Story review             │
 │  execution-manager      TDD pipeline per DAG node:                  │
 │                          developer → validator → reviewer            │
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │
@@ -337,11 +370,12 @@ Semspec registers 22 components at startup alongside the full semstreams compone
 
 ┌──────────── Support ─────────────────────────────────────────────────┐
 │  plan-manager         Requirement/Scenario/PlanDecision HTTP API;    │
-│                        owns PLAN_STATES writes and event handling    │
+│                        owns PLAN_STATES writes, contract packets,    │
+│                        phase summaries, and event handling           │
 │  project-manager      Project management HTTP API                    │
 │  workflow-validator   Document structure validation (request/reply)  │
 │  workflow-documents   File output to .semspec/plans/                 │
-│  structural-validator  Structural integrity checks                   │
+│  structural-validator  Structural, ownership, and topology checks    │
 │  question-manager     Question routing, SLA tracking, LLM answering  │
 │  lesson-decomposer    Splits reviewer rejections into atomic triples │
 │                        for the role-scoped lessons pipeline          │
@@ -426,10 +460,19 @@ and the backend-only `e2e-mock.json` stay at `"summary"`.
 
 ### How the UI surfaces trajectories
 
+- **Plan phase summary** (`phase_summary` on plan API responses) — authoritative current phase,
+  active-loop count, execution counts, waits, recovery, QA, lesson activity, and freshness. The
+  banner and detail panels use this instead of inferring current state from feed rows.
 - **Activity feed** (`/agentic-dispatch/activity` SSE) — streams `loop_created`,
-  `loop_updated`, `loop_deleted` events so the live feed updates without polling.
-- **Execution timeline** — groups loops into Planning vs Execution stages and ghosts
-  the empty stages before any loop exists.
+  `loop_updated`, `loop_deleted`, stale/disconnected, orphaned execution, and lesson activity
+  events so the live feed updates without polling.
+- **Execution timeline** — groups loops into Planning vs Execution stages from plan phase state
+  and ghost-renders expected stages before any loop exists.
+- **Recovery and lesson details** — show PlanDecision status, affected nodes, contract impact,
+  whether the system is waiting for action, and whether lesson work can affect the current run or
+  only future prompts.
+- **Cost evidence** — token and cost displays use measured usage plus provider-rate metadata; when
+  rate data is unavailable, the UI marks the estimate instead of presenting false precision.
 - **TrajectoryEntryCard** — clicking a loop expands the per-step view. When the loop
   was captured at `trajectory_detail: "full"`, the card renders the **Request** side
   (one row per message with role chip + scrollable content) alongside the **Response**

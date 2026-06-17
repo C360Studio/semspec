@@ -31,6 +31,11 @@ type AssemblyContext struct {
 	// TaskContext carries task-specific data for developer prompts.
 	TaskContext *TaskContext
 
+	// ContractProjection carries the role-scoped view of the authoritative
+	// plan contract packet. It is nil for legacy plans that do not yet have a
+	// packet or for dispatches that have not opted into contract rendering.
+	ContractProjection *ContractProjection
+
 	// PlanContext carries plan-specific data for planner prompts.
 	PlanContext *PlanContext
 

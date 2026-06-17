@@ -15,11 +15,19 @@
 
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { stubPlanBranches, stubRequirementFileDiff } from './helpers/truth';
+import {
+	stubPlanBranches,
+	stubProjectConfigured,
+	stubRequirementFileDiff
+} from './helpers/truth';
 
 const slug = 'files-fixture';
 
 test.describe('@t0 plan-workspace files view', () => {
+	test.beforeEach(async ({ page }) => {
+		await stubProjectConfigured(page);
+	});
+
 	test('dropdown labels are requirement titles, not branch UUIDs', async ({ page }) => {
 		await stubPlanBranches(page, slug, [
 			{

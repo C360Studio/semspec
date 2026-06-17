@@ -24,10 +24,40 @@ interface LoopLike {
 	role?: string;
 	state: string;
 	created_at?: string;
+	completed_at?: string;
 	iterations?: number;
 	max_iterations?: number;
 	workflow_slug?: string;
 	current_task_id?: string;
+}
+
+type ActivityData = {
+	state?: string;
+};
+
+function parseActivityData(raw: unknown): ActivityData | null {
+	if (!raw) return null;
+	if (typeof raw === 'object') return raw as ActivityData;
+	if (typeof raw !== 'string') return null;
+
+	for (const candidate of [raw, decodeBase64(raw)]) {
+		if (!candidate) continue;
+		try {
+			const parsed = JSON.parse(candidate);
+			return typeof parsed === 'object' && parsed !== null ? parsed as ActivityData : null;
+		} catch {
+			// Try the next wire shape.
+		}
+	}
+	return null;
+}
+
+function decodeBase64(value: string): string | null {
+	try {
+		return atob(value);
+	} catch {
+		return null;
+	}
 }
 
 class TimelineStore {
@@ -85,6 +115,10 @@ class TimelineStore {
 			if (loop.created_at) {
 				const time = new Date(loop.created_at).getTime();
 				minTime = Math.min(minTime, time);
+				maxTime = Math.max(maxTime, time);
+			}
+			if (loop.completed_at) {
+				const time = new Date(loop.completed_at).getTime();
 				maxTime = Math.max(maxTime, time);
 			}
 		}
@@ -170,13 +204,10 @@ class TimelineStore {
 				taskId: loop.current_task_id
 			};
 
-			// If not active, estimate end time based on state
+			// If not active, use the measured completion timestamp when the API
+			// provides one. Do not fabricate durations from iteration counts.
 			if (!['active', 'waiting', 'blocked'].includes(segmentState)) {
-				// For completed/failed, estimate end time
-				// In a real implementation, this would come from actual data
-				const startMs = new Date(segment.startTime).getTime();
-				const estimatedDuration = (loop.iterations || 1) * 30000; // 30s per iteration estimate
-				segment.endTime = new Date(startMs + estimatedDuration).toISOString();
+				segment.endTime = loop.completed_at ?? segment.startTime;
 			}
 
 			segments.push(segment);
@@ -236,16 +267,9 @@ class TimelineStore {
 		// Update end time if this event has completed the segment
 		if (event.type === 'loop_completed') {
 			segment.endTime = event.timestamp;
-			// Parse data to get completion state if available
-			if (event.data) {
-				try {
-					const data = JSON.parse(atob(event.data));
-					if (data.state) {
-						segment.state = loopStateToSegmentState(data.state);
-					}
-				} catch {
-					// Ignore parse errors
-				}
+			const data = parseActivityData((event as ActivityEvent & { data?: unknown }).data);
+			if (data?.state) {
+				segment.state = loopStateToSegmentState(data.state);
 			}
 		}
 

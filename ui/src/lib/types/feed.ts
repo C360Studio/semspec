@@ -1,3 +1,20 @@
+import type { PlanWithStatus } from './plan';
+
+export type FeedEventKind =
+	| 'plan_stage'
+	| 'plan_wait'
+	| 'plan_recovery'
+	| 'plan_stale'
+	| 'plan_deleted'
+	| 'execution_phase'
+	| 'execution_task'
+	| 'execution_requirement'
+	| 'execution_orphaned'
+	| 'execution_stale'
+	| 'lesson_activity'
+	| 'activity_loop'
+	| 'question';
+
 /**
  * FeedEvent — normalized event from plan, execution, or question SSE sources.
  * Used by the left-panel Activity Feed for a unified lifecycle view.
@@ -9,6 +26,8 @@ export type FeedEvent = {
 	source: 'plan' | 'execution' | 'activity' | 'question';
 	/** Original SSE event type (plan_updated, task_updated, question_created, etc.) */
 	type: string;
+	/** Normalized machine-readable row class for UI routing and rendering. */
+	kind: FeedEventKind;
 	/** Human-readable summary */
 	summary: string;
 	/** Plan slug for filtering */
@@ -31,9 +50,8 @@ export type FeedEvent = {
  * Use the generated PlanWithStatus to stay in sync with the OpenAPI
  * contract; if the server adds fields they flow through automatically.
  */
-import type { PlanWithStatus } from './plan';
-
 export type PlanSSEPayload = PlanWithStatus;
+export type PlanPhaseSummary = NonNullable<PlanWithStatus['phase_summary']>;
 
 /** Task execution payload from execution SSE */
 export type TaskSSEPayload = {

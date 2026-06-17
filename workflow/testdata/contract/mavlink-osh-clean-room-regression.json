@@ -1,0 +1,90 @@
+{
+  "id": "c360.local.wf.plan.contract.fixture-mavlink-osh-clean-room-regression",
+  "version": 1,
+  "brief": "Add a Dronefleet MAVLink dependency and API contract inside an existing OpenSensorHub addon baseline without replacing the repository topology.",
+  "source_refs": [
+    {
+      "kind": "fixture",
+      "ref": "mavlink-osh-clean-room-regression"
+    }
+  ],
+  "constraints": [
+    "Integrate into the existing osh-addons baseline.",
+    "Preserve baseline activator, descriptor, and system extension points unless an accepted amendment replaces them.",
+    "Do not create a standalone Gradle project root.",
+    "Do not add top-level Gradle wrapper or settings files that conflict with QA source substitution."
+  ],
+  "acceptance_obligations": [
+    "The implementation builds in the composite QA environment.",
+    "The delivered files extend the accepted baseline topology.",
+    "QA build configuration reaches test execution before integration behavior is judged."
+  ],
+  "forbidden_moves": [
+    "creating top-level gradlew",
+    "creating top-level settings.gradle",
+    "creating a sibling osh-core root inside the addon deliverable",
+    "replacing existing baseline classes with unrelated clean-room class names"
+  ],
+  "scope": {
+    "include": [
+      "src/main/java/org/sensorhub/impl/sensor/",
+      "src/test/java/org/sensorhub/impl/sensor/"
+    ],
+    "do_not_touch": [
+      "settings.gradle",
+      "gradlew",
+      "osh-core/"
+    ],
+    "create": [
+      "src/main/java/org/sensorhub/impl/sensor/mavlink/DronefleetMavlinkBridge.java",
+      "src/test/java/org/sensorhub/impl/sensor/mavlink/DronefleetMavlinkBridgeTest.java"
+    ]
+  },
+  "topology_facts": [
+    {
+      "kind": "build_root",
+      "path": "build.gradle",
+      "value": "gradle-subproject",
+      "evidence": [
+        "build.gradle"
+      ]
+    },
+    {
+      "kind": "composite_source_substitution",
+      "value": "github-com-opensensorhub-osh-addons",
+      "evidence": [
+        "QA source substitution enabled for osh-addons"
+      ]
+    },
+    {
+      "kind": "forbidden_file",
+      "path": "settings.gradle",
+      "value": "conflicts-with-composite-root",
+      "evidence": [
+        "QA failure: duplicate root element during Gradle configuration"
+      ]
+    },
+    {
+      "kind": "forbidden_file",
+      "path": "gradlew",
+      "value": "standalone-clean-room-marker",
+      "evidence": [
+        "Developer delivered standalone Gradle wrapper"
+      ]
+    }
+  ],
+  "validation_findings": [
+    {
+      "severity": "error",
+      "category": "topology",
+      "message": "Standalone Gradle project shape conflicts with brownfield composite QA topology.",
+      "evidence": [
+        "settings.gradle",
+        "gradlew",
+        "duplicate root element"
+      ],
+      "created_at": "2026-06-17T00:00:00Z"
+    }
+  ],
+  "created_at": "2026-06-17T00:00:00Z"
+}

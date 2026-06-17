@@ -140,3 +140,69 @@ func TestApplyStoryReprepare_ResetFailureLeavesPlanUntouched(t *testing.T) {
 		t.Fatalf("plan.Scenarios = %+v, want original scenario retained after reset failure", plan.Scenarios)
 	}
 }
+
+func TestApplyStoryReprepare_UsesDependentClosureForResetAndScenarioRemoval(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.contract",
+			"task.demo.node-contract",
+			"req.demo.consumer",
+			"task.demo.node-consumer",
+			"req.demo.unrelated",
+			"task.demo.node-unrelated",
+		},
+		values: map[string][]byte{
+			"task.demo.node-contract":  []byte(`{"requirement_id":"contract"}`),
+			"task.demo.node-consumer":  []byte(`{"requirement_id":"consumer"}`),
+			"task.demo.node-unrelated": []byte(`{"requirement_id":"unrelated"}`),
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	plan := &workflow.Plan{
+		Slug:   "demo",
+		Status: workflow.StatusImplementing,
+		Requirements: []workflow.Requirement{
+			{ID: "contract"},
+			{ID: "consumer", DependsOn: []string{"contract"}},
+			{ID: "unrelated"},
+		},
+		Scenarios: []workflow.Scenario{
+			{ID: "scen.contract", RequirementID: "contract", StoryID: "story.contract"},
+			{ID: "scen.consumer", RequirementID: "consumer", StoryID: "story.consumer"},
+			{ID: "scen.unrelated", RequirementID: "unrelated", StoryID: "story.unrelated"},
+		},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.demo.recovery.story",
+		Kind:           workflow.PlanDecisionKindStoryReprepare,
+		AffectedReqIDs: []string{"contract"},
+		Rationale:      "Repair the contract Story and dependent consumer scenario.",
+	}
+
+	if err := c.applyStoryReprepare(context.Background(), plan, proposal, plan.Slug); err != nil {
+		t.Fatalf("applyStoryReprepare: %v", err)
+	}
+
+	assertResetKeys(t, reset, []string{
+		"req.demo.contract",
+		"task.demo.node-contract",
+		"req.demo.consumer",
+		"task.demo.node-consumer",
+	})
+	assertNoResetKeys(t, reset, []string{
+		"req.demo.unrelated",
+		"task.demo.node-unrelated",
+	})
+	if plan.Status != workflow.StatusPreparingStories {
+		t.Fatalf("Status = %s, want preparing_stories", plan.Status)
+	}
+	if len(plan.Scenarios) != 1 || plan.Scenarios[0].ID != "scen.unrelated" {
+		t.Fatalf("Scenarios = %+v, want only unrelated scenario preserved", plan.Scenarios)
+	}
+}

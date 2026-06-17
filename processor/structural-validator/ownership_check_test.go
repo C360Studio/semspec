@@ -128,6 +128,7 @@ func TestDecideOwnership(t *testing.T) {
 		wantModUnowned        []string // advisory: non-owner editing non-doc
 		wantNewUnowned        []string // advisory: new file in-territory / new doc
 		wantNewOutOfTerritory []string // hard-fail: new source/test outside territory
+		wantNewTopology       []string // hard-fail: new topology-controlled project/build file
 		wantRootScratch       []string // hard-fail (dev-retry): root-level source scratch
 	}{
 		{
@@ -200,6 +201,23 @@ func TestDecideOwnership(t *testing.T) {
 			porcelain:      "?? NOTES.txt",
 			owned:          ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
 			wantNewUnowned: []string{"NOTES.txt"},
+		},
+		{
+			name:            "new root settings.gradle is topology planning gap",
+			porcelain:       "?? settings.gradle",
+			owned:           ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNewTopology: []string{"settings.gradle"},
+		},
+		{
+			name:            "new nested gradlew is topology planning gap",
+			porcelain:       "?? osh-core/gradlew",
+			owned:           ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNewTopology: []string{"osh-core/gradlew"},
+		},
+		{
+			name:      "new owned package manifest is clean",
+			porcelain: "?? plugins/new-driver/package.json",
+			owned:     ownedSetOf("plugins/new-driver/package.json"),
 		},
 		{
 			name:      "new Java companion test for owned main class is clean",
@@ -309,6 +327,9 @@ func TestDecideOwnership(t *testing.T) {
 			}
 			if !equalSets(v.NewUnownedOutOfTerritory, tc.wantNewOutOfTerritory) {
 				t.Errorf("newUnownedOutOfTerritory = %v, want %v", sortedCopy(v.NewUnownedOutOfTerritory), sortedCopy(tc.wantNewOutOfTerritory))
+			}
+			if !equalSets(v.NewTopologyControlled, tc.wantNewTopology) {
+				t.Errorf("newTopologyControlled = %v, want %v", sortedCopy(v.NewTopologyControlled), sortedCopy(tc.wantNewTopology))
 			}
 			if !equalSets(v.RootScratch, tc.wantRootScratch) {
 				t.Errorf("rootScratch = %v, want %v", sortedCopy(v.RootScratch), sortedCopy(tc.wantRootScratch))
@@ -479,6 +500,23 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 		}
 		if !strings.Contains(gap.Stderr, "other/pkg/New.java") {
 			t.Errorf("expected offending path named in planning-gap, got %q", gap.Stderr)
+		}
+	})
+
+	t.Run("new topology-controlled file emits a planning-gap Required failure", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? osh-core/settings.gradle\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
+		if !c.Passed {
+			t.Fatalf("containment (junk/doc) should pass; the topology gap is a separate row, got %+v", c)
+		}
+		gap := findResult(t, results, payloads.CheckFileOwnershipPlanningGap)
+		if gap.Passed || !gap.Required {
+			t.Fatalf("expected a Required planning-gap FAILURE, got %+v", gap)
+		}
+		if !strings.Contains(gap.Stderr, "osh-core/settings.gradle") || !strings.Contains(gap.Stderr, "topology") {
+			t.Errorf("expected topology path and explanation in planning-gap, got %q", gap.Stderr)
 		}
 	})
 

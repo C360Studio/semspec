@@ -5,11 +5,15 @@
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import PlanDetail from '$lib/components/plan/PlanDetail.svelte';
+	import PlanFreshnessIndicator from '$lib/components/plan/PlanFreshnessIndicator.svelte';
 	import PlanReviewCard from '$lib/components/plan/PlanReviewCard.svelte';
 	import InProgressPanel from '$lib/components/plan/InProgressPanel.svelte';
 	import { deriveGuidance } from '$lib/components/plan/guidance';
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
+	import ExecutionDetail from '$lib/components/plan/ExecutionDetail.svelte';
+	import LessonActivityDetail from '$lib/components/plan/LessonActivityDetail.svelte';
+	import RecoveryDetail from '$lib/components/plan/RecoveryDetail.svelte';
 	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
@@ -26,6 +30,11 @@
 	import { activePhaseProgress } from '$lib/types/activePlanProgress';
 	import { selectFreshestPlan } from '$lib/types/planFreshness';
 	import { mergeLiveTrajectoryItems } from '$lib/types/trajectoryActivityProjection';
+	import {
+		isLessonTrajectoryItem,
+		phaseSummaryDetail,
+		shouldShowPhaseSummaryBanner
+	} from '$lib/components/plan/observabilityModels';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
@@ -58,8 +67,35 @@
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
+	const showExecutionDetail = $derived(
+		plan
+			? Boolean(
+				(plan.stories?.length ?? 0) > 0 ||
+					plan.execution_summary ||
+					plan.qa_run ||
+					plan.qa_verdict_summary ||
+					['execution', 'qa', 'recovery', 'waiting', 'terminal'].includes(plan.phase_summary?.phase ?? '')
+			)
+			: false
+	);
+	const showRecoveryDetail = $derived(
+		plan
+			? Boolean(
+					(plan.plan_decisions?.length ?? 0) > 0 ||
+						plan.phase_summary?.recovery ||
+						plan.phase_summary?.wait?.decision_id
+				)
+			: false
+	);
 	const liveTrajectoryItems = $derived(
 		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
+	);
+	const showLessonActivityDetail = $derived(
+		plan
+			? Boolean(
+					plan.phase_summary?.lessons || liveTrajectoryItems.some(isLessonTrajectoryItem)
+				)
+			: false
 	);
 
 	// ---------------------------------------------------------------------------
@@ -77,7 +113,13 @@
 		'failed'
 	]);
 	let viewMode = $state<ViewMode>('doc');
-	const showFilesView = $derived(plan ? FILES_VIEW_STAGES.has(plan.stage) : false);
+	let viewModeRequest = 0;
+	const showFilesView = $derived(
+		plan
+			? FILES_VIEW_STAGES.has(plan.stage) ||
+				['execution', 'qa', 'terminal'].includes(plan.phase_summary?.phase ?? '')
+			: false
+	);
 
 	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
 	const planGraphAdapter: GraphStoreAdapter = {
@@ -109,24 +151,26 @@
 	let nlqSearching = $state(false);
 
 	async function setViewMode(mode: ViewMode) {
+		const request = ++viewModeRequest;
+		viewMode = mode;
 		if (mode === 'graph') {
+			graphStore.setGraphMode(true, slug);
 			// Lazy-load graph components on first use (browser-only libs)
 			if (!SigmaCanvas) {
 				const [sc, gf] = await Promise.all([
 					import('$lib/components/graph/SigmaCanvas.svelte'),
 					import('$lib/components/graph/GraphFilters.svelte')
 				]);
+				if (request !== viewModeRequest || viewMode !== 'graph') return;
 				SigmaCanvas = sc.default;
 				GraphFilters = gf.default;
 			}
-			graphStore.setGraphMode(true, slug);
-			if (graphStore.entities.size === 0) {
-				graphStore.loadInitialGraph(planGraphAdapter);
+			if (request === viewModeRequest && viewMode === 'graph' && graphStore.entities.size === 0) {
+				await graphStore.loadInitialGraph(planGraphAdapter);
 			}
 		} else {
 			graphStore.setGraphMode(false);
 		}
-		viewMode = mode;
 	}
 
 	// Turn off graph mode and clear plan-scoped entities when navigating away.
@@ -198,10 +242,21 @@
 	);
 	const activeProgress = $derived(activePhaseProgress(liveTrajectoryItems));
 	const progressPanel = $derived.by(() => {
+		if (plan?.phase_summary && shouldShowPhaseSummaryBanner(plan.phase_summary)) {
+			return {
+				title: plan.phase_summary.title,
+				detail: phaseSummaryDetail(plan.phase_summary),
+				phase: plan.phase_summary.phase,
+				state: plan.phase_summary.state,
+				startedAt: activeProgress?.startedAt ?? stageStartedAt(plan)
+			};
+		}
 		if (activeProgress) {
 			return {
 				title: activeProgress.title,
 				detail: activeProgress.detail,
+				phase: 'activity',
+				state: 'active',
 				startedAt: activeProgress.startedAt
 			};
 		}
@@ -209,6 +264,8 @@
 			return {
 				title: stageTitle(plan.stage),
 				detail: planGuidance.message,
+				phase: 'planning',
+				state: 'active',
 				startedAt: stageStartedAt(plan)
 			};
 		}
@@ -232,7 +289,12 @@
 			case 'reviewing_scenarios':
 			case 'generating_requirements':
 			case 'generating_architecture':
+			case 'preparing_stories':
+			case 'stories_generated':
 			case 'generating_scenarios':
+			case 'ready_for_execution':
+			case 'implementing':
+			case 'ready_for_qa':
 				// Post-approval phases: approved_at is the closest stage-start
 				// proxy we have. Falls back to reviewed_at, then created_at.
 				return p.approved_at ?? p.reviewed_at ?? p.created_at;
@@ -266,9 +328,18 @@
 				return 'Generating requirements…';
 			case 'generating_architecture':
 				return 'Generating architecture…';
+			case 'preparing_stories':
+				return 'Preparing Stories…';
+			case 'stories_generated':
+				return 'Stories generated';
 			case 'requirements_generated':
 			case 'generating_scenarios':
 				return 'Generating scenarios…';
+			case 'ready_for_execution':
+				return 'Ready for execution';
+			case 'implementing':
+			case 'executing':
+				return 'Execution…';
 			case 'reviewing_scenarios':
 				return 'Reviewing scenarios…';
 			case 'reviewing_qa':
@@ -412,8 +483,8 @@
 				<h1 class="plan-title">{plan.title || plan.slug}</h1>
 				<div class="plan-meta">
 					<ModeIndicator approved={plan.approved} />
-					<span class="plan-stage" data-stage={plan.stage}>
-						{getStageLabel(plan.stage)}
+					<span class="plan-stage" data-stage={plan.stage} data-phase={plan.phase_summary?.phase ?? plan.stage}>
+						{plan.phase_summary?.title ?? getStageLabel(plan.stage)}
 					</span>
 				</div>
 			</div>
@@ -513,6 +584,11 @@
 				</a>
 			</div>
 		</div>
+	{:else if viewMode === 'graph'}
+		<div class="view-loading" role="status">
+			<Icon name="loader" size={20} />
+			<span>Loading graph...</span>
+		</div>
 	{:else if viewMode === 'files'}
 		<div class="files-content">
 			<PlanWorkspace slug={plan.slug} />
@@ -578,9 +654,13 @@
 				<InProgressPanel
 					title={progressPanel.title}
 					detail={progressPanel.detail}
+					phase={progressPanel.phase}
+					phaseState={progressPanel.state}
 					startedAt={progressPanel.startedAt}
 				/>
 			{/if}
+
+			<PlanFreshnessIndicator {plan} />
 
 			<!-- Agent pipeline during execution -->
 			{#if plan.active_loops && plan.active_loops.length > 0}
@@ -591,6 +671,18 @@
 
 			<!-- Plan details: goal, context, scope -->
 			<PlanDetail {plan} phases={[]} requirements={requirements} onRefresh={handleRefresh} />
+
+			{#if showExecutionDetail}
+				<ExecutionDetail {plan} />
+			{/if}
+
+			{#if showRecoveryDetail}
+				<RecoveryDetail {plan} />
+			{/if}
+
+			{#if showLessonActivityDetail}
+				<LessonActivityDetail {plan} trajectoryItems={liveTrajectoryItems} />
+			{/if}
 
 			<!-- Reviews: collapsible. R1 plan-reviewer verdict appears as soon as the
 			     planner+reviewer have finished (plan.review_verdict is set on the plan
@@ -702,7 +794,8 @@
 	}
 
 	.plan-stage[data-stage='implementing'],
-	.plan-stage[data-stage='executing'] {
+	.plan-stage[data-stage='executing'],
+	.plan-stage[data-phase='execution'] {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 	}
@@ -715,6 +808,11 @@
 	.plan-stage[data-stage='complete'] {
 		background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
 		color: var(--color-success);
+	}
+
+	.plan-stage[data-stage='complete_with_deferrals'] {
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
+		color: var(--color-warning);
 	}
 
 	.plan-stage[data-stage='failed'] {
@@ -868,6 +966,26 @@
 		background: var(--color-bg-secondary);
 		color: var(--color-text-primary);
 		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+	}
+
+	.view-loading {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-2);
+		min-height: 240px;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+	}
+
+	.view-loading :global(svg) {
+		animation: spin 1.6s linear infinite;
+	}
+
+	@keyframes spin {
+		from { transform: rotate(0deg); }
+		to { transform: rotate(360deg); }
 	}
 
 	/* Graph mode content */

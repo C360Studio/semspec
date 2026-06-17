@@ -52,11 +52,23 @@
 	const isConnected = $derived(
 		scope === 'global' ? activityStore.connected : feedStore.connected
 	);
-	const waitingLabel = $derived(
-		scope === 'global' ? 'Activity stream offline' : 'Waiting for plan...'
+	const lastSuccessfulUpdateAt = $derived(
+		scope === 'global' ? activityStore.lastSuccessfulUpdateAt : feedStore.lastSuccessfulUpdateAt
+	);
+	const waitingLabel = $derived.by(() => {
+		if (scope === 'global') return 'Activity stream offline';
+		return feedStore.streamEverConnected ? 'Stream reconnecting' : 'Connecting...';
+	});
+	const lastUpdateLabel = $derived(
+		lastSuccessfulUpdateAt ? `Last update ${formatStatusTime(lastSuccessfulUpdateAt)}` : null
 	);
 
 	function getEventIcon(event: FeedEvent): string {
+		if (event.kind === 'plan_recovery') return 'refresh-cw';
+		if (event.kind === 'plan_wait') return 'clock';
+		if (event.kind === 'plan_stale' || event.kind === 'execution_stale') return 'wifi-off';
+		if (event.kind === 'execution_orphaned') return 'unlink';
+		if (event.kind === 'lesson_activity') return 'lightbulb';
 		switch (event.source) {
 			case 'plan':
 				if (event.type === 'plan_deleted') return 'trash-2';
@@ -85,6 +97,12 @@
 	}
 
 	function getEventColor(event: FeedEvent): string {
+		if (event.kind === 'plan_recovery') return 'var(--color-warning, var(--color-accent))';
+		if (event.kind === 'plan_wait') return 'var(--color-warning, var(--color-text-muted))';
+		if (event.kind === 'plan_stale' || event.kind === 'execution_stale' || event.kind === 'execution_orphaned') {
+			return 'var(--color-warning, var(--color-error))';
+		}
+		if (event.kind === 'lesson_activity') return 'var(--color-accent)';
 		switch (event.source) {
 			case 'plan': {
 				const stage = (event.data?.stage as string) ?? '';
@@ -110,6 +128,10 @@
 	}
 
 	function formatTime(timestamp: string): string {
+		return new Date(timestamp).toLocaleTimeString();
+	}
+
+	function formatStatusTime(timestamp: string): string {
 		return new Date(timestamp).toLocaleTimeString();
 	}
 
@@ -226,6 +248,9 @@
 			<span class="status-dot"></span>
 			<span>{isConnected ? 'Live' : waitingLabel}</span>
 		</div>
+		{#if lastUpdateLabel}
+			<span class="last-update">{lastUpdateLabel}</span>
+		{/if}
 		<span class="event-count">{filteredEvents.length} events</span>
 	</div>
 
@@ -269,6 +294,7 @@
 						class="event-item event-item--link"
 						href={href}
 						data-testid="activity-feed-row"
+						data-kind={event.kind}
 						data-href={href}
 					>
 						<div class="event-icon" style="color: {getEventColor(event)}">
@@ -287,7 +313,7 @@
 						</div>
 					</a>
 				{:else}
-					<div class="event-item" data-testid="activity-feed-row">
+					<div class="event-item" data-testid="activity-feed-row" data-kind={event.kind}>
 						<div class="event-icon" style="color: {getEventColor(event)}">
 							<Icon name={getEventIcon(event)} size={14} />
 						</div>
@@ -400,6 +426,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: var(--space-2);
 		margin-bottom: var(--space-3);
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
@@ -420,6 +447,17 @@
 
 	.connection-indicator.connected .status-dot {
 		background: var(--color-success);
+	}
+
+	.last-update {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.event-count {
+		margin-left: auto;
+		white-space: nowrap;
 	}
 
 	.empty-feed {

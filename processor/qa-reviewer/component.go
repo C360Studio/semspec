@@ -478,18 +478,19 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 
 	// Build assembly context.
 	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RolePlanQAReviewer,
-		Provider:          provider,
-		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
-		Domain:            "software",
-		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Standards:         stdCtx,
-		QAReviewContext:   qrc,
-		QAReviewerPrompt:  &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError, QAReviewContext: qrc},
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		Role:               prompt.RolePlanQAReviewer,
+		Provider:           provider,
+		HasResponseFormat:  terminal.EndpointSupportsResponseFormat(endpoint),
+		Domain:             "software",
+		AvailableTools:     prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
+		SupportsTools:      true,
+		MaxTokens:          maxTokens,
+		Standards:          stdCtx,
+		QAReviewContext:    qrc,
+		QAReviewerPrompt:   &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError, QAReviewContext: qrc},
+		Persona:            prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
+		Vocabulary:         prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection: prompt.QAContractProjection(plan),
 	}
 
 	// Load role-scoped lessons.
@@ -818,6 +819,7 @@ func forcedExecutableQAVerdict(slug string, plan *workflow.Plan, level workflow.
 		return base
 	}
 	if !plan.QARun.Passed {
+		plan.QARun.Failures = classifyQAFailures(plan.QARun.Failures)
 		base.Verdict = workflow.QAVerdictNeedsChanges
 		base.Summary = summarizeQAFailures(level, plan.QARun)
 		return base
@@ -842,6 +844,9 @@ func summarizeQAFailures(level workflow.QALevel, run *workflow.QARun) string {
 		fmt.Fprintf(&b, " [%s]", failure.JobName)
 		if failure.TestName != "" {
 			fmt.Fprintf(&b, " %s", failure.TestName)
+		}
+		if failure.Category != "" {
+			fmt.Fprintf(&b, " category=%s", failure.Category)
 		}
 		if failure.Message != "" {
 			fmt.Fprintf(&b, ": %s", failure.Message)

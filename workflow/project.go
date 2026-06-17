@@ -108,6 +108,7 @@ func CreateProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectS
 			DoNotTouch: []string{},
 		},
 	}
+	plan.EnsureContractPacket(title, now)
 
 	if err := writePlanTriples(ctx, tw, plan); err != nil {
 		return nil, err
