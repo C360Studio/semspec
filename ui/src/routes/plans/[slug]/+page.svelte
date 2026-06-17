@@ -78,7 +78,13 @@
 		'failed'
 	]);
 	let viewMode = $state<ViewMode>('doc');
-	const showFilesView = $derived(plan ? FILES_VIEW_STAGES.has(plan.stage) : false);
+	let viewModeRequest = 0;
+	const showFilesView = $derived(
+		plan
+			? FILES_VIEW_STAGES.has(plan.stage) ||
+				['execution', 'qa', 'terminal'].includes(plan.phase_summary?.phase ?? '')
+			: false
+	);
 
 	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
 	const planGraphAdapter: GraphStoreAdapter = {
@@ -110,24 +116,26 @@
 	let nlqSearching = $state(false);
 
 	async function setViewMode(mode: ViewMode) {
+		const request = ++viewModeRequest;
+		viewMode = mode;
 		if (mode === 'graph') {
+			graphStore.setGraphMode(true, slug);
 			// Lazy-load graph components on first use (browser-only libs)
 			if (!SigmaCanvas) {
 				const [sc, gf] = await Promise.all([
 					import('$lib/components/graph/SigmaCanvas.svelte'),
 					import('$lib/components/graph/GraphFilters.svelte')
 				]);
+				if (request !== viewModeRequest || viewMode !== 'graph') return;
 				SigmaCanvas = sc.default;
 				GraphFilters = gf.default;
 			}
-			graphStore.setGraphMode(true, slug);
-			if (graphStore.entities.size === 0) {
-				graphStore.loadInitialGraph(planGraphAdapter);
+			if (request === viewModeRequest && viewMode === 'graph' && graphStore.entities.size === 0) {
+				await graphStore.loadInitialGraph(planGraphAdapter);
 			}
 		} else {
 			graphStore.setGraphMode(false);
 		}
-		viewMode = mode;
 	}
 
 	// Turn off graph mode and clear plan-scoped entities when navigating away.
@@ -454,8 +462,8 @@
 				<h1 class="plan-title">{plan.title || plan.slug}</h1>
 				<div class="plan-meta">
 					<ModeIndicator approved={plan.approved} />
-					<span class="plan-stage" data-stage={plan.stage}>
-						{getStageLabel(plan.stage)}
+					<span class="plan-stage" data-stage={plan.stage} data-phase={plan.phase_summary?.phase ?? plan.stage}>
+						{plan.phase_summary?.title ?? getStageLabel(plan.stage)}
 					</span>
 				</div>
 			</div>
@@ -554,6 +562,11 @@
 					<span>Open full explorer</span>
 				</a>
 			</div>
+		</div>
+	{:else if viewMode === 'graph'}
+		<div class="view-loading" role="status">
+			<Icon name="loader" size={20} />
+			<span>Loading graph...</span>
 		</div>
 	{:else if viewMode === 'files'}
 		<div class="files-content">
@@ -746,7 +759,8 @@
 	}
 
 	.plan-stage[data-stage='implementing'],
-	.plan-stage[data-stage='executing'] {
+	.plan-stage[data-stage='executing'],
+	.plan-stage[data-phase='execution'] {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 	}
@@ -912,6 +926,26 @@
 		background: var(--color-bg-secondary);
 		color: var(--color-text-primary);
 		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+	}
+
+	.view-loading {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-2);
+		min-height: 240px;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+	}
+
+	.view-loading :global(svg) {
+		animation: spin 1.6s linear infinite;
+	}
+
+	@keyframes spin {
+		from { transform: rotate(0deg); }
+		to { transform: rotate(360deg); }
 	}
 
 	/* Graph mode content */
