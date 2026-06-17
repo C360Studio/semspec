@@ -1,10 +1,10 @@
 ## 1. Contract Model And Fixtures
 
-- [ ] 1.1 Add workflow types for the root contract packet, amendment ledger, contract impact, and topology facts
-- [ ] 1.2 Persist the contract packet with new plans through plan-manager without changing legacy plan loading
-- [ ] 1.3 Write graph/vocabulary predicates for contract identity, constraints, topology facts, amendments, and validation findings
-- [ ] 1.4 Add unit tests proving new plans get a contract packet before analyst/planner handoff
-- [ ] 1.5 Add a generic brownfield fixture plus the MAVLink/OSH clean-room regression fixture
+- [x] 1.1 Add workflow types for the root contract packet, amendment ledger, contract impact, and topology facts
+- [x] 1.2 Persist the contract packet with new plans through plan-manager without changing legacy plan loading
+- [x] 1.3 Write graph/vocabulary predicates for contract identity, constraints, topology facts, amendments, and validation findings
+- [x] 1.4 Add unit tests proving new plans get a contract packet before analyst/planner handoff
+- [x] 1.5 Add a generic brownfield fixture plus the MAVLink/OSH clean-room regression fixture
 
 ## 2. BMAD/OpenSpec Handoff Propagation
 

@@ -1,0 +1,59 @@
+{
+  "id": "c360.local.wf.plan.contract.fixture-generic-brownfield",
+  "version": 1,
+  "brief": "Modify an existing service in place while preserving its repository, module, and package topology.",
+  "source_refs": [
+    {
+      "kind": "fixture",
+      "ref": "generic-brownfield"
+    }
+  ],
+  "constraints": [
+    "Preserve the existing module layout.",
+    "Do not create a standalone project root.",
+    "Use the existing project test command as the acceptance baseline."
+  ],
+  "acceptance_obligations": [
+    "The existing test suite continues to pass.",
+    "New behavior is integrated into the existing module boundary."
+  ],
+  "forbidden_moves": [
+    "creating a new repository root",
+    "replacing the existing package entry point",
+    "adding an unrelated build system"
+  ],
+  "scope": {
+    "include": [
+      "src/service/",
+      "tests/service/"
+    ],
+    "exclude": [
+      "vendor/"
+    ],
+    "do_not_touch": [
+      ".github/workflows/release.yml"
+    ],
+    "create": [
+      "tests/service/new_behavior_test.go"
+    ]
+  },
+  "topology_facts": [
+    {
+      "kind": "build_root",
+      "path": "go.mod",
+      "value": "go-module",
+      "evidence": [
+        "go.mod"
+      ]
+    },
+    {
+      "kind": "package_root",
+      "path": "src/service",
+      "value": "existing-service-package",
+      "evidence": [
+        "src/service/service.go"
+      ]
+    }
+  ],
+  "created_at": "2026-06-17T00:00:00Z"
+}

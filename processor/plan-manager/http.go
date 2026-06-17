@@ -642,7 +642,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Create new plan — snapshot the project's current QA level onto the plan
 	// so its policy is immutable under project-config changes.
-	plan, err := ps.create(ctx, slug, title, c.resolveProjectQALevel(), req.AutoRejectOnExhaustion)
+	plan, err := ps.create(ctx, slug, title, req.Description, c.resolveProjectQALevel(), req.AutoRejectOnExhaustion)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)

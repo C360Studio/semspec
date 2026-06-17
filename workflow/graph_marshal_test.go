@@ -278,6 +278,80 @@ func TestBuildPlanTriples_StatusViaEffectiveStatus(t *testing.T) {
 	}
 }
 
+func TestBuildPlanTriples_ContractPacket(t *testing.T) {
+	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	slug := "contract-plan"
+	eid := PlanEntityID(slug)
+	plan := &Plan{
+		ID:          eid,
+		Slug:        slug,
+		Title:       "Contract Plan",
+		CreatedAt:   now,
+		Constraints: []string{"preserve baseline topology"},
+		Contract: &ContractPacket{
+			ID:          PlanContractID(slug),
+			Version:     1,
+			Brief:       "Extend the brownfield baseline.",
+			Constraints: []string{"preserve baseline topology"},
+			TopologyFacts: []TopologyFact{{
+				Kind: "build_root",
+				Path: "build.gradle",
+			}},
+			Amendments: []ContractAmendment{{
+				ID:        "amendment-1",
+				Impact:    ContractImpact{Kind: ContractImpactPreserve, Summary: "No contract change."},
+				CreatedAt: now,
+			}},
+			ValidationFindings: []ContractValidationFinding{{
+				Severity:  "warning",
+				Category:  "contract",
+				Message:   "example",
+				CreatedAt: now,
+			}},
+			CreatedAt: now,
+		},
+	}
+
+	triples := buildPlanTriples(eid, plan)
+	byPred := indexPlanTriplesByPred(t, eid, triples)
+
+	if got := byPred[semspec.PlanContractID]; len(got) != 1 || got[0] != PlanContractID(slug) {
+		t.Fatalf("PlanContractID triples = %v", got)
+	}
+	if got := byPred[semspec.PlanContract]; len(got) != 1 {
+		t.Fatalf("PlanContract triples = %v, want one JSON blob", got)
+	}
+	if got := byPred[semspec.PlanContractConstraint]; len(got) != 1 || got[0] != "preserve baseline topology" {
+		t.Fatalf("PlanContractConstraint triples = %v", got)
+	}
+	if got := byPred[semspec.PlanContractTopology]; len(got) != 1 {
+		t.Fatalf("PlanContractTopology triples = %v, want one JSON blob", got)
+	}
+	if got := byPred[semspec.PlanContractAmendment]; len(got) != 1 {
+		t.Fatalf("PlanContractAmendment triples = %v, want one JSON blob", got)
+	}
+	if got := byPred[semspec.PlanContractValidationFinding]; len(got) != 1 {
+		t.Fatalf("PlanContractValidationFinding triples = %v, want one JSON blob", got)
+	}
+
+	collapsed := map[string]string{}
+	for _, tr := range triples {
+		if _, exists := collapsed[tr.Predicate]; !exists {
+			collapsed[tr.Predicate] = fmt.Sprintf("%v", tr.Object)
+		}
+	}
+	got := PlanFromTripleMap(eid, collapsed)
+	if got.Contract == nil {
+		t.Fatal("PlanFromTripleMap did not restore Contract")
+	}
+	if got.Contract.ID != PlanContractID(slug) {
+		t.Fatalf("restored contract ID = %q", got.Contract.ID)
+	}
+	if got.Contract.TopologyFacts[0].Kind != "build_root" {
+		t.Fatalf("restored topology facts = %#v", got.Contract.TopologyFacts)
+	}
+}
+
 // TestWritePlanTriples_NilTWIsNoop verifies the existing guard: when
 // TripleWriter is nil (no NATS), writePlanTriples returns nil without panicking.
 func TestWritePlanTriples_NilTWIsNoop(t *testing.T) {

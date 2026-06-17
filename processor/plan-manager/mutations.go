@@ -1582,7 +1582,11 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 		return MutationResponse{Success: true}
 	}
 
-	plan, err := ps.create(ctx, slug, req.Title, c.resolveProjectQALevel(), nil)
+	brief := req.Description
+	if brief == "" {
+		brief = req.Title
+	}
+	plan, err := ps.create(ctx, slug, req.Title, brief, c.resolveProjectQALevel(), nil)
 	if err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("create plan: %v", err)}
 	}

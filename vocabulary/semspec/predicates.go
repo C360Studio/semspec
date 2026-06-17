@@ -129,6 +129,24 @@ const (
 	// PlanOpenQuestions records analyst-flagged ambiguities for the planner
 	// sub-phase to resolve. Multi-valued — one triple per question.
 	PlanOpenQuestions = "semspec.plan.open_questions"
+
+	// PlanContractID is the stable identifier for the plan's root contract packet.
+	PlanContractID = "semspec.plan.contract_id"
+
+	// PlanContract is the JSON-encoded authoritative contract packet.
+	PlanContract = "semspec.plan.contract"
+
+	// PlanContractConstraint is one root contract hard constraint.
+	PlanContractConstraint = "semspec.plan.contract_constraint"
+
+	// PlanContractTopology is one JSON-encoded topology fact from the contract packet.
+	PlanContractTopology = "semspec.plan.contract_topology"
+
+	// PlanContractAmendment is one JSON-encoded accepted contract amendment.
+	PlanContractAmendment = "semspec.plan.contract_amendment"
+
+	// PlanContractValidationFinding is one JSON-encoded contract validation finding.
+	PlanContractValidationFinding = "semspec.plan.contract_validation"
 )
 
 // Project config predicates define attributes for project initialization config files.
@@ -1326,6 +1344,36 @@ func registerTaskPredicates() {
 		vocabulary.WithDescription("Analyst-flagged open question (multi-valued, one triple per question)"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"planOpenQuestions"))
+
+	vocabulary.Register(PlanContractID,
+		vocabulary.WithDescription("Stable identifier for the plan root contract packet"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"planContractId"))
+
+	vocabulary.Register(PlanContract,
+		vocabulary.WithDescription("Authoritative plan contract packet (JSON)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planContract"))
+
+	vocabulary.Register(PlanContractConstraint,
+		vocabulary.WithDescription("Hard root contract constraint (multi-valued, one triple per constraint)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planContractConstraint"))
+
+	vocabulary.Register(PlanContractTopology,
+		vocabulary.WithDescription("Contract topology fact (JSON, multi-valued)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planContractTopology"))
+
+	vocabulary.Register(PlanContractAmendment,
+		vocabulary.WithDescription("Accepted contract amendment (JSON, multi-valued)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planContractAmendment"))
+
+	vocabulary.Register(PlanContractValidationFinding,
+		vocabulary.WithDescription("Contract validation finding (JSON, multi-valued)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planContractValidationFinding"))
 
 	// Register loop predicates
 	vocabulary.Register(PredicateLoopStatus,

@@ -623,6 +623,13 @@ type Plan struct {
 	// reviewer, and QA prompts — which otherwise never see the original request.
 	Constraints []string `json:"constraints,omitempty"`
 
+	// Contract is the authoritative root brief for this plan. It captures the
+	// user/sponsor intent, initial scope snapshot, topology facts, and accepted
+	// amendments that downstream BMAD/OpenSpec handoffs must preserve. New plans
+	// receive a packet before the analyst/planner watcher can claim them; legacy
+	// plans may leave this nil until explicitly migrated.
+	Contract *ContractPacket `json:"contract,omitempty"`
+
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
 
@@ -1296,6 +1303,124 @@ type Scope struct {
 	// repeatedly-flagged hallucination — the reviewer's prose suggestion
 	// even hallucinated a scope.create field by name.
 	Create []string `json:"create,omitempty"`
+}
+
+// ContractPacket is the immutable root contract plus its amendment ledger for
+// a Plan. The packet is Plan-owned state, not a second workflow: plan-manager is
+// still the single writer for plan mutations, and PlanDecisions provide the
+// governance path for accepted changes.
+type ContractPacket struct {
+	// ID is a stable, graph-addressable identifier for this plan's root
+	// contract packet.
+	ID string `json:"id"`
+
+	// Version is the contract schema version. Starts at 1 so future packet
+	// migrations can be detected without guessing from optional fields.
+	Version int `json:"version"`
+
+	// Brief is the original user/sponsor request text available at creation
+	// time. UI and prompt projections may summarize it, but the root packet
+	// preserves the source wording that kicked off the plan.
+	Brief string `json:"brief,omitempty"`
+
+	// SourceRefs identifies where the brief came from: REST request, GitHub
+	// issue, imported OpenSpec change, or another upstream source.
+	SourceRefs []ContractSourceRef `json:"source_refs,omitempty"`
+
+	// Constraints are hard must/must-not obligations extracted from the brief or
+	// project context. The planner may also mirror these into Plan.Constraints
+	// for older consumers, but this packet is the authoritative root.
+	Constraints []string `json:"constraints,omitempty"`
+
+	// AcceptanceObligations records required deliverables or coverage promises
+	// that cannot be reduced without an accepted amendment.
+	AcceptanceObligations []string `json:"acceptance_obligations,omitempty"`
+
+	// ForbiddenMoves records structural moves that are disallowed by the brief
+	// or project context, such as replacing a brownfield module with a standalone
+	// clean-room project.
+	ForbiddenMoves []string `json:"forbidden_moves,omitempty"`
+
+	// Scope is the initial scope snapshot captured before downstream agents can
+	// mutate plan shape.
+	Scope ContractScopeSnapshot `json:"scope,omitempty"`
+
+	// TopologyFacts are generic brownfield repository/build/module facts used by
+	// validators and prompt projections. Detectors populate these incrementally.
+	TopologyFacts []TopologyFact `json:"topology_facts,omitempty"`
+
+	// Amendments records accepted contract changes. A proposal may discuss a
+	// change, but it only belongs here after the governing PlanDecision is
+	// accepted.
+	Amendments []ContractAmendment `json:"amendments,omitempty"`
+
+	// ValidationFindings records structural or semantic contract checks surfaced
+	// against the current plan shape.
+	ValidationFindings []ContractValidationFinding `json:"validation_findings,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ContractSourceRef identifies the source evidence for a contract packet.
+type ContractSourceRef struct {
+	Kind   string `json:"kind"` // user_brief, github_issue, openspec_change, etc.
+	Ref    string `json:"ref,omitempty"`
+	Digest string `json:"digest,omitempty"`
+}
+
+// ContractScopeSnapshot records the file-boundary state captured into the root
+// contract or a later accepted amendment.
+type ContractScopeSnapshot struct {
+	Include    []string `json:"include,omitempty"`
+	Exclude    []string `json:"exclude,omitempty"`
+	DoNotTouch []string `json:"do_not_touch,omitempty"`
+	Create     []string `json:"create,omitempty"`
+}
+
+// TopologyFact is a generic brownfield topology assertion. Keep this
+// language-agnostic: detectors can emit Gradle, Go module, Node package, Python
+// package, Rust crate, or mixed-repo facts without changing the packet shape.
+type TopologyFact struct {
+	Kind     string   `json:"kind"` // build_root, module_include, package_root, etc.
+	Path     string   `json:"path,omitempty"`
+	Value    string   `json:"value,omitempty"`
+	Evidence []string `json:"evidence,omitempty"`
+}
+
+// ContractImpactKind describes how a downstream artifact relates to the root
+// contract.
+type ContractImpactKind string
+
+const (
+	ContractImpactPreserve ContractImpactKind = "preserve"
+	ContractImpactRefine   ContractImpactKind = "refine"
+	ContractImpactChange   ContractImpactKind = "change"
+)
+
+// ContractImpact summarizes a proposed or accepted effect on the authoritative
+// contract.
+type ContractImpact struct {
+	Kind        ContractImpactKind `json:"kind"`
+	Summary     string             `json:"summary,omitempty"`
+	AffectedIDs []string           `json:"affected_ids,omitempty"`
+}
+
+// ContractAmendment records an accepted contract change.
+type ContractAmendment struct {
+	ID             string         `json:"id"`
+	PlanDecisionID string         `json:"plan_decision_id,omitempty"`
+	Impact         ContractImpact `json:"impact"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+// ContractValidationFinding records contract-fidelity validation output.
+type ContractValidationFinding struct {
+	ID        string    `json:"id,omitempty"`
+	Severity  string    `json:"severity,omitempty"`
+	Category  string    `json:"category,omitempty"`
+	Message   string    `json:"message"`
+	Evidence  []string  `json:"evidence,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
 // CapabilityLifecycle classifies whether a capability is new to the project

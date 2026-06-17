@@ -166,7 +166,7 @@ func (s *planStore) exists(slug string) bool {
 // preserving existing production behaviour. Plumbed through create() so the
 // field is set on the in-memory plan before its first KV write — avoids a
 // double-write on the create path.
-func (s *planStore) create(ctx context.Context, slug, title string, qaLevel workflow.QALevel, autoRejectOverride *bool) (*workflow.Plan, error) {
+func (s *planStore) create(ctx context.Context, slug, title, brief string, qaLevel workflow.QALevel, autoRejectOverride *bool) (*workflow.Plan, error) {
 	if err := workflow.ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -208,6 +208,10 @@ func (s *planStore) create(ctx context.Context, slug, title string, qaLevel work
 		QALevel:                qaLevel,
 		AutoRejectOnExhaustion: autoRejectOverride,
 	}
+	if brief == "" {
+		brief = title
+	}
+	plan.EnsureContractPacket(brief, now)
 
 	if err := s.save(ctx, plan); err != nil {
 		return nil, fmt.Errorf("save new plan: %w", err)
@@ -251,6 +255,13 @@ func (s *planStore) createImported(ctx context.Context, plan *workflow.Plan, qaL
 	}
 	if plan.CreatedAt.IsZero() {
 		plan.CreatedAt = now
+	}
+	if plan.Contract == nil {
+		brief := plan.Context
+		if brief == "" {
+			brief = plan.Title
+		}
+		plan.EnsureContractPacket(brief, now)
 	}
 	plan.QALevel = qaLevel
 	plan.AutoRejectOnExhaustion = autoRejectOverride
@@ -412,6 +423,32 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	if plan.LastErrorAt != nil {
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanLastErrorAt, Object: plan.LastErrorAt.Format(time.RFC3339)})
 	}
+	if plan.Contract != nil {
+		if plan.Contract.ID != "" {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractID, Object: plan.Contract.ID})
+		}
+		if blob, err := json.Marshal(plan.Contract); err == nil {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContract, Object: string(blob)})
+		}
+		for _, constraint := range plan.Contract.Constraints {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractConstraint, Object: constraint})
+		}
+		for _, fact := range plan.Contract.TopologyFacts {
+			if blob, err := json.Marshal(fact); err == nil {
+				triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractTopology, Object: string(blob)})
+			}
+		}
+		for _, amendment := range plan.Contract.Amendments {
+			if blob, err := json.Marshal(amendment); err == nil {
+				triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractAmendment, Object: string(blob)})
+			}
+		}
+		for _, finding := range plan.Contract.ValidationFindings {
+			if blob, err := json.Marshal(finding); err == nil {
+				triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContractValidationFinding, Object: string(blob)})
+			}
+		}
+	}
 
 	// Scope lists (replace-as-a-set — emit full current list each write).
 	for _, v := range plan.Scope.Include {
@@ -464,6 +501,12 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 			semspec.PlanReviewIteration,
 			semspec.PlanLastError,
 			semspec.PlanLastErrorAt,
+			semspec.PlanContractID,
+			semspec.PlanContract,
+			semspec.PlanContractConstraint,
+			semspec.PlanContractTopology,
+			semspec.PlanContractAmendment,
+			semspec.PlanContractValidationFinding,
 			semspec.PlanScopeInclude,
 			semspec.PlanScopeExclude,
 			semspec.PlanScopeProtected,
