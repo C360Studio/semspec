@@ -23,13 +23,20 @@ func NewContractPacket(slug, brief string, scope Scope, constraints []string, no
 		Brief:       brief,
 		SourceRefs:  []ContractSourceRef{{Kind: "user_brief", Ref: slug}},
 		Constraints: append([]string(nil), constraints...),
-		Scope: ContractScopeSnapshot{
-			Include:    append([]string(nil), scope.Include...),
-			Exclude:    append([]string(nil), scope.Exclude...),
-			DoNotTouch: append([]string(nil), scope.DoNotTouch...),
-			Create:     append([]string(nil), scope.Create...),
-		},
-		CreatedAt: now,
+		Scope:       NewContractScopeSnapshot(scope),
+		CreatedAt:   now,
+	}
+}
+
+// NewContractScopeSnapshot copies mutable plan scope lists into a contract
+// snapshot. Callers use this both at plan creation and when the first real
+// drafted scope arrives after an initially empty shell plan.
+func NewContractScopeSnapshot(scope Scope) ContractScopeSnapshot {
+	return ContractScopeSnapshot{
+		Include:    append([]string(nil), scope.Include...),
+		Exclude:    append([]string(nil), scope.Exclude...),
+		DoNotTouch: append([]string(nil), scope.DoNotTouch...),
+		Create:     append([]string(nil), scope.Create...),
 	}
 }
 

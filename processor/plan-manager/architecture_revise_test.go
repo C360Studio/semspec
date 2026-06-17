@@ -117,6 +117,36 @@ func TestReviseArchitectureState_NoPriorArchitecture(t *testing.T) {
 	}
 }
 
+func TestReviseArchitectureState_FromRejectedForPostQARecovery(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:         "mavlink-hard",
+		Status:       workflow.StatusRejected,
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
+		Stories:      []workflow.Story{{ID: "story-1"}},
+		Scenarios:    []workflow.Scenario{{ID: "scenario-1"}},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:        "plan-decision.mavlink-hard.recovery.post-qa",
+		Kind:      workflow.PlanDecisionKindArchitectureRevise,
+		Rationale: "QA found the architecture dependency contract was wrong.",
+	}
+
+	transitioned, from := reviseArchitectureState(plan, proposal)
+
+	if !transitioned {
+		t.Fatalf("expected rejected plan to transition for post-QA architecture recovery, from=%q", from)
+	}
+	if from != workflow.StatusRejected {
+		t.Fatalf("from = %s, want rejected", from)
+	}
+	if plan.Status != workflow.StatusRequirementsGenerated {
+		t.Fatalf("Status = %s, want requirements_generated", plan.Status)
+	}
+	if plan.Architecture != nil || plan.Stories != nil || plan.Scenarios != nil {
+		t.Fatalf("architecture/stories/scenarios were not wiped: arch=%v stories=%v scenarios=%v", plan.Architecture, plan.Stories, plan.Scenarios)
+	}
+}
+
 func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *testing.T) {
 	c := setupTestComponent(t)
 	c.execBucket = resetKVStub{

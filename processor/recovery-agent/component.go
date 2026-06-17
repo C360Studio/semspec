@@ -844,7 +844,19 @@ func recoveryContractImpact(action payloads.RecoveryActionKind, diagnosis string
 	if len(impact.AffectedIDs) == 0 && len(affectedIDs) > 0 {
 		impact.AffectedIDs = append([]string(nil), affectedIDs...)
 	}
+	if recoveryActionRequiresContractChange(action) && impact.Kind != workflow.ContractImpactChange {
+		impact.Kind = workflow.ContractImpactChange
+	}
 	return &impact
+}
+
+func recoveryActionRequiresContractChange(action payloads.RecoveryActionKind) bool {
+	switch action {
+	case payloads.RecoveryActionNarrowScope, payloads.RecoveryActionArchitectureRevise:
+		return true
+	default:
+		return false
+	}
 }
 
 func defaultRecoveryContractImpact(action payloads.RecoveryActionKind, diagnosis string, affectedIDs []string) *workflow.ContractImpact {

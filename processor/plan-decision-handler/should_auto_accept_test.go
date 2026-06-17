@@ -12,10 +12,8 @@ func recoveryImpact(kind workflow.ContractImpactKind) *workflow.ContractImpact {
 
 // TestShouldAutoAcceptRecovery_WidenedForStoryReprepare pins the Train C
 // step 4 widening: recovery-agent-emitted story_reprepare proposals are
-// now auto-acceptable alongside requirement_change. Pre-fix the filter
-// only matched requirement_change → story_reprepare proposals sat in
-// `proposed` forever waiting for a human click, defeating the whole
-// autonomous-recovery shape.
+// auto-acceptable alongside safe requirement_change proposals, while
+// contract-changing actions stay human-gated.
 func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -48,7 +46,7 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 			comment: "pre-existing path unchanged",
 		},
 		{
-			name: "architecture_revise is auto-acceptable",
+			name: "architecture_revise stays human-gated even if malformed as refine",
 			dec: &workflow.PlanDecision{
 				ProposedBy:     "recovery-agent",
 				Status:         workflow.PlanDecisionStatusProposed,
@@ -56,8 +54,22 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 				AffectedReqIDs: []string{"req.demo.1"},
 				ContractImpact: recoveryImpact(workflow.ContractImpactRefine),
 			},
-			wantOK:  true,
-			comment: "heaviest recovery kind; user chose auto-accept",
+			wantOK:  false,
+			comment: "architecture recovery changes topology/contract and cannot self-downgrade",
+		},
+		{
+			name: "narrow_scope requirement_change stays human-gated even if malformed as preserve",
+			dec: &workflow.PlanDecision{
+				Title:          "Recovery: narrow_scope",
+				Rationale:      "Recommended action: narrow_scope\n\nDiagnosis:\nRemove accepted scope.",
+				ProposedBy:     "recovery-agent",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindRequirementChange,
+				AffectedReqIDs: []string{"req.demo.1"},
+				ContractImpact: recoveryImpact(workflow.ContractImpactPreserve),
+			},
+			wantOK:  false,
+			comment: "scope-narrowing is contract-changing even though it maps to requirement_change",
 		},
 		{
 			name: "contract-changing recovery stays human-gated",

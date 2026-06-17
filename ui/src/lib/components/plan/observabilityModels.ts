@@ -70,6 +70,8 @@ export type FreshnessIndicatorState = {
 	source?: string;
 };
 
+export type QAOutcomeState = 'success' | 'warning' | 'error' | 'neutral';
+
 const LESSON_STEPS = new Set(['decompose', 'lesson-decompose', 'lesson-decomposition']);
 const LESSON_ROLES = new Set(['lesson-decomposer', 'lesson-curator']);
 
@@ -120,6 +122,17 @@ export function executionBlockers(plan: PlanWithStatus): ExecutionBlocker[] {
 		});
 	}
 	return items;
+}
+
+export function qaOutcomeState(plan: PlanWithStatus): QAOutcomeState {
+	const qaRun = plan.qa_run ?? null;
+	const verdict = plan.qa_verdict_summary?.verdict;
+	if (qaRun?.passed === false) return 'error';
+	if (verdict === 'needs_changes' || verdict === 'rejected') return 'error';
+	if (plan.stage === 'failed') return 'error';
+	if (plan.stage === 'complete_with_deferrals' || verdict === 'conditionally_approved') return 'warning';
+	if (qaRun?.passed === true || verdict === 'approved') return 'success';
+	return 'neutral';
 }
 
 export function storyTaskCounts(story: Story): TaskCounts {

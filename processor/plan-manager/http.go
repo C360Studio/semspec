@@ -212,6 +212,9 @@ func (c *Component) getRepoRoot(w http.ResponseWriter) string {
 // effects, for callers that run outside a request scope. Falls back to the
 // current working directory silently; logs a warning if even that fails.
 func (c *Component) resolveRepoRoot() string {
+	if c.config.RepoPath != "" {
+		return c.config.RepoPath
+	}
 	if v := os.Getenv("SEMSPEC_REPO_PATH"); v != "" {
 		return v
 	}

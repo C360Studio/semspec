@@ -310,6 +310,11 @@
 		color: var(--color-success);
 	}
 
+	.plan-stage[data-stage='complete_with_deferrals'] {
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.15));
+		color: var(--color-warning);
+	}
+
 	.plan-stage[data-stage='failed'] {
 		background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
 		color: var(--color-error);

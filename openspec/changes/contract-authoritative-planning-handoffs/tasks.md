@@ -56,3 +56,11 @@
 - [x] 7.4 Run `go test ./...` after backend slices land
 - [x] 7.5 Run UI checks and relevant Playwright scenarios after frontend slices land
 - [ ] 7.6 Run the MAVLink/OSH hard-run ladder once the artifact, backend, and UI slices are merged
+
+## 8. PR Review Enforcement Follow-Ups
+
+- [x] 8.1 Populate runtime plan contract packets with brownfield topology facts before architecture and Story gates rely on them
+- [x] 8.2 Capture the first real drafted scope as the contract baseline and enforce scope-shrink checks on recovery acceptance paths
+- [x] 8.3 Add a legal post-QA architecture recovery transition and regression coverage for `rejected -> requirements_generated`
+- [x] 8.4 Floor recovery contract-impact policy by action kind so scope/topology-changing actions cannot self-report as preserve/refine
+- [x] 8.5 Fix UI false-green and stale observability state regressions from the PR review

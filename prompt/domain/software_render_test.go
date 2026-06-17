@@ -336,6 +336,24 @@ func TestAssembler_PlanConstraintsReachDeveloper(t *testing.T) {
 	if strings.Contains(out2.SystemMessage+out2.UserMessage, "PLAN CONSTRAINTS") {
 		t.Errorf("empty PlanConstraints should render no constraints block")
 	}
+
+	out3 := a.Assemble(&prompt.AssemblyContext{
+		Role:               prompt.RoleDeveloper,
+		Provider:           prompt.ProviderOpenAI,
+		AvailableTools:     []string{"bash", "submit_work"},
+		ContractProjection: &prompt.ContractProjection{ID: "contract.empty"},
+		TaskContext: &prompt.TaskContext{
+			PlanGoal:        "g",
+			PlanConstraints: []string{constraint},
+			WorktreePath:    "/work/wt",
+		},
+	})
+	if out3.RenderError != nil {
+		t.Fatalf("unexpected RenderError with empty contract projection: %v", out3.RenderError)
+	}
+	if !strings.Contains(out3.SystemMessage+out3.UserMessage, "PLAN CONSTRAINTS") {
+		t.Errorf("empty ContractProjection should not suppress legacy PlanConstraints fallback")
+	}
 }
 
 // TestRenderPlanReviewerPrompt_R1PhaseBoundaries pins the take-19 fix from the

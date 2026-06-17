@@ -54,7 +54,7 @@
 		isActive && summary ? summary.iterations : trajectory ? null : summary ? summary.iterations : null
 	);
 
-	const isComplete = $derived(state === 'completed');
+	const isComplete = $derived(state === 'complete' || state === 'completed');
 	const isFailed = $derived(state === 'failed' || state === 'error');
 
 	function formatTokens(count: number): string {

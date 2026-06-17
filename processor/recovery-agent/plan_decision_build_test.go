@@ -101,7 +101,7 @@ func TestBuildRecoveryPlanDecision_BothEmptyLeavesAffectedReqIDsNil(t *testing.T
 	}
 }
 
-func TestBuildRecoveryPlanDecision_ThreadsContractImpactThrough(t *testing.T) {
+func TestBuildRecoveryPlanDecision_FloorsArchitectureReviseProvidedImpactToChange(t *testing.T) {
 	req := &payloads.RecoveryRequested{
 		RecoveryID:       "12345678-9999-aaaa-bbbb-cccccccccccc",
 		Slug:             "impact-demo",
@@ -119,13 +119,42 @@ func TestBuildRecoveryPlanDecision_ThreadsContractImpactThrough(t *testing.T) {
 	if dec.ContractImpact == nil {
 		t.Fatal("ContractImpact = nil, want parsed impact")
 	}
-	if dec.ContractImpact.Kind != workflow.ContractImpactRefine {
-		t.Fatalf("ContractImpact.Kind = %q, want refine", dec.ContractImpact.Kind)
+	if dec.ContractImpact.Kind != workflow.ContractImpactChange {
+		t.Fatalf("ContractImpact.Kind = %q, want change for architecture_revise", dec.ContractImpact.Kind)
 	}
 	if dec.ContractImpact.Summary != impact.Summary {
 		t.Fatalf("ContractImpact.Summary = %q, want %q", dec.ContractImpact.Summary, impact.Summary)
 	}
 	if len(dec.ContractImpact.AffectedIDs) != 1 || dec.ContractImpact.AffectedIDs[0] != "req-impact" {
+		t.Fatalf("ContractImpact.AffectedIDs = %v, want fallback affected req", dec.ContractImpact.AffectedIDs)
+	}
+}
+
+func TestBuildRecoveryPlanDecision_FloorsNarrowScopeProvidedImpactToChange(t *testing.T) {
+	req := &payloads.RecoveryRequested{
+		RecoveryID:       "12345678-9999-aaaa-bbbb-dddddddddddd",
+		Slug:             "scope-demo",
+		Layer:            payloads.RecoveryLayerPhaseLocal,
+		RequirementID:    "req-scope",
+		EscalationReason: "scope was too broad",
+	}
+	impact := &workflow.ContractImpact{
+		Kind:    workflow.ContractImpactPreserve,
+		Summary: "Narrowing scope was incorrectly reported as preserving the contract.",
+	}
+
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionNarrowScope, "diagnosis", true, impact, time.Now())
+
+	if dec.ContractImpact == nil {
+		t.Fatal("ContractImpact = nil, want parsed impact")
+	}
+	if dec.ContractImpact.Kind != workflow.ContractImpactChange {
+		t.Fatalf("ContractImpact.Kind = %q, want change for narrow_scope", dec.ContractImpact.Kind)
+	}
+	if dec.ContractImpact.Summary != impact.Summary {
+		t.Fatalf("ContractImpact.Summary = %q, want provided summary preserved", dec.ContractImpact.Summary)
+	}
+	if len(dec.ContractImpact.AffectedIDs) != 1 || dec.ContractImpact.AffectedIDs[0] != "req-scope" {
 		t.Fatalf("ContractImpact.AffectedIDs = %v, want fallback affected req", dec.ContractImpact.AffectedIDs)
 	}
 }

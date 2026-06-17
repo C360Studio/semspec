@@ -24,6 +24,7 @@ interface LoopLike {
 	role?: string;
 	state: string;
 	created_at?: string;
+	completed_at?: string;
 	iterations?: number;
 	max_iterations?: number;
 	workflow_slug?: string;
@@ -116,6 +117,10 @@ class TimelineStore {
 				minTime = Math.min(minTime, time);
 				maxTime = Math.max(maxTime, time);
 			}
+			if (loop.completed_at) {
+				const time = new Date(loop.completed_at).getTime();
+				maxTime = Math.max(maxTime, time);
+			}
 		}
 
 		// If no valid times, use current time
@@ -199,13 +204,10 @@ class TimelineStore {
 				taskId: loop.current_task_id
 			};
 
-			// If not active, estimate end time based on state
+			// If not active, use the measured completion timestamp when the API
+			// provides one. Do not fabricate durations from iteration counts.
 			if (!['active', 'waiting', 'blocked'].includes(segmentState)) {
-				// For completed/failed, estimate end time
-				// In a real implementation, this would come from actual data
-				const startMs = new Date(segment.startTime).getTime();
-				const estimatedDuration = (loop.iterations || 1) * 30000; // 30s per iteration estimate
-				segment.endTime = new Date(startMs + estimatedDuration).toISOString();
+				segment.endTime = loop.completed_at ?? segment.startTime;
 			}
 
 			segments.push(segment);

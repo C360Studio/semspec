@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import { executionBlockers, storyTaskCounts } from '$lib/components/plan/observabilityModels';
+	import { executionBlockers, qaOutcomeState, storyTaskCounts } from '$lib/components/plan/observabilityModels';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	interface Props {
@@ -18,6 +18,7 @@
 	const execution = $derived(summary?.execution ?? plan.execution_summary ?? null);
 	const qaRun = $derived(plan.qa_run ?? null);
 	const qaVerdict = $derived(plan.qa_verdict_summary ?? null);
+	const qaState = $derived(qaOutcomeState(plan));
 	const terminalState = $derived(
 		summary?.phase === 'terminal' || ['complete', 'complete_with_deferrals', 'failed'].includes(plan.stage)
 	);
@@ -180,7 +181,7 @@
 				<Icon name="test-tube" size={13} />
 				<span>QA And Outcome</span>
 			</div>
-			<div class="qa-box" data-state={qaRun?.passed || qaVerdict?.verdict === 'approved' ? 'success' : qaRun ? 'error' : 'neutral'}>
+			<div class="qa-box" data-state={qaState}>
 				{#if terminalState}
 					<div class="qa-row">
 						<span>Terminal</span>
@@ -458,7 +459,23 @@
 		gap: var(--space-2);
 		padding: var(--space-2);
 		border-radius: var(--radius-md);
+		border: 1px solid transparent;
 		background: var(--color-bg-tertiary);
+	}
+
+	.qa-box[data-state='success'] {
+		border-color: color-mix(in srgb, var(--color-success) 35%, transparent);
+		background: color-mix(in srgb, var(--color-success-muted) 45%, var(--color-bg-tertiary));
+	}
+
+	.qa-box[data-state='warning'] {
+		border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+		background: color-mix(in srgb, var(--color-warning-muted) 45%, var(--color-bg-tertiary));
+	}
+
+	.qa-box[data-state='error'] {
+		border-color: color-mix(in srgb, var(--color-error) 35%, transparent);
+		background: color-mix(in srgb, var(--color-error-muted) 45%, var(--color-bg-tertiary));
 	}
 
 	.qa-row {

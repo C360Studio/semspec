@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semstreams/message"
@@ -34,6 +35,7 @@ type planStore struct {
 	kvBucket     jetstream.KeyValue // PLAN_STATES — may be nil (tests, no NATS)
 	tripleWriter *graphutil.TripleWriter
 	logger       *slog.Logger
+	repoPath     string
 }
 
 // newPlanStore creates a plan store backed by a TTL in-memory cache.
@@ -41,16 +43,21 @@ type planStore struct {
 // Plans that outlive the TTL (e.g., waiting for human review) are served
 // via KV fallback on cache miss (see get()). This is the reference pattern.
 // kv may be nil — store operates in cache+graph-only mode when absent.
-func newPlanStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger) (*planStore, error) {
+func newPlanStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger, repoPath ...string) (*planStore, error) {
 	c, err := sscache.NewTTL[*workflow.Plan](ctx, 30*time.Minute, 5*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("create plan cache: %w", err)
+	}
+	var root string
+	if len(repoPath) > 0 {
+		root = strings.TrimSpace(repoPath[0])
 	}
 	return &planStore{
 		cache:        c,
 		kvBucket:     kv,
 		tripleWriter: tw,
 		logger:       logger,
+		repoPath:     root,
 	}, nil
 }
 
@@ -212,6 +219,7 @@ func (s *planStore) create(ctx context.Context, slug, title, brief string, qaLev
 		brief = title
 	}
 	plan.EnsureContractPacket(brief, now)
+	s.ensureRuntimeContractFacts(plan)
 
 	if err := s.save(ctx, plan); err != nil {
 		return nil, fmt.Errorf("save new plan: %w", err)
@@ -263,6 +271,7 @@ func (s *planStore) createImported(ctx context.Context, plan *workflow.Plan, qaL
 		}
 		plan.EnsureContractPacket(brief, now)
 	}
+	s.ensureRuntimeContractFacts(plan)
 	plan.QALevel = qaLevel
 	plan.AutoRejectOnExhaustion = autoRejectOverride
 	// Imports default to unapproved; the operator runs the normal approval
@@ -273,6 +282,30 @@ func (s *planStore) createImported(ctx context.Context, plan *workflow.Plan, qaL
 		return fmt.Errorf("save imported plan: %w", err)
 	}
 	return nil
+}
+
+func (s *planStore) ensureRuntimeContractFacts(plan *workflow.Plan) {
+	if plan == nil || plan.Contract == nil {
+		return
+	}
+	if len(plan.Contract.TopologyFacts) > 0 {
+		return
+	}
+	repoPath := strings.TrimSpace(s.repoPath)
+	if repoPath == "" {
+		return
+	}
+	result, err := workflow.NewFileSystemDetector().Detect(repoPath)
+	if err != nil {
+		if s.logger != nil {
+			s.logger.Warn("Failed to detect topology facts for plan contract", "slug", plan.Slug, "repo_path", repoPath, "error", err)
+		}
+		return
+	}
+	if result == nil || len(result.TopologyFacts) == 0 {
+		return
+	}
+	plan.Contract.TopologyFacts = append([]workflow.TopologyFact(nil), result.TopologyFacts...)
 }
 
 // save persists a plan through all three layers in order:

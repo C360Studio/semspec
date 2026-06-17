@@ -120,6 +120,7 @@ class FeedStore {
 			this.lastPlanEventKey = null;
 			this.seenQuestionIds.clear();
 			this.requirementStages = new Map();
+			this.taskStages = new Map();
 			this.currentPlan = null;
 		});
 	}
@@ -157,6 +158,8 @@ class FeedStore {
 		this.lastPlanEventKey = null;
 		this.seenQuestionIds.clear();
 		this.currentPlan = null;
+		this.requirementStages = new Map();
+		this.taskStages = new Map();
 	}
 
 	// ── Private ────────────────────────────────────────────────────

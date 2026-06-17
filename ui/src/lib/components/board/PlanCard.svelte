@@ -309,6 +309,10 @@
 		color: var(--color-success);
 	}
 
+	.stage-label[data-stage='complete_with_deferrals'] {
+		color: var(--color-warning);
+	}
+
 	.stage-label[data-stage='failed'] {
 		color: var(--color-error);
 	}

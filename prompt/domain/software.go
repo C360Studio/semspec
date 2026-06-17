@@ -54,6 +54,10 @@ func formatChecklist(checks []workflow.Check) string {
 	return sb.String()
 }
 
+func contractProjectionCarriesConstraints(cp *prompt.ContractProjection) bool {
+	return cp != nil && len(cp.Constraints) > 0
+}
+
 // Software returns all prompt fragments for the software engineering domain.
 func Software() []*prompt.Fragment {
 	base := []*prompt.Fragment{
@@ -191,7 +195,7 @@ These are not stylistic preferences. The compiler / interpreter / type checker e
 			Priority: -2,
 			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				if ctx.ContractProjection != nil || ctx.TaskContext == nil || len(ctx.TaskContext.PlanConstraints) == 0 {
+				if contractProjectionCarriesConstraints(ctx.ContractProjection) || ctx.TaskContext == nil || len(ctx.TaskContext.PlanConstraints) == 0 {
 					return ""
 				}
 				return "## PLAN CONSTRAINTS (must hold — from the original request)\n\n" +
@@ -2670,7 +2674,7 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 				sb.WriteString(fmt.Sprintf("**Title:** %s\n", qc.PlanTitle))
 				sb.WriteString(fmt.Sprintf("**Goal:** %s\n", qc.PlanGoal))
 				sb.WriteString(fmt.Sprintf("**QA Level:** %s\n", qc.QALevel))
-				if len(qc.PlanConstraints) > 0 && ctx.ContractProjection == nil {
+				if len(qc.PlanConstraints) > 0 && !contractProjectionCarriesConstraints(ctx.ContractProjection) {
 					// #204: hard constraints from the original request. A deliverable
 					// that violated one (e.g. stubbed a class the request said not to)
 					// is not release-ready even if every executed test passed.

@@ -370,9 +370,11 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusRejected:
 		// rejected → approved (manual R2 restart — human intervenes)
 		// rejected → created (manual R1 restart — human intervenes after escalation, ADR-029)
+		// rejected → requirements_generated (accepted post-QA architecture recovery)
 		// rejected → ready_for_execution (retry failed requirements)
 		// rejected → implementing (resume stalled plan — orchestrator already dispatched)
 		return target == StatusApproved || target == StatusCreated ||
+			target == StatusRequirementsGenerated ||
 			target == StatusReadyForExecution || target == StatusImplementing
 	default:
 		return false

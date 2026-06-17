@@ -487,6 +487,10 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Cannot accept proposal in current status", http.StatusConflict)
 		return
 	}
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
 
 	now := time.Now()
 	proposal.Status = workflow.PlanDecisionStatusAccepted

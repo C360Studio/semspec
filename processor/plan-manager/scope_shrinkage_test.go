@@ -9,6 +9,57 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
+func TestHandleDraftedMutationCapturesFirstRealScopeAsContractBaseline(t *testing.T) {
+	c := setupTestComponent(t)
+	slug := "first-real-scope"
+	plan := &workflow.Plan{
+		ID:     workflow.PlanEntityID(slug),
+		Slug:   slug,
+		Title:  slug,
+		Status: workflow.StatusCreated,
+	}
+	plan.EnsureContractPacket("planner has not drafted scope yet", time.Now())
+	if err := c.plans.save(context.Background(), plan); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	body := marshalJSON(t, DraftedMutationRequest{
+		Slug:        slug,
+		Goal:        "Draft the first concrete scope",
+		Context:     "The initial contract was created before planner scope existed.",
+		Constraints: []string{"Keep the baseline integration intact."},
+		Scope: &workflow.Scope{
+			Create:     []string{"src/required.go"},
+			Include:    []string{"README.md"},
+			DoNotTouch: []string{"secrets.yaml"},
+		},
+	})
+	resp := c.handleDraftedMutation(context.Background(), body)
+	if !resp.Success {
+		t.Fatalf("handleDraftedMutation failed: %s", resp.Error)
+	}
+
+	got, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan not found after mutation")
+	}
+	if got.Contract == nil {
+		t.Fatal("Contract is nil after drafted mutation")
+	}
+	if got.Contract.Scope.Create[0] != "src/required.go" {
+		t.Fatalf("Contract.Scope.Create = %v, want first drafted scope", got.Contract.Scope.Create)
+	}
+	if got.Contract.Scope.Include[0] != "README.md" {
+		t.Fatalf("Contract.Scope.Include = %v, want first drafted scope", got.Contract.Scope.Include)
+	}
+	if got.Contract.Scope.DoNotTouch[0] != "secrets.yaml" {
+		t.Fatalf("Contract.Scope.DoNotTouch = %v, want first drafted scope", got.Contract.Scope.DoNotTouch)
+	}
+	if len(got.Contract.Constraints) != 1 || got.Contract.Constraints[0] != "Keep the baseline integration intact." {
+		t.Fatalf("Contract.Constraints = %v, want planner constraints copied into empty root packet", got.Contract.Constraints)
+	}
+}
+
 func TestHandleDraftedMutationRejectsUnamendedContractScopeShrinkage(t *testing.T) {
 	c := setupTestComponent(t)
 	slug := "scope-shrink"
@@ -166,5 +217,45 @@ func TestApplyPlanDecisionAcceptEffectsAddsContractAmendment(t *testing.T) {
 	}
 	if len(plan.Contract.Amendments) != 1 {
 		t.Fatalf("len(Amendments) after idempotent apply = %d, want 1", len(plan.Contract.Amendments))
+	}
+}
+
+func TestValidatePlanDecisionAcceptContractImpactRejectsNarrowScopeSelfDowngrade(t *testing.T) {
+	proposal := &workflow.PlanDecision{
+		Title:     "Recovery: narrow_scope",
+		Rationale: "Recommended action: narrow_scope\n\nDiagnosis:\nDrop work from accepted scope.",
+		Kind:      workflow.PlanDecisionKindRequirementChange,
+		ContractImpact: &workflow.ContractImpact{
+			Kind:    workflow.ContractImpactPreserve,
+			Summary: "incorrectly marked as preserving the contract",
+		},
+	}
+
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err == nil {
+		t.Fatal("validatePlanDecisionAcceptContractImpact returned nil; want narrow_scope self-downgrade rejected")
+	}
+
+	proposal.ContractImpact.Kind = workflow.ContractImpactChange
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		t.Fatalf("validatePlanDecisionAcceptContractImpact with change impact: %v", err)
+	}
+}
+
+func TestValidatePlanDecisionAcceptContractImpactRejectsArchitectureReviseSelfDowngrade(t *testing.T) {
+	proposal := &workflow.PlanDecision{
+		Kind: workflow.PlanDecisionKindArchitectureRevise,
+		ContractImpact: &workflow.ContractImpact{
+			Kind:    workflow.ContractImpactRefine,
+			Summary: "incorrectly marked as refining the contract",
+		},
+	}
+
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err == nil {
+		t.Fatal("validatePlanDecisionAcceptContractImpact returned nil; want architecture_revise self-downgrade rejected")
+	}
+
+	proposal.ContractImpact.Kind = workflow.ContractImpactChange
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		t.Fatalf("validatePlanDecisionAcceptContractImpact with change impact: %v", err)
 	}
 }

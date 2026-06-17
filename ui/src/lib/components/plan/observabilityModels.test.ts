@@ -10,6 +10,7 @@ import {
 	lessonActivityModel,
 	phaseSummaryDetail,
 	planFreshnessIndicatorState,
+	qaOutcomeState,
 	recoveryAffectedNodes,
 	shouldShowPhaseSummaryBanner,
 	storyTaskCounts
@@ -129,6 +130,57 @@ describe('execution detail observability model', () => {
 		} as NonNullable<PlanWithStatus['stories']>[number]);
 
 		expect(counts).toEqual({ total: 3, done: 1, active: 1, failed: 1 });
+	});
+
+	it('treats failed QA run as error even when verdict text is approved', () => {
+		expect(qaOutcomeState(plan({
+			stage: 'complete',
+			qa_run: {
+				run_id: 'qa-1',
+				completed_at: '2026-06-16T12:12:00Z',
+				duration_ms: 1200,
+				passed: false
+			},
+			qa_verdict_summary: {
+				level: 'integration',
+				recorded_at: '2026-06-16T12:13:00Z',
+				verdict: 'approved'
+			}
+		}))).toBe('error');
+	});
+
+	it('shows complete-with-deferrals as warning instead of success', () => {
+		expect(qaOutcomeState(plan({
+			stage: 'complete_with_deferrals',
+			qa_run: {
+				run_id: 'qa-1',
+				completed_at: '2026-06-16T12:12:00Z',
+				duration_ms: 1200,
+				passed: true
+			},
+			qa_verdict_summary: {
+				level: 'integration',
+				recorded_at: '2026-06-16T12:13:00Z',
+				verdict: 'conditionally_approved'
+			}
+		}))).toBe('warning');
+	});
+
+	it('shows approved passing QA as success', () => {
+		expect(qaOutcomeState(plan({
+			stage: 'complete',
+			qa_run: {
+				run_id: 'qa-1',
+				completed_at: '2026-06-16T12:12:00Z',
+				duration_ms: 1200,
+				passed: true
+			},
+			qa_verdict_summary: {
+				level: 'integration',
+				recorded_at: '2026-06-16T12:13:00Z',
+				verdict: 'approved'
+			}
+		}))).toBe('success');
 	});
 });
 

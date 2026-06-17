@@ -3,6 +3,7 @@ package changeproposalhandler
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
@@ -151,19 +152,18 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 //     step 4). The cascade dirty-marks Stories + scenarios; plan-manager
 //     drives stories_generated → preparing_stories so Sarah re-runs with
 //     the diagnosis as Story.RecoveryHint.
-//   - PlanDecisionKindArchitectureRevise — architecture_revise action.
-//     plan-manager clears Architecture + downstream Story/Scenario state,
-//     resets the affected requirement execution closure, and drives
-//     implementing → requirements_generated so Winston re-runs with the
-//     diagnosis as ReviewFormattedFindings.
+//   - PlanDecisionKindArchitectureRevise — parsed for visibility but not
+//     auto-accepted unless a future policy explicitly permits contract-changing
+//     architecture recovery.
 //
 // Other kinds (execution_exhausted terminal records, qa-reviewer
 // proposals, human proposals) stay human-gated. AffectedReqIDs is the
 // load-bearing predicate for both auto-acceptable kinds: it scopes the
 // cascade target, and an empty list signals "the wedge isn't scoped to
 // specific work — needs human triage." ContractImpact is also
-// load-bearing: preserve/refine may auto-accept, while change or missing
-// impact waits for review.
+// load-bearing: preserve/refine may auto-accept only for actions that do not
+// inherently change the contract, while change or missing impact waits for
+// review.
 // countAcceptedArchitectureRevises counts PlanDecisions already in accepted
 // status with Kind=architecture_revise. Used as the monotonic loop bound for
 // the architecture_revise auto-accept cap — the count survives the entity wipe
@@ -216,10 +216,37 @@ func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	if dec.ContractImpact == nil || !dec.ContractImpact.Kind.IsValid() {
 		return false
 	}
+	if recoveryDecisionRequiresContractChange(dec) {
+		return false
+	}
 	if dec.ContractImpact.Kind == workflow.ContractImpactChange {
 		return false
 	}
 	return true
+}
+
+func recoveryDecisionRequiresContractChange(dec *workflow.PlanDecision) bool {
+	if dec == nil {
+		return false
+	}
+	switch dec.Kind {
+	case workflow.PlanDecisionKindArchitectureRevise:
+		return true
+	case workflow.PlanDecisionKindRequirementChange:
+		return recoveryDecisionMentionsAction(dec, "narrow_scope")
+	default:
+		return false
+	}
+}
+
+func recoveryDecisionMentionsAction(dec *workflow.PlanDecision, action string) bool {
+	haystack := strings.ToLower(dec.Title + "\n" + dec.Rationale)
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return false
+	}
+	return strings.Contains(haystack, action) ||
+		strings.Contains(haystack, strings.ReplaceAll(action, "_", " "))
 }
 
 // invokeAccept fires plan.mutation.plan_decision.accept via NATS

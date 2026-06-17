@@ -701,8 +701,20 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	plan.Goal = req.Goal
 	plan.Context = req.Context
 	plan.Constraints = req.Constraints
+	if plan.Contract == nil {
+		brief := req.Context
+		if brief == "" {
+			brief = req.Goal
+		}
+		plan.EnsureContractPacket(brief, time.Now())
+	}
+	if plan.Contract != nil && len(plan.Contract.Constraints) == 0 && len(req.Constraints) > 0 {
+		plan.Contract.Constraints = append([]string(nil), req.Constraints...)
+	}
 	if req.Scope != nil {
-		if missing := unauthorizedContractScopeDrops(plan.Contract, *req.Scope); len(missing) > 0 {
+		if plan.Contract != nil && contractScopeSnapshotEmpty(plan.Contract.Scope) {
+			plan.Contract.Scope = workflow.NewContractScopeSnapshot(*req.Scope)
+		} else if missing := unauthorizedContractScopeDrops(plan.Contract, *req.Scope); len(missing) > 0 {
 			return MutationResponse{
 				Success: false,
 				Error:   fmt.Sprintf("scope shrinkage requires accepted amendment provenance for dropped contract obligations: %s", strings.Join(missing, ", ")),
@@ -725,6 +737,13 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 type contractScopeDrop struct {
 	Origin string
 	Path   string
+}
+
+func contractScopeSnapshotEmpty(scope workflow.ContractScopeSnapshot) bool {
+	return len(scope.Include) == 0 &&
+		len(scope.Exclude) == 0 &&
+		len(scope.DoNotTouch) == 0 &&
+		len(scope.Create) == 0
 }
 
 func unauthorizedContractScopeDrops(contract *workflow.ContractPacket, next workflow.Scope) []string {
@@ -2090,6 +2109,9 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 // watcher event. An out-of-window plan (already moved past the source status
 // while a human-review window was open) is left in place with a warning.
 func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		return err
+	}
 	applyAcceptedContractAmendment(plan, proposal)
 
 	if proposal.Kind == workflow.PlanDecisionKindArchitectureRevise {
@@ -2106,6 +2128,40 @@ func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *wo
 		}
 	}
 	return nil
+}
+
+func validatePlanDecisionAcceptContractImpact(proposal *workflow.PlanDecision) error {
+	if !planDecisionRequiresContractChange(proposal) {
+		return nil
+	}
+	if proposal.ContractImpact == nil || proposal.ContractImpact.Kind != workflow.ContractImpactChange {
+		return fmt.Errorf("accepting %s requires contract impact kind %q", proposal.Kind, workflow.ContractImpactChange)
+	}
+	return nil
+}
+
+func planDecisionRequiresContractChange(proposal *workflow.PlanDecision) bool {
+	if proposal == nil {
+		return false
+	}
+	switch proposal.Kind {
+	case workflow.PlanDecisionKindArchitectureRevise:
+		return true
+	case workflow.PlanDecisionKindRequirementChange:
+		return planDecisionMentionsRecoveryAction(proposal, "narrow_scope")
+	default:
+		return false
+	}
+}
+
+func planDecisionMentionsRecoveryAction(proposal *workflow.PlanDecision, action string) bool {
+	haystack := strings.ToLower(proposal.Title + "\n" + proposal.Rationale)
+	action = strings.ToLower(strings.TrimSpace(action))
+	if action == "" {
+		return false
+	}
+	return strings.Contains(haystack, action) ||
+		strings.Contains(haystack, strings.ReplaceAll(action, "_", " "))
 }
 
 func applyAcceptedContractAmendment(plan *workflow.Plan, proposal *workflow.PlanDecision) {
@@ -2580,6 +2636,9 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 	}
 	if !proposal.Status.CanTransitionTo(workflow.PlanDecisionStatusAccepted) {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("cannot accept in status %q", proposal.Status)}
+	}
+	if err := validatePlanDecisionAcceptContractImpact(proposal); err != nil {
+		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
 	now := time.Now()
