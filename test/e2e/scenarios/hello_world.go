@@ -56,14 +56,6 @@ func WithCodeExecution() HelloWorldOption {
 	}
 }
 
-// WithoutCodeExecution disables the code execution verification stages.
-// Use this for fast tests that only verify planning and approval workflows.
-func WithoutCodeExecution() HelloWorldOption {
-	return func(s *HelloWorldScenario) {
-		s.variant.EnableCodeExecution = false
-	}
-}
-
 // WithIterationExhaustion creates a variant where the developer agent never
 // calls submit_work, exhausting the agentic loop's max_iterations budget.
 // This triggers: loop failed → TDD retry (×max_tdd_cycles) → escalation →
@@ -765,7 +757,15 @@ func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result 
 	result.SetDetail("validation_capture", capture)
 
 	// Build a ValidationRequest wrapped in a BaseMessage envelope.
-	// Empty files_modified triggers full-scan mode (all checks run).
+	// Report the seed project's Python files explicitly. We cannot rely on
+	// "empty files_modified == full scan": the structural-validator unions the
+	// reported set with `git status --porcelain` (executor.go
+	// effectiveFilesModified), and once the sandbox commits the seeded
+	// workspace at ready_for_execution the only dirty paths are .semspec/*,
+	// which match no check trigger — so an empty list yields ChecksRun=0
+	// ("no checks ran") rather than a full scan. Naming the real Python files
+	// makes the pytest (*.py) and pip-install (requirements.txt/*.py) checks
+	// fire deterministically regardless of git state.
 	// We construct the envelope manually to avoid importing the
 	// structural-validator package into the E2E test binary.
 	baseMsg := map[string]any{
@@ -777,7 +777,7 @@ func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result 
 		},
 		"payload": map[string]any{
 			"slug":           slug,
-			"files_modified": []string{},
+			"files_modified": []string{"api/app.py", "api/requirements.txt"},
 		},
 		"meta": map[string]any{
 			"created_at": time.Now().UnixMilli(),
@@ -813,101 +813,6 @@ func (s *HelloWorldScenario) stageWaitForValidation(ctx context.Context, result 
 
 	msgs := capture.Messages()
 	result.SetDetail("validation_result_raw", string(msgs[0].Data))
-	return nil
-}
-
-// stageVerifyValidationResults parses and validates the structural validation result.
-// For the greenfield hello-world scenario the validator should correctly FAIL:
-// pytest runs but finds no test files (exit 5), proving the pipeline works and
-// the OODA loop would engage the developer to write tests.
-func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, result *Result) error {
-	rawData, ok := result.GetDetailString("validation_result_raw")
-	if !ok {
-		return fmt.Errorf("validation_result_raw not found")
-	}
-
-	// Parse the BaseMessage envelope to extract the payload.
-	var envelope struct {
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal([]byte(rawData), &envelope); err != nil {
-		return fmt.Errorf("unmarshal validation result envelope: %w", err)
-	}
-
-	var validationResult struct {
-		Slug         string `json:"slug"`
-		Passed       bool   `json:"passed"`
-		ChecksRun    int    `json:"checks_run"`
-		Warning      string `json:"warning,omitempty"`
-		CheckResults []struct {
-			Name     string `json:"name"`
-			Passed   bool   `json:"passed"`
-			Required bool   `json:"required"`
-			Command  string `json:"command"`
-			ExitCode int    `json:"exit_code"`
-			Stdout   string `json:"stdout"`
-			Stderr   string `json:"stderr"`
-		} `json:"check_results"`
-	}
-	if err := json.Unmarshal(envelope.Payload, &validationResult); err != nil {
-		return fmt.Errorf("unmarshal validation result payload: %w", err)
-	}
-
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Assert slug matches what we triggered.
-	if validationResult.Slug != slug {
-		return fmt.Errorf("validation slug mismatch: got %q, want %q",
-			validationResult.Slug, slug)
-	}
-
-	// Assert at least one check ran — the checklist should have pytest from init.
-	if validationResult.ChecksRun == 0 {
-		return fmt.Errorf("no checks ran (checklist empty or not loaded)")
-	}
-
-	// Greenfield project has no test files — validation should correctly fail.
-	// If it passes, either the checklist is wrong or pytest isn't running properly.
-	if validationResult.Passed {
-		return fmt.Errorf("expected validation to fail (greenfield project has no tests) but it passed")
-	}
-
-	// Verify pytest actually ran — exit code must NOT be -1 (command not found).
-	// We expect exit 5 (no tests collected) which proves pytest is installed
-	// and the validator correctly detected the missing tests.
-	// Only check required commands relevant to Python (pytest, pip-install).
-	// Other checks like make-test may be in the checklist from detected
-	// languages but are not expected to be available in the sandbox.
-	pytestFound := false
-	for _, cr := range validationResult.CheckResults {
-		if cr.Name == "pytest" {
-			pytestFound = true
-			if cr.ExitCode == -1 {
-				return fmt.Errorf("pytest returned exit -1 (command not found); " +
-					"must be installed in container")
-			}
-		}
-	}
-	if !pytestFound {
-		return fmt.Errorf("pytest check not found in validation results (checks_run=%d)",
-			validationResult.ChecksRun)
-	}
-
-	// Record details for JSON output.
-	result.SetDetail("validation_slug", validationResult.Slug)
-	result.SetDetail("validation_passed", validationResult.Passed)
-	result.SetDetail("validation_checks_run", validationResult.ChecksRun)
-	result.SetDetail("validation_warning", validationResult.Warning)
-
-	for i, cr := range validationResult.CheckResults {
-		result.SetDetail(fmt.Sprintf("check_%d_name", i), cr.Name)
-		result.SetDetail(fmt.Sprintf("check_%d_passed", i), cr.Passed)
-		result.SetDetail(fmt.Sprintf("check_%d_command", i), cr.Command)
-		result.SetDetail(fmt.Sprintf("check_%d_exit_code", i), cr.ExitCode)
-		result.SetDetail(fmt.Sprintf("check_%d_stdout", i), cr.Stdout)
-		result.SetDetail(fmt.Sprintf("check_%d_stderr", i), cr.Stderr)
-	}
-
 	return nil
 }
 
@@ -1492,11 +1397,17 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 	}
 
 	// Happy path and rejection variants: full pipeline.
+	//
+	// No manual structural-validation stage here. It was a pre-reactive-mode
+	// bolt-on that triggered a greenfield validation and asserted it failed —
+	// but in reactive mode approve auto-runs execution, whose node validation
+	// publishes to the SAME workflow.result.structural-validator.<slug> subject,
+	// so the e2e captured the wrong (post-codegen, passing) result. The
+	// structural-validator is covered by reactive execution, the offline
+	// conformance gate (processor/plan-reviewer), and qa-cycle. These variants
+	// assert on the plan/execution outcome and mock-call stats instead.
 	stages := append(setup,
 		stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 180)},
-		stageDefinition{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
-		stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 120)},
-		stageDefinition{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
 	)
 
 	// Code execution stages - enabled via WithCodeExecution() option.

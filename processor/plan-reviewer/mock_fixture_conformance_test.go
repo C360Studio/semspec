@@ -157,9 +157,29 @@ func TestMockFixturesConformToArchitectureRules(t *testing.T) {
 	}
 }
 
+// TestMockFixturesStoryContractConform is the discovery-based offline half of
+// the ADR-049/ADR-050 contract gate: for EVERY scenario that ships a
+// mock-story-preparer fixture, it assembles the full plan (scope + architecture
+// + requirements + stories + tasks) and runs the production story-contract rules
+// (mergeStoryFindings → storyContractCoverageFindings), asserting ZERO blocking
+// (error) findings.
+//
+// Discovery-based ON PURPOSE: the prior hardcoded single-scenario test
+// (TestExecutionPhaseMockFixtureStoryContractConforms, scenario="execution-phase")
+// let the other 15 fixtures rot silently — the docker mock-ladder is the only
+// thing that exercised them and it is not wired into CI. A newly-added scenario
+// is now enrolled automatically; you cannot forget to cover it.
+func TestMockFixturesStoryContractConform(t *testing.T) {
+	for _, scenario := range mockScenariosWithFixture(t, "mock-story-preparer") {
+		t.Run(scenario, func(t *testing.T) {
+			runStoryContractConformance(t, scenario)
+		})
+	}
+}
+
 //revive:disable-next-line:function-length // sequential fixture decode-and-assemble; the linear plan build mirrors the production contract path and splitting would fragment it.
-func TestExecutionPhaseMockFixtureStoryContractConforms(t *testing.T) {
-	const scenario = "execution-phase"
+func runStoryContractConformance(t *testing.T, scenario string) {
+	t.Helper()
 
 	var planner struct {
 		Scope workflow.Scope `json:"scope"`
@@ -270,17 +290,17 @@ func TestExecutionPhaseMockFixtureStoryContractConforms(t *testing.T) {
 		t.Fatalf("derive story scheduling from fixture: %v", err)
 	}
 	if err := workflow.ValidateStories(stories); err != nil {
-		t.Fatalf("execution-phase story fixture fails Sarah readiness gate: %v", err)
+		t.Fatalf("%s story fixture fails Sarah readiness gate: %v", scenario, err)
 	}
 	plan.Stories = stories
 
 	result := &workflow.PlanReviewResult{Verdict: "approved"}
 	mergeStoryFindings(plan, result)
 	for _, f := range result.ErrorFindings() {
-		t.Errorf("execution-phase story fixture fires blocking finding %s on %q: %s", f.SOPID, f.TargetID, f.Issue)
+		t.Errorf("%s story fixture fires blocking finding %s on %q: %s", scenario, f.SOPID, f.TargetID, f.Issue)
 	}
 	if result.Verdict != "approved" {
-		t.Errorf("execution-phase story fixture verdict = %q, want approved", result.Verdict)
+		t.Errorf("%s story fixture verdict = %q, want approved", scenario, result.Verdict)
 	}
 }
 

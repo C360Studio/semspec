@@ -90,14 +90,12 @@ npm run test:e2e:mock:ui
 MOCK_SCENARIO=hello-world-plan-rejection npm run test:e2e:mock
 ```
 
-**Available Scenarios** (`test/e2e/fixtures/mock-responses/`):
-| Scenario | Purpose |
-|----------|---------|
-| `hello-world` | Happy path - plan approved, tasks generated |
-| `hello-world-plan-rejection` | Plan rejected once, then approved |
-| `hello-world-task-rejection` | Tasks rejected once, then approved |
-| `hello-world-double-rejection` | Both plan and tasks rejected once |
-| `hello-world-plan-exhaustion` | Always rejects (escalation testing) |
+**Available Scenarios:** the mock fixture directories under
+`test/e2e/fixtures/mock-responses/` are the source of truth — run
+`ls test/e2e/fixtures/mock-responses/` for the current set (e.g. `hello-world`,
+`hello-world-plan-rejection`, `hello-world-plan-exhaustion`,
+`hello-world-code-execution`). Pass one via `MOCK_SCENARIO=<dir>`. The UI
+Playwright specs currently select `hello-world` and `hello-world-plan-rejection`.
 
 **Mock LLM Assertions** (`e2e/helpers/mock-llm.ts`):
 ```typescript
