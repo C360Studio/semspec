@@ -139,41 +139,44 @@ func listCmd() *cobra.Command {
 // actually accepts. The order is the canonical run order.
 func buildScenarioList(cfg *config.Config) []scenarios.Scenario {
 	return []scenarios.Scenario{
-		// Tier 1 — REST API / component scenarios
-		scenarios.NewPlanWorkflowScenario(cfg),
-		scenarios.NewQuestionsAPIScenario(cfg),
-		scenarios.NewScenarioExecutionScenario(cfg),
-		scenarios.NewReactiveExecutionScenario(cfg),
-		scenarios.NewPlanDecisionScenario(cfg),
-		scenarios.NewSandboxLifecycleScenario(cfg),
-		// Graph source registry (ADR-032)
-		scenarios.NewGraphSourcesScenario(cfg),
-		scenarios.NewGraphToolsScenario(cfg),
-		// Document processing scenarios (require source-ingester enabled)
-		scenarios.NewDocIngestScenario(cfg),
-		scenarios.NewOpenSpecIngestScenario(cfg),
-		// Tier 1 — State machine guard clauses
-		scenarios.NewPlanStateMachineScenario(cfg),
-		scenarios.NewStaleMutationScenario(cfg),
-		scenarios.NewContractObservabilityScenario(cfg),
-		// Tier 2 — Pipeline tests (mock LLM)
-		scenarios.NewPlanPhaseScenario(cfg),
-		scenarios.NewExecutionPhaseScenario(cfg),
-		// ADR-049 move-3: out-of-territory shared file caught at the dev node.
-		scenarios.NewParallelAssemblyScenario(cfg),
-		scenarios.NewHelloWorldScenario(cfg),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithIterationExhaustion()),
-		// Tier 2 — Stall recovery variants (state machine refactor)
-		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
-		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete),
-		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),
-		// Tier 2 — QA phase: sandbox executable QA + qa-reviewer verdict pipeline
-		scenarios.NewQACycleScenario(cfg),
-		scenarios.NewQAIntegrationCycleScenario(cfg),
+		// Component / API — REST, CRUD, and state-machine coverage. Most need
+		// no LLM; plan-workflow and requirement-crud use the mock planner only
+		// to bootstrap a plan to operate on.
+		scenarios.NewPlanWorkflowScenario(cfg),          // plan-workflow
+		scenarios.NewScenarioExecutionScenario(cfg),     // requirement-crud
+		scenarios.NewQuestionsAPIScenario(cfg),          // questions-api
+		scenarios.NewPlanDecisionScenario(cfg),          // plan-decision
+		scenarios.NewReactiveExecutionScenario(cfg),     // reactive-execution
+		scenarios.NewSandboxLifecycleScenario(cfg),      // sandbox-lifecycle
+		scenarios.NewGraphSourcesScenario(cfg),          // graph-sources (ADR-032)
+		scenarios.NewGraphToolsScenario(cfg),            // graph-tools
+		scenarios.NewDocIngestScenario(cfg),             // doc-ingest
+		scenarios.NewOpenSpecIngestScenario(cfg),        // openspec-ingest
+		scenarios.NewPlanStateMachineScenario(cfg),      // plan-state-machine
+		scenarios.NewStaleMutationScenario(cfg),         // stale-mutation
+		scenarios.NewContractObservabilityScenario(cfg), // contract-observability
+
+		// Mock pipeline — plan phase
+		scenarios.NewPlanPhaseScenario(cfg),                                   // plan-phase
+		scenarios.NewHelloWorldScenario(cfg),                                  // plan-smoke
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)), // plan-reject
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),  // plan-exhaust
+
+		// Mock pipeline — execution phase
+		scenarios.NewExecutionPhaseScenario(cfg),                               // execution-phase
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),    // exec-smoke
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()), // exec-requirement-retry
+		scenarios.NewParallelAssemblyScenario(cfg),                             // exec-ownership-gate (ADR-049 move-3)
+
+		// Mock pipeline — stall recovery
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithIterationExhaustion()),    // stall-iteration
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),    // stall-retry
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete), // stall-complete
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),   // stall-reject
+
+		// Mock pipeline — QA phase
+		scenarios.NewQACycleScenario(cfg),            // qa-unit
+		scenarios.NewQAIntegrationCycleScenario(cfg), // qa-integration
 	}
 }
 

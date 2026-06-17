@@ -24,7 +24,7 @@ test.describe('@t1 @happy-path plan-journey', () => {
 
 	test.beforeAll(async () => {
 		await mockLLM.waitForHealthy();
-		await mockLLM.resetScenario('hello-world');
+		await mockLLM.resetScenario('plan-smoke');
 		const plan = await createPlan(`Journey test ${Date.now()}`);
 		slug = plan.slug;
 		await waitForGoal(slug, 30000);

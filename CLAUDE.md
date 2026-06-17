@@ -215,10 +215,10 @@ Use [Task](https://taskfile.dev) commands — they handle infrastructure lifecyc
 ```bash
 # Tier 1: Component tests (no LLM — seconds)
 task e2e:run -- plan-workflow         # REST API CRUD
-task e2e:run -- scenario-execution    # Requirement/Scenario CRUD + workflow trigger
+task e2e:run -- requirement-crud      # Requirement/Scenario CRUD over REST
 
 # Tier 2: Pipeline tests (mock LLM — ~1 min)
-task e2e:mock -- hello-world          # Run hello-world with mock LLM
+task e2e:mock -- plan-smoke           # Run the plan-phase smoke with mock LLM
 task e2e:mock -- plan-phase           # Full plan pipeline
 task e2e:mock -- execution-phase      # Full execution pipeline
 
@@ -236,7 +236,7 @@ task e2e:watch:llm -- local easy      # Local Ollama variant
 
 # Debugging (keeps infra running)
 task e2e:debug                        # Start infra and tail logs
-task e2e:run -- hello-world           # Run against running infra
+task e2e:run -- plan-smoke            # Run against running infra
 task e2e:down                         # Stop when done
 ```
 

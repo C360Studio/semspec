@@ -33,7 +33,8 @@ func TestMockFixtureDirsMapToRegisteredScenarios(t *testing.T) {
 	// future-proofs the check if an alias target ever stops being registered
 	// under its own name.
 	fixtureAliasTargets := map[string]struct{}{
-		"qa-cycle": {}, // qa-cycle-integration reuses qa-cycle's fixtures
+		"qa-unit":     {}, // qa-integration reuses qa-unit's fixtures
+		"stall-retry": {}, // stall-complete and stall-reject reuse stall-retry's fixtures
 	}
 
 	const mockRoot = "../../test/e2e/fixtures/mock-responses"

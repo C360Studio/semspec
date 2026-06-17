@@ -35,7 +35,7 @@ test.describe('@t1 @ux plan-pre-execution-ux', () => {
 
 	test('drafting state hides Create Requirements + shows loading hint', async ({ page }) => {
 		await mockLLM.waitForHealthy();
-		await mockLLM.resetScenario('hello-world');
+		await mockLLM.resetScenario('plan-smoke');
 
 		// 6s delay per mock response. Long enough to navigate + hydrate + assert
 		// while the planner's first call is still in flight, short enough that the
@@ -78,7 +78,7 @@ test.describe('@t1 @ux plan-pre-execution-ux', () => {
 
 	test('R1 plan-reviewer verdict + summary surface in the Reviews section', async ({ page }) => {
 		await mockLLM.waitForHealthy();
-		await mockLLM.resetScenario('hello-world');
+		await mockLLM.resetScenario('plan-smoke');
 
 		// Slow each LLM call so the plan doesn't race past `reviewed` before we
 		// can scroll + click + assert. Without this the mock journey reaches
@@ -153,7 +153,7 @@ test.describe('@t1 @ux plan-pre-execution-ux', () => {
 		// contextual copy ("Review the plan details, then create requirements
 		// and scenarios."); ActionBar lost its bare duplicate.
 		await mockLLM.waitForHealthy();
-		await mockLLM.resetScenario('hello-world');
+		await mockLLM.resetScenario('plan-smoke');
 
 		const plan = await createPlan(`Single-CTA UX ${Date.now()}`);
 

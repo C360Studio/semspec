@@ -7,11 +7,11 @@ import { startExecutionButton } from './helpers/selectors';
 /**
  * T1 rejection-variant plan journey: plan rejected by reviewer once, then approved.
  *
- * One plan, serial steps. Mock LLM reset to hello-world-plan-rejection once in
+ * One plan, serial steps. Mock LLM reset to plan-reject once in
  * beforeAll — fixtures are consumed sequentially through the retry cycle.
  *
  * Flow:
- *   1. Reset mock LLM to hello-world-plan-rejection (once)
+ *   1. Reset mock LLM to plan-reject (once)
  *   2. Create plan, wait for goal synthesis
  *   3. Approve → reviewer rejects → retry → reaches scenarios_reviewed
  *   4. Second promote via UI → reaches ready_for_execution
@@ -26,7 +26,7 @@ test.describe('@t1 @rejection plan-rejection-journey', () => {
 
 	test.beforeAll(async () => {
 		await mockLLM.waitForHealthy();
-		await mockLLM.resetScenario('hello-world-plan-rejection');
+		await mockLLM.resetScenario('plan-reject');
 		const plan = await createPlan(`Rejection journey test ${Date.now()}`);
 		slug = plan.slug;
 		await waitForGoal(slug, 30000);

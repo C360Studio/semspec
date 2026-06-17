@@ -10,7 +10,7 @@ package scenarios
 //
 // The reactive-workflow trigger stages were deleted when the rules engine
 // was removed (KV watchers replaced workflow.trigger.* subjects). Real
-// execution coverage now lives in hello-world-code-execution and
+// execution coverage now lives in exec-smoke and
 // execution-phase, which exercise the KV self-trigger path end-to-end.
 
 import (
@@ -33,8 +33,8 @@ type ScenarioExecutionScenario struct {
 // NewScenarioExecutionScenario creates a new scenario execution scenario.
 func NewScenarioExecutionScenario(cfg *config.Config) *ScenarioExecutionScenario {
 	return &ScenarioExecutionScenario{
-		name:        "scenario-execution",
-		description: "Tests Requirement/Scenario CRUD and scenario-execution + DAG reactive workflow trigger",
+		name:        "requirement-crud",
+		description: "Requirement and Scenario CRUD over the REST API on a planner-bootstrapped, approved plan",
 		config:      cfg,
 	}
 }

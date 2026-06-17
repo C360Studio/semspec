@@ -28,7 +28,7 @@ func seedProjectConfig(t *testing.T, c *Component, pc *workflow.ProjectConfig) {
 
 // TestHandleConfig_NoopPatchPreservesTimestamp verifies that a PATCH whose
 // payload matches the current config does not reseat UpdatedAt or rewrite
-// the file. Without this guard, every qa-cycle e2e run dirties the
+// the file. Without this guard, every qa-unit e2e run dirties the
 // committed e2e workspace project.json with a fresh timestamp.
 func TestHandleConfig_NoopPatchPreservesTimestamp(t *testing.T) {
 	c, repoRoot := setupTestComponent(t)

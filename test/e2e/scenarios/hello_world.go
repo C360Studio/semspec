@@ -98,7 +98,7 @@ type HelloWorldScenario struct {
 // Options modify the variant configuration for rejection/retry testing.
 func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloWorldScenario {
 	s := &HelloWorldScenario{
-		name:        "hello-world",
+		name:        "plan-smoke",
 		description: "Greenfield Python+JS: add /goodbye endpoint with semantic validation",
 		config:      cfg,
 	}
@@ -109,19 +109,19 @@ func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloW
 
 	// Derive name from variant configuration
 	if s.variant.ExpectIterationExhaustion {
-		s.name = "hello-world-iteration-exhaustion"
+		s.name = "stall-iteration"
 		s.description += " (developer iteration exhaustion → stall → retry recovery)"
 	} else if s.variant.ExpectPlanExhaustion {
-		s.name = "hello-world-plan-exhaustion"
+		s.name = "plan-exhaust"
 		s.description += " (plan review exhaustion → escalation)"
 	} else if s.variant.ExpectPlanRevisions > 0 {
-		s.name = "hello-world-plan-rejection"
+		s.name = "plan-reject"
 		s.description += " (plan rejection)"
 	} else if s.variant.ExpectRequirementRetry {
-		s.name = "hello-world-requirement-retry"
+		s.name = "exec-requirement-retry"
 		s.description += " (requirement rejection → dirty-node retry → approval)"
 	} else if s.variant.EnableCodeExecution {
-		s.name = "hello-world-code-execution"
+		s.name = "exec-smoke"
 		s.description += " (with code execution verification)"
 	}
 
@@ -1404,7 +1404,7 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 	// publishes to the SAME workflow.result.structural-validator.<slug> subject,
 	// so the e2e captured the wrong (post-codegen, passing) result. The
 	// structural-validator is covered by reactive execution, the offline
-	// conformance gate (processor/plan-reviewer), and qa-cycle. These variants
+	// conformance gate (processor/plan-reviewer), and qa-unit. These variants
 	// assert on the plan/execution outcome and mock-call stats instead.
 	stages := append(setup,
 		stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 180)},

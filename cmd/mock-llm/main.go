@@ -46,7 +46,9 @@ import (
 )
 
 var fixtureScenarioAliases = map[string]string{
-	"qa-cycle-integration": "qa-cycle",
+	"qa-integration": "qa-unit",     // same pipeline, qa_level=integration
+	"stall-complete": "stall-retry", // same plan/exec fixtures; differ only in the HTTP recovery action
+	"stall-reject":   "stall-retry",
 }
 
 // --- OpenAI-compatible types ---
@@ -389,12 +391,12 @@ func parseFixture(content string) (chatMessage, string) {
 // all call counters. This allows Playwright tests to switch scenarios without
 // restarting the container.
 //
-// POST /reset?scenario=hello-world-plan-rejection
+// POST /reset?scenario=plan-reject
 //
 // The scenario name is appended to the base fixture directory. For example, if
 // the server was started with -fixtures /fixtures and the request specifies
-// scenario=hello-world-plan-rejection, fixtures are loaded from
-// /fixtures/hello-world-plan-rejection/.
+// scenario=plan-reject, fixtures are loaded from
+// /fixtures/plan-reject/.
 func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

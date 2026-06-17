@@ -61,13 +61,13 @@ func NewPlanStallRecoveryScenario(cfg *config.Config, action StallRecoveryAction
 	var name, description string
 	switch action {
 	case StallRecoveryRetry:
-		name = "plan-stall-retry"
+		name = "stall-retry"
 		description = "Execution stall: failed requirement → POST /retry scope=failed → re-execution succeeds"
 	case StallRecoveryComplete:
-		name = "plan-stall-complete"
+		name = "stall-complete"
 		description = "Execution stall: failed requirement → POST /complete force-completes the plan"
 	case StallRecoveryReject:
-		name = "plan-stall-reject"
+		name = "stall-reject"
 		description = "Execution stall: failed requirement → POST /reject → POST /retry scope=all → re-execution"
 	}
 	return &PlanStallRecoveryScenario{

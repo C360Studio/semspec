@@ -76,7 +76,7 @@ func NewParallelAssemblyScenario(cfg *config.Config) *ParallelAssemblyScenario {
 }
 
 // Name implements Scenario.
-func (s *ParallelAssemblyScenario) Name() string { return "parallel-assembly" }
+func (s *ParallelAssemblyScenario) Name() string { return "exec-ownership-gate" }
 
 // Description implements Scenario.
 func (s *ParallelAssemblyScenario) Description() string {

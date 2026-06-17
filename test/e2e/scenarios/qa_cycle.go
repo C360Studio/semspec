@@ -45,16 +45,16 @@ type QACycleScenario struct {
 // NewQACycleScenario creates a new QA cycle scenario at qa_level=unit.
 // Exercises the sandbox unit-test executor path.
 func NewQACycleScenario(cfg *config.Config) *QACycleScenario {
-	return &QACycleScenario{config: cfg, qaLevel: "unit", name: "qa-cycle"}
+	return &QACycleScenario{config: cfg, qaLevel: "unit", name: "qa-unit"}
 }
 
 // NewQAIntegrationCycleScenario creates a QA cycle scenario at
-// qa_level=integration. It intentionally reuses the qa-cycle mock LLM fixtures:
+// qa_level=integration. It intentionally reuses the qa-unit mock LLM fixtures:
 // the plan/dev story is identical, but plan-manager must route through
 // QARequestedEvent(mode=integration), sandbox QA execution, and qa-reviewer
 // fail-closed verdict handling.
 func NewQAIntegrationCycleScenario(cfg *config.Config) *QACycleScenario {
-	return &QACycleScenario{config: cfg, qaLevel: "integration", name: "qa-cycle-integration"}
+	return &QACycleScenario{config: cfg, qaLevel: "integration", name: "qa-integration"}
 }
 
 // Name implements Scenario.
@@ -95,7 +95,7 @@ func (s *QACycleScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// Execute runs the qa-cycle scenario stages sequentially.
+// Execute runs the qa-unit scenario stages sequentially.
 func (s *QACycleScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.Name())
 	defer result.Complete()
