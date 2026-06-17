@@ -4,14 +4,15 @@ import type { Requirement } from '$lib/types/requirement';
 import type { Scenario } from '$lib/types/scenario';
 import type { TrajectoryListItem, TrajectoryListResponse } from '$lib/types/trajectory';
 import type { SynthesisResult } from '$lib/types/review';
+import type { ExecutionTask, Lesson } from '$lib/components/plan/observabilityModels';
 
 export const load: PageLoad = async ({ params, fetch, depends }) => {
 	depends('app:plans');
 	const slug = params.slug;
 
-	// Fetch plan, requirements, trajectory summaries, and reviews in parallel
+	// Fetch plan, requirements, trajectory summaries, reviews, and execution state in parallel
 	// Backend may return JSON `null` for empty collections, so coalesce to []
-	const [plan, requirements, trajectoryItems, reviews] = await Promise.all([
+	const [plan, requirements, trajectoryItems, reviews, executionTasks, lessons] = await Promise.all([
 		fetch(`/plan-manager/plans/${slug}`)
 			.then((r) => (r.ok ? (r.json() as Promise<PlanWithStatus>) : null))
 			.catch(() => null),
@@ -27,7 +28,13 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 			.catch(() => [] as TrajectoryListItem[]),
 		fetch(`/plan-manager/plans/${slug}/reviews`)
 			.then((r) => (r.ok ? r.json().then((d: SynthesisResult | null) => d) : null))
-			.catch(() => null)
+			.catch(() => null),
+		fetch(`/execution-manager/plans/${encodeURIComponent(slug)}/tasks`)
+			.then((r) => (r.ok ? r.json().then((d: ExecutionTask[] | null) => d ?? []) : []))
+			.catch(() => [] as ExecutionTask[]),
+		fetch('/execution-manager/lessons?role=developer')
+			.then((r) => (r.ok ? r.json().then((d: Lesson[] | null) => d ?? []) : []))
+			.catch(() => [] as Lesson[])
 	]);
 
 	// Fetch scenarios for each requirement in parallel
@@ -47,5 +54,13 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 		scenariosByReq[reqId] = scenarios;
 	}
 
-	return { plan, requirements, scenariosByReq, trajectoryItems: trajectoryItems ?? [], reviews: reviews ?? null };
+	return {
+		plan,
+		requirements,
+		scenariosByReq,
+		trajectoryItems: trajectoryItems ?? [],
+		reviews: reviews ?? null,
+		executionTasks: executionTasks ?? [],
+		lessons: lessons ?? []
+	};
 };

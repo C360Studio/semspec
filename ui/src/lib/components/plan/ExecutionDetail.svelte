@@ -1,13 +1,22 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import { executionBlockers, qaOutcomeState, storyTaskCounts } from '$lib/components/plan/observabilityModels';
+	import {
+		executionAttemptModel,
+		executionBlockers,
+		qaOutcomeState,
+		storyTaskCounts,
+		type ExecutionTask,
+		type ExecutionTaskAttempt,
+		type ExecutionTaskGroupStatus
+	} from '$lib/components/plan/observabilityModels';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	interface Props {
 		plan: PlanWithStatus;
+		executionTasks?: ExecutionTask[];
 	}
 
-	let { plan }: Props = $props();
+	let { plan, executionTasks = [] }: Props = $props();
 
 	type Story = NonNullable<PlanWithStatus['stories']>[number];
 	type StoryTask = NonNullable<Story['tasks']>[number];
@@ -19,6 +28,12 @@
 	const qaRun = $derived(plan.qa_run ?? null);
 	const qaVerdict = $derived(plan.qa_verdict_summary ?? null);
 	const qaState = $derived(qaOutcomeState(plan));
+	const attemptModel = $derived(executionAttemptModel(executionTasks));
+	const skippedTests = $derived(qaRun?.skipped_tests ?? []);
+	const skipGuardTriggered = $derived(
+		skippedTests.length > 0 &&
+			((qaVerdict?.summary ?? '').includes('[skip-guard]') || qaVerdict?.verdict === 'needs_changes')
+	);
 	const terminalState = $derived(
 		summary?.phase === 'terminal' || ['complete', 'complete_with_deferrals', 'failed'].includes(plan.stage)
 	);
@@ -42,6 +57,7 @@
 				return 'active';
 			case 'blocked':
 			case 'waiting':
+			case 'recovered':
 				return 'warning';
 			default:
 				return 'neutral';
@@ -58,6 +74,69 @@
 
 	function taskTitle(task: StoryTask): string {
 		return task.description || task.id;
+	}
+
+	function groupStatusLabel(status: ExecutionTaskGroupStatus): string {
+		switch (status) {
+			case 'active':
+				return 'active';
+			case 'approved':
+				return 'approved';
+			case 'recovered':
+				return 'recovered';
+			case 'blocked':
+				return 'blocked';
+			default:
+				return 'pending';
+		}
+	}
+
+	function attemptState(attempt: ExecutionTaskAttempt): string {
+		if (attempt.stage === 'approved') return 'success';
+		if (attempt.stage === 'escalated') return 'warning';
+		if (attempt.stage === 'error' || attempt.stage === 'rejected') return 'error';
+		return 'active';
+	}
+
+	function attemptIcon(attempt: ExecutionTaskAttempt): string {
+		switch (attemptState(attempt)) {
+			case 'success':
+				return 'check-circle';
+			case 'warning':
+				return 'alert-triangle';
+			case 'error':
+				return 'x-circle';
+			default:
+				return 'loader';
+		}
+	}
+
+	function cycleLabel(attempt: ExecutionTaskAttempt): string {
+		if (typeof attempt.tddCycle !== 'number') return '';
+		const current = attempt.tddCycle + 1;
+		if (typeof attempt.maxTddCycles === 'number') return `cycle ${current}/${attempt.maxTddCycles}`;
+		return `cycle ${current}`;
+	}
+
+	function shortRequirement(id: string | undefined): string {
+		if (!id) return 'Plan';
+		const match = id.match(/(\d+)$/);
+		return match ? `Req ${match[1]}` : id;
+	}
+
+	function shortSha(sha: string | undefined): string {
+		return sha ? sha.slice(0, 8) : '';
+	}
+
+	function timeLabel(value: string | undefined): string {
+		if (!value) return '';
+		const date = new Date(value);
+		if (!Number.isFinite(date.getTime())) return '';
+		return `${date.toISOString().slice(11, 19)}Z`;
+	}
+
+	function attemptDetail(attempt: ExecutionTaskAttempt): string {
+		return attempt.errorReason || attempt.escalationReason || attempt.feedback || '';
 	}
 </script>
 
@@ -89,6 +168,16 @@
 			<span class="overview-label">Loops</span>
 			<span class="overview-value">{activeLoops.length}</span>
 		</div>
+		{#if attemptModel.totalAttempts > 0}
+			<div class="overview-item">
+				<span class="overview-label">Attempts</span>
+				<span class="overview-value">{attemptModel.totalAttempts}</span>
+			</div>
+			<div class="overview-item" data-state={attemptModel.orphanedGroups > 0 ? 'warning' : 'neutral'}>
+				<span class="overview-label">Recovered</span>
+				<span class="overview-value">{attemptModel.orphanedGroups}</span>
+			</div>
+		{/if}
 		{#if execution}
 			<div class="overview-item">
 				<span class="overview-label">Reqs Done</span>
@@ -101,7 +190,7 @@
 		{/if}
 	</div>
 
-	{#if blockers.length > 0}
+	{#if blockers.length > 0 || attemptModel.warnings.length > 0 || skipGuardTriggered}
 		<div class="blockers">
 			{#each blockers as blocker}
 				<div class="blocker" data-kind={blocker.kind}>
@@ -109,6 +198,26 @@
 					<div>
 						<div class="blocker-label">{blocker.label}</div>
 						{#if blocker.detail}<div class="blocker-detail">{blocker.detail}</div>{/if}
+					</div>
+				</div>
+			{/each}
+			{#if skipGuardTriggered}
+				<div class="blocker" data-kind="qa">
+					<Icon name="alert-triangle" size={14} />
+					<div>
+						<div class="blocker-label">Skipped tests need classification</div>
+						<div class="blocker-detail">
+							{skippedTests.length} skipped test{skippedTests.length === 1 ? '' : 's'} kept QA from treating this as all-green.
+						</div>
+					</div>
+				</div>
+			{/if}
+			{#each attemptModel.warnings as warning (warning.relatedId)}
+				<div class="blocker" data-kind="attempt">
+					<Icon name="alert-triangle" size={14} />
+					<div>
+						<div class="blocker-label">{warning.title}</div>
+						<div class="blocker-detail">{warning.detail}</div>
 					</div>
 				</div>
 			{/each}
@@ -126,6 +235,52 @@
 					<div class="loop-row" data-state={statusClass(loop.state)}>
 						<span class="loop-main">{loopLabel(loop)}</span>
 						<span class="loop-id">{loop.loop_id.slice(0, 12)}</span>
+					</div>
+				{/each}
+			</div>
+		</div>
+	{/if}
+
+	{#if attemptModel.taskGroups.length > 0}
+		<div class="subsection">
+			<div class="subsection-title">
+				<Icon name="git-branch" size={13} />
+				<span>Execution Attempts</span>
+			</div>
+			<div class="attempt-group-list">
+				{#each attemptModel.taskGroups as group (group.key)}
+					<div class="attempt-group" data-status={group.status}>
+						<div class="attempt-group-main">
+							<span class="req-chip">{shortRequirement(group.requirementId)}</span>
+							<span class="attempt-title">{group.title}</span>
+							<span class="status-pill" data-state={statusClass(group.status)}>
+								{groupStatusLabel(group.status)}
+							</span>
+						</div>
+						<div class="attempt-list">
+							{#each group.attempts as attempt, index (attempt.taskId)}
+								<div class="attempt-row" data-state={attemptState(attempt)}>
+									<Icon name={attemptIcon(attempt)} size={13} />
+									<span>Attempt {index + 1}</span>
+									<span class="attempt-stage">{compactStatus(attempt.stage)}</span>
+									{#if cycleLabel(attempt)}
+										<span>{cycleLabel(attempt)}</span>
+									{/if}
+									{#if attempt.mergeCommit}
+										<span class="attempt-sha">
+											<Icon name="git-commit" size={12} />
+											{shortSha(attempt.mergeCommit)}
+										</span>
+									{/if}
+									{#if attempt.updatedAt}
+										<span class="attempt-time">{timeLabel(attempt.updatedAt)}</span>
+									{/if}
+								</div>
+								{#if attemptDetail(attempt)}
+									<div class="attempt-detail">{attemptDetail(attempt)}</div>
+								{/if}
+							{/each}
+						</div>
 					</div>
 				{/each}
 			</div>
@@ -202,6 +357,17 @@
 								</li>
 							{/each}
 						</ul>
+					{/if}
+					{#if skippedTests.length}
+						<div class="skip-list">
+							<div class="skip-title">
+								<Icon name="skip-forward" size={13} />
+								<span>{skippedTests.length} skipped test{skippedTests.length === 1 ? '' : 's'}</span>
+							</div>
+							{#each skippedTests.slice(0, 4) as skipped, index (skipped.name + index)}
+								<span class="skip-item">{skipped.name}</span>
+							{/each}
+						</div>
 					{/if}
 				{/if}
 				{#if qaVerdict}
@@ -305,13 +471,20 @@
 		color: var(--color-error);
 	}
 
+	.overview-item[data-state='warning'] .overview-value {
+		color: var(--color-warning);
+	}
+
 	.overview-label,
 	.story-meta,
 	.loop-id,
 	.task-status,
+	.attempt-row,
+	.attempt-detail,
 	.empty-note,
 	.qa-row span,
 	.qa-failures small,
+	.skip-item,
 	.blocker-detail {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
@@ -326,6 +499,9 @@
 	.blockers,
 	.loop-list,
 	.story-list,
+	.attempt-group-list,
+	.attempt-list,
+	.skip-list,
 	.task-list,
 	.qa-failures {
 		display: flex;
@@ -346,6 +522,11 @@
 	.blocker[data-kind='qa'] {
 		background: var(--color-error-muted, rgba(239, 68, 68, 0.12));
 		color: var(--color-error);
+	}
+
+	.blocker[data-kind='attempt'] {
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
+		color: var(--color-warning);
 	}
 
 	.blocker-label {
@@ -413,6 +594,87 @@
 		list-style: none;
 		margin: 0;
 		padding: 0 var(--space-3) var(--space-2);
+	}
+
+	.attempt-group {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-2);
+		border-radius: var(--radius-md);
+		background: var(--color-bg-tertiary);
+	}
+
+	.attempt-group-main {
+		display: grid;
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.req-chip {
+		padding: 2px var(--space-2);
+		border-radius: var(--radius-sm);
+		background: var(--color-bg-primary);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-secondary);
+		white-space: nowrap;
+	}
+
+	.attempt-title {
+		min-width: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-primary);
+	}
+
+	.attempt-list {
+		gap: var(--space-1);
+		padding-left: var(--space-3);
+	}
+
+	.attempt-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		min-height: 22px;
+	}
+
+	.attempt-row[data-state='success'] {
+		color: var(--color-success);
+	}
+
+	.attempt-row[data-state='warning'] {
+		color: var(--color-warning);
+	}
+
+	.attempt-row[data-state='error'] {
+		color: var(--color-error);
+	}
+
+	.attempt-row[data-state='active'] {
+		color: var(--color-accent);
+	}
+
+	.attempt-stage,
+	.attempt-sha,
+	.attempt-time {
+		color: var(--color-text-secondary);
+	}
+
+	.attempt-sha {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		font-family: var(--font-family-mono);
+	}
+
+	.attempt-detail {
+		padding-left: calc(13px + var(--space-2));
+		line-height: var(--line-height-normal);
 	}
 
 	.task-row {
@@ -508,5 +770,37 @@
 		font-size: var(--font-size-sm);
 		line-height: var(--line-height-normal);
 		color: var(--color-text-secondary);
+	}
+
+	.skip-list {
+		gap: var(--space-1);
+	}
+
+	.skip-title {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-warning);
+	}
+
+	.skip-item {
+		line-height: var(--line-height-normal);
+	}
+
+	@media (max-width: 720px) {
+		.attempt-group-main {
+			grid-template-columns: auto minmax(0, 1fr);
+		}
+
+		.attempt-group-main .status-pill {
+			grid-column: 1 / -1;
+			justify-self: flex-start;
+		}
+
+		.attempt-row {
+			flex-wrap: wrap;
+		}
 	}
 </style>

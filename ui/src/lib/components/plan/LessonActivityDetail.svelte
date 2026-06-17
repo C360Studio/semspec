@@ -7,7 +7,8 @@
 	} from '$lib/types/costAccounting';
 	import {
 		formatToken,
-		lessonActivityModel
+		lessonActivityModel,
+		type PersistedLessonSummary
 	} from '$lib/components/plan/observabilityModels';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { TrajectoryListItem } from '$lib/types/trajectory';
@@ -15,10 +16,11 @@
 	interface Props {
 		plan: PlanWithStatus;
 		trajectoryItems?: TrajectoryListItem[];
+		persistedLessons?: PersistedLessonSummary[];
 		providerRates?: ProviderRate[];
 	}
 
-	let { plan, trajectoryItems = [], providerRates = [] }: Props = $props();
+	let { plan, trajectoryItems = [], persistedLessons = [], providerRates = [] }: Props = $props();
 
 	const lessonSummary = $derived(plan.phase_summary?.lessons ?? null);
 	const model = $derived(lessonActivityModel(plan, trajectoryItems, providerRates));
@@ -32,6 +34,13 @@
 		if (ms < 1000) return `${ms}ms`;
 		if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
 		return `${(ms / 60000).toFixed(1)}m`;
+	}
+
+	function timeLabel(value: string | null | undefined): string {
+		if (!value) return '';
+		const date = new Date(value);
+		if (!Number.isFinite(date.getTime())) return '';
+		return `${date.toISOString().slice(11, 19)}Z`;
 	}
 </script>
 
@@ -82,7 +91,27 @@
 				</div>
 			{/each}
 		</div>
-	{:else}
+	{/if}
+
+	{#if persistedLessons.length > 0}
+		<div class="captured-list">
+			{#each persistedLessons.slice(0, 6) as lesson (lesson.id)}
+				<div class="captured-row" data-positive={lesson.positive}>
+					<Icon name={lesson.positive ? 'lightbulb' : 'alert-circle'} size={14} />
+					<div class="captured-copy">
+						<span>{lesson.summary}</span>
+						<small>
+							{lesson.relatedTaskTitle ?? lesson.source}
+							<span aria-hidden="true">·</span>
+							{lesson.futureRunOnly ? 'future-run only' : `injected ${timeLabel(lesson.lastInjectedAt)}`}
+						</small>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	{#if model.lessonLoops.length === 0 && persistedLessons.length === 0}
 		<div class="empty-note">
 			<Icon name="info" size={16} />
 			<span>Lesson activity has not produced measured trajectory usage for this run.</span>
@@ -105,6 +134,7 @@
 	.section-title,
 	.metric-row,
 	.role-row,
+	.captured-row,
 	.empty-note {
 		display: flex;
 		align-items: center;
@@ -184,6 +214,46 @@
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-1);
+	}
+
+	.captured-list {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.captured-row {
+		align-items: flex-start;
+		gap: var(--space-2);
+		padding: var(--space-2);
+		border-radius: var(--radius-md);
+		background: var(--color-bg-tertiary);
+		color: var(--color-warning);
+	}
+
+	.captured-row[data-positive='true'] {
+		color: var(--color-success);
+	}
+
+	.captured-copy {
+		display: flex;
+		min-width: 0;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.captured-copy span {
+		font-size: var(--font-size-sm);
+		line-height: var(--line-height-normal);
+		color: var(--color-text-primary);
+	}
+
+	.captured-copy small {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
 	}
 
 	.role-row {

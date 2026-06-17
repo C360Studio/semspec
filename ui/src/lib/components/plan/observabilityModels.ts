@@ -6,12 +6,116 @@ import {
 	type MeasuredTokenUsage,
 	type ProviderRate
 } from '$lib/types/costAccounting';
+import type { components } from '$lib/types/api.generated';
 import type { PlanPhaseSummary } from '$lib/types/feed';
+import type { TaskSSEPayload } from '$lib/types/feed';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { TrajectoryListItem } from '$lib/types/trajectory';
 
 type Story = NonNullable<PlanWithStatus['stories']>[number];
 type RecoveryDecision = NonNullable<PlanWithStatus['plan_decisions']>[number];
+export type Lesson = components['schemas']['Lesson'];
+
+export type ExecutionScenario = {
+	id?: string;
+	title?: string;
+	requirement_id?: string;
+	story_id?: string;
+	tags?: string[];
+};
+
+export type ExecutionTask = {
+	entity_id?: string;
+	slug: string;
+	task_id: string;
+	requirement_id?: string;
+	stage: string;
+	tdd_cycle?: number;
+	max_tdd_cycles?: number;
+	title?: string;
+	description?: string;
+	project_id?: string;
+	prompt?: string;
+	model?: string;
+	trace_id?: string;
+	loop_id?: string;
+	request_id?: string;
+	task_type?: string;
+	worktree_path?: string;
+	worktree_branch?: string;
+	scenario_branch?: string;
+	file_scope?: string[];
+	scenarios?: ExecutionScenario[];
+	files_modified?: string[];
+	tests_passed?: boolean;
+	validation_passed?: boolean;
+	merge_commit?: string;
+	developer_task_id?: string;
+	validator_task_id?: string;
+	reviewer_task_id?: string;
+	verdict?: string;
+	rejection_type?: string;
+	feedback?: string;
+	review_retry_count?: number;
+	error_reason?: string;
+	error_class?: string;
+	escalation_reason?: string;
+	created_at?: string;
+	updated_at?: string;
+};
+
+export type ExecutionTaskGroupStatus = 'active' | 'approved' | 'recovered' | 'blocked' | 'pending';
+
+export type ExecutionTaskAttempt = {
+	taskId: string;
+	stage: string;
+	verdict?: string;
+	tddCycle?: number;
+	maxTddCycles?: number;
+	updatedAt?: string;
+	mergeCommit?: string;
+	feedback?: string;
+	errorReason?: string;
+	escalationReason?: string;
+};
+
+export type ExecutionTaskGroup = {
+	key: string;
+	title: string;
+	requirementId?: string;
+	status: ExecutionTaskGroupStatus;
+	attempts: ExecutionTaskAttempt[];
+	hasOrphanedTerminalAttempt: boolean;
+	latestUpdatedAt?: string;
+};
+
+export type ExecutionAttemptWarning = {
+	kind: 'orphaned-attempt';
+	title: string;
+	detail: string;
+	relatedId: string;
+};
+
+export type ExecutionAttemptModel = {
+	taskGroups: ExecutionTaskGroup[];
+	warnings: ExecutionAttemptWarning[];
+	totalAttempts: number;
+	approvedGroups: number;
+	activeGroups: number;
+	blockedGroups: number;
+	orphanedGroups: number;
+};
+
+export type PersistedLessonSummary = {
+	id: string;
+	summary: string;
+	source: string;
+	positive: boolean;
+	createdAt: string;
+	lastInjectedAt?: string | null;
+	futureRunOnly: boolean;
+	relatedTaskTitle?: string;
+};
 
 export type ExecutionBlocker = {
 	label: string;
@@ -74,6 +178,9 @@ export type QAOutcomeState = 'success' | 'warning' | 'error' | 'neutral';
 
 const LESSON_STEPS = new Set(['decompose', 'lesson-decompose', 'lesson-decomposition']);
 const LESSON_ROLES = new Set(['lesson-decomposer', 'lesson-curator']);
+const ACTIVE_TASK_STAGES = new Set(['developing', 'validating', 'reviewing', 'testing', 'building']);
+const BLOCKED_TASK_STAGES = new Set(['escalated', 'error', 'rejected']);
+const TERMINAL_TASK_STAGES = new Set(['approved', ...BLOCKED_TASK_STAGES]);
 
 export function shouldShowPhaseSummaryBanner(summary: PlanPhaseSummary): boolean {
 	if (summary.phase === 'terminal') return false;
@@ -143,6 +250,95 @@ export function storyTaskCounts(story: Story): TaskCounts {
 		failed: tasks.filter((task) => ['failed', 'error', 'rejected'].includes(task.status ?? '')).length,
 		active: tasks.filter((task) => ['executing', 'in_progress', 'running'].includes(task.status ?? '')).length
 	};
+}
+
+export function mergeExecutionTaskSSE(
+	loadedTasks: ExecutionTask[],
+	taskStages: Map<string, TaskSSEPayload>,
+	planSlug: string
+): ExecutionTask[] {
+	if (!planSlug) return loadedTasks;
+
+	const byTask = new Map(loadedTasks.map((task) => [task.task_id, task]));
+	for (const payload of taskStages.values()) {
+		if (payload.slug !== planSlug) continue;
+		const previous = byTask.get(payload.task_id);
+		byTask.set(payload.task_id, {
+			...previous,
+			slug: payload.slug,
+			task_id: payload.task_id,
+			entity_id: payload.entity_id ?? previous?.entity_id,
+			stage: payload.stage ?? previous?.stage ?? 'developing',
+			title: payload.title ?? previous?.title,
+			loop_id: payload.loop_id ?? previous?.loop_id,
+			tests_passed: payload.tests_passed ?? previous?.tests_passed,
+			validation_passed: payload.validation_passed ?? previous?.validation_passed,
+			verdict: payload.verdict ?? previous?.verdict,
+			feedback: payload.feedback ?? previous?.feedback,
+			tdd_cycle: payload.tdd_cycle ?? previous?.tdd_cycle,
+			max_tdd_cycles: payload.max_tdd_cycles ?? previous?.max_tdd_cycles,
+			review_retry_count: payload.review_retry_count ?? previous?.review_retry_count,
+			created_at: previous?.created_at ?? payload.updated_at,
+			updated_at: payload.updated_at ?? previous?.updated_at
+		});
+	}
+
+	return Array.from(byTask.values()).sort(byExecutionTaskUpdatedAt);
+}
+
+export function executionAttemptModel(executionTasks: ExecutionTask[]): ExecutionAttemptModel {
+	const taskGroups = groupExecutionTasks(executionTasks);
+	const warnings = taskGroups
+		.filter((group) => group.hasOrphanedTerminalAttempt)
+		.map((group) => ({
+			kind: 'orphaned-attempt' as const,
+			title: 'Recovered task has old terminal attempt',
+			detail: `${group.title} has an approved replacement but an older rejected/escalated row is still present.`,
+			relatedId: group.key
+		}));
+
+	return {
+		taskGroups,
+		warnings,
+		totalAttempts: executionTasks.length,
+		approvedGroups: taskGroups.filter((group) => group.status === 'approved' || group.status === 'recovered').length,
+		activeGroups: taskGroups.filter((group) => group.status === 'active').length,
+		blockedGroups: taskGroups.filter((group) => group.status === 'blocked').length,
+		orphanedGroups: taskGroups.filter((group) => group.hasOrphanedTerminalAttempt).length
+	};
+}
+
+export function persistedLessonSummaries(
+	plan: PlanWithStatus,
+	tasks: ExecutionTask[],
+	trajectoryItems: TrajectoryListItem[],
+	lessons: Lesson[]
+): PersistedLessonSummary[] {
+	const taskIDs = new Set(tasks.map((task) => task.task_id));
+	const scenarioIDs = new Set(
+		tasks.flatMap((task) => task.scenarios?.map((scenario) => scenario.id).filter(Boolean) ?? [])
+	);
+	const loopIDs = new Set(trajectoryItems.map((item) => item.loop_id));
+	const taskTitles = new Map(tasks.map((task) => [task.task_id, executionTaskTitle(task)]));
+
+	return lessons
+		.filter((lesson) => {
+			if (taskIDs.has(lesson.ScenarioID)) return true;
+			if (scenarioIDs.has(lesson.ScenarioID)) return true;
+			if (lesson.ScenarioID?.includes(plan.slug)) return true;
+			return lesson.EvidenceSteps?.some((step) => loopIDs.has(step.loop_id)) ?? false;
+		})
+		.sort((a, b) => dateMs(b.CreatedAt) - dateMs(a.CreatedAt))
+		.map((lesson) => ({
+			id: lesson.ID,
+			summary: lesson.Summary,
+			source: lesson.Source,
+			positive: lesson.Positive,
+			createdAt: lesson.CreatedAt,
+			lastInjectedAt: lesson.LastInjectedAt,
+			futureRunOnly: !lesson.LastInjectedAt,
+			relatedTaskTitle: taskTitles.get(lesson.ScenarioID)
+		}));
 }
 
 export function recoveryAffectedNodes(decision: RecoveryDecision): AffectedNode[] {
@@ -280,4 +476,103 @@ export function formatRole(role: string | undefined): string {
 
 export function formatToken(value: string): string {
 	return value.replaceAll('_', ' ').replaceAll('-', ' ');
+}
+
+function groupExecutionTasks(tasks: ExecutionTask[]): ExecutionTaskGroup[] {
+	const groups = new Map<string, ExecutionTask[]>();
+	for (const task of tasks) {
+		const key = executionTaskGroupKey(task);
+		groups.set(key, [...(groups.get(key) ?? []), task]);
+	}
+
+	return Array.from(groups.entries())
+		.map(([key, groupTasks]) => {
+			const attempts = groupTasks.sort(byExecutionTaskUpdatedAt).map(taskAttempt);
+			const hasApproved = attempts.some((attempt) => attempt.stage === 'approved');
+			const hasActive = attempts.some((attempt) => isActiveExecutionTaskStage(attempt.stage));
+			const hasBlocked = attempts.some((attempt) => BLOCKED_TASK_STAGES.has(attempt.stage));
+			const hasOrphanedTerminalAttempt = hasApproved && hasBlocked;
+			const latest = latestExecutionTask(groupTasks);
+			return {
+				key,
+				title: executionTaskTitle(latest ?? groupTasks[0]),
+				requirementId: latest?.requirement_id ?? groupTasks[0]?.requirement_id,
+				status: executionTaskGroupStatus(hasActive, hasApproved, hasBlocked, hasOrphanedTerminalAttempt),
+				attempts,
+				hasOrphanedTerminalAttempt,
+				latestUpdatedAt: newestTimestamp(groupTasks.map((task) => task.updated_at ?? task.created_at))
+			};
+		})
+		.sort((a, b) => {
+			const req = (a.requirementId ?? '').localeCompare(b.requirementId ?? '');
+			if (req !== 0) return req;
+			return (b.latestUpdatedAt ?? '').localeCompare(a.latestUpdatedAt ?? '');
+		});
+}
+
+function executionTaskGroupStatus(
+	hasActive: boolean,
+	hasApproved: boolean,
+	hasBlocked: boolean,
+	hasOrphanedTerminalAttempt: boolean
+): ExecutionTaskGroupStatus {
+	if (hasActive) return 'active';
+	if (hasApproved && hasOrphanedTerminalAttempt) return 'recovered';
+	if (hasApproved) return 'approved';
+	if (hasBlocked) return 'blocked';
+	return 'pending';
+}
+
+function taskAttempt(task: ExecutionTask): ExecutionTaskAttempt {
+	return {
+		taskId: task.task_id,
+		stage: task.stage,
+		verdict: task.verdict,
+		tddCycle: task.tdd_cycle,
+		maxTddCycles: task.max_tdd_cycles,
+		updatedAt: task.updated_at ?? task.created_at,
+		mergeCommit: task.merge_commit,
+		feedback: task.feedback,
+		errorReason: task.error_reason,
+		escalationReason: task.escalation_reason
+	};
+}
+
+function executionTaskGroupKey(task: ExecutionTask): string {
+	return `${task.requirement_id ?? 'plan'}::${normalizeTaskTitle(executionTaskTitle(task))}`;
+}
+
+function executionTaskTitle(task: ExecutionTask | undefined): string {
+	if (!task) return 'Untitled task';
+	return task.title || task.prompt || task.description || task.task_id;
+}
+
+function normalizeTaskTitle(title: string): string {
+	return title.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function latestExecutionTask(tasks: ExecutionTask[]): ExecutionTask | undefined {
+	return [...tasks].sort((a, b) => dateMs(b.updated_at ?? b.created_at) - dateMs(a.updated_at ?? a.created_at))[0];
+}
+
+function byExecutionTaskUpdatedAt(a: ExecutionTask, b: ExecutionTask): number {
+	return dateMs(a.updated_at ?? a.created_at) - dateMs(b.updated_at ?? b.created_at);
+}
+
+function isActiveExecutionTaskStage(stage: string | undefined): boolean {
+	if (!stage) return false;
+	if (ACTIVE_TASK_STAGES.has(stage)) return true;
+	return !TERMINAL_TASK_STAGES.has(stage);
+}
+
+function newestTimestamp(values: Array<string | null | undefined>): string | undefined {
+	return values
+		.filter((value): value is string => Boolean(value))
+		.sort((a, b) => dateMs(b) - dateMs(a))[0];
+}
+
+function dateMs(value: string | null | undefined): number {
+	if (!value) return 0;
+	const ms = new Date(value).getTime();
+	return Number.isFinite(ms) ? ms : 0;
 }
