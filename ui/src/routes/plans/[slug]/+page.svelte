@@ -32,7 +32,9 @@
 	import { mergeLiveTrajectoryItems } from '$lib/types/trajectoryActivityProjection';
 	import {
 		isLessonTrajectoryItem,
+		mergeExecutionTaskSSE,
 		phaseSummaryDetail,
+		persistedLessonSummaries,
 		shouldShowPhaseSummaryBanner
 	} from '$lib/components/plan/observabilityModels';
 	import { activityStore } from '$lib/stores/activity.svelte';
@@ -67,10 +69,22 @@
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
+	const liveTrajectoryItems = $derived(
+		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
+	);
+	const liveExecutionTasks = $derived(
+		mergeExecutionTaskSSE(data.executionTasks ?? [], feedStore.taskStages, slug ?? '')
+	);
+	const persistedLessons = $derived(
+		plan
+			? persistedLessonSummaries(plan, liveExecutionTasks, liveTrajectoryItems, data.lessons ?? [])
+			: []
+	);
 	const showExecutionDetail = $derived(
 		plan
 			? Boolean(
 				(plan.stories?.length ?? 0) > 0 ||
+					liveExecutionTasks.length > 0 ||
 					plan.execution_summary ||
 					plan.qa_run ||
 					plan.qa_verdict_summary ||
@@ -87,13 +101,12 @@
 				)
 			: false
 	);
-	const liveTrajectoryItems = $derived(
-		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
-	);
 	const showLessonActivityDetail = $derived(
 		plan
 			? Boolean(
-					plan.phase_summary?.lessons || liveTrajectoryItems.some(isLessonTrajectoryItem)
+					plan.phase_summary?.lessons ||
+						liveTrajectoryItems.some(isLessonTrajectoryItem) ||
+						persistedLessons.length > 0
 				)
 			: false
 	);
@@ -673,7 +686,7 @@
 			<PlanDetail {plan} phases={[]} requirements={requirements} onRefresh={handleRefresh} />
 
 			{#if showExecutionDetail}
-				<ExecutionDetail {plan} />
+				<ExecutionDetail {plan} executionTasks={liveExecutionTasks} />
 			{/if}
 
 			{#if showRecoveryDetail}
@@ -681,7 +694,7 @@
 			{/if}
 
 			{#if showLessonActivityDetail}
-				<LessonActivityDetail {plan} trajectoryItems={liveTrajectoryItems} />
+				<LessonActivityDetail {plan} trajectoryItems={liveTrajectoryItems} {persistedLessons} />
 			{/if}
 
 			<!-- Reviews: collapsible. R1 plan-reviewer verdict appears as soon as the

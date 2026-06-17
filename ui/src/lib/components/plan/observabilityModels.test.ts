@@ -4,16 +4,21 @@ import type { PlanPhaseSummary } from '$lib/types/feed';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { TrajectoryListItem } from '$lib/types/trajectory';
 import {
+	executionAttemptModel,
 	executionBlockers,
 	inferRecoveryAutoAccept,
 	isLessonTrajectoryItem,
 	lessonActivityModel,
+	mergeExecutionTaskSSE,
+	persistedLessonSummaries,
 	phaseSummaryDetail,
 	planFreshnessIndicatorState,
 	qaOutcomeState,
 	recoveryAffectedNodes,
 	shouldShowPhaseSummaryBanner,
-	storyTaskCounts
+	storyTaskCounts,
+	type ExecutionTask,
+	type Lesson
 } from './observabilityModels';
 
 function plan(overrides: Partial<PlanWithStatus> = {}): PlanWithStatus {
@@ -61,6 +66,39 @@ function trajectory(overrides: Partial<TrajectoryListItem> = {}): TrajectoryList
 		total_tokens_out: 300,
 		...overrides
 	} as TrajectoryListItem;
+}
+
+function executionTask(overrides: Partial<ExecutionTask> = {}): ExecutionTask {
+	return {
+		slug: 'demo',
+		task_id: 'node-1',
+		requirement_id: 'requirement.demo.1',
+		stage: 'approved',
+		title: 'Implement raw fallback',
+		updated_at: '2026-06-16T12:15:00Z',
+		...overrides
+	};
+}
+
+function lesson(overrides: Partial<Lesson> = {}): Lesson {
+	return {
+		ID: 'lesson-1',
+		Source: 'decomposer',
+		ScenarioID: 'node-1',
+		Summary: 'Avoid bypassing coverage checks with placeholder code.',
+		CategoryIDs: [],
+		Role: 'developer',
+		CreatedAt: '2026-06-16T12:16:00Z',
+		Detail: 'The developer created empty classes instead of satisfying scenarios.',
+		InjectionForm: 'Document unsupported features with rationale.',
+		EvidenceSteps: [],
+		EvidenceFiles: [],
+		RootCauseRole: 'developer',
+		Positive: false,
+		RetiredAt: null,
+		LastInjectedAt: null,
+		...overrides
+	};
 }
 
 describe('phase banner observability model', () => {
@@ -181,6 +219,89 @@ describe('execution detail observability model', () => {
 				verdict: 'approved'
 			}
 		}))).toBe('success');
+	});
+
+	it('merges live task SSE over durable execution task rows', () => {
+		const taskStages = new Map([
+			[
+				'node-1',
+				{
+					entity_id: 'entity-1',
+					slug: 'demo',
+					task_id: 'node-1',
+					stage: 'reviewing',
+					title: 'Implement raw fallback',
+					iteration: 1,
+					max_iterations: 5,
+					tdd_cycle: 2,
+					max_tdd_cycles: 5,
+					updated_at: '2026-06-16T12:17:00Z'
+				}
+			],
+			[
+				'node-new',
+				{
+					entity_id: 'entity-new',
+					slug: 'demo',
+					task_id: 'node-new',
+					stage: 'developing',
+					title: 'New live task',
+					iteration: 0,
+					max_iterations: 5,
+					updated_at: '2026-06-16T12:18:00Z'
+				}
+			]
+		]);
+
+		const merged = mergeExecutionTaskSSE([executionTask()], taskStages, 'demo');
+
+		expect(merged).toHaveLength(2);
+		expect(merged.find((item) => item.task_id === 'node-1')?.stage).toBe('reviewing');
+		expect(merged.find((item) => item.task_id === 'node-1')?.tdd_cycle).toBe(2);
+		expect(merged.find((item) => item.task_id === 'node-new')?.title).toBe('New live task');
+	});
+
+	it('groups replacement attempts and flags stale terminal rows as recovered', () => {
+		const model = executionAttemptModel([
+			executionTask({
+				task_id: 'node-original',
+				stage: 'escalated',
+				verdict: 'rejected',
+				updated_at: '2026-06-16T12:10:00Z'
+			}),
+			executionTask({
+				task_id: 'node-replacement',
+				stage: 'approved',
+				verdict: 'approved',
+				merge_commit: '28e9a4df444b8eaa64b23b500f962be868ff0572',
+				updated_at: '2026-06-16T12:20:00Z'
+			})
+		]);
+
+		expect(model.taskGroups).toHaveLength(1);
+		expect(model.taskGroups[0].status).toBe('recovered');
+		expect(model.taskGroups[0].attempts.map((attempt) => attempt.taskId)).toEqual([
+			'node-original',
+			'node-replacement'
+		]);
+		expect(model.orphanedGroups).toBe(1);
+		expect(model.warnings[0].kind).toBe('orphaned-attempt');
+	});
+
+	it('matches persisted developer lessons to execution tasks and future-run state', () => {
+		const summaries = persistedLessonSummaries(
+			plan({ slug: 'demo' }),
+			[executionTask({ task_id: 'node-1', title: 'Implement raw fallback' })],
+			[trajectory({ loop_id: 'loop-1', task_id: 'node-1' })],
+			[
+				lesson({ ID: 'matched', ScenarioID: 'node-1', LastInjectedAt: null }),
+				lesson({ ID: 'unrelated', ScenarioID: 'node-other', Summary: 'Unrelated' })
+			]
+		);
+
+		expect(summaries.map((item) => item.id)).toEqual(['matched']);
+		expect(summaries[0].futureRunOnly).toBe(true);
+		expect(summaries[0].relatedTaskTitle).toBe('Implement raw fallback');
 	});
 });
 
