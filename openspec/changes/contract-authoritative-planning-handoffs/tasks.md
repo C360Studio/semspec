@@ -44,7 +44,7 @@
 - [x] 6.1 Update the plan banner to derive from authoritative phase summaries and show execution as a first-class phase
 - [x] 6.2 Update left navigation and detail panes so Plans, Graph, and Files views remain clickable and state-coherent during live runs
 - [x] 6.3 Add execution detail showing Stories, tasks, loops, waits, blockers, terminal outcomes, and QA evidence
-- [ ] 6.4 Add recovery and PlanDecision detail showing diagnosis, affected nodes, contract impact, and auto-accept status
+- [x] 6.4 Add recovery and PlanDecision detail showing diagnosis, affected nodes, contract impact, and auto-accept status
 - [ ] 6.5 Add lesson activity UI showing lesson cost and whether lessons affect current or future runs
 - [ ] 6.6 Add stale/disconnected indicators with last successful update timestamps
 

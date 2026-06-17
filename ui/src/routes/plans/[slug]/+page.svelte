@@ -11,6 +11,7 @@
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import ExecutionDetail from '$lib/components/plan/ExecutionDetail.svelte';
+	import RecoveryDetail from '$lib/components/plan/RecoveryDetail.svelte';
 	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
@@ -69,6 +70,15 @@
 					plan.qa_verdict_summary ||
 					['execution', 'qa', 'recovery', 'waiting', 'terminal'].includes(plan.phase_summary?.phase ?? '')
 			)
+			: false
+	);
+	const showRecoveryDetail = $derived(
+		plan
+			? Boolean(
+					(plan.plan_decisions?.length ?? 0) > 0 ||
+						plan.phase_summary?.recovery ||
+						plan.phase_summary?.wait?.decision_id
+				)
 			: false
 	);
 	const liveTrajectoryItems = $derived(
@@ -663,6 +673,10 @@
 
 			{#if showExecutionDetail}
 				<ExecutionDetail {plan} />
+			{/if}
+
+			{#if showRecoveryDetail}
+				<RecoveryDetail {plan} />
 			{/if}
 
 			<!-- Reviews: collapsible. R1 plan-reviewer verdict appears as soon as the

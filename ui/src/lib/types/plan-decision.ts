@@ -5,6 +5,8 @@
  * On acceptance, the reactive workflow cascades changes to affected Scenarios and Tasks.
  */
 
+import type { components } from './api.generated';
+
 // ============================================================================
 // Status types
 // ============================================================================
@@ -24,24 +26,13 @@ export type PlanDecisionStatus =
 	| 'rejected'
 	| 'archived';
 
-// ============================================================================
-// Core interface
-// ============================================================================
+type GeneratedPlanDecision = NonNullable<components['schemas']['PlanWithStatus']['plan_decisions']>[number];
 
 /**
  * A mid-stream change proposal that mutates one or more Requirements.
  */
-export interface PlanDecision {
-	id: string;
-	plan_id: string;
-	title: string;
-	rationale: string;
+export interface PlanDecision extends Omit<GeneratedPlanDecision, 'status'> {
 	status: PlanDecisionStatus;
-	proposed_by: string;
-	affected_requirement_ids: string[];
-	created_at: string;
-	reviewed_at?: string;
-	decided_at?: string;
 }
 
 // ============================================================================
