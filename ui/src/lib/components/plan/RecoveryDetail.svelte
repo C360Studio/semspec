@@ -1,12 +1,14 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import {
+		inferRecoveryAutoAccept,
+		recoveryAffectedNodes
+	} from '$lib/components/plan/observabilityModels';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	interface Props {
 		plan: PlanWithStatus;
 	}
-
-	type RecoveryDecision = NonNullable<PlanWithStatus['plan_decisions']>[number];
 
 	let { plan }: Props = $props();
 
@@ -22,53 +24,9 @@
 	const affectedNodes = $derived.by(() => {
 		const decision = currentDecision;
 		if (!decision) return [];
-		return [
-			...(decision.affected_requirement_ids ?? []).map((id) => ({ kind: 'Requirement', id })),
-			...(decision.affected_story_ids ?? []).map((id) => ({ kind: 'Story', id })),
-			...(decision.contract_impact?.affected_ids ?? []).map((id) => ({ kind: 'Contract', id }))
-		];
+		return recoveryAffectedNodes(decision);
 	});
-	const autoAccept = $derived(currentDecision ? inferAutoAccept(currentDecision) : null);
-
-	function inferAutoAccept(decision: RecoveryDecision): { label: string; detail: string; state: 'success' | 'warning' | 'neutral' } {
-		const impactKind = decision.contract_impact?.kind;
-		const scoped = (decision.affected_requirement_ids?.length ?? 0) > 0 || (decision.affected_story_ids?.length ?? 0) > 0;
-		if (decision.status === 'accepted') {
-			return {
-				label: 'Accepted',
-				detail: decision.proposed_by === 'recovery-agent'
-					? 'Recovery decision has been accepted; auto-accept may have applied if policy allowed it.'
-					: 'Decision has been accepted.',
-				state: 'success'
-			};
-		}
-		if (decision.status === 'proposed' || decision.status === 'under_review') {
-			if (!impactKind || impactKind === 'change') {
-				return {
-					label: 'Review required',
-					detail: 'Auto-accept is not inferred for missing or contract-changing impact.',
-					state: 'warning'
-				};
-			}
-			if (!scoped) {
-				return {
-					label: 'Review required',
-					detail: 'Auto-accept requires scoped affected nodes.',
-					state: 'warning'
-				};
-			}
-			return {
-				label: 'Policy eligible',
-				detail: 'Preserve/refine impact with scoped nodes; final auto-accept depends on recovery policy budget.',
-				state: 'neutral'
-			};
-		}
-		return {
-			label: 'Not active',
-			detail: 'Decision is no longer awaiting recovery policy action.',
-			state: 'neutral'
-		};
-	}
+	const autoAccept = $derived(currentDecision ? inferRecoveryAutoAccept(currentDecision) : null);
 
 	function formatStatus(status?: string): string {
 		return status ? status.replaceAll('_', ' ') : 'unknown';

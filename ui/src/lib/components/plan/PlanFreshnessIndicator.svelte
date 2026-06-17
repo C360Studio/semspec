@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import { planFreshnessIndicatorState } from '$lib/components/plan/observabilityModels';
 	import { feedStore } from '$lib/stores/feed.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
@@ -9,41 +10,32 @@
 
 	let { plan }: Props = $props();
 
-	const freshness = $derived(plan.phase_summary?.freshness ?? null);
-	const planScoped = $derived(feedStore.currentSlug === plan.slug);
-	const disconnected = $derived(
-		planScoped && feedStore.streamEverConnected && !feedStore.connected
-	);
-	const stale = $derived(Boolean(freshness?.stale));
-	const shouldShow = $derived(stale || disconnected);
-	const lastUpdateAt = $derived(
-		feedStore.lastSuccessfulUpdateAt ?? freshness?.generated_at ?? null
-	);
-	const statusLabel = $derived.by(() => {
-		if (stale && disconnected) return 'Stale data and stream disconnected';
-		if (stale) return 'Stale data';
-		return 'Stream disconnected';
-	});
+	const indicator = $derived(planFreshnessIndicatorState(plan, {
+		currentSlug: feedStore.currentSlug,
+		connected: feedStore.connected,
+		streamEverConnected: feedStore.streamEverConnected,
+		lastSuccessfulUpdateAt: feedStore.lastSuccessfulUpdateAt
+	}));
 
 	function formatTime(timestamp: string): string {
 		return new Date(timestamp).toLocaleString();
 	}
 </script>
 
-{#if shouldShow}
-	<div class="freshness-indicator" data-state={disconnected ? 'disconnected' : 'stale'} role="status">
-		<Icon name={disconnected ? 'wifi-off' : 'clock'} size={16} />
+{#if indicator.shouldShow}
+	<div class="freshness-indicator" data-state={indicator.disconnected ? 'disconnected' : 'stale'} role="status">
+		<Icon name={indicator.disconnected ? 'wifi-off' : 'clock'} size={16} />
 		<div class="freshness-copy">
-			<strong>{statusLabel}</strong>
+			<strong>{indicator.statusLabel}</strong>
 			<div class="freshness-meta">
-				{#if lastUpdateAt}
-					<span>Last successful update {formatTime(lastUpdateAt)}</span>
+				{#if indicator.lastUpdateAt}
+					<span>Last successful update {formatTime(indicator.lastUpdateAt)}</span>
 				{/if}
-				{#if freshness?.reason}
-					<span>{freshness.reason}</span>
+				{#if indicator.reason}
+					<span>{indicator.reason}</span>
 				{/if}
-				{#if freshness?.source}
-					<span>{freshness.source}</span>
+				{#if indicator.source}
+					<span>{indicator.source}</span>
 				{/if}
 			</div>
 		</div>

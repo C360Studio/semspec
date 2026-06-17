@@ -51,7 +51,7 @@
 ## 7. Verification And Rollout
 
 - [x] 7.1 Add unit tests for contract packet persistence, prompt projection, topology validation, and scope-governance rules
-- [ ] 7.2 Add UI component tests for phase banner, execution detail, recovery detail, lesson activity, and stale data states
+- [x] 7.2 Add UI component tests for phase banner, execution detail, recovery detail, lesson activity, and stale data states
 - [ ] 7.3 Add E2E mock scenarios for scope shrinkage, targeted recovery, topology rejection, and execution observability
 - [ ] 7.4 Run `go test ./...` after backend slices land
 - [ ] 7.5 Run UI checks and relevant Playwright scenarios after frontend slices land

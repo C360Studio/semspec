@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import { executionBlockers, storyTaskCounts } from '$lib/components/plan/observabilityModels';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	interface Props {
@@ -20,48 +21,7 @@
 	const terminalState = $derived(
 		summary?.phase === 'terminal' || ['complete', 'complete_with_deferrals', 'failed'].includes(plan.stage)
 	);
-	const blockers = $derived.by(() => {
-		const items: { label: string; detail?: string; kind: 'wait' | 'recovery' | 'error' | 'qa' }[] = [];
-		if (summary?.wait) {
-			items.push({
-				label: summary.wait.reason,
-				detail: summary.wait.policy_reason ?? summary.wait.required_action,
-				kind: 'wait'
-			});
-		}
-		if (summary?.recovery && summary.recovery.status !== 'accepted') {
-			items.push({
-				label: `PlanDecision ${summary.recovery.status}`,
-				detail: summary.recovery.summary ?? summary.recovery.contract_impact_summary,
-				kind: 'recovery'
-			});
-		}
-		if (qaRun && !qaRun.passed) {
-			items.push({
-				label: 'QA failed',
-				detail: qaRun.runner_error ?? qaRun.failures?.[0]?.message,
-				kind: 'qa'
-			});
-		}
-		if (plan.last_error) {
-			items.push({
-				label: 'Plan error',
-				detail: plan.last_error,
-				kind: 'error'
-			});
-		}
-		return items;
-	});
-
-	function taskCounts(story: Story) {
-		const tasks = story.tasks ?? [];
-		return {
-			total: tasks.length,
-			done: tasks.filter((task) => ['complete', 'completed', 'approved'].includes(task.status ?? '')).length,
-			failed: tasks.filter((task) => ['failed', 'error', 'rejected'].includes(task.status ?? '')).length,
-			active: tasks.filter((task) => ['executing', 'in_progress', 'running'].includes(task.status ?? '')).length
-		};
-	}
+	const blockers = $derived(executionBlockers(plan));
 
 	function statusClass(status?: string): string {
 		switch (status) {
@@ -179,7 +139,7 @@
 			</div>
 			<div class="story-list">
 				{#each stories as story (story.id)}
-					{@const counts = taskCounts(story)}
+					{@const counts = storyTaskCounts(story)}
 					<details class="story-card" open={statusClass(story.status) !== 'success'}>
 						<summary>
 							<div class="story-summary">

@@ -30,12 +30,16 @@
 	import { activePhaseProgress } from '$lib/types/activePlanProgress';
 	import { selectFreshestPlan } from '$lib/types/planFreshness';
 	import { mergeLiveTrajectoryItems } from '$lib/types/trajectoryActivityProjection';
+	import {
+		isLessonTrajectoryItem,
+		phaseSummaryDetail,
+		shouldShowPhaseSummaryBanner
+	} from '$lib/components/plan/observabilityModels';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
-	import type { PlanPhaseSummary } from '$lib/types/feed';
 	import { graphApi } from '$lib/services/graphApi';
 	import { transformPathSearchResult, transformGlobalSearchResult } from '$lib/services/graphTransform';
 	import type { ClassificationMeta } from '$lib/api/graph-types';
@@ -93,19 +97,6 @@
 				)
 			: false
 	);
-
-	function isLessonTrajectoryItem(item: (typeof liveTrajectoryItems)[number]): boolean {
-		const taskID = item.task_id ?? '';
-		return (
-			item.workflow_slug === 'semspec-lesson-decomposition' ||
-			item.workflow_step === 'lesson-decomposition' ||
-			item.workflow_step === 'lesson-decompose' ||
-			item.workflow_step === 'decompose' ||
-			item.role === 'lesson-decomposer' ||
-			item.role === 'lesson-curator' ||
-			/^(lesson|decompose)-/.test(taskID)
-		);
-	}
 
 	// ---------------------------------------------------------------------------
 	// View mode — toggle between Doc, Graph, and Files
@@ -280,20 +271,6 @@
 		}
 		return null;
 	});
-
-	function shouldShowPhaseSummaryBanner(summary: PlanPhaseSummary): boolean {
-		if (summary.phase === 'terminal') return false;
-		if (summary.state === 'active' || summary.state === 'waiting') return true;
-		return summary.phase === 'execution' || summary.phase === 'recovery' || summary.phase === 'qa';
-	}
-
-	function phaseSummaryDetail(summary: PlanPhaseSummary): string | undefined {
-		if (summary.detail) return summary.detail;
-		if (summary.wait?.policy_reason) return summary.wait.policy_reason;
-		if (summary.recovery?.summary) return summary.recovery.summary;
-		if (summary.qa?.summary) return summary.qa.summary;
-		return undefined;
-	}
 
 	// Pick the best available timestamp to drive the in-progress panel's
 	// elapsed-time ticker for the CURRENT stage. The plan API doesn't yet

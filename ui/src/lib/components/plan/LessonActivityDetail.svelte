@@ -1,13 +1,14 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import {
-		calculateCostAccounting,
 		formatCostLabel,
 		formatRateSourceLabel,
-		measureSummaryUsage,
-		mergeMeasuredUsage,
 		type ProviderRate
 	} from '$lib/types/costAccounting';
+	import {
+		formatToken,
+		lessonActivityModel
+	} from '$lib/components/plan/observabilityModels';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { TrajectoryListItem } from '$lib/types/trajectory';
 
@@ -17,76 +18,10 @@
 		providerRates?: ProviderRate[];
 	}
 
-	type RoleSummary = {
-		role: string;
-		loops: number;
-		tokens: number;
-		duration: number;
-	};
-
 	let { plan, trajectoryItems = [], providerRates = [] }: Props = $props();
 
-	const LESSON_STEPS = new Set(['decompose', 'lesson-decompose', 'lesson-decomposition']);
-	const LESSON_ROLES = new Set(['lesson-decomposer', 'lesson-curator']);
-
 	const lessonSummary = $derived(plan.phase_summary?.lessons ?? null);
-	const lessonLoops = $derived(
-		trajectoryItems
-			.filter(isLessonLoop)
-			.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime())
-	);
-	const lessonUsage = $derived(
-		mergeMeasuredUsage(
-			lessonLoops.map((loop) =>
-				measureSummaryUsage({
-					model: loop.model,
-					tokens_in: loop.total_tokens_in,
-					tokens_out: loop.total_tokens_out
-				})
-			)
-		)
-	);
-	const costAccounting = $derived(calculateCostAccounting(lessonUsage, providerRates));
-	const roleSummaries = $derived.by(() => {
-		const summaries = new Map<string, RoleSummary>();
-		for (const loop of lessonLoops) {
-			const role = formatRole(loop.role);
-			const current = summaries.get(role) ?? { role, loops: 0, tokens: 0, duration: 0 };
-			current.loops += 1;
-			current.tokens += loop.total_tokens_in + loop.total_tokens_out;
-			current.duration += loop.duration;
-			summaries.set(role, current);
-		}
-		return [...summaries.values()].sort((a, b) => a.role.localeCompare(b.role));
-	});
-	const currentEffect = $derived(effectLabel(lessonSummary?.current_run_effect, 'none'));
-	const futureEffect = $derived(effectLabel(lessonSummary?.future_run_effect, 'eligible_for_future_prompts'));
-
-	function isLessonLoop(loop: TrajectoryListItem): boolean {
-		const workflowSlug = loop.workflow_slug ?? '';
-		const step = loop.workflow_step ?? '';
-		const role = loop.role ?? '';
-		const taskID = loop.task_id ?? '';
-		return (
-			workflowSlug === 'semspec-lesson-decomposition' ||
-			LESSON_STEPS.has(step) ||
-			LESSON_ROLES.has(role) ||
-			/^(lesson|decompose)-/.test(taskID)
-		);
-	}
-
-	function effectLabel(value: string | undefined, fallback: string): string {
-		return formatToken(value ?? fallback);
-	}
-
-	function formatRole(role: string | undefined): string {
-		if (!role) return 'Lesson activity';
-		return formatToken(role);
-	}
-
-	function formatToken(value: string): string {
-		return value.replaceAll('_', ' ').replaceAll('-', ' ');
-	}
+	const model = $derived(lessonActivityModel(plan, trajectoryItems, providerRates));
 
 	function formatTokens(count: number): string {
 		if (count >= 1000) return `${(count / 1000).toFixed(1)}k`;
@@ -114,15 +49,15 @@
 	<div class="effect-grid">
 		<div class="effect-cell" data-effect={lessonSummary?.current_run_effect ?? 'none'}>
 			<span class="field-label">Current Run</span>
-			<strong>{currentEffect}</strong>
+			<strong>{model.currentEffect}</strong>
 		</div>
 		<div class="effect-cell">
 			<span class="field-label">Future Runs</span>
-			<strong>{futureEffect}</strong>
+			<strong>{model.futureEffect}</strong>
 		</div>
-		<div class="effect-cell" title={formatRateSourceLabel(costAccounting)}>
+		<div class="effect-cell" title={formatRateSourceLabel(model.costAccounting)}>
 			<span class="field-label">Lesson Cost</span>
-			<strong>{formatCostLabel(costAccounting, true)}</strong>
+			<strong>{formatCostLabel(model.costAccounting, true)}</strong>
 		</div>
 	</div>
 
@@ -130,15 +65,15 @@
 		<p class="lesson-detail-text">{lessonSummary.detail}</p>
 	{/if}
 
-	{#if lessonLoops.length > 0}
+	{#if model.lessonLoops.length > 0}
 		<div class="metric-row">
-			<span>{lessonLoops.length} loop{lessonLoops.length === 1 ? '' : 's'}</span>
-			<span>{formatTokens(lessonUsage.totalTokens)} tokens</span>
-			<span>{formatRateSourceLabel(costAccounting)}</span>
+			<span>{model.lessonLoops.length} loop{model.lessonLoops.length === 1 ? '' : 's'}</span>
+			<span>{formatTokens(model.lessonUsage.totalTokens)} tokens</span>
+			<span>{formatRateSourceLabel(model.costAccounting)}</span>
 		</div>
 
 		<div class="role-list">
-			{#each roleSummaries as role}
+			{#each model.roleSummaries as role}
 				<div class="role-row">
 					<span>{role.role}</span>
 					<span>{role.loops} loop{role.loops === 1 ? '' : 's'}</span>
