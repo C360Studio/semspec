@@ -62,6 +62,26 @@ func TestHandlePromotePlan_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandlePromotePlan_CreatedReturnsConflict(t *testing.T) {
+	c := setupTestComponent(t)
+	slug := "promote-while-created"
+
+	// A freshly-created plan has not been through review. Per the two-stage
+	// approval state machine (ADR-029), promote may only approve a plan that
+	// reached `reviewed`; promoting straight from `created` is an invalid
+	// transition and must 409 — not silently approve an unreviewed plan.
+	setupTestPlan(t, c, slug) // stays at StatusCreated (zero value)
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, slug)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusConflict, w.Body.String())
+	}
+}
+
 func TestHandlePromotePlan_DraftingReturnsConflict(t *testing.T) {
 	c := setupTestComponent(t)
 	slug := "promote-while-drafting"
