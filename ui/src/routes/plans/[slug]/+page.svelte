@@ -11,6 +11,7 @@
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import ExecutionDetail from '$lib/components/plan/ExecutionDetail.svelte';
+	import LessonActivityDetail from '$lib/components/plan/LessonActivityDetail.svelte';
 	import RecoveryDetail from '$lib/components/plan/RecoveryDetail.svelte';
 	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
@@ -84,6 +85,26 @@
 	const liveTrajectoryItems = $derived(
 		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
 	);
+	const showLessonActivityDetail = $derived(
+		plan
+			? Boolean(
+					plan.phase_summary?.lessons || liveTrajectoryItems.some(isLessonTrajectoryItem)
+				)
+			: false
+	);
+
+	function isLessonTrajectoryItem(item: (typeof liveTrajectoryItems)[number]): boolean {
+		const taskID = item.task_id ?? '';
+		return (
+			item.workflow_slug === 'semspec-lesson-decomposition' ||
+			item.workflow_step === 'lesson-decomposition' ||
+			item.workflow_step === 'lesson-decompose' ||
+			item.workflow_step === 'decompose' ||
+			item.role === 'lesson-decomposer' ||
+			item.role === 'lesson-curator' ||
+			/^(lesson|decompose)-/.test(taskID)
+		);
+	}
 
 	// ---------------------------------------------------------------------------
 	// View mode — toggle between Doc, Graph, and Files
@@ -677,6 +698,10 @@
 
 			{#if showRecoveryDetail}
 				<RecoveryDetail {plan} />
+			{/if}
+
+			{#if showLessonActivityDetail}
+				<LessonActivityDetail {plan} trajectoryItems={liveTrajectoryItems} />
 			{/if}
 
 			<!-- Reviews: collapsible. R1 plan-reviewer verdict appears as soon as the
