@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { tick, untrack } from 'svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { settingsStore, type Theme } from '$lib/stores/settings.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
@@ -32,6 +32,9 @@
 	let editDescription = $state('');
 	let saving = $state(false);
 	let saveError = $state<string | null>(null);
+	let nameInput: HTMLInputElement | undefined = $state();
+	let orgInput: HTMLInputElement | undefined = $state();
+	let descriptionInput: HTMLInputElement | undefined = $state();
 
 	// Slugify name to derive the platform segment
 	function slugify(name: string): string {
@@ -47,12 +50,20 @@
 
 	const previewPrefix = $derived(`${editOrg || '?'}.${derivedPlatform}`);
 
-	function startEdit(field: 'name' | 'org' | 'description') {
+	async function startEdit(field: 'name' | 'org' | 'description') {
 		editName = setupStore.status?.project_name ?? '';
 		editOrg = setupStore.status?.project_org ?? '';
 		editDescription = setupStore.status?.project_description ?? '';
 		saveError = null;
 		editingField = field;
+		await tick();
+		const input = field === 'name'
+			? nameInput
+			: field === 'org'
+				? orgInput
+				: descriptionInput;
+		input?.focus();
+		input?.select();
 	}
 
 	function cancelEdit() {
@@ -366,13 +377,13 @@
 					{#if editingField === 'name'}
 						<div class="inline-edit-active">
 							<input
+								bind:this={nameInput}
 								type="text"
 								class="setting-input"
 								bind:value={editName}
 								placeholder="My Project"
 								onkeydown={handleFieldKeydown}
 								disabled={saving}
-								autofocus
 							/>
 							<button class="btn btn-primary btn-sm" onclick={saveField} disabled={saving}>
 								{saving ? 'Saving...' : 'Save'}
@@ -408,13 +419,13 @@
 					{#if editingField === 'org'}
 						<div class="inline-edit-active">
 							<input
+								bind:this={orgInput}
 								type="text"
 								class="setting-input mono"
 								bind:value={editOrg}
 								placeholder="my-org"
 								onkeydown={handleFieldKeydown}
 								disabled={saving}
-								autofocus
 							/>
 							<button class="btn btn-primary btn-sm" onclick={saveField} disabled={saving}>
 								{saving ? 'Saving...' : 'Save'}
@@ -449,13 +460,13 @@
 					{#if editingField === 'description'}
 						<div class="inline-edit-active">
 							<input
+								bind:this={descriptionInput}
 								type="text"
 								class="setting-input"
 								bind:value={editDescription}
 								placeholder="Brief project description"
 								onkeydown={handleFieldKeydown}
 								disabled={saving}
-								autofocus
 							/>
 							<button class="btn btn-primary btn-sm" onclick={saveField} disabled={saving}>
 								{saving ? 'Saving...' : 'Save'}
