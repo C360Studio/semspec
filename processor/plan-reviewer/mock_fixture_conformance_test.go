@@ -157,6 +157,174 @@ func TestMockFixturesConformToArchitectureRules(t *testing.T) {
 	}
 }
 
+//revive:disable-next-line:function-length // sequential fixture decode-and-assemble; the linear plan build mirrors the production contract path and splitting would fragment it.
+func TestExecutionPhaseMockFixtureStoryContractConforms(t *testing.T) {
+	const scenario = "execution-phase"
+
+	var planner struct {
+		Scope workflow.Scope `json:"scope"`
+	}
+	decodeFixtureArgs(t, scenario, "mock-planner", &planner)
+
+	var arch workflow.ArchitectureDocument
+	decodeFixtureArgs(t, scenario, "mock-architecture-generator", &arch)
+
+	var reqGen struct {
+		Requirements []struct {
+			Title          string `json:"title"`
+			Description    string `json:"description"`
+			CapabilityName string `json:"capability_name"`
+		} `json:"requirements"`
+	}
+	decodeFixtureArgs(t, scenario, "mock-requirement-generator", &reqGen)
+
+	var storyPrep struct {
+		Stories []struct {
+			Label              string `json:"label"`
+			ComponentName      string `json:"component_name"`
+			RequirementIndices []int  `json:"requirement_indices"`
+			CapabilityIndices  []int  `json:"capability_indices"`
+			Title              string `json:"title"`
+			Intent             string `json:"intent"`
+			Tasks              []struct {
+				Label           string   `json:"label"`
+				Description     string   `json:"description"`
+				DependsOnLabels []string `json:"depends_on_labels"`
+			} `json:"tasks"`
+		} `json:"stories"`
+	}
+	decodeFixtureArgs(t, scenario, "mock-story-preparer", &storyPrep)
+
+	plan := &workflow.Plan{
+		Slug:         scenario,
+		Scope:        planner.Scope,
+		Architecture: &arch,
+		Contract:     &workflow.ContractPacket{Scope: workflow.NewContractScopeSnapshot(planner.Scope)},
+	}
+	for i, r := range reqGen.Requirements {
+		plan.Requirements = append(plan.Requirements, workflow.Requirement{
+			ID:             fmt.Sprintf("req-%d", i),
+			Title:          r.Title,
+			Description:    r.Description,
+			CapabilityName: r.CapabilityName,
+		})
+	}
+
+	var analyst struct {
+		Capabilities []workflow.Capability `json:"capabilities"`
+	}
+	var capabilityNames []string
+	if decodeFixtureArgs(t, scenario, "mock-planner.1", &analyst) {
+		plan.Exploration = &workflow.Exploration{Capabilities: analyst.Capabilities}
+		for _, cap := range analyst.Capabilities {
+			capabilityNames = append(capabilityNames, cap.Name)
+		}
+	}
+
+	componentFiles := make(map[string][]string)
+	for _, c := range arch.ComponentBoundaries {
+		componentFiles[c.Name] = append([]string(nil), c.ImplementationFiles...)
+	}
+
+	stories := make([]workflow.Story, 0, len(storyPrep.Stories))
+	for i, s := range storyPrep.Stories {
+		files, ok := componentFiles[s.ComponentName]
+		if !ok {
+			t.Fatalf("story %q references unknown component %q", s.Label, s.ComponentName)
+		}
+
+		requirementIDs := make([]string, 0, len(s.RequirementIndices))
+		for _, idx := range s.RequirementIndices {
+			if idx < 0 || idx >= len(plan.Requirements) {
+				t.Fatalf("story %q requirement_index %d out of range", s.Label, idx)
+			}
+			requirementIDs = append(requirementIDs, plan.Requirements[idx].ID)
+		}
+
+		if plan.Exploration == nil && len(s.CapabilityIndices) > 0 {
+			t.Fatalf("story %q has capability_indices %v but %s mock config disables analyst exploration", s.Label, s.CapabilityIndices, scenario)
+		}
+		capabilityNamesForStory := make([]string, 0, len(s.CapabilityIndices))
+		for _, idx := range s.CapabilityIndices {
+			if idx < 0 || idx >= len(capabilityNames) {
+				t.Fatalf("story %q capability_index %d out of range", s.Label, idx)
+			}
+			capabilityNamesForStory = append(capabilityNamesForStory, capabilityNames[idx])
+		}
+
+		storyID := fmt.Sprintf("story.%s.%d", scenario, i+1)
+		tasks := resolveMockStoryFixtureTasks(t, storyID, s.Tasks)
+		stories = append(stories, workflow.Story{
+			ID:              storyID,
+			ComponentName:   s.ComponentName,
+			RequirementIDs:  requirementIDs,
+			CapabilityNames: capabilityNamesForStory,
+			Title:           s.Title,
+			Intent:          s.Intent,
+			FilesOwned:      workflow.ExpandFileScopeWithCompanionTests(files),
+			Tasks:           tasks,
+		})
+	}
+
+	if err := workflow.DeriveStoryScheduling(stories, plan.Requirements); err != nil {
+		t.Fatalf("derive story scheduling from fixture: %v", err)
+	}
+	if err := workflow.ValidateStories(stories); err != nil {
+		t.Fatalf("execution-phase story fixture fails Sarah readiness gate: %v", err)
+	}
+	plan.Stories = stories
+
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+	mergeStoryFindings(plan, result)
+	for _, f := range result.ErrorFindings() {
+		t.Errorf("execution-phase story fixture fires blocking finding %s on %q: %s", f.SOPID, f.TargetID, f.Issue)
+	}
+	if result.Verdict != "approved" {
+		t.Errorf("execution-phase story fixture verdict = %q, want approved", result.Verdict)
+	}
+}
+
+func resolveMockStoryFixtureTasks(t *testing.T, storyID string, inputs []struct {
+	Label           string   `json:"label"`
+	Description     string   `json:"description"`
+	DependsOnLabels []string `json:"depends_on_labels"`
+}) []workflow.Task {
+	t.Helper()
+
+	labelToID := make(map[string]string, len(inputs))
+	for i, task := range inputs {
+		if task.Label == "" {
+			t.Fatalf("story %s task %d missing label", storyID, i)
+		}
+		if _, exists := labelToID[task.Label]; exists {
+			t.Fatalf("story %s task label %q appears more than once", storyID, task.Label)
+		}
+		labelToID[task.Label] = fmt.Sprintf("task.%s.%d", storyID, i+1)
+	}
+
+	tasks := make([]workflow.Task, 0, len(inputs))
+	for i, task := range inputs {
+		dependsOn := make([]string, 0, len(task.DependsOnLabels))
+		for _, label := range task.DependsOnLabels {
+			id, ok := labelToID[label]
+			if !ok {
+				t.Fatalf("story %s task %q depends on unknown label %q", storyID, task.Label, label)
+			}
+			dependsOn = append(dependsOn, id)
+		}
+		tasks = append(tasks, workflow.Task{
+			ID:          labelToID[task.Label],
+			StoryID:     storyID,
+			Description: task.Description,
+			DependsOn:   dependsOn,
+		})
+		if task.Description == "" {
+			t.Fatalf("story %s task %d has empty description", storyID, i)
+		}
+	}
+	return tasks
+}
+
 // TestMockFixturesScenarioTagsValid is the second offline half of the gate: it
 // loads every mock-scenario-generator fixture and runs the production
 // ValidateScenarioTags (ADR-041 Move 1) over each emitted scenario, asserting
