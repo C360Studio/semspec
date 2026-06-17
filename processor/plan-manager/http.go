@@ -1,3 +1,8 @@
+// Package planmanager HTTP file. Holds the request/response DTOs for the plan
+// HTTP API surface; the count of public structs is the API surface, not
+// architectural debt.
+//
+//revive:disable:max-public-structs
 package planmanager
 
 import (
