@@ -169,7 +169,7 @@ func detailForPlanningStage(stage string) string {
 	}
 }
 
-func buildPlanWaitSummary(plan *workflow.Plan, stage string, recovery *PlanRecoverySummary) *PlanWaitSummary {
+func buildPlanWaitSummary(_ *workflow.Plan, stage string, recovery *PlanRecoverySummary) *PlanWaitSummary {
 	if recovery != nil {
 		switch recovery.Status {
 		case string(workflow.PlanDecisionStatusProposed), string(workflow.PlanDecisionStatusUnderReview):

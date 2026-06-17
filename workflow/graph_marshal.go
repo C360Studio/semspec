@@ -47,6 +47,8 @@ func writePlanTriples(ctx context.Context, tw *graphutil.TripleWriter, plan *Pla
 // JSON-encoded — per feedback_no_json_in_triples. UpsertEntity's
 // RemoveTriples = distinctPredicates(addTriples) replaces the whole list,
 // which is the same net effect as the prior ReplaceTripleList calls.
+//
+//revive:disable-next-line:function-length // sequential triple builder; predicate order is the contract.
 func buildPlanTriples(entityID string, plan *Plan) []message.Triple {
 	t := func(pred, obj string) message.Triple {
 		return message.Triple{Subject: entityID, Predicate: pred, Object: obj}

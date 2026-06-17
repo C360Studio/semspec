@@ -7,6 +7,7 @@ import "github.com/c360studio/semspec/workflow"
 // contract obligations are equivalent.
 type ContractProjectionProfile string
 
+// Contract projection profiles — one per BMAD/OpenSpec role group (ADR-050).
 const (
 	ContractProjectionPlanner              ContractProjectionProfile = "planner"
 	ContractProjectionArchitect            ContractProjectionProfile = "architect"
@@ -76,38 +77,47 @@ type ContractValidationFindingProjection struct {
 	Evidence []string
 }
 
+// PlannerContractProjection returns the planner-scoped contract view for plan.
 func PlannerContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RolePlanner)
 }
 
+// ArchitectContractProjection returns the architect-scoped contract view for plan.
 func ArchitectContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleArchitect)
 }
 
+// RequirementGeneratorContractProjection returns the requirement-generator contract view for plan.
 func RequirementGeneratorContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleRequirementGenerator)
 }
 
+// StoryPreparerContractProjection returns the story-preparer-scoped contract view for plan.
 func StoryPreparerContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleStoryPreparer)
 }
 
+// ScenarioGeneratorContractProjection returns the scenario-generator contract view for plan.
 func ScenarioGeneratorContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleScenarioGenerator)
 }
 
+// DeveloperContractProjection returns the developer-scoped contract view for plan.
 func DeveloperContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleDeveloper)
 }
 
+// ReviewerContractProjection returns the reviewer-scoped contract view for plan.
 func ReviewerContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleReviewer)
 }
 
+// RecoveryContractProjection returns the recovery-agent-scoped contract view for plan.
 func RecoveryContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RoleRecoveryAgent)
 }
 
+// QAContractProjection returns the QA-reviewer-scoped contract view for plan.
 func QAContractProjection(plan *workflow.Plan) *ContractProjection {
 	return BuildContractProjection(plan, RolePlanQAReviewer)
 }

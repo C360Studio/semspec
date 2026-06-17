@@ -1393,6 +1393,7 @@ type TopologyFact struct {
 // contract.
 type ContractImpactKind string
 
+// Contract impact kinds — how an accepted PlanDecision relates to the root contract.
 const (
 	ContractImpactPreserve ContractImpactKind = "preserve"
 	ContractImpactRefine   ContractImpactKind = "refine"

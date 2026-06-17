@@ -1164,6 +1164,7 @@ func registerPlanPredicates() {
 
 }
 
+//revive:disable-next-line:function-length // sequential predicate registration; one statement per predicate.
 func registerTaskPredicates() {
 	// Register task predicates
 	vocabulary.Register(TaskTitle,

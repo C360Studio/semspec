@@ -130,6 +130,7 @@ type QARequestedEvent struct {
 // QAFailureCategory is a deterministic machine-readable class for a QA failure.
 type QAFailureCategory string
 
+// QA failure categories — the deterministic closed set of QA failure classes.
 const (
 	QAFailureCategoryTopology    QAFailureCategory = "topology"
 	QAFailureCategoryBuildConfig QAFailureCategory = "build_configuration"

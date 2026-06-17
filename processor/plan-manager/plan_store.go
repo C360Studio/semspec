@@ -405,6 +405,8 @@ func (s *planStore) delete(ctx context.Context, slug string) error {
 // re-persists on every mutation" framing is only true when a triple-mirrored
 // field actually changes. Combined reduction on a typical execution save:
 // ~20× fewer writes, ~14.5× fewer NATS round-trips.
+//
+//revive:disable-next-line:function-length // sequential triple marshaler; field order is the write-coalescing contract.
 func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error {
 	tw := s.tripleWriter
 	if tw == nil {

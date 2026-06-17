@@ -302,10 +302,7 @@ func (s *ContractObservabilityScenario) stageDriveToExecution(ctx context.Contex
 	if err := s.markScenariosReviewed(ctx, slug); err != nil {
 		return err
 	}
-	if err := s.markReadyForExecution(ctx, slug); err != nil {
-		return err
-	}
-	return nil
+	return s.markReadyForExecution(ctx, slug)
 }
 
 func (s *ContractObservabilityScenario) ensureDraftingClaim(ctx context.Context, slug string) error {
