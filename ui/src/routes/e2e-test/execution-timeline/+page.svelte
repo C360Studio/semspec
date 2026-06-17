@@ -67,10 +67,11 @@
 					? executionLoops
 					: []
 	);
+	const timelineStage = $derived(data.scenario === 'execution-loops' ? 'implementing' : 'drafting');
 </script>
 
 <div class="harness" data-testid="execution-timeline-harness">
-	<ExecutionTimeline slug="fixture-slug" stage="drafting" {trajectoryItems} />
+	<ExecutionTimeline slug="fixture-slug" stage={timelineStage} {trajectoryItems} />
 </div>
 
 <style>
