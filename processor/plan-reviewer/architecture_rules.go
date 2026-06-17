@@ -737,31 +737,5 @@ func contractExplicitTopologyCreatePaths(scope workflow.ContractScopeSnapshot) m
 }
 
 func isTopologyControlledPath(p string) bool {
-	base := path.Base(p)
-	switch base {
-	case "go.mod",
-		"go.work",
-		"package.json",
-		"pnpm-workspace.yaml",
-		"lerna.json",
-		"nx.json",
-		"pyproject.toml",
-		"setup.py",
-		"Cargo.toml",
-		"pom.xml",
-		"build.gradle",
-		"build.gradle.kts",
-		"settings.gradle",
-		"settings.gradle.kts",
-		"composer.json",
-		"Gemfile",
-		"gradlew",
-		"gradlew.bat":
-		return true
-	}
-	if strings.HasSuffix(base, ".csproj") {
-		return true
-	}
-	return p == "gradle/wrapper/gradle-wrapper.properties" ||
-		strings.HasSuffix(p, "/gradle/wrapper/gradle-wrapper.properties")
+	return workflow.IsTopologyControlledPath(p)
 }

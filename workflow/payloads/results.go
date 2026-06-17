@@ -197,10 +197,11 @@ const (
 	// CheckFileOwnershipAdvisory is the non-blocking surfacing of mergeable
 	// out-of-scope edits (build/source modifications, in-territory new files).
 	CheckFileOwnershipAdvisory = "file-ownership-advisory"
-	// CheckFileOwnershipPlanningGap is the Required gate for a new source/test
-	// file created OUTSIDE the story's declared territory — a planning gap the
-	// developer cannot fix (the component boundary or the story's files_owned is
-	// wrong). The router fast-fails this straight to recovery (ADR-049 move 3).
+	// CheckFileOwnershipPlanningGap is the Required gate for non-developer-
+	// fixable ownership/topology gaps: a new source/test file created OUTSIDE
+	// the story's declared territory, or a new build/workspace/package manifest
+	// created outside declared ownership. The router fast-fails this straight
+	// to recovery (ADR-049 move 3).
 	CheckFileOwnershipPlanningGap = "file-ownership-planning-gap"
 )
 
