@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
@@ -102,6 +104,94 @@ func TestHandleScenariosMutation_ConcurrentDifferentRequirementsPreservesAll(t *
 	if len(missing) > 0 {
 		t.Errorf("LOST UPDATE — %d of %d concurrent scenario batches missing from plan.Scenarios after handlers returned; this proves the read-modify-write race in handleScenariosMutation. First few missing: %v",
 			len(missing), numReqs, missing[:min(5, len(missing))])
+	}
+}
+
+// TestHandleDeleteRequirement_ConcurrentDeletesAndReads regresses the
+// plan-workflow "deleted requirement still accessible: status=200" failure.
+// Two defects combined there:
+//
+//  1. The mutating HTTP requirement/scenario handlers did the same
+//     get → mutate → save sequence as the NATS mutation handlers but withOUT
+//     the per-slug lock, so a concurrent write (e.g. the requirements.generated
+//     wholesale replace fired by approval) could clobber an HTTP delete and the
+//     requirement reappeared on the next GET.
+//  2. The delete/deprecate handlers filtered plan.Requirements/Scenarios in
+//     place (slice[:0]) on a shallow copy whose backing array the unlocked
+//     GET/List handlers read concurrently — a data race.
+//
+// Concurrent deletes on distinct requirements must ALL stick (no lost update,
+// proving the HTTP handlers now hold the slug lock), and concurrent List
+// readers must not race the deleters (proving the fresh-slice fix). Run under
+// -race (Taskfile `test` does): the old in-place filter trips the detector.
+func TestHandleDeleteRequirement_ConcurrentDeletesAndReads(t *testing.T) {
+	const slug = "concurrent-delete"
+	const numReqs = 32
+
+	c := setupTestComponent(t)
+	reqs := make([]workflow.Requirement, numReqs)
+	scenarios := make([]workflow.Scenario, numReqs)
+	for i := 0; i < numReqs; i++ {
+		id := fmt.Sprintf("requirement.%s.%d", slug, i)
+		reqs[i] = workflow.Requirement{
+			ID:     id,
+			PlanID: workflow.PlanEntityID(slug),
+			Title:  fmt.Sprintf("R%d", i),
+			Status: workflow.RequirementStatusActive,
+		}
+		scenarios[i] = workflow.Scenario{ID: fmt.Sprintf("scenario.%s.%d", slug, i), RequirementID: id}
+	}
+	setupTestPlanWith(t, c, slug, reqs, scenarios)
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+
+	// Concurrent readers — deliberately NOT holding the slug lock (GET/List are
+	// read paths). They must never observe a torn backing array.
+	for r := 0; r < 6; r++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 100; j++ {
+				rec := httptest.NewRecorder()
+				c.handleListRequirements(rec, httptest.NewRequest(http.MethodGet, "/x", nil), slug)
+				rec2 := httptest.NewRecorder()
+				c.handleListScenarios(rec2, httptest.NewRequest(http.MethodGet, "/x", nil), slug)
+			}
+		}()
+	}
+
+	// Concurrent deleters, one requirement each.
+	for i := 0; i < numReqs; i++ {
+		reqID := reqs[i].ID
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := httptest.NewRecorder()
+			c.handleDeleteRequirement(rec, httptest.NewRequest(http.MethodDelete, "/x", nil), slug, reqID)
+			if rec.Code != http.StatusNoContent {
+				t.Errorf("delete %s: status = %d, want %d", reqID, rec.Code, http.StatusNoContent)
+			}
+		}()
+	}
+
+	close(start)
+	wg.Wait()
+
+	got, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan disappeared after concurrent deletes")
+	}
+	// Every delete must have stuck — a surviving requirement is a lost update
+	// (the clobber the per-slug lock prevents). Cascade also removes scenarios.
+	if len(got.Requirements) != 0 {
+		t.Errorf("LOST DELETE — %d of %d requirements survived concurrent deletes; the per-slug lock did not serialize the HTTP delete path. Survivors: %d",
+			len(got.Requirements), numReqs, len(got.Requirements))
+	}
+	if len(got.Scenarios) != 0 {
+		t.Errorf("cascade left %d scenarios after all requirements deleted", len(got.Scenarios))
 	}
 }
 
