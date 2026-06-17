@@ -381,6 +381,7 @@ sequenceDiagram
     participant EM as execution-manager
     participant SV as structural-validator
     participant CR as code reviewer
+    participant LD as lesson-decomposer
     participant RR as requirement reviewer
     participant QA as qa-reviewer
 
@@ -396,6 +397,7 @@ sequenceDiagram
     SV-->>EM: pass or fail
     EM->>CR: review code change
     CR-->>EM: approved, fixable, or restructure
+    EM-->>LD: lesson.decompose.requested on rejection (async)
     EM-->>RE: task terminal state
     RE->>RR: review Story scenarios
     RR-->>RE: approved, fixable, restructure, or exhausted
@@ -531,6 +533,30 @@ completes.
 
 Retry or recovery: fixable reruns the Story DAG on the same branch. Restructure recreates the
 requirement branch. Retry cap emits recovery.
+
+### 17a. Decompose Lessons
+
+Who: `execution-manager` publishes; `lesson-decomposer` consumes.
+
+When: a code-review rejection or eligible first-try success produces learning evidence. Positive
+lesson dispatch is opt-in because it adds an LLM call on each qualifying success.
+
+Where: `workflow.events.lesson.decompose.requested.>`, `AGENT_LOOPS`, trajectory object content,
+and the lessons graph.
+
+What: `execution-manager` emits a best-effort `LessonDecomposeRequested` event with task,
+requirement, developer-loop, reviewer-loop, verdict, and feedback references. `lesson-decomposer`
+fetches the trajectory, runs a dedicated lesson-decomposition loop, parses `submit_work`, and
+writes an evidence-cited Lesson.
+
+Why: turn expensive reviewer feedback into role-scoped institutional memory without making the
+current TDD path wait for another LLM loop.
+
+Happy path: the lesson is recorded for later role prompts and the UI reports lesson activity as
+future-run eligible.
+
+Retry or recovery: publish or decomposer failures are logged and observable, but do not block the
+current task, Story, requirement, QA, or recovery transition.
 
 ### 18. Reconcile Requirement Completion
 
@@ -881,6 +907,10 @@ when required executable evidence is missing or skipped.
 Recovery actions are explicit proposals, not hidden state mutation. Contract-impact fields explain
 whether the decision preserves, refines, or changes the original contract.
 
+`Lesson`: requires role, summary, source, evidence references, category IDs when available, and
+lifecycle metadata. Lessons emitted during a run are available to later role prompts; they do not
+retroactively change already-dispatched work.
+
 `PlanPhaseSummary`: requires current stage, phase, state, freshness, active loop count, and any
 execution, wait, recovery, lesson, or QA summary needed by UI surfaces.
 
@@ -906,7 +936,9 @@ execution, wait, recovery, lesson, or QA summary needed by UI surfaces.
 11. Requirement completion is Story-review based; task approval alone is not enough.
 12. Integrated QA gates release and must fail closed when required evidence is absent.
 13. Exhausted retries become recovery decisions with explicit accepted/rejected outcomes.
-14. UI current-state surfaces derive from authoritative phase summaries, not raw feed inference.
+14. Lesson decomposition is an async sidecar: it records future prompt memory without blocking the
+    current TDD or recovery path.
+15. UI current-state surfaces derive from authoritative phase summaries, not raw feed inference.
 
 ### Storage And Event Expectations
 
@@ -917,6 +949,8 @@ execution, wait, recovery, lesson, or QA summary needed by UI surfaces.
 `EXECUTION_STATES`: durable execution and task store.
 
 `AGENT_LOOPS`: inspectable agent run history.
+
+`workflow.events.lesson.decompose.requested.>`: best-effort lesson-decomposer input.
 
 `ENTITY_STATES`: queryable semantic state graph.
 
@@ -954,6 +988,9 @@ These are the main live code surfaces behind this document:
 - `processor/execution-manager/component.go`.
 - `processor/execution-manager/task_watcher.go`.
 - `processor/execution-manager/loop_completions.go`.
+- `processor/execution-manager/team_knowledge.go` for lesson-decomposer dispatch and threshold
+  signals.
+- `processor/lesson-decomposer/component.go` for async evidence-cited lesson generation.
 - `processor/qa-reviewer/component.go`.
 - `workflow/payloads/recovery.go`.
 - `ui/src/lib/components/plan/RecoveryDetail.svelte`.
