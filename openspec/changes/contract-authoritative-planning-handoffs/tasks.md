@@ -16,7 +16,7 @@
 
 ## 3. Brownfield Topology Validation
 
-- [ ] 3.1 Implement topology detectors for repository root, build roots, package/module manifests, and known workspace/composite-build markers
+- [x] 3.1 Implement topology detectors for repository root, build roots, package/module manifests, and known workspace/composite-build markers
 - [ ] 3.2 Add plan-reviewer or structural-validator checks for architecture outputs that violate topology facts
 - [ ] 3.3 Add Story ownership checks that reject standalone or baseline-erasing file ownership before developer execution
 - [ ] 3.4 Add developer-output checks that reject forbidden build roots, standalone project files, or topology-incompatible artifacts

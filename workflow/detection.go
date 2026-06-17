@@ -3,6 +3,7 @@ package workflow
 import (
 	"bufio"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,20 +35,318 @@ func NewFileSystemDetector() *FileSystemDetector {
 // Detect implements StackDetector.
 func (d *FileSystemDetector) Detect(repoRoot string) (*DetectionResult, error) {
 	result := &DetectionResult{
-		Languages:    []DetectedLanguage{},
-		Frameworks:   []DetectedFramework{},
-		Tooling:      []DetectedTool{},
-		ExistingDocs: []DetectedDoc{},
+		Languages:     []DetectedLanguage{},
+		Frameworks:    []DetectedFramework{},
+		Tooling:       []DetectedTool{},
+		ExistingDocs:  []DetectedDoc{},
+		TopologyFacts: []TopologyFact{},
 	}
 
 	d.detectLanguages(repoRoot, result)
 	d.detectFrameworks(repoRoot, result)
 	d.detectTooling(repoRoot, result)
 	d.detectDocs(repoRoot, result)
+	d.detectTopology(repoRoot, result)
 	d.detectOpenSpecChanges(repoRoot, result)
 	result.ProposedChecklist = d.buildProposedChecklist(repoRoot, result)
 
 	return result, nil
+}
+
+const maxTopologyScanDepth = 4
+
+// detectTopology records generic repository/build/workspace facts that planning
+// contracts can carry forward. These facts intentionally avoid language-specific
+// policy: validators decide what a fact means for a given artifact.
+func (d *FileSystemDetector) detectTopology(repoRoot string, result *DetectionResult) {
+	info, err := os.Stat(repoRoot)
+	if err != nil || !info.IsDir() {
+		return
+	}
+
+	addTopologyFact(result, "repository_root", ".", filepath.Base(repoRoot), []string{"."})
+
+	_ = filepath.WalkDir(repoRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+
+		rel, err := filepath.Rel(repoRoot, path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+		if rel == "." {
+			return nil
+		}
+
+		depth := strings.Count(rel, "/")
+		if entry.IsDir() {
+			if shouldSkipTopologyDir(entry.Name()) {
+				return fs.SkipDir
+			}
+			if depth >= maxTopologyScanDepth {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if depth > maxTopologyScanDepth {
+			return nil
+		}
+
+		d.detectTopologyFile(path, rel, entry.Name(), result)
+		return nil
+	})
+}
+
+func shouldSkipTopologyDir(name string) bool {
+	if excludedSubdirs[name] {
+		return true
+	}
+	return strings.HasPrefix(name, ".") && name != ".github"
+}
+
+func (d *FileSystemDetector) detectTopologyFile(path, rel, name string, result *DetectionResult) {
+	switch name {
+	case "go.mod":
+		addTopologyFact(result, "build_root", rel, "go_module", nil)
+	case "go.work":
+		addTopologyFact(result, "workspace_root", rel, "go_workspace", nil)
+		for _, modulePath := range parseGoWorkUses(path) {
+			addTopologyFact(result, "module_include", rel, modulePath, []string{rel})
+		}
+	case "package.json":
+		addTopologyFact(result, "package_root", rel, "node_package", nil)
+		for _, workspace := range parsePackageWorkspaces(path) {
+			addTopologyFact(result, "module_include", rel, workspace, []string{rel})
+		}
+	case "pnpm-workspace.yaml":
+		addTopologyFact(result, "workspace_root", rel, "pnpm_workspace", nil)
+	case "lerna.json":
+		addTopologyFact(result, "workspace_root", rel, "lerna_workspace", nil)
+	case "nx.json":
+		addTopologyFact(result, "workspace_root", rel, "nx_workspace", nil)
+	case "pyproject.toml":
+		addTopologyFact(result, "build_root", rel, "python_project", nil)
+	case "requirements.txt":
+		addTopologyFact(result, "package_root", rel, "python_requirements", nil)
+	case "setup.py":
+		addTopologyFact(result, "package_root", rel, "python_setup", nil)
+	case "Cargo.toml":
+		addTopologyFact(result, "build_root", rel, "rust_manifest", nil)
+		if fileContainsLine(path, "[workspace]") {
+			addTopologyFact(result, "workspace_root", rel, "rust_workspace", []string{rel})
+		}
+	case "pom.xml":
+		addTopologyFact(result, "build_root", rel, "maven_project", nil)
+	case "build.gradle", "build.gradle.kts":
+		addTopologyFact(result, "build_root", rel, "gradle_project", nil)
+	case "settings.gradle", "settings.gradle.kts":
+		addTopologyFact(result, "workspace_root", rel, "gradle_settings", nil)
+		includes, compositeBuilds := parseGradleSettings(path)
+		for _, included := range includes {
+			addTopologyFact(result, "module_include", rel, included, []string{rel})
+		}
+		for _, includedBuild := range compositeBuilds {
+			addTopologyFact(result, "composite_build", rel, includedBuild, []string{rel})
+		}
+	case "composer.json":
+		addTopologyFact(result, "package_root", rel, "php_package", nil)
+	case "Gemfile":
+		addTopologyFact(result, "package_root", rel, "ruby_bundle", nil)
+	default:
+		if strings.HasSuffix(name, ".csproj") {
+			addTopologyFact(result, "build_root", rel, "dotnet_project", nil)
+		}
+	}
+}
+
+func addTopologyFact(result *DetectionResult, kind, path, value string, evidence []string) {
+	if result == nil || kind == "" {
+		return
+	}
+	path = filepath.ToSlash(path)
+	normalizedEvidence := make([]string, 0, len(evidence))
+	for _, item := range evidence {
+		if item == "" {
+			continue
+		}
+		normalizedEvidence = append(normalizedEvidence, filepath.ToSlash(item))
+	}
+	if len(normalizedEvidence) == 0 && path != "" {
+		normalizedEvidence = append(normalizedEvidence, path)
+	}
+
+	for _, fact := range result.TopologyFacts {
+		if fact.Kind == kind && fact.Path == path && fact.Value == value {
+			return
+		}
+	}
+	result.TopologyFacts = append(result.TopologyFacts, TopologyFact{
+		Kind:     kind,
+		Path:     path,
+		Value:    value,
+		Evidence: normalizedEvidence,
+	})
+}
+
+func parseGoWorkUses(path string) []string {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var uses []string
+	inUseBlock := false
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := stripLineComment(scanner.Text())
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if inUseBlock {
+			if strings.HasPrefix(line, ")") {
+				inUseBlock = false
+				continue
+			}
+			if value := cleanWorkspaceValue(line); value != "" {
+				uses = append(uses, value)
+			}
+			continue
+		}
+		if line == "use (" {
+			inUseBlock = true
+			continue
+		}
+		if strings.HasPrefix(line, "use ") {
+			if value := cleanWorkspaceValue(strings.TrimSpace(strings.TrimPrefix(line, "use "))); value != "" {
+				uses = append(uses, value)
+			}
+		}
+	}
+	return uses
+}
+
+func parsePackageWorkspaces(path string) []string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var pkg struct {
+		Workspaces json.RawMessage `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &pkg); err != nil || len(pkg.Workspaces) == 0 {
+		return nil
+	}
+
+	var list []string
+	if err := json.Unmarshal(pkg.Workspaces, &list); err == nil {
+		return cleanWorkspaceValues(list)
+	}
+
+	var single string
+	if err := json.Unmarshal(pkg.Workspaces, &single); err == nil {
+		return cleanWorkspaceValues([]string{single})
+	}
+
+	var object struct {
+		Packages []string `json:"packages"`
+	}
+	if err := json.Unmarshal(pkg.Workspaces, &object); err == nil {
+		return cleanWorkspaceValues(object.Packages)
+	}
+	return nil
+}
+
+func parseGradleSettings(path string) (includes []string, compositeBuilds []string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := stripLineComment(scanner.Text())
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(trimmed, "includeBuild"):
+			compositeBuilds = append(compositeBuilds, quotedValues(trimmed)...)
+		case strings.HasPrefix(trimmed, "include ") || strings.HasPrefix(trimmed, "include("):
+			includes = append(includes, quotedValues(trimmed)...)
+		}
+	}
+	return cleanWorkspaceValues(includes), cleanWorkspaceValues(compositeBuilds)
+}
+
+func cleanWorkspaceValues(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]bool{}
+	for _, value := range values {
+		value = cleanWorkspaceValue(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		out = append(out, value)
+		seen[value] = true
+	}
+	return out
+}
+
+func cleanWorkspaceValue(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, ",")
+	value = strings.Trim(value, `"'`)
+	value = strings.TrimSpace(value)
+	return filepath.ToSlash(value)
+}
+
+func quotedValues(line string) []string {
+	var values []string
+	var quote rune
+	start := -1
+	for idx, r := range line {
+		switch {
+		case quote == 0 && (r == '\'' || r == '"'):
+			quote = r
+			start = idx + len(string(r))
+		case quote != 0 && r == quote:
+			if start >= 0 && start <= idx {
+				values = append(values, line[start:idx])
+			}
+			quote = 0
+			start = -1
+		}
+	}
+	return values
+}
+
+func stripLineComment(line string) string {
+	if idx := strings.Index(line, "//"); idx >= 0 {
+		return line[:idx]
+	}
+	return line
+}
+
+func fileContainsLine(path, want string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // detectOpenSpecChanges scans openspec/changes/ for change directories
@@ -100,6 +399,10 @@ var excludedSubdirs = map[string]bool{
 	"build":        true,
 	"__pycache__":  true,
 	".cache":       true,
+	".gradle":      true,
+	".next":        true,
+	"coverage":     true,
+	"target":       true,
 }
 
 // detectLanguages populates result.Languages by checking for primary marker files
