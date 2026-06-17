@@ -39,6 +39,7 @@ func RenderProposal(plan *workflow.Plan) string {
 
 	title := displayPlanTitle(plan)
 	fmt.Fprintf(&sb, "# Proposal: %s\n\n", title)
+	writeContractReference(&sb, plan)
 
 	if plan.Goal != "" {
 		sb.WriteString("## Why\n\n")

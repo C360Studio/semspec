@@ -46,6 +46,7 @@ func RenderDesign(plan *workflow.Plan) string {
 	var sb strings.Builder
 	title := displayPlanTitle(plan)
 	fmt.Fprintf(&sb, "# Design: %s\n\n", title)
+	writeContractReference(&sb, plan)
 
 	if len(arch.TechnologyChoices) > 0 {
 		sb.WriteString("## Technology Choices\n\n")

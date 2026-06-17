@@ -98,6 +98,14 @@ func samplePlan() *workflow.Plan {
 				FilesOwned:     []string{"src/main/java/TelemetryStream.java"},
 			},
 		},
+		Contract: &workflow.ContractPacket{
+			ID:      workflow.PlanContractID("test-plan"),
+			Version: 1,
+			Amendments: []workflow.ContractAmendment{{
+				ID:             "amendment-1",
+				PlanDecisionID: "plan-decision.test-plan.1",
+			}},
+		},
 	}
 }
 
@@ -105,6 +113,7 @@ func TestRenderProposal_Happy(t *testing.T) {
 	got := RenderProposal(samplePlan())
 	required := []string{
 		"# Proposal: Add MAVSDK driver",
+		"Contract packet:",
 		"## Why",
 		"Implement MAVLink/MAVSDK support",
 		"## What Changes",
@@ -122,6 +131,28 @@ func TestRenderProposal_Happy(t *testing.T) {
 		if !strings.Contains(got, s) {
 			t.Errorf("proposal missing %q:\n%s", s, got)
 		}
+	}
+}
+
+func TestRenderArtifactsIncludeContractReference(t *testing.T) {
+	plan := samplePlan()
+	artifacts := map[string]string{
+		"proposal": RenderProposal(plan),
+		"design":   RenderDesign(plan),
+		"spec":     RenderSpec(plan, "mavsdk-bootstrap"),
+		"tasks":    RenderTasks(plan, nil),
+	}
+	for name, content := range artifacts {
+		t.Run(name, func(t *testing.T) {
+			for _, want := range []string{
+				"Contract packet: `" + plan.Contract.ID + "` (v1)",
+				"Accepted amendments: `amendment-1` via `plan-decision.test-plan.1`",
+			} {
+				if !strings.Contains(content, want) {
+					t.Fatalf("%s missing contract reference %q:\n%s", name, want, content)
+				}
+			}
+		})
 	}
 }
 
