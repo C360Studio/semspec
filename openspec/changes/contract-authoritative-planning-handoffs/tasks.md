@@ -25,7 +25,7 @@
 ## 4. Scope Governance And Recovery
 
 - [x] 4.1 Add contract-impact fields to PlanDecision creation, recovery-agent output parsing, and auto-accept policy
-- [ ] 4.2 Add validation that compares current scope and Story coverage against the root contract plus accepted amendments
+- [x] 4.2 Add validation that compares current scope and Story coverage against the root contract plus accepted amendments
 - [ ] 4.3 Add scope-shrinkage guardrails that require explicit amendment provenance for dropped obligations
 - [ ] 4.4 Update recovery accept effects so dirty marking and execution resets use the smallest correct dependency closure
 - [ ] 4.5 Add tests proving unrelated completed work survives late architecture/story recovery

@@ -33,6 +33,10 @@ import (
 //     companion-test expansion.
 //   - story.topology_unapproved_build_root: Story.FilesOwned contains a
 //     build/workspace/package manifest not authorized by the contract topology.
+//   - contract.scope_missing: Root contract scope deliverable is absent from
+//     current plan scope without an accepted contract-changing amendment.
+//   - story.contract_scope_uncovered: Root contract scope deliverable is not
+//     owned by any Story without an accepted contract-changing amendment.
 //   - task.missing_within_story: Story with empty Tasks list.
 //   - task.depends_on_cycle: DAG cycle in a Story's intra-story Tasks
 //     DependsOn graph.
@@ -58,6 +62,7 @@ func mergeStoryFindings(plan *workflow.Plan, result *workflow.PlanReviewResult) 
 	original := len(result.Findings)
 	result.Findings = append(result.Findings, storyStructuralFindings(plan)...)
 	result.Findings = append(result.Findings, storyOwnershipFindings(plan)...)
+	result.Findings = append(result.Findings, storyContractCoverageFindings(plan)...)
 	result.Findings = append(result.Findings, storyDependsOnFindings(plan)...)
 	result.Findings = append(result.Findings, taskDependsOnFindings(plan)...)
 
@@ -278,6 +283,201 @@ func componentOwnedFiles(component workflow.ComponentDef) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+type contractScopeObligation struct {
+	Path   string
+	Origin string
+}
+
+// storyContractCoverageFindings compares the current mutable plan shape to the
+// immutable root contract plus accepted amendments. It catches the "current
+// scope got smaller, therefore everything looks complete" failure class before
+// execution starts.
+func storyContractCoverageFindings(plan *workflow.Plan) []workflow.PlanReviewFinding {
+	if plan == nil || plan.Contract == nil || len(plan.Stories) == 0 {
+		return nil
+	}
+
+	amended := contractChangedAffectedIDs(plan.Contract)
+	currentScope := scopedDeliverableSet(plan.Scope.Create, plan.Scope.Include, plan.Scope.DoNotTouch)
+	storyCoverage := storyOwnedFileSet(plan.Stories)
+
+	var findings []workflow.PlanReviewFinding
+	for _, obligation := range contractScopeDeliverables(plan.Contract.Scope) {
+		if contractPathAmended(obligation.Path, amended) {
+			continue
+		}
+		if _, ok := currentScope[obligation.Path]; !ok {
+			findings = append(findings, workflow.PlanReviewFinding{
+				SOPID:       "contract.scope_missing",
+				SOPTitle:    "Current plan scope dropped a root contract deliverable",
+				Severity:    "error",
+				Status:      "violation",
+				Category:    "contract",
+				Phase:       "stories",
+				TargetID:    obligation.Path,
+				Action:      "add",
+				TargetField: fmt.Sprintf("plan.scope.%s", obligation.Origin),
+				TargetValue: obligation.Path,
+				Issue:       fmt.Sprintf("Root contract %s includes deliverable %q, but the current plan scope no longer includes it and no accepted contract-changing amendment names that path.", obligation.Origin, obligation.Path),
+				Suggestion:  fmt.Sprintf("Restore %q to the current plan scope or accept a PlanDecision whose contract_impact.kind=change and affected_ids names this obligation.", obligation.Path),
+				Evidence:    fmt.Sprintf("contract.scope.%s=%q; accepted amendment affected_ids did not authorize dropping it", obligation.Origin, obligation.Path),
+			})
+		}
+		if _, ok := storyCoverage[obligation.Path]; !ok {
+			findings = append(findings, workflow.PlanReviewFinding{
+				SOPID:       "story.contract_scope_uncovered",
+				SOPTitle:    "Story coverage omits a root contract deliverable",
+				Severity:    "error",
+				Status:      "violation",
+				Category:    "contract",
+				Phase:       "stories",
+				TargetID:    obligation.Path,
+				Action:      "add",
+				TargetField: "stories[].files_owned",
+				TargetValue: obligation.Path,
+				Issue:       fmt.Sprintf("Root contract %s includes deliverable %q, but no Story files_owned entry covers it and no accepted contract-changing amendment names that path.", obligation.Origin, obligation.Path),
+				Suggestion:  fmt.Sprintf("Assign %q to the Story/component that owns the work, or accept a contract-changing PlanDecision amendment that explicitly removes the obligation.", obligation.Path),
+				Evidence:    fmt.Sprintf("story.files_owned union missing %q", obligation.Path),
+			})
+		}
+	}
+	return findings
+}
+
+func contractScopeDeliverables(scope workflow.ContractScopeSnapshot) []contractScopeObligation {
+	protected := map[string]struct{}{}
+	for _, p := range workflow.NormalizeFilePaths(scope.DoNotTouch) {
+		if p != "" {
+			protected[p] = struct{}{}
+		}
+	}
+
+	seen := map[string]struct{}{}
+	var obligations []contractScopeObligation
+	add := func(raw, origin string) {
+		p := workflow.NormalizeFilePath(raw)
+		if p == "" || !isConcreteScopedFile(p) {
+			return
+		}
+		if _, ok := protected[p]; ok {
+			return
+		}
+		if _, dup := seen[p]; dup {
+			return
+		}
+		seen[p] = struct{}{}
+		obligations = append(obligations, contractScopeObligation{Path: p, Origin: origin})
+	}
+	for _, raw := range scope.Create {
+		add(raw, "create")
+	}
+	for _, raw := range scope.Include {
+		add(raw, "include")
+	}
+	return obligations
+}
+
+func scopedDeliverableSet(create, include, doNotTouch []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	protected := map[string]struct{}{}
+	for _, p := range workflow.NormalizeFilePaths(doNotTouch) {
+		if p != "" {
+			protected[p] = struct{}{}
+		}
+	}
+	add := func(raw string) {
+		p := workflow.NormalizeFilePath(raw)
+		if p == "" || !isConcreteScopedFile(p) {
+			return
+		}
+		if _, ok := protected[p]; ok {
+			return
+		}
+		out[p] = struct{}{}
+	}
+	for _, raw := range create {
+		add(raw)
+	}
+	for _, raw := range include {
+		add(raw)
+	}
+	return out
+}
+
+func storyOwnedFileSet(stories []workflow.Story) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, story := range stories {
+		if story.Status == workflow.StoryStatusPending {
+			continue
+		}
+		for _, p := range workflow.ExpandFileScopeWithCompanionTests(story.FilesOwned) {
+			if p != "" {
+				out[p] = struct{}{}
+			}
+		}
+	}
+	return out
+}
+
+func contractChangedAffectedIDs(contract *workflow.ContractPacket) map[string]struct{} {
+	out := map[string]struct{}{}
+	if contract == nil {
+		return out
+	}
+	for _, amendment := range contract.Amendments {
+		if amendment.Impact.Kind != workflow.ContractImpactChange {
+			continue
+		}
+		for _, id := range amendment.Impact.AffectedIDs {
+			addContractAffectedID(out, id)
+		}
+	}
+	return out
+}
+
+func addContractAffectedID(out map[string]struct{}, id string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	out[id] = struct{}{}
+	if p := workflow.NormalizeFilePath(id); p != "" {
+		out[p] = struct{}{}
+	}
+	for _, prefix := range []string{
+		"scope:",
+		"scope.create:",
+		"scope.include:",
+		"contract.scope:",
+		"contract.scope.create:",
+		"contract.scope.include:",
+	} {
+		if strings.HasPrefix(id, prefix) {
+			if p := workflow.NormalizeFilePath(strings.TrimPrefix(id, prefix)); p != "" {
+				out[p] = struct{}{}
+			}
+		}
+	}
+}
+
+func contractPathAmended(path string, amended map[string]struct{}) bool {
+	candidates := []string{
+		path,
+		"scope:" + path,
+		"scope.create:" + path,
+		"scope.include:" + path,
+		"contract.scope:" + path,
+		"contract.scope.create:" + path,
+		"contract.scope.include:" + path,
+	}
+	for _, candidate := range candidates {
+		if _, ok := amended[candidate]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // storyDependsOnFindings emits findings for cross-story DependsOn invariants

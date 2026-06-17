@@ -232,6 +232,128 @@ func TestMergeStoryFindings_TopologyCreateScopeAllowed(t *testing.T) {
 	}
 }
 
+func TestMergeStoryFindings_ContractScopeDroppedFromCurrentPlan(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:         "contract-scope-dropped",
+		Requirements: []workflow.Requirement{{ID: "r1"}},
+		Scope: workflow.Scope{
+			Create: []string{"src/kept.go"},
+		},
+		Contract: &workflow.ContractPacket{
+			Scope: workflow.ContractScopeSnapshot{
+				Create: []string{"src/kept.go", "src/dropped.go"},
+			},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "driver", ImplementationFiles: []string{"src/kept.go"}, Capabilities: []string{"driver"}},
+			},
+		},
+		Stories: []workflow.Story{
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "driver", Title: "T", Status: workflow.StoryStatusReady,
+				FilesOwned: []string{"src/kept.go"},
+				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeStoryFindings(plan, result)
+
+	scopeFinding := firstFinding(result.Findings, "contract.scope_missing")
+	if scopeFinding == nil {
+		t.Fatalf("expected contract.scope_missing, got: %+v", result.Findings)
+	}
+	if scopeFinding.TargetValue != "src/dropped.go" || scopeFinding.TargetField != "plan.scope.create" {
+		t.Fatalf("scope finding = %+v", *scopeFinding)
+	}
+	coverageFinding := firstFinding(result.Findings, "story.contract_scope_uncovered")
+	if coverageFinding == nil {
+		t.Fatalf("expected story.contract_scope_uncovered, got: %+v", result.Findings)
+	}
+	if coverageFinding.TargetValue != "src/dropped.go" {
+		t.Fatalf("coverage finding = %+v", *coverageFinding)
+	}
+}
+
+func TestMergeStoryFindings_ContractScopeInCurrentPlanButUncoveredByStories(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:         "contract-story-uncovered",
+		Requirements: []workflow.Requirement{{ID: "r1"}},
+		Scope: workflow.Scope{
+			Create: []string{"src/kept.go", "src/uncovered.go"},
+		},
+		Contract: &workflow.ContractPacket{
+			Scope: workflow.ContractScopeSnapshot{
+				Create: []string{"src/kept.go", "src/uncovered.go"},
+			},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "driver", ImplementationFiles: []string{"src/kept.go"}, Capabilities: []string{"driver"}},
+			},
+		},
+		Stories: []workflow.Story{
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "driver", Title: "T", Status: workflow.StoryStatusReady,
+				FilesOwned: []string{"src/kept.go"},
+				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeStoryFindings(plan, result)
+
+	if hasFinding(result.Findings, "contract.scope_missing") {
+		t.Fatalf("current scope still includes the contract path; scope_missing should not fire: %+v", result.Findings)
+	}
+	coverageFinding := firstFinding(result.Findings, "story.contract_scope_uncovered")
+	if coverageFinding == nil {
+		t.Fatalf("expected story.contract_scope_uncovered, got: %+v", result.Findings)
+	}
+	if coverageFinding.TargetValue != "src/uncovered.go" {
+		t.Fatalf("coverage finding = %+v", *coverageFinding)
+	}
+}
+
+func TestMergeStoryFindings_AcceptedContractChangeAllowsDroppedScope(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug:         "contract-amended-drop",
+		Requirements: []workflow.Requirement{{ID: "r1"}},
+		Scope: workflow.Scope{
+			Create: []string{"src/kept.go"},
+		},
+		Contract: &workflow.ContractPacket{
+			Scope: workflow.ContractScopeSnapshot{
+				Create: []string{"src/kept.go", "src/dropped.go"},
+			},
+			Amendments: []workflow.ContractAmendment{{
+				ID: "amendment-1",
+				Impact: workflow.ContractImpact{
+					Kind:        workflow.ContractImpactChange,
+					Summary:     "Drop the optional adapter file.",
+					AffectedIDs: []string{"contract.scope.create:src/dropped.go"},
+				},
+			}},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{Name: "driver", ImplementationFiles: []string{"src/kept.go"}, Capabilities: []string{"driver"}},
+			},
+		},
+		Stories: []workflow.Story{
+			{ID: "s1", RequirementIDs: []string{"r1"}, ComponentName: "driver", Title: "T", Status: workflow.StoryStatusReady,
+				FilesOwned: []string{"src/kept.go"},
+				Tasks:      []workflow.Task{{ID: "t1", StoryID: "s1", Description: "x"}}},
+		},
+	}
+	result := &workflow.PlanReviewResult{Verdict: "approved"}
+
+	mergeStoryFindings(plan, result)
+
+	if hasFinding(result.Findings, "contract.scope_missing") || hasFinding(result.Findings, "story.contract_scope_uncovered") {
+		t.Fatalf("accepted contract-changing amendment should authorize the drop, got: %+v", result.Findings)
+	}
+}
+
 func TestMergeStoryFindings_StoryDependsOnOrphan(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:         "story-orphan",
