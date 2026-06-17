@@ -46,7 +46,7 @@
 - [x] 6.3 Add execution detail showing Stories, tasks, loops, waits, blockers, terminal outcomes, and QA evidence
 - [x] 6.4 Add recovery and PlanDecision detail showing diagnosis, affected nodes, contract impact, and auto-accept status
 - [x] 6.5 Add lesson activity UI showing lesson cost and whether lessons affect current or future runs
-- [ ] 6.6 Add stale/disconnected indicators with last successful update timestamps
+- [x] 6.6 Add stale/disconnected indicators with last successful update timestamps
 
 ## 7. Verification And Rollout
 

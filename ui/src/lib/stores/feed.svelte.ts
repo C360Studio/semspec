@@ -16,6 +16,8 @@ import {
 	planFeedEventKey
 } from './feedEvents';
 
+const RECONNECT_GRACE_MS = 15_000;
+
 /**
  * Plan-scoped feed store. Aggregates plan SSE + execution SSE + questions
  * into a unified FeedEvent stream for the Activity Feed panel.
@@ -27,6 +29,12 @@ import {
 class FeedStore {
 	events = $state<FeedEvent[]>([]);
 	connected = $state(false);
+	planStreamConnected = $state(false);
+	executionStreamConnected = $state(false);
+	streamEverConnected = $state(false);
+	lastPlanUpdateAt = $state<string | null>(null);
+	lastExecutionUpdateAt = $state<string | null>(null);
+	lastSuccessfulUpdateAt = $state<string | null>(null);
 	currentSlug = $state<string | null>(null);
 	requirementStages = $state<Map<string, RequirementSSEPayload>>(new Map());
 	/** Latest task SSE payload keyed by task_id — consumers like PlanCard derive
@@ -47,6 +55,8 @@ class FeedStore {
 
 	private planSSE: EventSource | null = null;
 	private execSSE: EventSource | null = null;
+	private planReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+	private execReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private maxEvents = $derived(settingsStore.activityLimit);
 	private lastPlanStage: string | null = null;
 	private lastPlanEventKey: string | null = null;
@@ -72,6 +82,13 @@ class FeedStore {
 			if (this.currentSlug === slug && this.planSSE) return;
 
 			this.currentSlug = slug;
+			this.connected = false;
+			this.planStreamConnected = false;
+			this.executionStreamConnected = false;
+			this.streamEverConnected = false;
+			this.lastPlanUpdateAt = null;
+			this.lastExecutionUpdateAt = null;
+			this.lastSuccessfulUpdateAt = null;
 			this.lastPlanStage = null;
 			this.lastPlanEventKey = null;
 			this.seenQuestionIds.clear();
@@ -80,7 +97,6 @@ class FeedStore {
 			// when the plan reaches execution stage — avoids consuming browser
 			// connections (HTTP/1.1 limit of 6 per origin) during planning phase.
 			this.connectPlanSSE(slug);
-			this.connected = true;
 		});
 	}
 
@@ -90,7 +106,15 @@ class FeedStore {
 			this.planSSE = null;
 			this.execSSE?.close();
 			this.execSSE = null;
+			this.clearReconnectTimer('plan');
+			this.clearReconnectTimer('execution');
 			this.connected = false;
+			this.planStreamConnected = false;
+			this.executionStreamConnected = false;
+			this.streamEverConnected = false;
+			this.lastPlanUpdateAt = null;
+			this.lastExecutionUpdateAt = null;
+			this.lastSuccessfulUpdateAt = null;
 			this.currentSlug = null;
 			this.lastPlanStage = null;
 			this.lastPlanEventKey = null;
@@ -141,7 +165,7 @@ class FeedStore {
 		const sse = new EventSource(`/plan-manager/plans/${slug}/stream`);
 
 		sse.addEventListener('connected', () => {
-			// Plan SSE connected
+			this.markPlanConnected();
 		});
 
 		sse.addEventListener('plan_updated', (event) => {
@@ -150,9 +174,10 @@ class FeedStore {
 		});
 
 		sse.addEventListener('plan_deleted', () => {
+			const timestamp = this.markPlanUpdated();
 			this.addEvent({
 				id: `plan-deleted-${Date.now()}`,
-				timestamp: new Date().toISOString(),
+				timestamp,
 				source: 'plan',
 				type: 'plan_deleted',
 				kind: 'plan_deleted',
@@ -169,7 +194,7 @@ class FeedStore {
 		});
 
 		sse.onerror = () => {
-			// Will auto-reconnect via EventSource
+			this.handleStreamError('plan', sse.readyState);
 		};
 
 		this.planSSE = sse;
@@ -179,7 +204,7 @@ class FeedStore {
 		const sse = new EventSource(`/execution-manager/plans/${slug}/stream`);
 
 		sse.addEventListener('connected', () => {
-			// Execution SSE connected
+			this.markExecutionConnected();
 		});
 
 		for (const name of ['task_updated', 'task_completed']) {
@@ -197,13 +222,14 @@ class FeedStore {
 		}
 
 		sse.onerror = () => {
-			// Will auto-reconnect via EventSource
+			this.handleStreamError('execution', sse.readyState);
 		};
 
 		this.execSSE = sse;
 	}
 
 	private handlePlanUpdated(payload: PlanSSEPayload): void {
+		const timestamp = this.markPlanUpdated();
 		const stage = payload.stage;
 		const prevStage = this.lastPlanStage;
 		const kind = classifyPlanFeedKind(payload);
@@ -236,7 +262,7 @@ class FeedStore {
 
 		const event: FeedEvent = {
 			id: `plan-${payload.slug}-${stage}-${Date.now()}`,
-			timestamp: new Date().toISOString(),
+			timestamp,
 			source: kind === 'execution_phase' ? 'execution' : 'plan',
 			type: 'plan_updated',
 			kind,
@@ -253,6 +279,7 @@ class FeedStore {
 	}
 
 	private handleTaskUpdated(payload: TaskSSEPayload, eventType: string): void {
+		const timestamp = this.markExecutionUpdated();
 		const title = payload.title?.slice(0, 50) ?? payload.task_id;
 		const stage = payload.stage;
 		const iter = payload.iteration > 1 ? ` (iter ${payload.iteration})` : '';
@@ -275,7 +302,7 @@ class FeedStore {
 
 		const event: FeedEvent = {
 			id: `task-${payload.task_id}-${stage}-${Date.now()}`,
-			timestamp: new Date().toISOString(),
+			timestamp,
 			source: 'execution',
 			type: eventType,
 			kind,
@@ -294,6 +321,7 @@ class FeedStore {
 	}
 
 	private handleRequirementUpdated(payload: RequirementSSEPayload, eventType: string): void {
+		const timestamp = this.markExecutionUpdated();
 		const title = payload.title?.slice(0, 50) ?? payload.requirement_id;
 		const stage = payload.stage;
 		const progress = payload.node_count
@@ -311,7 +339,7 @@ class FeedStore {
 
 		const event: FeedEvent = {
 			id: `req-${payload.requirement_id}-${stage}-${Date.now()}`,
-			timestamp: new Date().toISOString(),
+			timestamp,
 			source: 'execution',
 			type: eventType,
 			kind,
@@ -330,6 +358,86 @@ class FeedStore {
 
 	private addEvent(event: FeedEvent): void {
 		this.events = [...this.events.slice(-(this.maxEvents - 1)), event];
+	}
+
+	private markPlanConnected(): void {
+		this.clearReconnectTimer('plan');
+		this.planStreamConnected = true;
+		this.streamEverConnected = true;
+		this.updateAggregateConnection();
+	}
+
+	private markExecutionConnected(): void {
+		this.clearReconnectTimer('execution');
+		this.executionStreamConnected = true;
+		this.streamEverConnected = true;
+		this.updateAggregateConnection();
+	}
+
+	private markPlanUpdated(): string {
+		const timestamp = new Date().toISOString();
+		this.lastPlanUpdateAt = timestamp;
+		this.lastSuccessfulUpdateAt = timestamp;
+		this.markPlanConnected();
+		return timestamp;
+	}
+
+	private markExecutionUpdated(): string {
+		const timestamp = new Date().toISOString();
+		this.lastExecutionUpdateAt = timestamp;
+		this.lastSuccessfulUpdateAt = timestamp;
+		this.markExecutionConnected();
+		return timestamp;
+	}
+
+	private handleStreamError(stream: 'plan' | 'execution', readyState: number | undefined): void {
+		const closed = typeof EventSource !== 'undefined' ? EventSource.CLOSED : 2;
+		if (readyState === closed) {
+			this.markStreamDisconnected(stream);
+			return;
+		}
+
+		const existing = stream === 'plan' ? this.planReconnectTimer : this.execReconnectTimer;
+		if (existing) return;
+		const timer = setTimeout(() => {
+			if (stream === 'plan') {
+				this.planReconnectTimer = null;
+			} else {
+				this.execReconnectTimer = null;
+			}
+			this.markStreamDisconnected(stream);
+		}, RECONNECT_GRACE_MS);
+
+		if (stream === 'plan') {
+			this.planReconnectTimer = timer;
+		} else {
+			this.execReconnectTimer = timer;
+		}
+	}
+
+	private markStreamDisconnected(stream: 'plan' | 'execution'): void {
+		this.clearReconnectTimer(stream);
+		if (stream === 'plan') {
+			this.planStreamConnected = false;
+		} else {
+			this.executionStreamConnected = false;
+		}
+		this.updateAggregateConnection();
+	}
+
+	private clearReconnectTimer(stream: 'plan' | 'execution'): void {
+		if (stream === 'plan' && this.planReconnectTimer) {
+			clearTimeout(this.planReconnectTimer);
+			this.planReconnectTimer = null;
+		}
+		if (stream === 'execution' && this.execReconnectTimer) {
+			clearTimeout(this.execReconnectTimer);
+			this.execReconnectTimer = null;
+		}
+	}
+
+	private updateAggregateConnection(): void {
+		this.connected = this.planStreamConnected || this.executionStreamConnected;
 	}
 }
 

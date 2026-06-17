@@ -52,8 +52,15 @@
 	const isConnected = $derived(
 		scope === 'global' ? activityStore.connected : feedStore.connected
 	);
-	const waitingLabel = $derived(
-		scope === 'global' ? 'Activity stream offline' : 'Waiting for plan...'
+	const lastSuccessfulUpdateAt = $derived(
+		scope === 'global' ? activityStore.lastSuccessfulUpdateAt : feedStore.lastSuccessfulUpdateAt
+	);
+	const waitingLabel = $derived.by(() => {
+		if (scope === 'global') return 'Activity stream offline';
+		return feedStore.streamEverConnected ? 'Stream reconnecting' : 'Connecting...';
+	});
+	const lastUpdateLabel = $derived(
+		lastSuccessfulUpdateAt ? `Last update ${formatStatusTime(lastSuccessfulUpdateAt)}` : null
 	);
 
 	function getEventIcon(event: FeedEvent): string {
@@ -121,6 +128,10 @@
 	}
 
 	function formatTime(timestamp: string): string {
+		return new Date(timestamp).toLocaleTimeString();
+	}
+
+	function formatStatusTime(timestamp: string): string {
 		return new Date(timestamp).toLocaleTimeString();
 	}
 
@@ -237,6 +248,9 @@
 			<span class="status-dot"></span>
 			<span>{isConnected ? 'Live' : waitingLabel}</span>
 		</div>
+		{#if lastUpdateLabel}
+			<span class="last-update">{lastUpdateLabel}</span>
+		{/if}
 		<span class="event-count">{filteredEvents.length} events</span>
 	</div>
 
@@ -412,6 +426,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
+		gap: var(--space-2);
 		margin-bottom: var(--space-3);
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
@@ -432,6 +447,17 @@
 
 	.connection-indicator.connected .status-dot {
 		background: var(--color-success);
+	}
+
+	.last-update {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.event-count {
+		margin-left: auto;
+		white-space: nowrap;
 	}
 
 	.empty-feed {

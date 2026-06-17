@@ -15,6 +15,7 @@ type ActivityCallback = (event: ActivityEvent) => void;
 class ActivityStore {
 	recent = $state<ActivityEvent[]>([]);
 	connected = $state(false);
+	lastSuccessfulUpdateAt = $state<string | null>(null);
 	/**
 	 * Tick timestamp (browser Date.now()) of the last SSE event per loop_id.
 	 * Lets UIs surface "is this thing on?" — the time since last tick tells a
@@ -82,6 +83,7 @@ class ActivityStore {
 	}
 
 	private addEvent(event: ActivityEvent): void {
+		this.lastSuccessfulUpdateAt = new Date().toISOString();
 		this.recent = [...this.recent.slice(-(this.maxEvents - 1)), event];
 
 		// Maintain loopLastSeen as a heartbeat timeline. Map must be replaced,

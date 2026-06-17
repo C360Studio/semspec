@@ -5,6 +5,7 @@
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import PlanDetail from '$lib/components/plan/PlanDetail.svelte';
+	import PlanFreshnessIndicator from '$lib/components/plan/PlanFreshnessIndicator.svelte';
 	import PlanReviewCard from '$lib/components/plan/PlanReviewCard.svelte';
 	import InProgressPanel from '$lib/components/plan/InProgressPanel.svelte';
 	import { deriveGuidance } from '$lib/components/plan/guidance';
@@ -681,6 +682,8 @@
 					startedAt={progressPanel.startedAt}
 				/>
 			{/if}
+
+			<PlanFreshnessIndicator {plan} />
 
 			<!-- Agent pipeline during execution -->
 			{#if plan.active_loops && plan.active_loops.length > 0}
