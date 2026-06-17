@@ -8,11 +8,11 @@
 	 * all others are faded to #525252. Edge dimming mirrors the same rule.
 	 */
 
-	import { MultiDirectedGraph } from 'graphology';
-	import Sigma from 'sigma';
 	import type { GraphEntity, GraphRelationship } from '$lib/api/graph-types';
 	import { syncStoreToGraph } from '$lib/utils/graphology-adapter';
-	import { LayoutController } from '$lib/utils/sigma-layout';
+	import type { MultiDirectedGraph } from 'graphology';
+	import type Sigma from 'sigma';
+	import type { LayoutController } from '$lib/utils/sigma-layout';
 
 	interface SigmaCanvasProps {
 		entities: GraphEntity[];
@@ -39,9 +39,9 @@
 	}: SigmaCanvasProps = $props();
 
 	let containerElement: HTMLDivElement;
-	let sigma: Sigma | null = null;
-	let graph: MultiDirectedGraph | null = null;
-	let layout: LayoutController | null = null;
+	let sigma: Sigma | null = $state(null);
+	let graph: MultiDirectedGraph | null = $state(null);
+	let layout: LayoutController | null = $state(null);
 	let lastEntityCount = 0;
 	let renderError = $state<string | null>(null);
 
@@ -51,109 +51,132 @@
 		if (typeof window === 'undefined') return;
 		if (!containerElement) return;
 
-		graph = new MultiDirectedGraph();
-		layout = new LayoutController();
+		let cancelled = false;
+		let initializedSigma: Sigma | null = null;
+		let initializedLayout: LayoutController | null = null;
 
-		sigma = new Sigma(graph, containerElement, {
-			allowInvalidContainer: true,
-			renderEdgeLabels: false,
-			defaultEdgeType: 'arrow',
-			labelRenderedSizeThreshold: 8,
-			labelColor: { color: '#f4f4f4' },
-			defaultDrawNodeHover: (context, data, settings) => {
-				const size = data.size || 5;
-				const x = data.x;
-				const y = data.y;
-				const color = data.color || '#6b7280';
+		void Promise.all([
+			import('graphology'),
+			import('sigma'),
+			import('$lib/utils/sigma-layout')
+		])
+			.then(([graphology, sigmaModule, layoutModule]) => {
+				if (cancelled) return;
+				const nextGraph = new graphology.MultiDirectedGraph();
+				const nextLayout = new layoutModule.LayoutController();
+				const nextSigma = new sigmaModule.default(nextGraph, containerElement, {
+					allowInvalidContainer: true,
+					renderEdgeLabels: false,
+					defaultEdgeType: 'arrow',
+					labelRenderedSizeThreshold: 8,
+					labelColor: { color: '#f4f4f4' },
+					defaultDrawNodeHover: (context, data, settings) => {
+						const size = data.size || 5;
+						const x = data.x;
+						const y = data.y;
+						const color = data.color || '#6b7280';
 
-				// Draw a colored ring around the node instead of Sigma's default white halo
-				context.beginPath();
-				context.arc(x, y, size + 3, 0, Math.PI * 2);
-				context.strokeStyle = color;
-				context.lineWidth = 2;
-				context.stroke();
-				context.closePath();
+						// Draw a colored ring around the node instead of Sigma's default white halo
+						context.beginPath();
+						context.arc(x, y, size + 3, 0, Math.PI * 2);
+						context.strokeStyle = color;
+						context.lineWidth = 2;
+						context.stroke();
+						context.closePath();
 
-				// Redraw the node circle
-				context.beginPath();
-				context.arc(x, y, size, 0, Math.PI * 2);
-				context.fillStyle = color;
-				context.fill();
-				context.closePath();
+						// Redraw the node circle
+						context.beginPath();
+						context.arc(x, y, size, 0, Math.PI * 2);
+						context.fillStyle = color;
+						context.fill();
+						context.closePath();
 
-				// Draw the label
-				if (data.label) {
-					const fontSize = settings.labelSize || 14;
-					context.font = `${fontSize}px ${settings.labelFont || 'sans-serif'}`;
-					context.fillStyle = '#f4f4f4';
-					context.fillText(data.label, x + size + 4, y + fontSize / 3);
-				}
-			},
-			nodeReducer: (node, data) => {
-				const res = { ...data };
+						// Draw the label
+						if (data.label) {
+							const fontSize = settings.labelSize || 14;
+							context.font = `${fontSize}px ${settings.labelFont || 'sans-serif'}`;
+							context.fillStyle = '#f4f4f4';
+							context.fillText(data.label, x + size + 4, y + fontSize / 3);
+						}
+					},
+					nodeReducer: (node, data) => {
+						const res = { ...data };
 
-				if (selectedEntityId && node !== selectedEntityId) {
-					const isNeighbor =
-						graph!.hasEdge(selectedEntityId, node) ||
-						graph!.hasEdge(node, selectedEntityId);
-					if (!isNeighbor) {
-						res.color = '#525252';
-						res.label = '';
+						if (selectedEntityId && node !== selectedEntityId) {
+							const isNeighbor =
+								nextGraph.hasEdge(selectedEntityId, node) ||
+								nextGraph.hasEdge(node, selectedEntityId);
+							if (!isNeighbor) {
+								res.color = '#525252';
+								res.label = '';
+							}
+						}
+
+						if (node === hoveredEntityId) {
+							res.highlighted = true;
+						}
+
+						return res;
+					},
+					edgeReducer: (edge, data) => {
+						const res = { ...data };
+
+						if (selectedEntityId) {
+							const source = nextGraph.source(edge);
+							const target = nextGraph.target(edge);
+							const isConnected =
+								source === selectedEntityId || target === selectedEntityId;
+							if (!isConnected) {
+								res.color = '#393939';
+							}
+						}
+
+						return res;
 					}
-				}
+				});
 
-				if (node === hoveredEntityId) {
-					res.highlighted = true;
-				}
+				// Event handlers
+				nextSigma.on('clickNode', ({ node }) => {
+					onEntitySelect?.(node === selectedEntityId ? null : node);
+				});
 
-				return res;
-			},
-			edgeReducer: (edge, data) => {
-				const res = { ...data };
+				nextSigma.on('doubleClickNode', ({ node, event }) => {
+					event.original.preventDefault();
+					onEntityExpand?.(node);
+				});
 
-				if (selectedEntityId) {
-					const source = graph!.source(edge);
-					const target = graph!.target(edge);
-					const isConnected =
-						source === selectedEntityId || target === selectedEntityId;
-					if (!isConnected) {
-						res.color = '#393939';
-					}
-				}
+				nextSigma.on('enterNode', ({ node }) => {
+					onEntityHover?.(node);
+				});
 
-				return res;
-			}
-		});
+				nextSigma.on('leaveNode', () => {
+					onEntityHover?.(null);
+				});
 
-		// Event handlers
-		sigma.on('clickNode', ({ node }) => {
-			onEntitySelect?.(node === selectedEntityId ? null : node);
-		});
+				nextSigma.on('clickStage', () => {
+					onEntitySelect?.(null);
+				});
 
-		sigma.on('doubleClickNode', ({ node, event }) => {
-			event.original.preventDefault();
-			onEntityExpand?.(node);
-		});
-
-		sigma.on('enterNode', ({ node }) => {
-			onEntityHover?.(node);
-		});
-
-		sigma.on('leaveNode', () => {
-			onEntityHover?.(null);
-		});
-
-		sigma.on('clickStage', () => {
-			onEntitySelect?.(null);
-		});
+				initializedSigma = nextSigma;
+				initializedLayout = nextLayout;
+				graph = nextGraph;
+				layout = nextLayout;
+				sigma = nextSigma;
+			})
+			.catch((err) => {
+				if (cancelled) return;
+				renderError = err instanceof Error ? err.message : 'Graph rendering failed';
+				console.error('Graph initialization failed', err);
+			});
 
 		// Cleanup on destroy
 		return () => {
-			layout?.stop();
-			sigma?.kill();
-			sigma = null;
+			cancelled = true;
+			initializedLayout?.stop();
+			initializedSigma?.kill();
+			if (sigma === initializedSigma) sigma = null;
+			if (layout === initializedLayout) layout = null;
 			graph = null;
-			layout = null;
 		};
 	});
 
