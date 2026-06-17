@@ -1445,17 +1445,20 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 	}
 
 	current := plan.EffectiveStatus()
-	if current != workflow.StatusReadyForQA {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in ready_for_qa, got %s", current)}
+	if current != workflow.StatusReadyForQA && current != workflow.StatusReviewingQA {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in ready_for_qa or reviewing_qa, got %s", current)}
 	}
-	if !current.CanTransitionTo(workflow.StatusReviewingQA) {
+	alreadyReviewing := current == workflow.StatusReviewingQA
+	if !alreadyReviewing && !current.CanTransitionTo(workflow.StatusReviewingQA) {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → reviewing_qa", current)}
 	}
 
 	if req.QARun != nil {
 		plan.QARun = req.QARun
 	}
-	plan.Status = workflow.StatusReviewingQA
+	if !alreadyReviewing {
+		plan.Status = workflow.StatusReviewingQA
+	}
 
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan after QA start", "slug", req.Slug, "error", err)
@@ -1465,7 +1468,9 @@ func (c *Component) handleQAStartMutation(ctx context.Context, data []byte) Muta
 	// Cold-path safety net: guarantee the QA worktree (staged at convergence)
 	// exists before qa-reviewer dispatches Murat, so the release-gate loop
 	// inspects the assembled implementation rather than the repo root.
-	c.ensureQAWorktree(ctx, plan)
+	if !alreadyReviewing {
+		c.ensureQAWorktree(ctx, plan)
+	}
 
 	level := plan.EffectiveQALevel()
 	c.logger.Info("QA review started",

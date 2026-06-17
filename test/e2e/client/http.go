@@ -909,6 +909,7 @@ type Plan struct {
 	UpdatedAt               time.Time       `json:"updated_at"`
 	Status                  string          `json:"status,omitempty"`
 	Stage                   string          `json:"stage,omitempty"`
+	QALevel                 string          `json:"qa_level,omitempty"`
 	ReviewVerdict           string          `json:"review_verdict,omitempty"`
 	ReviewSummary           string          `json:"review_summary,omitempty"`
 	ReviewedAt              *time.Time      `json:"reviewed_at,omitempty"`
@@ -923,6 +924,18 @@ type Plan struct {
 
 	// ExecutionSummary is populated when plan is in implementing status.
 	ExecutionSummary *ExecutionSummary `json:"execution_summary,omitempty"`
+
+	// PhaseSummary is the authoritative current-state surface used by the UI.
+	PhaseSummary *PlanPhaseSummary `json:"phase_summary,omitempty"`
+
+	// Requirements, Stories, and Scenarios are included on plan detail reads.
+	Requirements []Requirement    `json:"requirements,omitempty"`
+	Stories      []Story          `json:"stories,omitempty"`
+	Scenarios    []ScenarioRecord `json:"scenarios,omitempty"`
+
+	// QA evidence is populated once the plan enters the QA gate.
+	QARun            *QARun            `json:"qa_run,omitempty"`
+	QAVerdictSummary *QAVerdictSummary `json:"qa_verdict_summary,omitempty"`
 
 	// LLM call history for drill-down from loop iterations to full artifacts
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
@@ -939,6 +952,151 @@ type ExecutionSummary struct {
 	Failed    int `json:"failed"`
 	Pending   int `json:"pending"`
 	Total     int `json:"total"`
+}
+
+// PlanPhaseSummary mirrors plan-manager's authoritative UI-facing phase model.
+type PlanPhaseSummary struct {
+	Stage           string                `json:"stage"`
+	Phase           string                `json:"phase"`
+	State           string                `json:"state"`
+	Title           string                `json:"title"`
+	Detail          string                `json:"detail,omitempty"`
+	ActiveLoopCount int                   `json:"active_loop_count"`
+	Execution       *ExecutionSummary     `json:"execution,omitempty"`
+	Wait            *PlanWaitSummary      `json:"wait,omitempty"`
+	Recovery        *PlanRecoverySummary  `json:"recovery,omitempty"`
+	Lessons         *PlanLessonSummary    `json:"lessons,omitempty"`
+	QA              *PlanQASummary        `json:"qa,omitempty"`
+	Freshness       *PlanFreshnessSummary `json:"freshness,omitempty"`
+}
+
+// PlanWaitSummary explains why a plan is intentionally not advancing.
+type PlanWaitSummary struct {
+	Reason         string `json:"reason"`
+	DecisionID     string `json:"decision_id,omitempty"`
+	PolicyReason   string `json:"policy_reason,omitempty"`
+	RequiredAction string `json:"required_action,omitempty"`
+}
+
+// PlanRecoverySummary points at the governing recovery/change decision.
+type PlanRecoverySummary struct {
+	DecisionID             string   `json:"decision_id"`
+	Kind                   string   `json:"kind,omitempty"`
+	Status                 string   `json:"status"`
+	ProposedBy             string   `json:"proposed_by,omitempty"`
+	Summary                string   `json:"summary,omitempty"`
+	ContractImpactKind     string   `json:"contract_impact_kind,omitempty"`
+	ContractImpactSummary  string   `json:"contract_impact_summary,omitempty"`
+	AffectedRequirementIDs []string `json:"affected_requirement_ids,omitempty"`
+	AffectedStoryIDs       []string `json:"affected_story_ids,omitempty"`
+}
+
+// PlanLessonSummary exposes whether run lessons can affect current work.
+type PlanLessonSummary struct {
+	State            string `json:"state"`
+	CurrentRunEffect string `json:"current_run_effect"`
+	FutureRunEffect  string `json:"future_run_effect"`
+	Detail           string `json:"detail,omitempty"`
+}
+
+// PlanQASummary carries current QA verdict/run evidence.
+type PlanQASummary struct {
+	Level           string `json:"level,omitempty"`
+	Verdict         string `json:"verdict,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	RunID           string `json:"run_id,omitempty"`
+	Passed          *bool  `json:"passed,omitempty"`
+	FailureCategory string `json:"failure_category,omitempty"`
+}
+
+// PlanFreshnessSummary lets tests assert the plan-manager source of truth.
+type PlanFreshnessSummary struct {
+	Source      string    `json:"source"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Stale       bool      `json:"stale"`
+	Reason      string    `json:"reason,omitempty"`
+}
+
+// Story mirrors the plan detail shape for BMAD Story observability assertions.
+type Story struct {
+	ID             string    `json:"id"`
+	ComponentName  string    `json:"component_name,omitempty"`
+	RequirementIDs []string  `json:"requirement_ids,omitempty"`
+	Title          string    `json:"title"`
+	Intent         string    `json:"intent,omitempty"`
+	FilesOwned     []string  `json:"files_owned,omitempty"`
+	DependsOn      []string  `json:"depends_on,omitempty"`
+	Tasks          []Task    `json:"tasks,omitempty"`
+	Status         string    `json:"status,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// Task mirrors workflow.Task for plan detail reads.
+type Task struct {
+	ID          string    `json:"id"`
+	StoryID     string    `json:"story_id"`
+	Description string    `json:"description"`
+	DependsOn   []string  `json:"depends_on,omitempty"`
+	Status      string    `json:"status,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// QARun carries executor evidence persisted on a plan.
+type QARun struct {
+	RunID        string          `json:"run_id"`
+	Passed       bool            `json:"passed"`
+	Failures     []QAFailure     `json:"failures,omitempty"`
+	SkippedTests []QASkippedTest `json:"skipped_tests,omitempty"`
+	Artifacts    []QAArtifactRef `json:"artifacts,omitempty"`
+	DurationMs   int64           `json:"duration_ms"`
+	RunnerError  string          `json:"runner_error,omitempty"`
+	TraceID      string          `json:"trace_id,omitempty"`
+	CompletedAt  time.Time       `json:"completed_at"`
+}
+
+// QAFailure is the machine-readable class for a QA job failure.
+type QAFailure struct {
+	JobName    string `json:"job_name"`
+	StepName   string `json:"step_name,omitempty"`
+	TestName   string `json:"test_name,omitempty"`
+	Category   string `json:"category,omitempty"`
+	Message    string `json:"message,omitempty"`
+	LogExcerpt string `json:"log_excerpt,omitempty"`
+}
+
+// QASkippedTest identifies a single skipped QA test.
+type QASkippedTest struct {
+	Suite string `json:"suite,omitempty"`
+	Name  string `json:"name"`
+	File  string `json:"file,omitempty"`
+}
+
+// QAArtifactRef references a QA artifact.
+type QAArtifactRef struct {
+	Path    string `json:"path"`
+	Type    string `json:"type"`
+	Purpose string `json:"purpose,omitempty"`
+}
+
+// QAVerdictSummary mirrors the persisted qa-reviewer verdict.
+type QAVerdictSummary struct {
+	Verdict    string              `json:"verdict"`
+	Level      string              `json:"level"`
+	Summary    string              `json:"summary,omitempty"`
+	Dimensions QAVerdictDimensions `json:"dimensions,omitempty"`
+	RecordedAt time.Time           `json:"recorded_at"`
+}
+
+// QAVerdictDimensions carries per-axis qa-reviewer assessments.
+type QAVerdictDimensions struct {
+	RequirementFulfillment string `json:"requirement_fulfillment,omitempty"`
+	CapabilityEvidence     string `json:"capability_evidence,omitempty"`
+	Coverage               string `json:"coverage,omitempty"`
+	AssertionQuality       string `json:"assertion_quality,omitempty"`
+	RegressionSurface      string `json:"regression_surface,omitempty"`
+	FlakeJudgment          string `json:"flake_judgment,omitempty"`
 }
 
 // Architecture mirrors workflow.ArchitectureDocument for E2E assertions.
@@ -2067,15 +2225,33 @@ type PlanDecision struct {
 	// Kind narrows the intent: requirement_change (cascade re-runs) or
 	// execution_exhausted (terminal record). Recovery-agent emits both
 	// shapes depending on the chosen RecoveryAction.
-	Kind           string     `json:"kind,omitempty"`
-	Title          string     `json:"title"`
-	Rationale      string     `json:"rationale,omitempty"`
-	Status         string     `json:"status"`
-	ProposedBy     string     `json:"proposed_by"`
-	AffectedReqIDs []string   `json:"affected_requirement_ids"`
-	CreatedAt      time.Time  `json:"created_at"`
-	ReviewedAt     *time.Time `json:"reviewed_at,omitempty"`
-	DecidedAt      *time.Time `json:"decided_at,omitempty"`
+	Kind               string            `json:"kind,omitempty"`
+	Title              string            `json:"title"`
+	Rationale          string            `json:"rationale,omitempty"`
+	Status             string            `json:"status"`
+	ProposedBy         string            `json:"proposed_by"`
+	AffectedReqIDs     []string          `json:"affected_requirement_ids"`
+	AffectedStoryIDs   []string          `json:"affected_story_ids,omitempty"`
+	RejectionReasons   map[string]string `json:"rejection_reasons,omitempty"`
+	ContractImpact     *ContractImpact   `json:"contract_impact,omitempty"`
+	ArtifactReferences []ArtifactRef     `json:"artifact_references,omitempty"`
+	CreatedAt          time.Time         `json:"created_at"`
+	ReviewedAt         *time.Time        `json:"reviewed_at,omitempty"`
+	DecidedAt          *time.Time        `json:"decided_at,omitempty"`
+}
+
+// ContractImpact summarizes how a decision affects the authoritative contract.
+type ContractImpact struct {
+	Kind        string   `json:"kind"`
+	Summary     string   `json:"summary,omitempty"`
+	AffectedIDs []string `json:"affected_ids,omitempty"`
+}
+
+// ArtifactRef is attached to PlanDecisions for recovery/QA evidence.
+type ArtifactRef struct {
+	Path    string `json:"path"`
+	Type    string `json:"type"`
+	Purpose string `json:"purpose,omitempty"`
 }
 
 // CascadeResult summarizes the effect of accepting a PlanDecision.
