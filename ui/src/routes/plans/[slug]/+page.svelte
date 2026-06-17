@@ -10,6 +10,7 @@
 	import { deriveGuidance } from '$lib/components/plan/guidance';
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
+	import ExecutionDetail from '$lib/components/plan/ExecutionDetail.svelte';
 	import PhaseArtifactsView from '$lib/components/plan/PhaseArtifactsView.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
@@ -59,6 +60,17 @@
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
+	const showExecutionDetail = $derived(
+		plan
+			? Boolean(
+				(plan.stories?.length ?? 0) > 0 ||
+					plan.execution_summary ||
+					plan.qa_run ||
+					plan.qa_verdict_summary ||
+					['execution', 'qa', 'recovery', 'waiting', 'terminal'].includes(plan.phase_summary?.phase ?? '')
+			)
+			: false
+	);
 	const liveTrajectoryItems = $derived(
 		mergeLiveTrajectoryItems(data.trajectoryItems, activityStore.recent, slug ?? '')
 	);
@@ -648,6 +660,10 @@
 
 			<!-- Plan details: goal, context, scope -->
 			<PlanDetail {plan} phases={[]} requirements={requirements} onRefresh={handleRefresh} />
+
+			{#if showExecutionDetail}
+				<ExecutionDetail {plan} />
+			{/if}
 
 			<!-- Reviews: collapsible. R1 plan-reviewer verdict appears as soon as the
 			     planner+reviewer have finished (plan.review_verdict is set on the plan
