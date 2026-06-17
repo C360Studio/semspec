@@ -69,7 +69,7 @@ func TestPlanWithStatusContract_RequiredFields(t *testing.T) {
 	requiredFields := []string{
 		"id", "slug", "title", "project_id",
 		"approved", "created_at",
-		"stage", "active_loops",
+		"stage", "active_loops", "phase_summary",
 	}
 	for _, field := range requiredFields {
 		_, exists := raw[field]
