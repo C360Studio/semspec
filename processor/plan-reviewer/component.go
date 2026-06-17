@@ -452,18 +452,24 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	// reviewer pass-2 (with no memory of pass-1) re-rejected with the same
 	// complaint shape and hit max_revisions → escalated.
 	priorFindings, priorIteration := extractPriorReviewContext(planContent)
+	var reviewPlan workflow.Plan
+	var reviewPlanPtr *workflow.Plan
+	if err := json.Unmarshal([]byte(planContent), &reviewPlan); err == nil {
+		reviewPlanPtr = &reviewPlan
+	}
 
 	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RolePlanReviewer,
-		Provider:          provider,
-		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
-		Domain:            "software",
-		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer),
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Standards:         stdCtx,
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		Role:               prompt.RolePlanReviewer,
+		Provider:           provider,
+		HasResponseFormat:  terminal.EndpointSupportsResponseFormat(endpoint),
+		Domain:             "software",
+		AvailableTools:     prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer),
+		SupportsTools:      true,
+		MaxTokens:          maxTokens,
+		Standards:          stdCtx,
+		Persona:            prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
+		Vocabulary:         prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection: prompt.BuildContractProjection(reviewPlanPtr, prompt.RolePlanReviewer),
 		PlanReviewerPrompt: &prompt.PlanReviewerPromptContext{
 			Slug:                slug,
 			PlanContent:         planContent,

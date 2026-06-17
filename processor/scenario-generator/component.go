@@ -385,6 +385,9 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		Vocabulary:              prompt.GlobalPersonas().Vocabulary(),
 		ScenarioGeneratorPrompt: scenCtx,
 	}
+	if plan, err := c.loadPlanFromKV(ctx, req.Slug); err == nil {
+		asmCtx.ContractProjection = prompt.ScenarioGeneratorContractProjection(plan)
+	}
 
 	// Wire role-scoped lessons learned.
 	if c.lessonWriter != nil {

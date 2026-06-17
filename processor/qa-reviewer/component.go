@@ -478,18 +478,19 @@ func (c *Component) dispatchReviewer(ctx context.Context, plan *workflow.Plan, p
 
 	// Build assembly context.
 	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RolePlanQAReviewer,
-		Provider:          provider,
-		HasResponseFormat: terminal.EndpointSupportsResponseFormat(endpoint),
-		Domain:            "software",
-		AvailableTools:    prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Standards:         stdCtx,
-		QAReviewContext:   qrc,
-		QAReviewerPrompt:  &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError, QAReviewContext: qrc},
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
+		Role:               prompt.RolePlanQAReviewer,
+		Provider:           provider,
+		HasResponseFormat:  terminal.EndpointSupportsResponseFormat(endpoint),
+		Domain:             "software",
+		AvailableTools:     prompt.FilterTools(c.availableToolNames(), prompt.RolePlanQAReviewer),
+		SupportsTools:      true,
+		MaxTokens:          maxTokens,
+		Standards:          stdCtx,
+		QAReviewContext:    qrc,
+		QAReviewerPrompt:   &prompt.QAReviewerPromptContext{Plan: plan, PreviousError: previousError, QAReviewContext: qrc},
+		Persona:            prompt.GlobalPersonas().ForRole(prompt.RolePlanQAReviewer),
+		Vocabulary:         prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection: prompt.QAContractProjection(plan),
 	}
 
 	// Load role-scoped lessons.

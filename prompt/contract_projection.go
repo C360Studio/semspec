@@ -199,11 +199,11 @@ func includeConstraints(profile ContractProjectionProfile) bool {
 }
 
 func includeAcceptanceObligations(profile ContractProjectionProfile) bool {
-	return profile != ContractProjectionArchitect
+	return profile != ""
 }
 
 func includeForbiddenMoves(profile ContractProjectionProfile) bool {
-	return profile != ContractProjectionRequirementGenerator
+	return profile != ""
 }
 
 func includeScope(profile ContractProjectionProfile) bool {

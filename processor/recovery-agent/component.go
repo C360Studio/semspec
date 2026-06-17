@@ -411,27 +411,30 @@ func capabilityForRequest(req *payloads.RecoveryRequested) model.Capability {
 	return model.CapabilityPlanWedgeRecovery
 }
 
-// readPlanArchitectureContext loads the wedged plan from PLAN_STATES and
-// pre-renders its architecture surface so recovery can diagnose what the wedge
-// actually was. Best-effort: returns "" when the bucket, plan, or architecture
-// is absent (early plan-layer wedges have no architecture yet).
-func (c *Component) readPlanArchitectureContext(ctx context.Context, slug string) string {
+func (c *Component) readPlan(ctx context.Context, slug string) *workflow.Plan {
 	if c.natsClient == nil || slug == "" {
-		return ""
+		return nil
 	}
 	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "PLAN_STATES")
 	if err != nil {
-		return ""
+		return nil
 	}
 	entry, err := bucket.Get(ctx, slug)
 	if err != nil {
-		return ""
+		return nil
 	}
 	var plan workflow.Plan
 	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-		return ""
+		return nil
 	}
-	return prompt.FormatArchitectureContext(prompt.ProjectArchitecture(plan.Architecture))
+	return &plan
+}
+
+func planArchitecture(plan *workflow.Plan) *workflow.ArchitectureDocument {
+	if plan == nil {
+		return nil
+	}
+	return plan.Architecture
 }
 
 // dispatchRecovery is the load-bearing path: fetch trajectory, build prompt,
@@ -460,6 +463,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 	}
 
 	steps := c.fetchTrajectorySteps(ctx, req)
+	plan := c.readPlan(ctx, req.Slug)
 	recCtx := &prompt.RecoveryPromptContext{
 		Layer:               string(req.Layer),
 		Slug:                req.Slug,
@@ -470,7 +474,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		EscalationReason:    req.EscalationReason,
 		LastFailureFeedback: req.LastFailureFeedback,
 		TrajectorySteps:     steps,
-		ArchitectureContext: c.readPlanArchitectureContext(ctx, req.Slug),
+		ArchitectureContext: prompt.FormatArchitectureContext(prompt.ProjectArchitecture(planArchitecture(plan))),
 	}
 
 	var (
@@ -486,16 +490,17 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 
 	availableTools := prompt.FilterTools(recoveryAvailableToolNames(), prompt.RoleRecoveryAgent)
 	asmCtx := &prompt.AssemblyContext{
-		Role:              prompt.RoleRecoveryAgent,
-		Provider:          resolveProvider(modelName),
-		HasResponseFormat: terminal.EndpointSupportsResponseFormatGated(endpoint, nil),
-		Domain:            "software",
-		AvailableTools:    availableTools,
-		SupportsTools:     true,
-		MaxTokens:         maxTokens,
-		Persona:           prompt.GlobalPersonas().ForRole(prompt.RoleRecoveryAgent),
-		Vocabulary:        prompt.GlobalPersonas().Vocabulary(),
-		Recovery:          recCtx,
+		Role:               prompt.RoleRecoveryAgent,
+		Provider:           resolveProvider(modelName),
+		HasResponseFormat:  terminal.EndpointSupportsResponseFormatGated(endpoint, nil),
+		Domain:             "software",
+		AvailableTools:     availableTools,
+		SupportsTools:      true,
+		MaxTokens:          maxTokens,
+		Persona:            prompt.GlobalPersonas().ForRole(prompt.RoleRecoveryAgent),
+		Vocabulary:         prompt.GlobalPersonas().Vocabulary(),
+		ContractProjection: prompt.RecoveryContractProjection(plan),
+		Recovery:           recCtx,
 	}
 
 	assembled := c.assembler.Assemble(asmCtx)

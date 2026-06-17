@@ -1609,6 +1609,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		// rather than re-fetching PLAN_STATES per field (3 reads × 3 roles per
 		// TDD cycle pre-consolidation).
 		plan := c.readPlan(ctx, exec.Slug)
+		asmCtx.ContractProjection = prompt.BuildContractProjection(plan, role)
 		asmCtx.TaskContext = &prompt.TaskContext{
 			PlanGoal:            exec.Title,
 			IsRetry:             exec.TDDCycle > 0,

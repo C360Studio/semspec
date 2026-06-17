@@ -2313,6 +2313,7 @@ func (c *Component) buildRequirementReviewContext(ctx context.Context, exec *req
 	// context, not in isolation. Best-effort: a missing plan just leaves the
 	// fields empty.
 	if plan, err := c.loadPlanFromKV(ctx, exec.Slug); err == nil && plan != nil {
+		asmCtx.ContractProjection = prompt.ReviewerContractProjection(plan)
 		rc.PlanTitle = plan.Title
 		rc.PlanGoal = plan.Goal
 		rc.ArchitectureContext = prompt.FormatArchitectureContext(prompt.ProjectArchitecture(plan.Architecture))
