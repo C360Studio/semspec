@@ -157,6 +157,7 @@ func TestMockFixturesConformToArchitectureRules(t *testing.T) {
 	}
 }
 
+//revive:disable-next-line:function-length // sequential fixture decode-and-assemble; the linear plan build mirrors the production contract path and splitting would fragment it.
 func TestExecutionPhaseMockFixtureStoryContractConforms(t *testing.T) {
 	const scenario = "execution-phase"
 
