@@ -256,13 +256,18 @@ func (s *ExecutionPhaseScenario) stageWaitForApproval(ctx context.Context, resul
 			if err != nil {
 				continue
 			}
+			if planReachedFailureTerminal(plan) {
+				result.SetDetail("plan_approved", plan.Approved)
+				result.SetDetail("plan_status", plan.Status)
+				result.SetDetail("plan_stage", plan.Stage)
+				result.SetDetail("plan_failure_details", planDiagnostic(plan))
+				return fmt.Errorf("plan reached terminal failure before execution approval: %s", planDiagnostic(plan))
+			}
 			if plan.Approved {
 				result.SetDetail("plan_approved", true)
+				result.SetDetail("plan_status", plan.Status)
 				result.SetDetail("plan_stage", plan.Stage)
 				return nil
-			}
-			if plan.Stage == "escalated" || plan.Stage == "error" {
-				return fmt.Errorf("plan reached terminal state: %s", plan.Stage)
 			}
 		}
 	}
@@ -271,10 +276,18 @@ func (s *ExecutionPhaseScenario) stageWaitForApproval(ctx context.Context, resul
 func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	if plan, err := s.http.GetPlan(ctx, slug); err == nil && executionAlreadyStarted(plan.Status, plan.Stage) {
-		result.SetDetail("execution_already_started", true)
-		result.SetDetail("execution_stage", plan.Stage)
-		return nil
+	if plan, err := s.http.GetPlan(ctx, slug); err == nil {
+		if planReachedFailureTerminal(plan) {
+			result.SetDetail("plan_status", plan.Status)
+			result.SetDetail("plan_stage", plan.Stage)
+			result.SetDetail("plan_failure_details", planDiagnostic(plan))
+			return fmt.Errorf("cannot trigger execution; plan already reached terminal failure: %s", planDiagnostic(plan))
+		}
+		if executionAlreadyStarted(plan.Status, plan.Stage) {
+			result.SetDetail("execution_already_started", true)
+			result.SetDetail("execution_stage", plan.Stage)
+			return nil
+		}
 	}
 
 	resp, err := s.http.ExecutePlan(ctx, slug)
@@ -302,10 +315,73 @@ func (s *ExecutionPhaseScenario) stageWaitForExecutionComplete(ctx context.Conte
 
 	plan, err := s.http.WaitForPlanTerminalStatus(ctx, slug)
 	if err != nil {
+		if plan != nil {
+			result.SetDetail("plan_status", plan.Status)
+			result.SetDetail("plan_stage", plan.Stage)
+			result.SetDetail("plan_failure_details", planDiagnostic(plan))
+			return fmt.Errorf("%w: %s", err, planDiagnostic(plan))
+		}
 		return err
 	}
 	result.SetDetail("plan_final_status", plan.Status)
 	return nil
+}
+
+func planReachedFailureTerminal(plan *client.Plan) bool {
+	if plan == nil {
+		return false
+	}
+	return planTerminalFailureValue(plan.Status) || planTerminalFailureValue(plan.Stage)
+}
+
+func planTerminalFailureValue(value string) bool {
+	switch value {
+	case "rejected", "error", "escalated":
+		return true
+	default:
+		return false
+	}
+}
+
+func planDiagnostic(plan *client.Plan) string {
+	if plan == nil {
+		return "plan=<nil>"
+	}
+	parts := []string{
+		fmt.Sprintf("status=%q", plan.Status),
+		fmt.Sprintf("stage=%q", plan.Stage),
+		fmt.Sprintf("approved=%t", plan.Approved),
+	}
+	if plan.ReviewVerdict != "" {
+		parts = append(parts, fmt.Sprintf("review_verdict=%q", plan.ReviewVerdict))
+	}
+	if summary := compactPlanText(plan.ReviewSummary); summary != "" {
+		parts = append(parts, fmt.Sprintf("review_summary=%q", summary))
+	}
+	if formatted := compactPlanText(plan.ReviewFormattedFindings); formatted != "" {
+		parts = append(parts, fmt.Sprintf("review_findings=%q", formatted))
+	} else if len(plan.ReviewFindings) > 0 {
+		parts = append(parts, fmt.Sprintf("review_findings=%q", compactPlanText(string(plan.ReviewFindings))))
+	}
+	if plan.PhaseSummary != nil {
+		parts = append(parts,
+			fmt.Sprintf("phase=%q", plan.PhaseSummary.Phase),
+			fmt.Sprintf("phase_state=%q", plan.PhaseSummary.State),
+			fmt.Sprintf("phase_title=%q", plan.PhaseSummary.Title),
+		)
+		if detail := compactPlanText(plan.PhaseSummary.Detail); detail != "" {
+			parts = append(parts, fmt.Sprintf("phase_detail=%q", detail))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func compactPlanText(value string) string {
+	value = strings.Join(strings.Fields(value), " ")
+	if len(value) <= 500 {
+		return value
+	}
+	return value[:500] + "..."
 }
 
 func (s *ExecutionPhaseScenario) stageVerifyMockStats(ctx context.Context, result *Result) error {

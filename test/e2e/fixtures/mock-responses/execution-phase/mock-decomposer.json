@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "decompose_task",
-        "arguments": "{\"goal\":\"Implement /goodbye endpoint\",\"nodes\":[{\"id\":\"impl-goodbye\",\"prompt\":\"Add a /goodbye endpoint to api/app.py that returns a JSON response with a goodbye message. Follow the same pattern as the existing /hello endpoint.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+        "arguments": "{\"goal\":\"Implement /goodbye endpoint\",\"nodes\":[{\"id\":\"impl-goodbye\",\"prompt\":\"Add focused tests in api/test_goodbye.py and add a /goodbye endpoint to api/app.py that returns a JSON response with a goodbye message. Follow the same pattern as the existing /hello endpoint.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\",\"api/test_goodbye.py\"]}]}"
       }
     }
   ],
