@@ -30,6 +30,35 @@ interface LoopLike {
 	current_task_id?: string;
 }
 
+type ActivityData = {
+	state?: string;
+};
+
+function parseActivityData(raw: unknown): ActivityData | null {
+	if (!raw) return null;
+	if (typeof raw === 'object') return raw as ActivityData;
+	if (typeof raw !== 'string') return null;
+
+	for (const candidate of [raw, decodeBase64(raw)]) {
+		if (!candidate) continue;
+		try {
+			const parsed = JSON.parse(candidate);
+			return typeof parsed === 'object' && parsed !== null ? parsed as ActivityData : null;
+		} catch {
+			// Try the next wire shape.
+		}
+	}
+	return null;
+}
+
+function decodeBase64(value: string): string | null {
+	try {
+		return atob(value);
+	} catch {
+		return null;
+	}
+}
+
 class TimelineStore {
 	// State
 	tracks = $state<TimelineTrack[]>([]);
@@ -236,16 +265,9 @@ class TimelineStore {
 		// Update end time if this event has completed the segment
 		if (event.type === 'loop_completed') {
 			segment.endTime = event.timestamp;
-			// Parse data to get completion state if available
-			if (event.data) {
-				try {
-					const data = JSON.parse(atob(event.data));
-					if (data.state) {
-						segment.state = loopStateToSegmentState(data.state);
-					}
-				} catch {
-					// Ignore parse errors
-				}
+			const data = parseActivityData((event as ActivityEvent & { data?: unknown }).data);
+			if (data?.state) {
+				segment.state = loopStateToSegmentState(data.state);
 			}
 		}
 

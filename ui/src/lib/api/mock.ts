@@ -554,10 +554,11 @@ export function startMockActivityStream(): void {
 			type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
 			loop_id: 'loop_abc123',
 			timestamp: new Date().toISOString(),
-			data: JSON.stringify({
+			data: {
+				loop_id: 'loop_abc123',
 				state: 'executing',
 				iterations: Math.floor(Math.random() * 10)
-			})
+			}
 		};
 		activityListeners.forEach((listener) => listener(event));
 	}, 3000 + Math.random() * 2000);

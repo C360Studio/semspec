@@ -32,6 +32,8 @@ type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
 export type PlanStage =
 	| 'created' // Just created, planner hasn't claimed yet
 	| 'draft' // Unapproved, gathering information
+	| 'exploring' // Analyst exploration is collecting goals/context
+	| 'explored' // Exploration complete, ready for drafting
 	| 'drafting' // Planner LLM is composing plan content
 	| 'drafted' // Planner done, waiting for plan reviewer to claim
 	| 'reviewing_draft' // Plan reviewer (R1) is evaluating the draft
@@ -45,10 +47,14 @@ export type PlanStage =
 	| 'requirements_generated' // Requirements generated via auto-cascade
 	| 'generating_architecture' // Architecture generator is running
 	| 'architecture_generated' // Architecture generated
+	| 'preparing_stories' // Story preparer is generating BMAD Stories
+	| 'stories_generated' // Stories generated and ready for scenario generation
 	| 'generating_scenarios' // Scenario generator is running
 	| 'scenarios_generated' // Scenarios generated via auto-cascade
 	| 'reviewing_scenarios' // Plan reviewer (R2) evaluating scenarios
 	| 'scenarios_reviewed' // Scenarios reviewed, waiting for human approval (round 2)
+	| 'awaiting_review' // A PlanDecision or human review is required
+	| 'changed' // Accepted change is waiting for scoped planning re-entry
 	| 'ready_for_execution' // Both approvals done, ready to execute
 	| 'phases_generated' // Legacy: Phases generated
 	| 'phases_approved' // Legacy: Phases approved

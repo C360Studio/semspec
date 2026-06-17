@@ -2477,6 +2477,12 @@ export interface components {
                 marker: string;
                 name: string;
             }[];
+            topology_facts: {
+                evidence?: string[];
+                kind: string;
+                path?: string;
+                value?: string;
+            }[];
         };
         Flow: {
             connections: {
@@ -2567,6 +2573,12 @@ export interface components {
                     language?: string;
                     marker: string;
                     name: string;
+                }[];
+                topology_facts: {
+                    evidence?: string[];
+                    kind: string;
+                    path?: string;
+                    value?: string;
                 }[];
             };
             existing_docs_content: {
@@ -2799,7 +2811,55 @@ export interface components {
             assembled_branch?: string;
             assembled_merge_commit?: string;
             auto_reject_on_exhaustion?: boolean | null;
+            constraints?: string[];
             context?: string;
+            contract?: {
+                acceptance_obligations?: string[];
+                amendments?: {
+                    /** Format: date-time */
+                    created_at: string;
+                    id: string;
+                    impact: {
+                        affected_ids?: string[];
+                        kind: string;
+                        summary?: string;
+                    };
+                    plan_decision_id?: string;
+                }[];
+                brief?: string;
+                constraints?: string[];
+                /** Format: date-time */
+                created_at: string;
+                forbidden_moves?: string[];
+                id: string;
+                scope?: {
+                    create?: string[];
+                    do_not_touch?: string[];
+                    exclude?: string[];
+                    include?: string[];
+                };
+                source_refs?: {
+                    digest?: string;
+                    kind: string;
+                    ref?: string;
+                }[];
+                topology_facts?: {
+                    evidence?: string[];
+                    kind: string;
+                    path?: string;
+                    value?: string;
+                }[];
+                validation_findings?: {
+                    category?: string;
+                    /** Format: date-time */
+                    created_at?: string;
+                    evidence?: string[];
+                    id?: string;
+                    message: string;
+                    severity?: string;
+                }[];
+                version: number;
+            } | null;
             /** Format: date-time */
             created_at: string;
             execution_trace_ids?: string[];
@@ -2848,6 +2908,11 @@ export interface components {
                     purpose?: string;
                     type: string;
                 }[];
+                contract_impact?: {
+                    affected_ids?: string[];
+                    kind: string;
+                    summary?: string;
+                } | null;
                 /** Format: date-time */
                 created_at: string;
                 /** Format: date-time */
@@ -2878,6 +2943,7 @@ export interface components {
                 completed_at: string;
                 duration_ms: number;
                 failures?: {
+                    category?: string;
                     job_name: string;
                     log_excerpt?: string;
                     message?: string;
@@ -2887,6 +2953,11 @@ export interface components {
                 passed: boolean;
                 run_id: string;
                 runner_error?: string;
+                skipped_tests?: {
+                    file?: string;
+                    name: string;
+                    suite?: string;
+                }[];
                 trace_id?: string;
             } | null;
             qa_verdict_summary?: {
@@ -3072,7 +3143,55 @@ export interface components {
             assembled_branch?: string;
             assembled_merge_commit?: string;
             auto_reject_on_exhaustion?: boolean | null;
+            constraints?: string[];
             context?: string;
+            contract?: {
+                acceptance_obligations?: string[];
+                amendments?: {
+                    /** Format: date-time */
+                    created_at: string;
+                    id: string;
+                    impact: {
+                        affected_ids?: string[];
+                        kind: string;
+                        summary?: string;
+                    };
+                    plan_decision_id?: string;
+                }[];
+                brief?: string;
+                constraints?: string[];
+                /** Format: date-time */
+                created_at: string;
+                forbidden_moves?: string[];
+                id: string;
+                scope?: {
+                    create?: string[];
+                    do_not_touch?: string[];
+                    exclude?: string[];
+                    include?: string[];
+                };
+                source_refs?: {
+                    digest?: string;
+                    kind: string;
+                    ref?: string;
+                }[];
+                topology_facts?: {
+                    evidence?: string[];
+                    kind: string;
+                    path?: string;
+                    value?: string;
+                }[];
+                validation_findings?: {
+                    category?: string;
+                    /** Format: date-time */
+                    created_at?: string;
+                    evidence?: string[];
+                    id?: string;
+                    message: string;
+                    severity?: string;
+                }[];
+                version: number;
+            } | null;
             /** Format: date-time */
             created_at: string;
             execution_summary?: {
@@ -3119,6 +3238,58 @@ export interface components {
                     verdict?: string;
                 }[];
             } | null;
+            phase_summary?: {
+                active_loop_count: number;
+                detail?: string;
+                execution?: {
+                    completed: number;
+                    failed: number;
+                    pending: number;
+                    total: number;
+                } | null;
+                freshness: {
+                    /** Format: date-time */
+                    generated_at: string;
+                    reason?: string;
+                    source: string;
+                    stale: boolean;
+                };
+                lessons?: {
+                    current_run_effect: string;
+                    detail?: string;
+                    future_run_effect: string;
+                    state: string;
+                } | null;
+                phase: string;
+                qa?: {
+                    failure_category?: string;
+                    level?: string;
+                    passed?: boolean | null;
+                    run_id?: string;
+                    summary?: string;
+                    verdict?: string;
+                } | null;
+                recovery?: {
+                    affected_requirement_ids?: string[];
+                    affected_story_ids?: string[];
+                    contract_impact_kind?: string;
+                    contract_impact_summary?: string;
+                    decision_id: string;
+                    kind?: string;
+                    proposed_by?: string;
+                    status: string;
+                    summary?: string;
+                } | null;
+                stage: string;
+                state: string;
+                title: string;
+                wait?: {
+                    decision_id?: string;
+                    policy_reason?: string;
+                    reason: string;
+                    required_action?: string;
+                } | null;
+            } | null;
             plan_decisions?: {
                 affected_requirement_ids: string[];
                 affected_story_ids?: string[];
@@ -3127,6 +3298,11 @@ export interface components {
                     purpose?: string;
                     type: string;
                 }[];
+                contract_impact?: {
+                    affected_ids?: string[];
+                    kind: string;
+                    summary?: string;
+                } | null;
                 /** Format: date-time */
                 created_at: string;
                 /** Format: date-time */
@@ -3157,6 +3333,7 @@ export interface components {
                 completed_at: string;
                 duration_ms: number;
                 failures?: {
+                    category?: string;
                     job_name: string;
                     log_excerpt?: string;
                     message?: string;
@@ -3166,6 +3343,11 @@ export interface components {
                 passed: boolean;
                 run_id: string;
                 runner_error?: string;
+                skipped_tests?: {
+                    file?: string;
+                    name: string;
+                    suite?: string;
+                }[];
                 trace_id?: string;
             } | null;
             qa_verdict_summary?: {

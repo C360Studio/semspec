@@ -50,61 +50,8 @@ export type FeedEvent = {
  * Use the generated PlanWithStatus to stay in sync with the OpenAPI
  * contract; if the server adds fields they flow through automatically.
  */
-export type PlanSSEPayload = PlanWithStatus & {
-	phase_summary?: PlanPhaseSummary;
-};
-
-export type PlanPhaseSummary = {
-	stage: string;
-	phase: string;
-	state: string;
-	title: string;
-	detail?: string;
-	active_loop_count: number;
-	execution?: {
-		completed: number;
-		failed: number;
-		pending: number;
-		total: number;
-	};
-	wait?: {
-		reason: string;
-		decision_id?: string;
-		policy_reason?: string;
-		required_action?: string;
-	};
-	recovery?: {
-		decision_id: string;
-		kind?: string;
-		status: string;
-		proposed_by?: string;
-		summary?: string;
-		contract_impact_kind?: string;
-		contract_impact_summary?: string;
-		affected_requirement_ids?: string[];
-		affected_story_ids?: string[];
-	};
-	lessons?: {
-		state: string;
-		current_run_effect: string;
-		future_run_effect: string;
-		detail?: string;
-	};
-	qa?: {
-		level?: string;
-		verdict?: string;
-		summary?: string;
-		run_id?: string;
-		passed?: boolean;
-		failure_category?: string;
-	};
-	freshness: {
-		source: string;
-		generated_at: string;
-		stale: boolean;
-		reason?: string;
-	};
-};
+export type PlanSSEPayload = PlanWithStatus;
+export type PlanPhaseSummary = NonNullable<PlanWithStatus['phase_summary']>;
 
 /** Task execution payload from execution SSE */
 export type TaskSSEPayload = {

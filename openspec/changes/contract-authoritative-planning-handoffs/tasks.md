@@ -37,7 +37,7 @@
 - [x] 5.2 Normalize feed events so execution rows, recovery decisions, orphaned rows, and stale rows have distinct machine-readable kinds
 - [x] 5.3 Expose lesson-decomposer and lesson-curator activity with current-run versus future-run effect labels
 - [x] 5.4 Expose cost accounting with measured usage, configured provider rate source, and unknown-rate fallback
-- [ ] 5.5 Regenerate OpenAPI and UI generated TypeScript types after API shape changes
+- [x] 5.5 Regenerate OpenAPI and UI generated TypeScript types after API shape changes
 
 ## 6. UI Implementation
 
