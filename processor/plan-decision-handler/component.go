@@ -300,7 +300,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 	if err != nil {
 		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}
-	expandPlanningReentryClosure(result, plan.Requirements)
+	expandPlanningReentryClosure(result, plan.Requirements, plan.Scenarios)
 
 	c.logger.Info("cascade complete",
 		"proposal_id", req.ProposalID,
@@ -333,14 +333,50 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 	return result, nil
 }
 
-func expandPlanningReentryClosure(result *cascade.Result, requirements []workflow.Requirement) {
+func expandPlanningReentryClosure(result *cascade.Result, requirements []workflow.Requirement, scenarios []workflow.Scenario) {
 	if result == nil {
 		return
 	}
 	switch result.Kind {
-	case workflow.PlanDecisionKindArchitectureRevise, workflow.PlanDecisionKindStoryReprepare:
+	case workflow.PlanDecisionKindArchitectureRevise:
 		result.AffectedRequirementIDs = cascade.ExpandRequirementClosure(requirements, result.AffectedRequirementIDs)
+	case workflow.PlanDecisionKindRequirementChange, workflow.PlanDecisionKindStoryReprepare:
+		result.AffectedRequirementIDs = cascade.ExpandRequirementClosure(requirements, result.AffectedRequirementIDs)
+		result.AffectedScenarioIDs = mergeScenarioIDsForRequirements(result.AffectedScenarioIDs, scenarios, result.AffectedRequirementIDs)
 	}
+}
+
+func mergeScenarioIDsForRequirements(existing []string, scenarios []workflow.Scenario, reqIDs []string) []string {
+	reqSet := make(map[string]struct{}, len(reqIDs))
+	for _, id := range reqIDs {
+		if id != "" {
+			reqSet[id] = struct{}{}
+		}
+	}
+	if len(reqSet) == 0 {
+		return existing
+	}
+	seen := make(map[string]struct{}, len(existing))
+	out := append([]string(nil), existing...)
+	for _, id := range existing {
+		if id != "" {
+			seen[id] = struct{}{}
+		}
+	}
+	for _, scenario := range scenarios {
+		if scenario.ID == "" {
+			continue
+		}
+		if _, ok := reqSet[scenario.RequirementID]; !ok {
+			continue
+		}
+		if _, ok := seen[scenario.ID]; ok {
+			continue
+		}
+		seen[scenario.ID] = struct{}{}
+		out = append(out, scenario.ID)
+	}
+	return out
 }
 
 // publishAcceptedEvent publishes a plan_decision.accepted event to JetStream.

@@ -188,16 +188,78 @@ func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *te
 	}
 }
 
-func TestPlanDecisionResetScope_UnscopedFallsBackToAll(t *testing.T) {
-	scope, reqIDs := planDecisionResetScope(&workflow.Plan{
+func TestPlanDecisionResetScope_UnscopedRequiresExplicitEvidence(t *testing.T) {
+	scope, reqIDs, err := planDecisionResetScope(&workflow.Plan{
 		Requirements: []workflow.Requirement{{ID: "contract"}},
 	}, &workflow.PlanDecision{Kind: workflow.PlanDecisionKindArchitectureRevise})
 
+	if err == nil {
+		t.Fatal("planDecisionResetScope returned nil error; want explicit evidence required for unscoped reset")
+	}
+	if scope != "" {
+		t.Fatalf("scope = %q, want empty on rejected unscoped reset", scope)
+	}
+	if reqIDs != nil {
+		t.Fatalf("reqIDs = %v, want nil", reqIDs)
+	}
+}
+
+func TestPlanDecisionResetScope_UnscopedRequiresWholePhaseEvidence(t *testing.T) {
+	scope, reqIDs, err := planDecisionResetScope(&workflow.Plan{
+		Requirements: []workflow.Requirement{{ID: "contract"}},
+	}, &workflow.PlanDecision{
+		Kind: workflow.PlanDecisionKindArchitectureRevise,
+		ContractImpact: &workflow.ContractImpact{
+			Kind:        workflow.ContractImpactChange,
+			Summary:     "The accepted decision invalidates the architecture phase.",
+			AffectedIDs: []string{"contract.phase:architecture"},
+		},
+	})
+
+	if err != nil {
+		t.Fatalf("planDecisionResetScope returned error: %v", err)
+	}
 	if scope != "all" {
 		t.Fatalf("scope = %q, want all", scope)
 	}
 	if reqIDs != nil {
 		t.Fatalf("reqIDs = %v, want nil", reqIDs)
+	}
+}
+
+func TestApplyArchitectureRevise_UnscopedWithoutPhaseEvidenceLeavesPlanUntouched(t *testing.T) {
+	c := setupTestComponent(t)
+	plan := &workflow.Plan{
+		Slug:         "demo",
+		Status:       workflow.StatusImplementing,
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior"},
+		Stories:      []workflow.Story{{ID: "story.unrelated"}},
+		Scenarios:    []workflow.Scenario{{ID: "scenario.unrelated"}},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:        "plan-decision.demo.recovery.unscoped",
+		Kind:      workflow.PlanDecisionKindArchitectureRevise,
+		Rationale: "Architecture needs another look, but no target was named.",
+		ContractImpact: &workflow.ContractImpact{
+			Kind:    workflow.ContractImpactRefine,
+			Summary: "No whole-phase contract change.",
+		},
+	}
+
+	if err := c.applyArchitectureRevise(context.Background(), plan, proposal); err == nil {
+		t.Fatal("applyArchitectureRevise returned nil; want unscoped reset rejected")
+	}
+	if plan.Status != workflow.StatusImplementing {
+		t.Fatalf("Status = %s, want implementing", plan.Status)
+	}
+	if plan.Architecture == nil || plan.Architecture.DataFlow != "prior" {
+		t.Fatalf("Architecture = %+v, want original preserved", plan.Architecture)
+	}
+	if len(plan.Stories) != 1 || plan.Stories[0].ID != "story.unrelated" {
+		t.Fatalf("Stories = %+v, want original preserved", plan.Stories)
+	}
+	if len(plan.Scenarios) != 1 || plan.Scenarios[0].ID != "scenario.unrelated" {
+		t.Fatalf("Scenarios = %+v, want original preserved", plan.Scenarios)
 	}
 }
 

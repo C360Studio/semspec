@@ -2043,7 +2043,10 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 	// replies and must finish even if the caller's request context is
 	// cancelled mid-accept (closes go-reviewer H2/M3). Clearing EXECUTION_STATES
 	// stops the re-run from fast-completing via the executor's Tier-1 dedup.
-	resetScope, resetReqIDs := planDecisionResetScope(plan, proposal)
+	resetScope, resetReqIDs, err := planDecisionResetScope(plan, proposal)
+	if err != nil {
+		return err
+	}
 	resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), plan.Slug, resetScope, resetReqIDs)
 	if err != nil {
 		return fmt.Errorf("reset requirement executions for architecture_revise: %w", err)
@@ -2145,8 +2148,11 @@ func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan
 	}
 
 	affectedReqIDs := affectedRequirementIDsForStoryReprepare(plan, proposal)
+	resetScope, resetReqIDs, err := resetScopeFromRequirements(plan, affectedReqIDs, proposal, "stories")
+	if err != nil {
+		return err
+	}
 	if current == workflow.StatusImplementing {
-		resetScope, resetReqIDs := resetScopeFromRequirements(plan, affectedReqIDs)
 		resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), slug, resetScope, resetReqIDs)
 		if err != nil {
 			return fmt.Errorf("reset requirement executions for story_reprepare: %w", err)
@@ -2159,13 +2165,17 @@ func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan
 			"reset_count", resetCount)
 	}
 
-	plan.Scenarios = removeScenariosForStoryReprepare(plan.Scenarios, proposal, affectedReqIDs)
+	if resetScope == "all" {
+		plan.Scenarios = nil
+	} else {
+		plan.Scenarios = removeScenariosForStoryReprepare(plan.Scenarios, proposal, resetReqIDs)
+	}
 	plan.Status = workflow.StatusPreparingStories
 	c.logger.Info("Story reprepare applied — plan re-queued for story preparation",
 		"slug", slug,
 		"proposal_id", proposal.ID,
 		"from_status", current,
-		"affected_reqs", len(affectedReqIDs))
+		"affected_reqs", len(resetReqIDs))
 	return nil
 }
 
@@ -2202,16 +2212,43 @@ func affectedRequirementIDsForStoryReprepare(plan *workflow.Plan, proposal *work
 	return out
 }
 
-func planDecisionResetScope(plan *workflow.Plan, proposal *workflow.PlanDecision) (string, []string) {
-	return resetScopeFromRequirements(plan, affectedRequirementIDsForStoryReprepare(plan, proposal))
+func planDecisionResetScope(plan *workflow.Plan, proposal *workflow.PlanDecision) (string, []string, error) {
+	return resetScopeFromRequirements(plan, affectedRequirementIDsForStoryReprepare(plan, proposal), proposal, "architecture")
 }
 
-func resetScopeFromRequirements(plan *workflow.Plan, affectedReqIDs []string) (string, []string) {
+func resetScopeFromRequirements(plan *workflow.Plan, affectedReqIDs []string, proposal *workflow.PlanDecision, phase string) (string, []string, error) {
 	closure := cascade.ExpandRequirementClosure(plan.Requirements, affectedReqIDs)
 	if len(closure) == 0 {
-		return "all", nil
+		if contractImpactAllowsWholePhaseReset(proposal, phase) {
+			return "all", nil, nil
+		}
+		return "", nil, fmt.Errorf("%s reset requires affected requirements or explicit whole-phase contract change evidence", phase)
 	}
-	return "requirements", closure
+	return "requirements", closure, nil
+}
+
+func contractImpactAllowsWholePhaseReset(proposal *workflow.PlanDecision, phase string) bool {
+	if proposal == nil || proposal.ContractImpact == nil {
+		return false
+	}
+	if proposal.ContractImpact.Kind != workflow.ContractImpactChange {
+		return false
+	}
+	phase = strings.ToLower(strings.TrimSpace(phase))
+	for _, raw := range proposal.ContractImpact.AffectedIDs {
+		id := strings.ToLower(strings.TrimSpace(raw))
+		switch id {
+		case "phase:*", "phase:all", "contract.phase:*", "contract.phase:all", "reset:*", "reset:all":
+			return true
+		}
+		if phase != "" {
+			switch id {
+			case "phase:" + phase, "contract.phase:" + phase, "reset:" + phase:
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func removeScenariosForStoryReprepare(scenarios []workflow.Scenario, proposal *workflow.PlanDecision, affectedReqIDs []string) []workflow.Scenario {

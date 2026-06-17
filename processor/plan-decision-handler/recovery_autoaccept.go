@@ -152,10 +152,10 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 //     drives stories_generated → preparing_stories so Sarah re-runs with
 //     the diagnosis as Story.RecoveryHint.
 //   - PlanDecisionKindArchitectureRevise — architecture_revise action.
-//     plan-manager wipes Architecture + Stories + Scenarios + all
-//     requirement executions and drives implementing →
-//     requirements_generated so Winston re-runs with the diagnosis as
-//     ReviewFormattedFindings.
+//     plan-manager clears Architecture + downstream Story/Scenario state,
+//     resets the affected requirement execution closure, and drives
+//     implementing → requirements_generated so Winston re-runs with the
+//     diagnosis as ReviewFormattedFindings.
 //
 // Other kinds (execution_exhausted terminal records, qa-reviewer
 // proposals, human proposals) stay human-gated. AffectedReqIDs is the
