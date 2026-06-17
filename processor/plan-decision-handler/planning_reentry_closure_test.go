@@ -16,13 +16,18 @@ func TestExpandPlanningReentryClosure_ArchitectureRevise(t *testing.T) {
 	requirements := []workflow.Requirement{
 		{ID: "bootstrap"},
 		{ID: "contract", DependsOn: []string{"bootstrap"}},
+		{ID: "control"},
 		{ID: "consumer", DependsOn: []string{"contract"}},
 		{ID: "unrelated"},
 	}
+	stories := []workflow.Story{
+		{ID: "story.mapper", RequirementIDs: []string{"contract", "control"}},
+		{ID: "story.unrelated", RequirementIDs: []string{"unrelated"}},
+	}
 
-	expandPlanningReentryClosure(result, requirements, nil)
+	expandPlanningReentryClosure(result, requirements, stories, nil)
 
-	want := []string{"consumer", "contract"}
+	want := []string{"consumer", "contract", "control"}
 	if !reflect.DeepEqual(result.AffectedRequirementIDs, want) {
 		t.Fatalf("AffectedRequirementIDs = %v, want %v", result.AffectedRequirementIDs, want)
 	}
@@ -45,7 +50,7 @@ func TestExpandPlanningReentryClosure_RequirementChangeAddsDependentScenarios(t 
 		{ID: "scenario.unrelated", RequirementID: "unrelated"},
 	}
 
-	expandPlanningReentryClosure(result, requirements, scenarios)
+	expandPlanningReentryClosure(result, requirements, nil, scenarios)
 
 	wantReqs := []string{"consumer", "contract"}
 	if !reflect.DeepEqual(result.AffectedRequirementIDs, wantReqs) {

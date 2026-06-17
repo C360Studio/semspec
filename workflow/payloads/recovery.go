@@ -71,14 +71,14 @@ const (
 	// dev prompt against a broken architecture only re-wedges.
 	//
 	// Heaviest action in the set. On accept, plan-manager captures the prior
-	// architecture into PreviousArchitectureJSON, clears Architecture +
-	// Stories + Scenarios, resets ALL requirement executions, writes the
-	// recovery diagnosis to ReviewFormattedFindings (the channel the
-	// architecture-generator already reads on revision rounds), and drives
-	// the back-transition implementing → requirements_generated so the
-	// architect re-fires and REVISES the prior architecture against the
-	// diagnosis. The full downstream pipeline (Sarah → Bob → execution)
-	// then re-runs clean.
+	// architecture into PreviousArchitectureJSON, clears Architecture, resets the
+	// affected requirement/story closure, writes the recovery diagnosis to
+	// ReviewFormattedFindings (the channel the architecture-generator already
+	// reads on revision rounds), and drives the back-transition implementing →
+	// requirements_generated so the architect re-fires and REVISES the prior
+	// architecture against the diagnosis. Whole-phase decisions may clear
+	// Stories/Scenarios; scoped decisions preserve unrelated artifacts and merge
+	// only the dirty closure before execution resumes.
 	//
 	// Distinct from story_reprepare: story_reprepare keeps Architecture and
 	// asks Sarah to re-shard; architecture_revise discards the architecture

@@ -2,18 +2,19 @@ package planmanager
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
 )
 
-// TestReviseArchitectureState_HappyPath pins the pure state mutation an
-// accepted architecture_revise PlanDecision performs from the implementing
-// status: capture the prior architecture, wipe Architecture + Stories +
-// Scenarios, route the diagnosis into ReviewFormattedFindings, and drive the
-// back-transition to requirements_generated. This is the seam that the
-// EXECUTION_STATES reset (NATS I/O) wraps in applyArchitectureRevise.
+// TestReviseArchitectureState_HappyPath pins the pure whole-phase state
+// mutation an accepted architecture_revise PlanDecision performs from the
+// implementing status: capture the prior architecture, wipe Architecture +
+// Stories + Scenarios, route the diagnosis into ReviewFormattedFindings, and
+// drive the back-transition to requirements_generated. Scoped decisions use
+// reviseScopedArchitectureState via applyArchitectureRevise.
 func TestReviseArchitectureState_HappyPath(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug:   "mavlink-hard",
@@ -183,11 +184,15 @@ func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *te
 			{ID: "consumer", Title: "Consumer integration", DependsOn: []string{"contract"}},
 		},
 		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
-		Stories:      []workflow.Story{{ID: "story.contract", RequirementIDs: []string{"contract"}}},
+		Stories: []workflow.Story{
+			{ID: "story.contract", RequirementIDs: []string{"contract"}},
+			{ID: "story.consumer", RequirementIDs: []string{"consumer"}},
+			{ID: "story.unrelated", RequirementIDs: []string{"unrelated"}},
+		},
 		Scenarios: []workflow.Scenario{
-			{ID: "scen.contract", RequirementID: "contract"},
-			{ID: "scen.consumer", RequirementID: "consumer"},
-			{ID: "scen.unrelated", RequirementID: "unrelated"},
+			{ID: "scen.contract", RequirementID: "contract", StoryID: "story.contract"},
+			{ID: "scen.consumer", RequirementID: "consumer", StoryID: "story.consumer"},
+			{ID: "scen.unrelated", RequirementID: "unrelated", StoryID: "story.unrelated"},
 		},
 	}
 	proposal := &workflow.PlanDecision{
@@ -216,6 +221,75 @@ func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *te
 	if plan.Status != workflow.StatusRequirementsGenerated {
 		t.Fatalf("plan.Status = %s, want requirements_generated", plan.Status)
 	}
+	if plan.Architecture != nil {
+		t.Fatal("Architecture should be cleared so Winston revises it")
+	}
+	if plan.PendingArchitectureRevision == nil {
+		t.Fatal("PendingArchitectureRevision should record the scoped dirty closure")
+	}
+	assertStringSet(t, plan.PendingArchitectureRevision.RequirementIDs, []string{"contract", "consumer"})
+	assertStringSet(t, plan.PendingArchitectureRevision.StoryIDs, []string{"story.contract", "story.consumer"})
+	if len(plan.Stories) != 3 {
+		t.Fatalf("Stories len = %d, want 3 preserved until scoped merge", len(plan.Stories))
+	}
+	if len(plan.Scenarios) != 3 {
+		t.Fatalf("Scenarios len = %d, want 3 preserved until scoped story merge", len(plan.Scenarios))
+	}
+	if got := storyRecoveryHint(plan.Stories, "story.unrelated"); got != "" {
+		t.Fatalf("unrelated story RecoveryHint = %q, want empty", got)
+	}
+}
+
+func TestApplyArchitectureRevise_ScopedResetExpandsMNStoryCoverage(t *testing.T) {
+	c := setupTestComponent(t)
+	c.execBucket = resetKVStub{
+		keys: []string{
+			"req.demo.telemetry",
+			"req.demo.control",
+			"req.demo.async",
+			"req.demo.unrelated",
+		},
+	}
+	var reset []string
+	c.reqResetSender = func(_ context.Context, key string) error {
+		reset = append(reset, key)
+		return nil
+	}
+
+	plan := &workflow.Plan{
+		Slug:   "demo",
+		Status: workflow.StatusImplementing,
+		Requirements: []workflow.Requirement{
+			{ID: "telemetry"},
+			{ID: "control"},
+			{ID: "async"},
+			{ID: "unrelated"},
+		},
+		Architecture: &workflow.ArchitectureDocument{DataFlow: "prior design"},
+		Stories: []workflow.Story{
+			{ID: "story.mapper", RequirementIDs: []string{"telemetry", "control", "async"}},
+			{ID: "story.unrelated", RequirementIDs: []string{"unrelated"}},
+		},
+	}
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.demo.recovery.mapper",
+		Kind:           workflow.PlanDecisionKindArchitectureRevise,
+		AffectedReqIDs: []string{"telemetry"},
+		Rationale:      "Revise the shared mapper architecture.",
+	}
+
+	if err := c.applyArchitectureRevise(context.Background(), plan, proposal); err != nil {
+		t.Fatalf("applyArchitectureRevise: %v", err)
+	}
+
+	assertResetKeys(t, reset, []string{
+		"req.demo.telemetry",
+		"req.demo.control",
+		"req.demo.async",
+	})
+	assertNoResetKeys(t, reset, []string{"req.demo.unrelated"})
+	assertStringSet(t, plan.PendingArchitectureRevision.RequirementIDs, []string{"async", "control", "telemetry"})
+	assertStringSet(t, plan.PendingArchitectureRevision.StoryIDs, []string{"story.mapper"})
 }
 
 func TestPlanDecisionResetScope_UnscopedRequiresExplicitEvidence(t *testing.T) {
@@ -293,6 +367,175 @@ func TestApplyArchitectureRevise_UnscopedWithoutPhaseEvidenceLeavesPlanUntouched
 	}
 }
 
+func TestHandleStoriesMutation_ScopedArchitectureRevisionMergesDirtyStoriesOnly(t *testing.T) {
+	c := setupTestComponent(t)
+	plan := setupTestPlan(t, c, "demo")
+	plan.Status = workflow.StatusPreparingStories
+	plan.Requirements = []workflow.Requirement{
+		{ID: "bootstrap"},
+		{ID: "unrelated"},
+		{ID: "contract", DependsOn: []string{"bootstrap"}},
+		{ID: "consumer", DependsOn: []string{"contract"}},
+	}
+	plan.PendingArchitectureRevision = &workflow.ArchitectureRevisionScope{
+		ProposalID:     "plan-decision.demo.recovery.contract",
+		RequirementIDs: []string{"contract", "consumer"},
+		StoryIDs:       []string{"story.contract.old", "story.consumer.old"},
+	}
+	plan.Stories = []workflow.Story{
+		testStory("story.bootstrap.old", []string{"bootstrap"}, "src/bootstrap.go"),
+		testStory("story.unrelated.old", []string{"unrelated"}, "src/unrelated.go"),
+		testStory("story.contract.old", []string{"contract"}, "src/contract_old.go"),
+		testStory("story.consumer.old", []string{"consumer"}, "src/consumer_old.go"),
+	}
+	plan.Scenarios = []workflow.Scenario{
+		{ID: "scen.bootstrap", RequirementID: "bootstrap", StoryID: "story.bootstrap.old"},
+		{ID: "scen.unrelated", RequirementID: "unrelated", StoryID: "story.unrelated.old"},
+		{ID: "scen.contract", RequirementID: "contract", StoryID: "story.contract.old"},
+		{ID: "scen.consumer", RequirementID: "consumer", StoryID: "story.consumer.old"},
+	}
+	if err := c.plans.save(context.Background(), plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	emitted := []workflow.Story{
+		testStory("story.bootstrap.new", []string{"bootstrap"}, "src/bootstrap_new.go"),
+		testStory("story.unrelated.new", []string{"unrelated"}, "src/unrelated_new.go"),
+		testStory("story.contract.new", []string{"contract"}, "src/contract_new.go"),
+		testStory("story.consumer.new", []string{"consumer"}, "src/consumer_new.go"),
+	}
+	data, err := json.Marshal(storiesMutationRequest{Slug: "demo", Stories: emitted})
+	if err != nil {
+		t.Fatalf("marshal stories mutation: %v", err)
+	}
+
+	resp := c.handleStoriesMutation(context.Background(), data)
+	if !resp.Success {
+		t.Fatalf("handleStoriesMutation failed: %s", resp.Error)
+	}
+
+	loaded, ok := c.plans.get("demo")
+	if !ok {
+		t.Fatal("plan not found after stories mutation")
+	}
+	if loaded.Status != workflow.StatusStoriesGenerated {
+		t.Fatalf("Status = %s, want stories_generated", loaded.Status)
+	}
+	if loaded.PendingArchitectureRevision == nil {
+		t.Fatal("PendingArchitectureRevision should remain until scoped scenarios converge")
+	}
+	assertStoryPresent(t, loaded.Stories, "story.bootstrap.old")
+	assertStoryPresent(t, loaded.Stories, "story.unrelated.old")
+	assertStoryPresent(t, loaded.Stories, "story.contract.new")
+	assertStoryPresent(t, loaded.Stories, "story.consumer.new")
+	assertStoryAbsent(t, loaded.Stories, "story.bootstrap.new")
+	assertStoryAbsent(t, loaded.Stories, "story.unrelated.new")
+	assertStoryAbsent(t, loaded.Stories, "story.contract.old")
+	assertStoryAbsent(t, loaded.Stories, "story.consumer.old")
+	assertScenarioIDs(t, loaded.Scenarios, []string{"scen.bootstrap", "scen.unrelated"})
+}
+
+func TestHandleScenariosMutation_ScopedArchitectureRevisionPreservesUnrelatedScenarios(t *testing.T) {
+	c := setupTestComponent(t)
+	plan := setupTestPlan(t, c, "demo")
+	plan.Status = workflow.StatusGeneratingScenarios
+	plan.Requirements = []workflow.Requirement{
+		{ID: "bootstrap"},
+		{ID: "unrelated"},
+		{ID: "contract", DependsOn: []string{"bootstrap"}},
+		{ID: "consumer", DependsOn: []string{"contract"}},
+	}
+	plan.PendingArchitectureRevision = &workflow.ArchitectureRevisionScope{
+		ProposalID:     "plan-decision.demo.recovery.contract",
+		RequirementIDs: []string{"contract", "consumer"},
+		StoryIDs:       []string{"story.contract.new", "story.consumer.new"},
+	}
+	plan.Stories = []workflow.Story{
+		testStory("story.bootstrap.old", []string{"bootstrap"}, "src/bootstrap.go"),
+		testStory("story.unrelated.old", []string{"unrelated"}, "src/unrelated.go"),
+		testStory("story.contract.new", []string{"contract"}, "src/contract_new.go"),
+		testStory("story.consumer.new", []string{"consumer"}, "src/consumer_new.go"),
+	}
+	plan.Scenarios = []workflow.Scenario{
+		{ID: "scen.bootstrap", RequirementID: "bootstrap", StoryID: "story.bootstrap.old"},
+		{ID: "scen.unrelated", RequirementID: "unrelated", StoryID: "story.unrelated.old"},
+	}
+	if err := c.plans.save(context.Background(), plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	contractData, err := json.Marshal(ScenariosMutationRequest{
+		Slug:          "demo",
+		RequirementID: "contract",
+		StoryID:       "story.contract.new",
+		Scenarios: []workflow.Scenario{{
+			ID:            "scen.contract.new",
+			RequirementID: "contract",
+			StoryID:       "story.contract.new",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal contract scenarios mutation: %v", err)
+	}
+
+	resp := c.handleScenariosMutation(context.Background(), contractData)
+	if !resp.Success {
+		t.Fatalf("handleScenariosMutation contract failed: %s", resp.Error)
+	}
+
+	loaded, ok := c.plans.get("demo")
+	if !ok {
+		t.Fatal("plan not found after contract scenarios mutation")
+	}
+	if loaded.Status != workflow.StatusGeneratingScenarios {
+		t.Fatalf("Status = %s, want generating_scenarios before dirty scope converges", loaded.Status)
+	}
+	if loaded.PendingArchitectureRevision == nil {
+		t.Fatal("PendingArchitectureRevision should remain until all dirty scenarios converge")
+	}
+	assertScenarioIDs(t, loaded.Scenarios, []string{
+		"scen.bootstrap",
+		"scen.unrelated",
+		"scen.contract.new",
+	})
+
+	consumerData, err := json.Marshal(ScenariosMutationRequest{
+		Slug:          "demo",
+		RequirementID: "consumer",
+		StoryID:       "story.consumer.new",
+		Scenarios: []workflow.Scenario{{
+			ID:            "scen.consumer.new",
+			RequirementID: "consumer",
+			StoryID:       "story.consumer.new",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal consumer scenarios mutation: %v", err)
+	}
+
+	resp = c.handleScenariosMutation(context.Background(), consumerData)
+	if !resp.Success {
+		t.Fatalf("handleScenariosMutation consumer failed: %s", resp.Error)
+	}
+
+	loaded, ok = c.plans.get("demo")
+	if !ok {
+		t.Fatal("plan not found after consumer scenarios mutation")
+	}
+	if loaded.Status != workflow.StatusScenariosGenerated {
+		t.Fatalf("Status = %s, want scenarios_generated after dirty scope converges", loaded.Status)
+	}
+	if loaded.PendingArchitectureRevision != nil {
+		t.Fatalf("PendingArchitectureRevision = %+v, want cleared after scoped scenarios converge", loaded.PendingArchitectureRevision)
+	}
+	assertScenarioIDs(t, loaded.Scenarios, []string{
+		"scen.bootstrap",
+		"scen.unrelated",
+		"scen.contract.new",
+		"scen.consumer.new",
+	})
+}
+
 func TestApplyArchitectureRevise_PreservesUnrelatedCompletedExecutions(t *testing.T) {
 	c := setupTestComponent(t)
 	c.execBucket = resetKVStub{
@@ -347,6 +590,74 @@ func TestApplyArchitectureRevise_PreservesUnrelatedCompletedExecutions(t *testin
 		"req.demo.completed-unrelated",
 		"task.demo.node-completed-unrelated",
 	})
+}
+
+func testStory(id string, reqIDs []string, file string) workflow.Story {
+	return workflow.Story{
+		ID:             id,
+		ComponentName:  id + "-component",
+		RequirementIDs: reqIDs,
+		Title:          id,
+		FilesOwned:     []string{file},
+		Tasks: []workflow.Task{{
+			ID:          "task." + id,
+			StoryID:     id,
+			Description: "verify " + id,
+		}},
+	}
+}
+
+func storyRecoveryHint(stories []workflow.Story, id string) string {
+	for _, story := range stories {
+		if story.ID == id {
+			return story.RecoveryHint
+		}
+	}
+	return ""
+}
+
+func assertStringSet(t *testing.T, got []string, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want set %v", got, want)
+	}
+	seen := make(map[string]struct{}, len(got))
+	for _, id := range got {
+		seen[id] = struct{}{}
+	}
+	for _, id := range want {
+		if _, ok := seen[id]; !ok {
+			t.Fatalf("got %v, missing %q", got, id)
+		}
+	}
+}
+
+func assertStoryPresent(t *testing.T, stories []workflow.Story, id string) {
+	t.Helper()
+	for _, story := range stories {
+		if story.ID == id {
+			return
+		}
+	}
+	t.Fatalf("stories = %+v, missing %q", stories, id)
+}
+
+func assertStoryAbsent(t *testing.T, stories []workflow.Story, id string) {
+	t.Helper()
+	for _, story := range stories {
+		if story.ID == id {
+			t.Fatalf("stories = %+v, should not include %q", stories, id)
+		}
+	}
+}
+
+func assertScenarioIDs(t *testing.T, scenarios []workflow.Scenario, want []string) {
+	t.Helper()
+	got := make([]string, 0, len(scenarios))
+	for _, scenario := range scenarios {
+		got = append(got, scenario.ID)
+	}
+	assertStringSet(t, got, want)
 }
 
 func assertResetKeys(t *testing.T, got []string, want []string) {

@@ -321,10 +321,12 @@ func (s Status) CanTransitionTo(target Status) bool {
 		//   resets affected requirement executions, and re-runs Sarah/Bob.)
 		// implementing → requirements_generated (architecture_revise recovery:
 		//   a wedge rooted in the architecture is escalated; the recovery-agent's
-		//   architecture_revise PlanDecision wipes Architecture/Stories/Scenarios +
-		//   all requirement executions and re-runs the architect. These two
-		//   execution-phase → plan-prep back-edges are gated to their accept paths
-		//   in plan-manager.)
+		//   architecture_revise PlanDecision clears Architecture, resets the
+		//   affected requirement/story closure, and re-runs the architect.
+		//   Whole-phase decisions may wipe Stories/Scenarios when justified;
+		//   scoped decisions preserve unrelated artifacts. These two execution-
+		//   phase → plan-prep back-edges are gated to their accept paths in
+		//   plan-manager.)
 		// implementing → rejected (execution escalation)
 		return target == StatusReviewingRollup || target == StatusReviewingQA || target == StatusReadyForQA ||
 			target == StatusAwaitingReview || target == StatusComplete ||
@@ -673,6 +675,15 @@ type Plan struct {
 	// architecture. Transient — empty on the forward flow.
 	PreviousArchitectureJSON string `json:"previous_architecture_json,omitempty"`
 
+	// PendingArchitectureRevision scopes an accepted execution/post-QA
+	// architecture_revise recovery while the plan re-enters architecture,
+	// story, and scenario generation. Nil means the revision invalidated the
+	// whole planning layer. When set, downstream generators may emit a full
+	// refreshed artifact set, but plan-manager only accepts changes inside
+	// RequirementIDs/StoryIDs and preserves unrelated completed artifacts.
+	// Cleared once the scoped scenario regeneration converges.
+	PendingArchitectureRevision *ArchitectureRevisionScope `json:"pending_architecture_revision,omitempty"`
+
 	// Requirements, Scenarios, Stories, and PlanDecisions are populated when
 	// the plan is written to the PLAN_STATES KV bucket so downstream watchers
 	// have everything they need without follow-up queries.
@@ -743,6 +754,16 @@ type Plan struct {
 	// refuse with 409 in that state until an operator has cleared the
 	// underlying cause (e.g. sandbox /admin/reconcile).
 	InfraHealth string `json:"infra_health,omitempty"`
+}
+
+// ArchitectureRevisionScope records the dirty closure for a scoped
+// architecture_revise recovery. It lets the architecture phase re-run while the
+// story/scenario layers merge only the affected closure instead of rewriting
+// unrelated completed artifacts.
+type ArchitectureRevisionScope struct {
+	ProposalID     string   `json:"proposal_id,omitempty"`
+	RequirementIDs []string `json:"requirement_ids,omitempty"`
+	StoryIDs       []string `json:"story_ids,omitempty"`
 }
 
 // QARun carries the executor result persisted on the plan at reviewing_qa.
@@ -1932,15 +1953,15 @@ const (
 
 	// PlanDecisionKindArchitectureRevise marks a decision proposing that
 	// Winston re-run the architecture. Heaviest recovery kind: on accept,
-	// plan-manager captures PreviousArchitectureJSON, clears Architecture +
-	// Stories + Scenarios, resets all requirement executions, and drives the
-	// back-transition implementing → requirements_generated so the architect
+	// plan-manager captures PreviousArchitectureJSON, clears Architecture,
+	// resets the affected requirement/story closure, and drives the back-
+	// transition implementing → requirements_generated so the architect
 	// re-fires and revises the prior architecture against the recovery
 	// diagnosis (carried via ReviewFormattedFindings — the same channel the
-	// R2 architecture re-entry uses). Distinct from story_reprepare, whose
-	// cascade keeps Architecture and only re-shards Stories; this kind
-	// discards the architecture itself and the cascade is a no-op because the
-	// accept handler already performed the wipe inline. Emitted by the
+	// R2 architecture re-entry uses). Whole-phase decisions with explicit
+	// evidence may clear Stories + Scenarios; scoped decisions record
+	// PendingArchitectureRevision so unrelated Stories/Scenarios survive and
+	// only the dirty closure is merged after Sarah/Bob re-run. Emitted by the
 	// recovery-agent for the architecture_revise action.
 	PlanDecisionKindArchitectureRevise PlanDecisionKind = "architecture_revise"
 

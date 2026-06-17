@@ -166,7 +166,7 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 // review.
 // countAcceptedArchitectureRevises counts PlanDecisions already in accepted
 // status with Kind=architecture_revise. Used as the monotonic loop bound for
-// the architecture_revise auto-accept cap — the count survives the entity wipe
+// the architecture_revise auto-accept cap — the count survives planning re-entry
 // because PlanDecisions are never cleared, so it strictly increases each cycle.
 func countAcceptedArchitectureRevises(decisions []workflow.PlanDecision) int {
 	n := 0

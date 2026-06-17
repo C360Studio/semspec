@@ -103,7 +103,11 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 	// plans / pre-Sarah mock fixtures) the dispatcher falls back to
 	// per-Requirement dispatch — preserves backwards compatibility with
 	// fixtures that don't author Stories.
+	targetReqs := scenarioGenerationRequirementScope(plan)
 	for _, req := range plan.Requirements {
+		if len(targetReqs) > 0 && !targetReqs[req.ID] {
+			continue
+		}
 		emissions := Classify(req, caps, plan.Architecture, catalog)
 		required := emissionsToWireTiers(emissions)
 
@@ -116,6 +120,19 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 			c.dispatchPerStory(ctx, plan, req, story, required, archContext)
 		}
 	}
+}
+
+func scenarioGenerationRequirementScope(plan *workflow.Plan) map[string]bool {
+	if plan == nil || plan.PendingArchitectureRevision == nil {
+		return nil
+	}
+	out := make(map[string]bool, len(plan.PendingArchitectureRevision.RequirementIDs))
+	for _, id := range plan.PendingArchitectureRevision.RequirementIDs {
+		if id != "" {
+			out[id] = true
+		}
+	}
+	return out
 }
 
 // dispatchPerStory issues a scenario-generator agent loop scoped to a single
