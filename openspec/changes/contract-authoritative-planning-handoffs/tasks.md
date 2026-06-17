@@ -20,7 +20,7 @@
 - [x] 3.2 Add plan-reviewer or structural-validator checks for architecture outputs that violate topology facts
 - [x] 3.3 Add Story ownership checks that reject standalone or baseline-erasing file ownership before developer execution
 - [x] 3.4 Add developer-output checks that reject forbidden build roots, standalone project files, or topology-incompatible artifacts
-- [ ] 3.5 Add QA failure classification for build-configuration and topology failures before recovery chooses an action
+- [x] 3.5 Add QA failure classification for build-configuration and topology failures before recovery chooses an action
 
 ## 4. Scope Governance And Recovery
 

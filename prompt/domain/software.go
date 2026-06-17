@@ -2766,6 +2766,9 @@ The Persona system prompt above (Murat) sets your identity and style. These role
 							if f.TestName != "" {
 								sb.WriteString(fmt.Sprintf("  Test: %s\n", f.TestName))
 							}
+							if f.Category != "" {
+								sb.WriteString(fmt.Sprintf("  Category: %s\n", f.Category))
+							}
 							if f.Message != "" {
 								sb.WriteString(fmt.Sprintf("  Message: %s\n", f.Message))
 							}

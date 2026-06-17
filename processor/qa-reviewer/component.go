@@ -819,6 +819,7 @@ func forcedExecutableQAVerdict(slug string, plan *workflow.Plan, level workflow.
 		return base
 	}
 	if !plan.QARun.Passed {
+		plan.QARun.Failures = classifyQAFailures(plan.QARun.Failures)
 		base.Verdict = workflow.QAVerdictNeedsChanges
 		base.Summary = summarizeQAFailures(level, plan.QARun)
 		return base
@@ -843,6 +844,9 @@ func summarizeQAFailures(level workflow.QALevel, run *workflow.QARun) string {
 		fmt.Fprintf(&b, " [%s]", failure.JobName)
 		if failure.TestName != "" {
 			fmt.Fprintf(&b, " %s", failure.TestName)
+		}
+		if failure.Category != "" {
+			fmt.Fprintf(&b, " category=%s", failure.Category)
 		}
 		if failure.Message != "" {
 			fmt.Fprintf(&b, ": %s", failure.Message)
