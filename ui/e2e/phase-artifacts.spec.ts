@@ -13,11 +13,19 @@
 
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { stubPhaseArtifactContent, stubPhaseArtifacts } from './helpers/truth';
+import {
+	stubPhaseArtifactContent,
+	stubPhaseArtifacts,
+	stubProjectConfigured
+} from './helpers/truth';
 
 const slug = 'artifacts-fixture';
 
 test.describe('@t0 @smoke phase-artifacts view', () => {
+	test.beforeEach(async ({ page }) => {
+		await stubProjectConfigured(page);
+	});
+
 	test('empty list renders the "not written yet" state', async ({ page }) => {
 		await stubPhaseArtifacts(page, slug, []);
 		await stubPhaseArtifactContent(page, slug, {});
@@ -147,7 +155,7 @@ test.describe('@t0 @smoke phase-artifacts view', () => {
 		await page.goto(`/e2e-test/phase-artifacts?slug=${slug}`);
 		await waitForHydration(page);
 
-		const banner = page.locator('[role="alert"]');
+		const banner = page.getByTestId('phase-artifacts').locator('[role="alert"]');
 		await expect(banner).toBeVisible();
 		await expect(banner).toContainText('planner unavailable');
 	});
