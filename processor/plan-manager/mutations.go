@@ -702,6 +702,12 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	plan.Context = req.Context
 	plan.Constraints = req.Constraints
 	if req.Scope != nil {
+		if missing := unauthorizedContractScopeDrops(plan.Contract, *req.Scope); len(missing) > 0 {
+			return MutationResponse{
+				Success: false,
+				Error:   fmt.Sprintf("scope shrinkage requires accepted amendment provenance for dropped contract obligations: %s", strings.Join(missing, ", ")),
+			}
+		}
 		plan.Scope = *req.Scope
 	}
 	plan.SkipArchitecture = req.SkipArchitecture
@@ -714,6 +720,145 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	c.logger.Info("Plan drafted via mutation", "slug", req.Slug, "goal", req.Goal,
 		"skip_architecture", req.SkipArchitecture)
 	return MutationResponse{Success: true}
+}
+
+type contractScopeDrop struct {
+	Origin string
+	Path   string
+}
+
+func unauthorizedContractScopeDrops(contract *workflow.ContractPacket, next workflow.Scope) []string {
+	if contract == nil {
+		return nil
+	}
+	amended := contractChangedScopeIDs(contract)
+	active := scopeActiveSet(next.Create, next.Include)
+	protected := scopePathSet(next.DoNotTouch)
+
+	var missing []string
+	for _, obligation := range contractScopeDropObligations(contract.Scope) {
+		if contractScopeDropAmended(obligation.Origin, obligation.Path, amended) {
+			continue
+		}
+		present := false
+		switch obligation.Origin {
+		case "do_not_touch":
+			_, present = protected[obligation.Path]
+		default:
+			_, present = active[obligation.Path]
+		}
+		if !present {
+			missing = append(missing, fmt.Sprintf("contract.scope.%s:%s", obligation.Origin, obligation.Path))
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func contractScopeDropObligations(scope workflow.ContractScopeSnapshot) []contractScopeDrop {
+	seen := map[string]struct{}{}
+	var out []contractScopeDrop
+	add := func(origin, raw string) {
+		p := workflow.NormalizeFilePath(raw)
+		if p == "" {
+			return
+		}
+		key := origin + "\x00" + p
+		if _, dup := seen[key]; dup {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, contractScopeDrop{Origin: origin, Path: p})
+	}
+	for _, p := range scope.Create {
+		add("create", p)
+	}
+	for _, p := range scope.Include {
+		add("include", p)
+	}
+	for _, p := range scope.DoNotTouch {
+		add("do_not_touch", p)
+	}
+	return out
+}
+
+func scopeActiveSet(create, include []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, p := range append(append([]string{}, create...), include...) {
+		if normalized := workflow.NormalizeFilePath(p); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
+}
+
+func scopePathSet(paths []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, p := range paths {
+		if normalized := workflow.NormalizeFilePath(p); normalized != "" {
+			out[normalized] = struct{}{}
+		}
+	}
+	return out
+}
+
+func contractChangedScopeIDs(contract *workflow.ContractPacket) map[string]struct{} {
+	out := map[string]struct{}{}
+	if contract == nil {
+		return out
+	}
+	for _, amendment := range contract.Amendments {
+		if amendment.Impact.Kind != workflow.ContractImpactChange {
+			continue
+		}
+		for _, id := range amendment.Impact.AffectedIDs {
+			addChangedScopeID(out, id)
+		}
+	}
+	return out
+}
+
+func addChangedScopeID(out map[string]struct{}, id string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	out[id] = struct{}{}
+	if p := workflow.NormalizeFilePath(id); p != "" {
+		out[p] = struct{}{}
+	}
+	for _, prefix := range []string{
+		"scope:",
+		"scope.create:",
+		"scope.include:",
+		"scope.do_not_touch:",
+		"contract.scope:",
+		"contract.scope.create:",
+		"contract.scope.include:",
+		"contract.scope.do_not_touch:",
+	} {
+		if strings.HasPrefix(id, prefix) {
+			if p := workflow.NormalizeFilePath(strings.TrimPrefix(id, prefix)); p != "" {
+				out[p] = struct{}{}
+			}
+		}
+	}
+}
+
+func contractScopeDropAmended(origin, path string, amended map[string]struct{}) bool {
+	candidates := []string{
+		path,
+		"scope:" + path,
+		"scope." + origin + ":" + path,
+		"contract.scope:" + path,
+		"contract.scope." + origin + ":" + path,
+	}
+	for _, candidate := range candidates {
+		if _, ok := amended[candidate]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // handleReviewedMutation updates plan status to reviewed after reviewer verdict.
@@ -1937,6 +2082,8 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 // watcher event. An out-of-window plan (already moved past the source status
 // while a human-review window was open) is left in place with a warning.
 func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
+	applyAcceptedContractAmendment(plan, proposal)
+
 	if proposal.Kind == workflow.PlanDecisionKindArchitectureRevise {
 		return c.applyArchitectureRevise(ctx, plan, proposal)
 	}
@@ -1951,6 +2098,42 @@ func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *wo
 		}
 	}
 	return nil
+}
+
+func applyAcceptedContractAmendment(plan *workflow.Plan, proposal *workflow.PlanDecision) {
+	if plan == nil || proposal == nil || proposal.ContractImpact == nil {
+		return
+	}
+	if proposal.ContractImpact.Kind != workflow.ContractImpactChange {
+		return
+	}
+	now := time.Now()
+	if proposal.DecidedAt != nil {
+		now = *proposal.DecidedAt
+	}
+	if plan.Contract == nil {
+		brief := plan.Context
+		if brief == "" {
+			brief = plan.Goal
+		}
+		plan.EnsureContractPacket(brief, now)
+	}
+	if plan.Contract == nil {
+		return
+	}
+	for _, existing := range plan.Contract.Amendments {
+		if existing.PlanDecisionID == proposal.ID {
+			return
+		}
+	}
+	impact := *proposal.ContractImpact
+	impact.AffectedIDs = append([]string(nil), proposal.ContractImpact.AffectedIDs...)
+	plan.Contract.Amendments = append(plan.Contract.Amendments, workflow.ContractAmendment{
+		ID:             "contract-amendment." + workflow.HashInstanceID(plan.Slug, proposal.ID),
+		PlanDecisionID: proposal.ID,
+		Impact:         impact,
+		CreatedAt:      now,
+	})
 }
 
 func (c *Component) applyStoryReprepare(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
