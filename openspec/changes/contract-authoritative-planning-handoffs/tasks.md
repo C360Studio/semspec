@@ -8,7 +8,7 @@
 
 ## 2. BMAD/OpenSpec Handoff Propagation
 
-- [ ] 2.1 Add role-specific contract projection builders for planner, architect, requirement-generator, story-preparer, scenario-generator, developer, reviewer, recovery, and QA
+- [x] 2.1 Add role-specific contract projection builders for planner, architect, requirement-generator, story-preparer, scenario-generator, developer, reviewer, recovery, and QA
 - [ ] 2.2 Update prompt/domain renderers to include contract packet identity, constraints, topology obligations, and accepted amendments
 - [ ] 2.3 Add prompt rendering tests that prove forbidden moves and must-deliver obligations reach each role
 - [ ] 2.4 Update OpenSpec/BMAD artifact emission so contract packet references are visible in generated artifacts
