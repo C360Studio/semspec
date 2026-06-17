@@ -1397,6 +1397,16 @@ const (
 	ContractImpactChange   ContractImpactKind = "change"
 )
 
+// IsValid reports whether the impact kind is a known closed-set value.
+func (k ContractImpactKind) IsValid() bool {
+	switch k {
+	case ContractImpactPreserve, ContractImpactRefine, ContractImpactChange:
+		return true
+	default:
+		return false
+	}
+}
+
 // ContractImpact summarizes a proposed or accepted effect on the authoritative
 // contract.
 type ContractImpact struct {
@@ -2012,6 +2022,10 @@ type PlanDecision struct {
 	// wedged exec's SortedStoryIDs at the time of diagnosis.
 	AffectedStoryIDs []string          `json:"affected_story_ids,omitempty"`
 	RejectionReasons map[string]string `json:"rejection_reasons,omitempty"`
+	// ContractImpact declares whether accepting this decision preserves,
+	// refines, or changes the authoritative contract. Auto-accept policy uses
+	// this field to avoid silently applying scope/topology-changing recovery.
+	ContractImpact *ContractImpact `json:"contract_impact,omitempty"`
 	// ArtifactReferences links artifacts (logs, screenshots, traces, trajectory
 	// steps) to this decision. Populated by qa-reviewer on needs_changes and
 	// by requirement-executor on retry exhaustion so the human reviewer can

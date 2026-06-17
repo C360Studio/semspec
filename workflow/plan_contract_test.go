@@ -96,6 +96,21 @@ func TestContractPacketJSONRoundTrip(t *testing.T) {
 	}
 }
 
+func TestContractImpactKindIsValid(t *testing.T) {
+	tests := map[ContractImpactKind]bool{
+		ContractImpactPreserve: true,
+		ContractImpactRefine:   true,
+		ContractImpactChange:   true,
+		"":                     false,
+		"replace":              false,
+	}
+	for kind, want := range tests {
+		if got := kind.IsValid(); got != want {
+			t.Errorf("ContractImpactKind(%q).IsValid() = %v, want %v", kind, got, want)
+		}
+	}
+}
+
 func TestEnsureContractPacketDoesNotOverwriteExisting(t *testing.T) {
 	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
 	plan := &Plan{Slug: "demo"}

@@ -1739,6 +1739,11 @@ abandoned. The shape is:
   {
     "action": "refine_prompt",            // REQUIRED FIRST — pick one from the set below
     "recovery_succeeded": true,
+    "contract_impact": {
+      "kind": "preserve",
+      "summary": "Same accepted contract; this only clarifies the wedged task prompt.",
+      "affected_ids": ["requirement.demo.1"]
+    },
     "diagnosis": "...",                    // REQUIRED — explains the action
     "refined_prompt": "..."               // only for refine_prompt
   }
@@ -1747,6 +1752,7 @@ Required fields:
 - action: one of refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise | escalate_human | mark_unrecoverable. REQUIRED — write it first.
 - diagnosis: 2-6 sentences describing what the trajectory shows the agent doing wrong and what the underlying mistake is. REQUIRED for every action.
 - recovery_succeeded: true when refine_prompt | narrow_scope | split_req | story_reprepare | architecture_revise plausibly fixes the wedge; false for escalate_human | mark_unrecoverable.
+- contract_impact: REQUIRED. Object with kind preserve | refine | change, summary, and optional affected_ids. Use preserve when the root contract remains unchanged; refine when you are changing downstream plan/story/scenario shape while preserving obligations; change when accepting your action would remove, add, or replace contract obligations, topology constraints, acceptance scope, or baseline architecture.
 
 Action-specific fields:
 - refine_prompt requires: refined_prompt — a complete replacement task prompt that, when handed to the wedged role, would produce the work the agent should have produced.
@@ -1754,6 +1760,10 @@ Action-specific fields:
 - story_reprepare: no extra fields beyond diagnosis — the diagnosis becomes Sarah's RecoveryHint when she re-shards the requirement's Stories.
 - architecture_revise: no extra fields beyond diagnosis — the diagnosis becomes the architect's revision feedback (ReviewFormattedFindings) when the architecture is re-run.
 - escalate_human and mark_unrecoverable: no extra fields beyond diagnosis.
+
+Auto-accept policy:
+- preserve/refine may be auto-accepted when the decision is otherwise scoped and policy-safe.
+- change is human-gated. Choose change for scope shrinkage, topology replacement, baseline-erasing architecture changes, or any action that cannot honestly preserve the root contract.
 
 Choosing between actions (ADR-043 PR 4i):
 - refine_prompt: the dev had the answer in front of it but didn't act. Same task, sharper prompt.

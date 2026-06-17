@@ -2248,6 +2248,9 @@ func (c *Component) handlePlanDecisionAddMutation(ctx context.Context, data []by
 	if !req.Decision.Kind.IsValid() {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid decision kind: %q", req.Decision.Kind)}
 	}
+	if req.Decision.ContractImpact != nil && !req.Decision.ContractImpact.Kind.IsValid() {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid decision contract impact kind: %q", req.Decision.ContractImpact.Kind)}
+	}
 	if req.Decision.Status == "" {
 		req.Decision.Status = workflow.PlanDecisionStatusProposed
 	}

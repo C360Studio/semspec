@@ -25,7 +25,7 @@ func TestBuildRecoveryPlanDecision_PrefersAffectedRequirementIDsOverSingleID(t *
 		// RequirementID intentionally left empty — the QA wedge is plan-scoped.
 	}
 
-	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diagnosis text", true, time.Now())
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diagnosis text", true, nil, time.Now())
 
 	if len(dec.AffectedReqIDs) != 3 {
 		t.Fatalf("AffectedReqIDs length = %d, want 3 (from AffectedRequirementIDs); got %v",
@@ -50,6 +50,12 @@ func TestBuildRecoveryPlanDecision_PrefersAffectedRequirementIDsOverSingleID(t *
 	if dec.Status != workflow.PlanDecisionStatusProposed {
 		t.Errorf("Status = %q, want proposed", dec.Status)
 	}
+	if dec.ContractImpact == nil || dec.ContractImpact.Kind != workflow.ContractImpactPreserve {
+		t.Fatalf("ContractImpact = %#v, want preserve", dec.ContractImpact)
+	}
+	if len(dec.ContractImpact.AffectedIDs) != 3 {
+		t.Errorf("ContractImpact.AffectedIDs = %v, want propagated affected req IDs", dec.ContractImpact.AffectedIDs)
+	}
 }
 
 // TestBuildRecoveryPlanDecision_FallsBackToSingleRequirementID covers the
@@ -67,7 +73,7 @@ func TestBuildRecoveryPlanDecision_FallsBackToSingleRequirementID(t *testing.T) 
 		// AffectedRequirementIDs intentionally empty.
 	}
 
-	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diagnosis", true, time.Now())
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diagnosis", true, nil, time.Now())
 
 	if len(dec.AffectedReqIDs) != 1 || dec.AffectedReqIDs[0] != "req-only" {
 		t.Errorf("AffectedReqIDs = %v, want [req-only] (single-ID fallback)", dec.AffectedReqIDs)
@@ -88,9 +94,57 @@ func TestBuildRecoveryPlanDecision_BothEmptyLeavesAffectedReqIDsNil(t *testing.T
 		EscalationReason: "plan review revision cap reached",
 	}
 
-	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diagnosis", false, time.Now())
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diagnosis", false, nil, time.Now())
 
 	if len(dec.AffectedReqIDs) != 0 {
 		t.Errorf("AffectedReqIDs = %v, want nil — auto-accept should not fire on plan-level wedges", dec.AffectedReqIDs)
+	}
+}
+
+func TestBuildRecoveryPlanDecision_ThreadsContractImpactThrough(t *testing.T) {
+	req := &payloads.RecoveryRequested{
+		RecoveryID:       "12345678-9999-aaaa-bbbb-cccccccccccc",
+		Slug:             "impact-demo",
+		Layer:            payloads.RecoveryLayerPhaseLocal,
+		RequirementID:    "req-impact",
+		EscalationReason: "architecture dependency contract is wrong",
+	}
+	impact := &workflow.ContractImpact{
+		Kind:    workflow.ContractImpactRefine,
+		Summary: "Architecture dependency contract is refined, not reduced.",
+	}
+
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionArchitectureRevise, "diagnosis", true, impact, time.Now())
+
+	if dec.ContractImpact == nil {
+		t.Fatal("ContractImpact = nil, want parsed impact")
+	}
+	if dec.ContractImpact.Kind != workflow.ContractImpactRefine {
+		t.Fatalf("ContractImpact.Kind = %q, want refine", dec.ContractImpact.Kind)
+	}
+	if dec.ContractImpact.Summary != impact.Summary {
+		t.Fatalf("ContractImpact.Summary = %q, want %q", dec.ContractImpact.Summary, impact.Summary)
+	}
+	if len(dec.ContractImpact.AffectedIDs) != 1 || dec.ContractImpact.AffectedIDs[0] != "req-impact" {
+		t.Fatalf("ContractImpact.AffectedIDs = %v, want fallback affected req", dec.ContractImpact.AffectedIDs)
+	}
+}
+
+func TestBuildRecoveryPlanDecision_DefaultsArchitectureReviseToContractChange(t *testing.T) {
+	req := &payloads.RecoveryRequested{
+		RecoveryID:       "12345678-abcd-aaaa-bbbb-cccccccccccc",
+		Slug:             "impact-demo",
+		Layer:            payloads.RecoveryLayerPhaseLocal,
+		RequirementID:    "req-impact",
+		EscalationReason: "architecture root cause",
+	}
+
+	dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionArchitectureRevise, "diagnosis", true, nil, time.Now())
+
+	if dec.ContractImpact == nil {
+		t.Fatal("ContractImpact = nil, want default impact")
+	}
+	if dec.ContractImpact.Kind != workflow.ContractImpactChange {
+		t.Fatalf("ContractImpact.Kind = %q, want change for omitted architecture_revise impact", dec.ContractImpact.Kind)
 	}
 }

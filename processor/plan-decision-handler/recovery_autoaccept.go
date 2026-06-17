@@ -161,7 +161,9 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 // proposals, human proposals) stay human-gated. AffectedReqIDs is the
 // load-bearing predicate for both auto-acceptable kinds: it scopes the
 // cascade target, and an empty list signals "the wedge isn't scoped to
-// specific work — needs human triage."
+// specific work — needs human triage." ContractImpact is also
+// load-bearing: preserve/refine may auto-accept, while change or missing
+// impact waits for review.
 // countAcceptedArchitectureRevises counts PlanDecisions already in accepted
 // status with Kind=architecture_revise. Used as the monotonic loop bound for
 // the architecture_revise auto-accept cap — the count survives the entity wipe
@@ -209,6 +211,12 @@ func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 		return false
 	}
 	if len(dec.AffectedReqIDs) == 0 {
+		return false
+	}
+	if dec.ContractImpact == nil || !dec.ContractImpact.Kind.IsValid() {
+		return false
+	}
+	if dec.ContractImpact.Kind == workflow.ContractImpactChange {
 		return false
 	}
 	return true

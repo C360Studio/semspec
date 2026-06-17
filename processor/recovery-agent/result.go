@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/jsonutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
@@ -29,9 +30,10 @@ type rawRecoveryResult struct {
 	// (observed 2026-06-13 gemini-pro mavlink-hard run 2). Captured so the
 	// action-inference net below can adopt it rather than terminal-fail a
 	// recoverable wedge.
-	Feedback          string          `json:"feedback,omitempty"`
-	ScopeChanges      json.RawMessage `json:"scope_changes,omitempty"`
-	RecoverySucceeded bool            `json:"recovery_succeeded"`
+	Feedback          string                   `json:"feedback,omitempty"`
+	ScopeChanges      json.RawMessage          `json:"scope_changes,omitempty"`
+	ContractImpact    *workflow.ContractImpact `json:"contract_impact,omitempty"`
+	RecoverySucceeded bool                     `json:"recovery_succeeded"`
 }
 
 // parsedRecoveryResult is the local typed view of a successful recovery
@@ -43,6 +45,7 @@ type parsedRecoveryResult struct {
 	Diagnosis         string
 	RefinedPrompt     string
 	ScopeChanges      json.RawMessage
+	ContractImpact    *workflow.ContractImpact
 	RecoverySucceeded bool
 }
 
@@ -51,6 +54,7 @@ var (
 	errResultMissingAction   = errors.New("recovery agent result missing action")
 	errResultMissingDiag     = errors.New("recovery agent result missing diagnosis")
 	errResultInvalidAction   = errors.New("recovery agent action is not in the closed set")
+	errResultInvalidImpact   = errors.New("recovery agent contract impact is not in the closed set")
 	errResultRefineNeedsPrmt = errors.New("recovery agent picked refine_prompt without a refined_prompt")
 )
 
@@ -131,12 +135,16 @@ func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 	if action == payloads.RecoveryActionRefinePrompt && strings.TrimSpace(rr.RefinedPrompt) == "" {
 		return nil, errResultRefineNeedsPrmt
 	}
+	if rr.ContractImpact != nil && !rr.ContractImpact.Kind.IsValid() {
+		return nil, fmt.Errorf("%w: %q", errResultInvalidImpact, rr.ContractImpact.Kind)
+	}
 
 	return &parsedRecoveryResult{
 		Action:            action,
 		Diagnosis:         rr.Diagnosis,
 		RefinedPrompt:     rr.RefinedPrompt,
 		ScopeChanges:      rr.ScopeChanges,
+		ContractImpact:    rr.ContractImpact,
 		RecoverySucceeded: rr.RecoverySucceeded,
 	}, nil
 }
