@@ -86,6 +86,7 @@ type sandboxClient interface {
 	DeleteWorktree(ctx context.Context, taskID string) error
 	CreateBranch(ctx context.Context, branch, baseRef string) error
 	DeleteBranch(ctx context.Context, branch string) error
+	Exec(ctx context.Context, taskID, command string, timeoutMs int) (*sandbox.ExecResult, error)
 }
 
 type requirementReviewResult struct {
@@ -1164,6 +1165,9 @@ func (c *Component) advancePastSkippedStoryLocked(ctx context.Context, exec *req
 		exec.CurrentStoryIdx++
 		resetPerStoryExecutionState(exec)
 		c.dispatchCurrentStoryLocked(ctx, exec, plan)
+		return
+	}
+	if c.handleRequirementDeliverableGapForPlanLocked(ctx, exec, plan) {
 		return
 	}
 	c.markCompletedLocked(ctx, exec)
@@ -2400,6 +2404,9 @@ func (c *Component) handleApprovedVerdictLocked(ctx context.Context, exec *requi
 	if c.handleApprovedClaimMismatchLocked(ctx, exec) {
 		return
 	}
+	if c.handleApprovedDeliverableGapLocked(ctx, exec) {
+		return
+	}
 	// ADR-044: record the per-Story terminal Status. Best-effort — claim
 	// rejection here is non-fatal because the requirement-level advancement
 	// is what gates downstream processing. Skipped when natsClient is nil
@@ -2411,6 +2418,9 @@ func (c *Component) handleApprovedVerdictLocked(ctx context.Context, exec *requi
 	// complete.
 	if exec.CurrentStoryIdx+1 < len(exec.SortedStoryIDs) {
 		c.advanceToNextStoryLocked(ctx, exec)
+		return
+	}
+	if c.handleRequirementDeliverableGapLocked(ctx, exec) {
 		return
 	}
 	c.markCompletedLocked(ctx, exec)

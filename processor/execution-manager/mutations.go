@@ -109,6 +109,9 @@ type ReqCreateRequest struct {
 	// requirement execution so the executor forks the requirement branch from
 	// its prerequisites' work rather than the plan base.
 	BaseBranch string `json:"base_branch,omitempty"`
+	// Force replaces an existing req execution. Used only by plan-manager-owned
+	// recovery redispatch after the affected execution closure has been reopened.
+	Force bool `json:"force,omitempty"`
 }
 
 // ReqPhaseRequest transitions a requirement execution to a new phase.
@@ -419,7 +422,12 @@ func (c *Component) handleReqCreateMutation(ctx context.Context, data []byte) Ex
 	key := workflow.RequirementExecutionKey(req.Slug, req.RequirementID)
 
 	if _, ok := c.store.getReq(key); ok {
-		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("req execution already exists: %s", key)}
+		if !req.Force {
+			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("req execution already exists: %s", key)}
+		}
+		if err := c.store.deleteReq(ctx, key); err != nil {
+			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("force reset existing req execution %s: %v", key, err)}
+		}
 	}
 
 	now := time.Now()
@@ -565,7 +573,9 @@ func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) Exe
 		return ExecMutationResponse{Success: false, Error: "key required"}
 	}
 
-	c.store.deleteReq(ctx, req.Key)
+	if err := c.store.deleteReq(ctx, req.Key); err != nil {
+		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("delete: %v", err)}
+	}
 
 	c.logger.Info("Requirement execution reset via mutation", "key", req.Key)
 	return ExecMutationResponse{Success: true}

@@ -36,6 +36,12 @@ accepted recovery or scope-change decision.
 The system MUST compare delivered artifacts against the current accepted scope and the root contract obligations, not
 only against the latest mutable scope list.
 
+#### Scenario: Missing deliverables are caught before final assembly
+- **WHEN** a Story or requirement has approved scenario evidence but has not delivered every accepted
+  `scope.create` path assigned to its `files_owned` closure
+- **THEN** execution rejects or retries that Story or requirement before it can be marked complete or advance to
+  final branch assembly
+
 #### Scenario: Delivered files are fewer than accepted obligations
 - **WHEN** execution converges with missing files, modules, or artifacts that remain required by the accepted contract
 - **THEN** the plan fails closed before QA and records a recoverable completeness decision
@@ -70,6 +76,12 @@ recoverable state.
 - **WHEN** a `scope_incomplete` decision is accepted
 - **THEN** the retry state includes the missing declared files and the reason they are still required in the next
   developer-facing recovery guidance
+
+#### Scenario: Scope recovery redispatches reopened requirements
+- **WHEN** an accepted `scope_incomplete` decision re-queues affected requirements for execution
+- **THEN** the orchestration retry identifies those affected requirements as force redispatches, and execution state
+  either recreates them as fresh pending executions or fails the recovery instead of treating stale rows as benign
+  idempotent dispatches
 
 #### Scenario: Recoverable accepted decisions do not leave a rejected active plan
 - **WHEN** an accepted recovery decision starts a retry or planning re-entry

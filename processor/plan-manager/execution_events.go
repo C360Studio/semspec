@@ -140,7 +140,7 @@ func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jet
 		c.mu.RUnlock()
 		if ps != nil {
 			if plan, ok := ps.get(slug); ok && plan.EffectiveStatus() == workflow.StatusImplementing {
-				if err := c.triggerScenarioOrchestrator(ctx, plan); err != nil {
+				if err := c.publishScenarioOrchestrator(ctx, plan); err != nil {
 					c.logger.Warn("Failed to re-fire scenario orchestrator after requirement completion",
 						"slug", slug, "requirement_id", reqExec.RequirementID, "error", err)
 				}

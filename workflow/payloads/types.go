@@ -808,6 +808,10 @@ type ScenarioOrchestrationTrigger struct {
 	Stories    []workflow.Story `json:"stories,omitempty"`
 	TraceID    string           `json:"trace_id,omitempty"`
 	PlanBranch string           `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)
+	// ForceRequirementIDs tells the orchestrator that these requirement
+	// executions were intentionally reopened by a recovery decision and must be
+	// recreated even if a stale req.* row still exists in EXECUTION_STATES.
+	ForceRequirementIDs []string `json:"force_requirement_ids,omitempty"`
 }
 
 // Schema implements message.Payload.

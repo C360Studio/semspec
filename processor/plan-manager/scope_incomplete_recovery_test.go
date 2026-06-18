@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 func TestScopeIncompleteAcceptEffectsWritesGuidanceAndAutoStartsRetry(t *testing.T) {
@@ -50,13 +51,13 @@ func TestScopeIncompleteAcceptEffectsWritesGuidanceAndAutoStartsRetry(t *testing
 	}
 
 	published := false
-	c.orchestratorTriggerPublisher = func(_ context.Context, got *workflow.Plan) error {
+	c.orchestratorTriggerPublisher = func(_ context.Context, got *payloads.ScenarioOrchestrationTrigger) error {
 		published = true
-		if got.Slug != plan.Slug {
-			t.Fatalf("published slug = %q, want %q", got.Slug, plan.Slug)
+		if got.PlanSlug != plan.Slug {
+			t.Fatalf("published slug = %q, want %q", got.PlanSlug, plan.Slug)
 		}
-		if got.EffectiveStatus() != workflow.StatusImplementing {
-			t.Fatalf("published status = %s, want implementing", got.EffectiveStatus())
+		if len(got.ForceRequirementIDs) != 1 || got.ForceRequirementIDs[0] != "req.scope-retry.1" {
+			t.Fatalf("ForceRequirementIDs = %v, want affected req", got.ForceRequirementIDs)
 		}
 		return nil
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // setupRevisionComponent creates a Component with MaxReviewIterations set.
@@ -50,13 +51,16 @@ func TestHandleReadyForExecutionMutation_AutoStartsExecution(t *testing.T) {
 	}
 
 	published := false
-	c.orchestratorTriggerPublisher = func(_ context.Context, got *workflow.Plan) error {
+	c.orchestratorTriggerPublisher = func(_ context.Context, got *payloads.ScenarioOrchestrationTrigger) error {
 		published = true
-		if got.Slug != plan.Slug {
-			t.Fatalf("published plan slug = %q, want %q", got.Slug, plan.Slug)
+		if got.PlanSlug != plan.Slug {
+			t.Fatalf("published plan slug = %q, want %q", got.PlanSlug, plan.Slug)
 		}
-		if got.EffectiveStatus() != workflow.StatusImplementing {
-			t.Fatalf("published plan status = %s, want implementing", got.EffectiveStatus())
+		if len(got.Requirements) != 1 || got.Requirements[0].ID != "contract" {
+			t.Fatalf("published requirements = %v, want contract", got.Requirements)
+		}
+		if len(got.ForceRequirementIDs) != 0 {
+			t.Fatalf("ForceRequirementIDs = %v, want none for normal auto-start", got.ForceRequirementIDs)
 		}
 		return nil
 	}

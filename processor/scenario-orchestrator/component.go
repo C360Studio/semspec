@@ -327,12 +327,8 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 	// scan so it always reflects the latest committed state.
 	c.reconcileCompletedRequirements(ctx)
 
-	completedReqIDs := make(map[string]bool, len(requirements))
-	for _, r := range requirements {
-		if _, ok := c.completedReqs.Get(r.ID); ok {
-			completedReqIDs[r.ID] = true
-		}
-	}
+	forceReqs := forceRequirementSet(trigger.ForceRequirementIDs)
+	completedReqIDs := c.completedRequirementIDs(requirements, forceReqs)
 	toDispatch := filterReadyRequirements(requirements, completedReqIDs)
 	preStoryGateCount := len(toDispatch)
 	toDispatch = filterByM2NStoryReservations(toDispatch, trigger.Stories)
@@ -374,7 +370,8 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 		prereqs := c.buildPrereqContext(req, requirements)
 
 		wg.Add(1)
-		go func(r workflow.Requirement, sc []workflow.Scenario, deps []payloads.PrereqContext) {
+		force := forceReqs[req.ID]
+		go func(r workflow.Requirement, sc []workflow.Scenario, deps []payloads.PrereqContext, force bool) {
 			defer wg.Done()
 
 			select {
@@ -384,12 +381,12 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 				return
 			}
 
-			if err := c.dispatchRequirement(ctx, trigger, r, sc, deps); err != nil {
+			if err := c.dispatchRequirement(ctx, trigger, r, sc, deps, force); err != nil {
 				errs <- err
 			} else {
 				c.requirementsTriggered.Add(1)
 			}
-		}(req, scenarios, prereqs)
+		}(req, scenarios, prereqs, force)
 	}
 
 	wg.Wait()
@@ -461,6 +458,7 @@ func (c *Component) dispatchRequirement(
 	req workflow.Requirement,
 	scenarios []workflow.Scenario,
 	prereqs []payloads.PrereqContext,
+	force bool,
 ) error {
 	base, err := c.resolveRequirementBase(ctx, req, trigger.Stories, trigger.PlanBranch)
 	if err != nil {
@@ -468,7 +466,7 @@ func (c *Component) dispatchRequirement(
 			"requirement_id", req.ID, "error", err)
 		return err
 	}
-	if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs); err != nil {
+	if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs, force); err != nil {
 		// A "req execution already exists" rejection is a benign idempotency
 		// outcome, not a failure (issue #180): when plan-manager re-fires the
 		// orchestrator on a completion AND the DAG gate independently re-dispatches
@@ -544,19 +542,9 @@ func (c *Component) triggerRequirementExecution(
 	req workflow.Requirement,
 	scenarios []workflow.Scenario,
 	prereqs []payloads.PrereqContext,
+	force bool,
 ) error {
-	mutReq := map[string]any{
-		"slug":           planSlug,
-		"requirement_id": req.ID,
-		"title":          req.Title,
-		"description":    req.Description,
-		"scenarios":      scenarios,
-		"depends_on":     prereqs,
-		"trace_id":       traceID,
-		"plan_branch":    planBranch,
-		"base_branch":    baseBranch,
-	}
-
+	mutReq := reqCreateMutationPayload(planSlug, traceID, planBranch, baseBranch, req, scenarios, prereqs, force)
 	data, err := json.Marshal(mutReq)
 	if err != nil {
 		return fmt.Errorf("marshal req.create mutation: %w", err)
@@ -585,6 +573,57 @@ func (c *Component) triggerRequirementExecution(
 		"prereq_count", len(prereqs),
 	)
 	return nil
+}
+
+func reqCreateMutationPayload(
+	planSlug, traceID, planBranch, baseBranch string,
+	req workflow.Requirement,
+	scenarios []workflow.Scenario,
+	prereqs []payloads.PrereqContext,
+	force bool,
+) map[string]any {
+	mutReq := map[string]any{
+		"slug":           planSlug,
+		"requirement_id": req.ID,
+		"title":          req.Title,
+		"description":    req.Description,
+		"scenarios":      scenarios,
+		"depends_on":     prereqs,
+		"trace_id":       traceID,
+		"plan_branch":    planBranch,
+		"base_branch":    baseBranch,
+	}
+	if force {
+		mutReq["force"] = true
+	}
+	return mutReq
+}
+
+func forceRequirementSet(ids []string) map[string]bool {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func (c *Component) completedRequirementIDs(requirements []workflow.Requirement, forceReqs map[string]bool) map[string]bool {
+	completedReqIDs := make(map[string]bool, len(requirements))
+	for _, r := range requirements {
+		if _, ok := c.completedReqs.Get(r.ID); ok {
+			completedReqIDs[r.ID] = true
+		}
+	}
+	removeForceRedispatchCompletions(completedReqIDs, forceReqs)
+	return completedReqIDs
+}
+
+func removeForceRedispatchCompletions(completedReqIDs, forceReqs map[string]bool) {
+	for id := range forceReqs {
+		delete(completedReqIDs, id)
+	}
 }
 
 // reconcileCompletedRequirements backfills completedReqs from EXECUTION_STATES on
