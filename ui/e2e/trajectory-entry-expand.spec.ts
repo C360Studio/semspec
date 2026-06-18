@@ -35,8 +35,8 @@ test.describe('@t0 trajectory-entry expansion', () => {
 
 		const expandBtn = page.getByTestId('entry-expand-btn');
 		await expect(expandBtn).toBeVisible();
-		await expect(expandBtn).toHaveAttribute('aria-expanded', 'false');
-		await expandBtn.click();
+		await expect(card).toHaveAttribute('aria-expanded', 'false');
+		await card.click();
 
 		const preview = page.getByTestId('entry-preview');
 		await expect(preview).toBeVisible();
@@ -46,8 +46,24 @@ test.describe('@t0 trajectory-entry expansion', () => {
 		await expect(preview).toContainText('Result');
 		await expect(preview).toContainText('PASS');
 
-		// aria-expanded reflects state so screen readers announce it.
-		await expect(expandBtn).toHaveAttribute('aria-expanded', 'true');
+		// aria-expanded reflects state on the card-level disclosure control.
+		await expect(card).toHaveAttribute('aria-expanded', 'true');
+	});
+
+	test('entry can be expanded with keyboard when the card has focus', async ({ page }) => {
+		await page.goto('/e2e-test/trajectory-entry?scenario=tool-call');
+		await waitForHydration(page);
+
+		const card = page.getByTestId('trajectory-entry');
+		await card.focus();
+		await page.keyboard.press('Enter');
+
+		await expect(page.getByTestId('entry-preview')).toBeVisible();
+		await expect(card).toHaveAttribute('aria-expanded', 'true');
+
+		await page.keyboard.press('Space');
+		await expect(page.getByTestId('entry-preview')).toHaveCount(0);
+		await expect(card).toHaveAttribute('aria-expanded', 'false');
 	});
 
 	test('model-call entry reveals response text on expand (compact layout)', async ({ page }) => {

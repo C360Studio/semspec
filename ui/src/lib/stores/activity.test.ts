@@ -71,6 +71,19 @@ describe('ActivityStore — loopLastSeen', () => {
 		expect(activityStore.loopLastSeen.has('loop-c')).toBe(false);
 	});
 
+	it('evicts the entry on terminal loop state updates', () => {
+		tick({ type: 'loop_created', loop_id: 'loop-terminal' });
+		expect(activityStore.loopLastSeen.has('loop-terminal')).toBe(true);
+
+		tick({
+			type: 'loop_updated',
+			loop_id: 'loop-terminal',
+			data: { loop_id: 'loop-terminal', state: 'complete' }
+		} as Partial<ActivityEvent> & { type: string; loop_id?: string });
+
+		expect(activityStore.loopLastSeen.has('loop-terminal')).toBe(false);
+	});
+
 	it('tracks multiple loops independently', () => {
 		tick({ type: 'loop_created', loop_id: 'loop-d' });
 		tick({ type: 'loop_created', loop_id: 'loop-e' });

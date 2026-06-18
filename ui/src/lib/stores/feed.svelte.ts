@@ -9,6 +9,7 @@ import type {
 import type { Question } from '$lib/types';
 import { questionsStore } from './questions.svelte';
 import { settingsStore } from './settings.svelte';
+import { appendBounded } from './buffer';
 import {
 	annotateExecutionSummary,
 	classifyExecutionFeedKind,
@@ -373,7 +374,7 @@ class FeedStore {
 	}
 
 	private addEvent(event: FeedEvent): void {
-		this.events = [...this.events.slice(-(this.maxEvents - 1)), event];
+		this.events = appendBounded(this.events, event, this.maxEvents);
 	}
 
 	private markPlanConnected(): void {

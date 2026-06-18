@@ -66,8 +66,24 @@
 	}
 
 	function toggleExpanded() {
+		if (!hasPreview) return;
 		expanded = !expanded;
 	}
+
+	function handleCardClick(event: MouseEvent) {
+		if (!hasPreview) return;
+		const target = event.target as HTMLElement | null;
+		if (target?.closest('button, a, input, textarea, select')) return;
+		toggleExpanded();
+	}
+
+	function handleCardKeydown(event: KeyboardEvent) {
+		if (!hasPreview) return;
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		toggleExpanded();
+	}
+
 </script>
 
 <div
@@ -78,6 +94,13 @@
 	class:tool-call={!isModelCall}
 	data-testid="trajectory-entry"
 	data-step-type={entry.step_type}
+	role="button"
+	tabindex={hasPreview ? 0 : -1}
+	aria-disabled={!hasPreview}
+	aria-expanded={expanded}
+	aria-label={`${expanded ? 'Collapse' : 'Expand'} trajectory entry ${displayName}`}
+	onclick={handleCardClick}
+	onkeydown={handleCardKeydown}
 >
 	<div class="card-header">
 		<div class="header-left">
@@ -107,15 +130,14 @@
 					 expansion is always allowed when there's something to show.
 					 Previously both were coupled, so the plan-page timeline
 					 couldn't reveal prompt/response/tool args (bug #7.10). -->
-				<button
+				<span
 					class="expand-btn"
-					onclick={toggleExpanded}
 					title={expanded ? 'Collapse' : 'Expand preview'}
 					data-testid="entry-expand-btn"
-					aria-expanded={expanded}
+					aria-hidden="true"
 				>
 					<Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={14} />
-				</button>
+				</span>
 			{/if}
 		</div>
 	</div>
@@ -237,6 +259,19 @@
 		flex-direction: column;
 		gap: var(--space-2);
 		transition: border-color var(--transition-fast);
+	}
+
+	.entry-card[role='button']:not([aria-disabled='true']) {
+		cursor: pointer;
+	}
+
+	.entry-card[role='button']:not([aria-disabled='true']):hover {
+		border-color: var(--color-border-strong, var(--color-accent-muted));
+	}
+
+	.entry-card[role='button']:not([aria-disabled='true']):focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
 	}
 
 	.entry-card.compact {

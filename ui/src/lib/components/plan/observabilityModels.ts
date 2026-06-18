@@ -109,7 +109,9 @@ export type ExecutionAttemptModel = {
 export type PersistedLessonSummary = {
 	id: string;
 	summary: string;
+	detail?: string;
 	source: string;
+	role?: string;
 	positive: boolean;
 	createdAt: string;
 	lastInjectedAt?: string | null;
@@ -162,6 +164,11 @@ export type FeedFreshnessSnapshot = {
 	connected: boolean;
 	streamEverConnected: boolean;
 	lastSuccessfulUpdateAt: string | null;
+	questionsConnected?: boolean;
+	questionsEverConnected?: boolean;
+	questionsLastSuccessfulUpdateAt?: string | null;
+	questionsError?: string | null;
+	questionsLastErrorAt?: string | null;
 };
 
 export type FreshnessIndicatorState = {
@@ -332,7 +339,9 @@ export function persistedLessonSummaries(
 		.map((lesson) => ({
 			id: lesson.ID,
 			summary: lesson.Summary,
+			detail: lesson.Detail,
 			source: lesson.Source,
+			role: lesson.Role,
 			positive: lesson.Positive,
 			createdAt: lesson.CreatedAt,
 			lastInjectedAt: lesson.LastInjectedAt,
@@ -434,9 +443,14 @@ export function planFreshnessIndicatorState(
 ): FreshnessIndicatorState {
 	const freshness = plan.phase_summary?.freshness ?? null;
 	const planScoped = feed.currentSlug === plan.slug;
-	const disconnected = planScoped && feed.streamEverConnected && !feed.connected;
+	const feedDisconnected = planScoped && feed.streamEverConnected && !feed.connected;
+	const questionsDisconnected = Boolean(feed.questionsEverConnected && !feed.questionsConnected);
+	const disconnected = feedDisconnected || questionsDisconnected;
 	const stale = Boolean(freshness?.stale);
 	const shouldShow = stale || disconnected;
+	const disconnectedReason = questionsDisconnected
+		? (feed.questionsError ?? 'Questions stream disconnected')
+		: undefined;
 	return {
 		shouldShow,
 		disconnected,
@@ -445,10 +459,15 @@ export function planFreshnessIndicatorState(
 			? 'Stale data and stream disconnected'
 			: stale
 				? 'Stale data'
-				: 'Stream disconnected',
-		lastUpdateAt: feed.lastSuccessfulUpdateAt ?? freshness?.generated_at ?? null,
-		reason: freshness?.reason,
-		source: freshness?.source
+				: questionsDisconnected
+					? 'Question stream disconnected'
+					: 'Stream disconnected',
+		lastUpdateAt: feed.lastSuccessfulUpdateAt ??
+			feed.questionsLastSuccessfulUpdateAt ??
+			freshness?.generated_at ??
+			null,
+		reason: disconnectedReason ?? freshness?.reason,
+		source: questionsDisconnected ? 'question-manager' : freshness?.source
 	};
 }
 

@@ -2,6 +2,7 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { planFreshnessIndicatorState } from '$lib/components/plan/observabilityModels';
 	import { feedStore } from '$lib/stores/feed.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	interface Props {
@@ -14,7 +15,12 @@
 		currentSlug: feedStore.currentSlug,
 		connected: feedStore.connected,
 		streamEverConnected: feedStore.streamEverConnected,
-		lastSuccessfulUpdateAt: feedStore.lastSuccessfulUpdateAt
+		lastSuccessfulUpdateAt: feedStore.lastSuccessfulUpdateAt,
+		questionsConnected: questionsStore.connected,
+		questionsEverConnected: questionsStore.streamEverConnected,
+		questionsLastSuccessfulUpdateAt: questionsStore.lastSuccessfulUpdateAt,
+		questionsError: questionsStore.streamError,
+		questionsLastErrorAt: questionsStore.lastErrorAt
 	}));
 
 	function formatTime(timestamp: string): string {
