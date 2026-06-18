@@ -10,6 +10,7 @@
 		lessonActivityModel,
 		type PersistedLessonSummary
 	} from '$lib/components/plan/observabilityModels';
+	import { compactPlanText, shouldCollapsePlanText } from '$lib/types/planDisplay';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { TrajectoryListItem } from '$lib/types/trajectory';
 
@@ -41,6 +42,14 @@
 		const date = new Date(value);
 		if (!Number.isFinite(date.getTime())) return '';
 		return `${date.toISOString().slice(11, 19)}Z`;
+	}
+
+	function lessonPreview(value: string): string {
+		return compactPlanText(value, 180);
+	}
+
+	function shouldShowRawLesson(lesson: PersistedLessonSummary): boolean {
+		return shouldCollapsePlanText(lesson.summary) || Boolean(lesson.detail);
 	}
 </script>
 
@@ -99,12 +108,24 @@
 				<div class="captured-row" data-positive={lesson.positive}>
 					<Icon name={lesson.positive ? 'lightbulb' : 'alert-circle'} size={14} />
 					<div class="captured-copy">
-						<span>{lesson.summary}</span>
-						<small>
+						<span class="lesson-summary">{lessonPreview(lesson.summary)}</span>
+						<small class="lesson-meta">
 							{lesson.relatedTaskTitle ?? lesson.source}
+							{#if lesson.role}
+								<span aria-hidden="true">·</span>
+								{formatToken(lesson.role)}
+							{/if}
 							<span aria-hidden="true">·</span>
 							{lesson.futureRunOnly ? 'future-run only' : `injected ${timeLabel(lesson.lastInjectedAt)}`}
 						</small>
+						{#if shouldShowRawLesson(lesson)}
+							<details class="lesson-raw">
+								<summary>Raw lesson details</summary>
+								<pre>{lesson.summary}{#if lesson.detail}
+
+{lesson.detail}{/if}</pre>
+							</details>
+						{/if}
 					</div>
 				</div>
 			{/each}
@@ -242,18 +263,48 @@
 		gap: 2px;
 	}
 
-	.captured-copy span {
+	.lesson-summary {
 		font-size: var(--font-size-sm);
 		line-height: var(--line-height-normal);
 		color: var(--color-text-primary);
+		overflow-wrap: anywhere;
 	}
 
-	.captured-copy small {
+	.lesson-meta {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-1);
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
+	}
+
+	.lesson-raw {
+		margin-top: var(--space-1);
+		border: 1px solid var(--color-border-subtle, var(--color-border));
+		border-radius: var(--radius-sm);
+		background: var(--color-bg-primary);
+	}
+
+	.lesson-raw summary {
+		padding: var(--space-1) var(--space-2);
+		cursor: pointer;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+	}
+
+	.lesson-raw pre {
+		max-height: 220px;
+		margin: 0;
+		padding: var(--space-2);
+		border-top: 1px solid var(--color-border-subtle, var(--color-border));
+		overflow: auto;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+		line-height: var(--line-height-relaxed);
+		color: var(--color-text-secondary);
 	}
 
 	.role-row {

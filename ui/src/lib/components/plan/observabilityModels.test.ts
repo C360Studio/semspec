@@ -415,6 +415,28 @@ describe('lesson activity observability model', () => {
 		expect(isLessonTrajectoryItem(trajectory({ workflow_slug: 'other', workflow_step: 'other', role: 'developer', task_id: 'lesson-pass' }))).toBe(true);
 		expect(isLessonTrajectoryItem(trajectory({ workflow_slug: 'semspec-task-execution', workflow_step: 'develop', role: 'developer', task_id: 'dev-1' }))).toBe(false);
 	});
+
+	it('carries persisted lesson role and detail for compact UI cards', () => {
+		const summaries = persistedLessonSummaries(
+			plan(),
+			[executionTask({ task_id: 'node-1', title: 'Fix coverage' })],
+			[],
+			[lesson({
+				ScenarioID: 'node-1',
+				Summary: 'Short summary',
+				Detail: 'Long evidence transcript',
+				Role: 'developer'
+			})]
+		);
+
+		expect(summaries).toHaveLength(1);
+		expect(summaries[0]).toMatchObject({
+			summary: 'Short summary',
+			detail: 'Long evidence transcript',
+			role: 'developer',
+			relatedTaskTitle: 'Fix coverage'
+		});
+	});
 });
 
 describe('freshness observability model', () => {
@@ -453,5 +475,25 @@ describe('freshness observability model', () => {
 		});
 
 		expect(state.shouldShow).toBe(false);
+	});
+
+	it('shows question stream failures even when plan feed is still connected', () => {
+		const state = planFreshnessIndicatorState(plan({ phase_summary: phaseSummary() }), {
+			currentSlug: 'demo',
+			connected: true,
+			streamEverConnected: true,
+			lastSuccessfulUpdateAt: '2026-06-16T12:11:00Z',
+			questionsConnected: false,
+			questionsEverConnected: true,
+			questionsLastSuccessfulUpdateAt: '2026-06-16T12:10:00Z',
+			questionsError: 'Questions stream connection error',
+			questionsLastErrorAt: '2026-06-16T12:12:00Z'
+		});
+
+		expect(state.shouldShow).toBe(true);
+		expect(state.disconnected).toBe(true);
+		expect(state.statusLabel).toBe('Question stream disconnected');
+		expect(state.reason).toBe('Questions stream connection error');
+		expect(state.source).toBe('question-manager');
 	});
 });

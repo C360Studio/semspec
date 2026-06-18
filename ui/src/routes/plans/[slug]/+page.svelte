@@ -27,6 +27,7 @@
 	import { promotePlan, executePlan, retryFailed } from '$lib/actions/plans';
 	import RetrySelectedPicker from '$lib/components/plan/RetrySelectedPicker.svelte';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
+	import { planDisplayTitle } from '$lib/types/planDisplay';
 	import { activePhaseProgress } from '$lib/types/activePlanProgress';
 	import { selectFreshestPlan } from '$lib/types/planFreshness';
 	import { mergeLiveTrajectoryItems } from '$lib/types/trajectoryActivityProjection';
@@ -65,6 +66,7 @@
 		selectFreshestPlan(feedStore.currentPlan, data.plan, slug ?? '')
 	);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
+	const displayTitle = $derived(planDisplayTitle(plan));
 	const requirements = $derived(data.requirements);
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
@@ -482,7 +484,7 @@
 </script>
 
 <svelte:head>
-	<title>{plan?.title || plan?.slug || 'Plan'} - Semspec</title>
+	<title>{displayTitle} - Semspec</title>
 </svelte:head>
 
 <div class="plan-detail">
@@ -493,7 +495,7 @@
 		</a>
 		{#if plan}
 			<div class="header-info">
-				<h1 class="plan-title">{plan.title || plan.slug}</h1>
+				<h1 class="plan-title">{displayTitle}</h1>
 				<div class="plan-meta">
 					<ModeIndicator approved={plan.approved} />
 					<span class="plan-stage" data-stage={plan.stage} data-phase={plan.phase_summary?.phase ?? plan.stage}>

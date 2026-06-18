@@ -24,9 +24,11 @@
 
 	let { data, children }: Props = $props();
 
-	const activeLoopCount = $derived(
+	const loadedActiveLoopCount = $derived(
 		(data.loops ?? []).filter((l) => ['pending', 'executing', 'paused'].includes(l.state)).length
 	);
+	const liveActiveLoopCount = $derived(activityStore.loopLastSeen.size);
+	const activeLoopCount = $derived(Math.max(loadedActiveLoopCount, liveActiveLoopCount));
 
 	const configWarning = $derived(
 		setupStore.step === 'scaffold' ||

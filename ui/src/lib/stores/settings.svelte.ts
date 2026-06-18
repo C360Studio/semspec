@@ -6,6 +6,7 @@
  */
 
 import { browser } from '$app/environment';
+import { clampEventLimit } from './buffer';
 
 const STORAGE_KEY = 'semspec-settings';
 
@@ -40,7 +41,7 @@ class SettingsStore {
 	}
 
 	get activityLimit(): number {
-		return this.settings.activityLimit;
+		return clampEventLimit(this.settings.activityLimit, DEFAULT_SETTINGS.activityLimit);
 	}
 
 	get reducedMotion(): boolean {
@@ -64,7 +65,7 @@ class SettingsStore {
 
 	// Activity limit management
 	setActivityLimit(limit: number): void {
-		this.settings.activityLimit = Math.max(10, Math.min(1000, limit));
+		this.settings.activityLimit = Math.max(10, clampEventLimit(limit, DEFAULT_SETTINGS.activityLimit));
 		this.saveToStorage();
 	}
 
@@ -93,7 +94,11 @@ class SettingsStore {
 			const stored = localStorage.getItem(STORAGE_KEY);
 			if (stored) {
 				const parsed = JSON.parse(stored) as Partial<Settings>;
-				this.settings = { ...DEFAULT_SETTINGS, ...parsed };
+				this.settings = {
+					...DEFAULT_SETTINGS,
+					...parsed,
+					activityLimit: Math.max(10, clampEventLimit(parsed.activityLimit, DEFAULT_SETTINGS.activityLimit))
+				};
 			}
 		} catch {
 			// Ignore parse errors, use defaults

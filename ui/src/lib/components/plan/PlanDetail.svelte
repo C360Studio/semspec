@@ -14,6 +14,7 @@
 	import { promotePlan } from '$lib/actions/plans';
 	import { feedStore } from '$lib/stores/feed.svelte';
 	import { LOCKED_STAGES } from '$lib/types/plan';
+	import { compactPlanText, planDisplayTitle, shouldCollapsePlanText } from '$lib/types/planDisplay';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Phase } from '$lib/types/phase';
 	import type { Requirement } from '$lib/types/requirement';
@@ -35,6 +36,9 @@
 	let error = $state<string | null>(null);
 
 	const guidance = $derived(deriveGuidance(plan.approved, plan.stage, requirements.length));
+	const displayTitle = $derived(planDisplayTitle(plan));
+	const collapseGoal = $derived(shouldCollapsePlanText(plan.goal));
+	const collapseContext = $derived(shouldCollapsePlanText(plan.context));
 
 	const canEdit = $derived(!LOCKED_STAGES.includes(plan.stage));
 
@@ -86,13 +90,17 @@
 			approving = false;
 		}
 	}
+
+	function charsLabel(value: string | null | undefined): string {
+		return `${(value ?? '').length.toLocaleString()} chars`;
+	}
 </script>
 
 <div class="plan-detail">
 	<!-- Header -->
 	<header class="detail-header">
 		<div class="header-main">
-			<h2 class="detail-title">{plan.title || plan.slug}</h2>
+			<h2 class="detail-title">{displayTitle}</h2>
 			<StatusBadge status={plan.approved ? 'approved' : 'draft'} />
 		</div>
 		{#if canEdit && !isEditing}
@@ -158,7 +166,15 @@
 						<Icon name="target" size={14} />
 						Goal
 					</dt>
-					<dd class="section-content">{plan.goal}</dd>
+					{#if collapseGoal}
+						<dd class="section-content section-summary">{compactPlanText(plan.goal)}</dd>
+						<details class="source-details">
+							<summary>Raw goal / prompt <span>{charsLabel(plan.goal)}</span></summary>
+							<pre class="source-text">{plan.goal}</pre>
+						</details>
+					{:else}
+						<dd class="section-content">{plan.goal}</dd>
+					{/if}
 				</div>
 			{/if}
 
@@ -168,7 +184,15 @@
 						<Icon name="info" size={14} />
 						Context
 					</dt>
-					<dd class="section-content">{plan.context}</dd>
+					{#if collapseContext}
+						<dd class="section-content section-summary">{compactPlanText(plan.context)}</dd>
+						<details class="source-details">
+							<summary>Raw context <span>{charsLabel(plan.context)}</span></summary>
+							<pre class="source-text">{plan.context}</pre>
+						</details>
+					{:else}
+						<dd class="section-content">{plan.context}</dd>
+					{/if}
 				</div>
 			{/if}
 
@@ -343,6 +367,50 @@
 		line-height: var(--line-height-relaxed);
 		color: var(--color-text-primary);
 		white-space: pre-wrap;
+	}
+
+	.section-summary {
+		color: var(--color-text-secondary);
+	}
+
+	.source-details {
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		background: var(--color-bg-tertiary);
+		overflow: hidden;
+	}
+
+	.source-details summary {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: var(--space-3);
+		padding: var(--space-2) var(--space-3);
+		cursor: pointer;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-secondary);
+	}
+
+	.source-details summary span {
+		font-size: var(--font-size-xs);
+		font-family: var(--font-family-mono);
+		color: var(--color-text-muted);
+	}
+
+	.source-text {
+		max-height: 280px;
+		margin: 0;
+		padding: var(--space-3);
+		border-top: 1px solid var(--color-border);
+		overflow: auto;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+		line-height: var(--line-height-relaxed);
+		color: var(--color-text-secondary);
+		background: var(--color-bg-primary);
 	}
 
 	.section-textarea {

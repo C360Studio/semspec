@@ -14,10 +14,17 @@ import { defineConfig, devices } from '@playwright/test';
  * Timeout configuration:
  * - Default: 90s global, 22.5s per expect
  * - Override with PLAYWRIGHT_TIMEOUT env var for slow environments
+ * - Web server default: 7m for cold Docker/model health gates
+ * - Override with PLAYWRIGHT_WEBSERVER_TIMEOUT env var when needed
  */
 
 const DEFAULT_TIMEOUT = 90000;
+const DEFAULT_WEB_SERVER_TIMEOUT = 420000;
 const timeout = parseInt(process.env.PLAYWRIGHT_TIMEOUT || String(DEFAULT_TIMEOUT), 10);
+const webServerTimeout = parseInt(
+	process.env.PLAYWRIGHT_WEBSERVER_TIMEOUT || String(DEFAULT_WEB_SERVER_TIMEOUT),
+	10
+);
 
 const useMockLLM = process.env.USE_MOCK_LLM === 'true';
 const dockerComposeCommand = useMockLLM
@@ -89,7 +96,7 @@ export default defineConfig({
 		command: dockerComposeCommand,
 		url: 'http://localhost:3000',
 		reuseExistingServer: !process.env.CI,
-		timeout: 120 * 1000,
+		timeout: webServerTimeout,
 		stdout: 'pipe',
 		stderr: 'pipe',
 		env: mockEnv,

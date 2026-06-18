@@ -6,6 +6,7 @@ import {
 } from '$lib/api/mock';
 import type { ActivityEvent } from '$lib/types';
 import { settingsStore } from '$lib/stores/settings.svelte';
+import { appendBounded } from './buffer';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 const RECONNECT_GRACE_MS = 15_000;
@@ -84,12 +85,14 @@ class ActivityStore {
 
 	private addEvent(event: ActivityEvent): void {
 		this.lastSuccessfulUpdateAt = new Date().toISOString();
-		this.recent = [...this.recent.slice(-(this.maxEvents - 1)), event];
+		this.recent = appendBounded(this.recent, event, this.maxEvents);
 
 		// Maintain loopLastSeen as a heartbeat timeline. Map must be replaced,
 		// not mutated, to trigger Svelte 5 reactivity — Maps aren't deeply reactive.
 		if (event.loop_id) {
-			if (event.type === 'loop_deleted') {
+			const state = event.data?.state;
+			const terminal = event.type === 'loop_deleted' || state === 'complete' || state === 'failed' || state === 'cancelled';
+			if (terminal) {
 				if (this.loopLastSeen.has(event.loop_id)) {
 					const next = new Map(this.loopLastSeen);
 					next.delete(event.loop_id);

@@ -15,6 +15,10 @@ class QuestionsStore {
 	error = $state<string | null>(null);
 	lastRefresh = $state<Date | null>(null);
 	connected = $state(false);
+	streamEverConnected = $state(false);
+	lastSuccessfulUpdateAt = $state<string | null>(null);
+	lastErrorAt = $state<string | null>(null);
+	streamError = $state<string | null>(null);
 
 	private unsubscribe: (() => void) | null = null;
 
@@ -39,13 +43,19 @@ class QuestionsStore {
 				(error: Error) => {
 					console.error('Questions stream error:', error);
 					this.connected = false;
+					this.streamError = error.message || 'Questions stream connection error';
+					this.lastErrorAt = new Date().toISOString();
 					// Native EventSource auto-reconnect handles backoff.
 				}
 			);
 			this.connected = true;
+			this.streamEverConnected = true;
+			this.streamError = null;
 		} catch (err) {
 			console.error('Failed to connect to questions stream:', err);
 			this.connected = false;
+			this.streamError = err instanceof Error ? err.message : 'Failed to connect to questions stream';
+			this.lastErrorAt = new Date().toISOString();
 		}
 
 		// Initial fetch to populate state (non-blocking)
@@ -72,6 +82,9 @@ class QuestionsStore {
 		if (!this.connected) {
 			this.connected = true;
 		}
+		this.streamEverConnected = true;
+		this.streamError = null;
+		this.lastSuccessfulUpdateAt = new Date().toISOString();
 		switch (event.type) {
 			case 'question_created': {
 				const question = event.data as Question;
@@ -129,6 +142,8 @@ class QuestionsStore {
 		try {
 			this.all = await questionsApi.list({ status });
 			this.lastRefresh = new Date();
+			this.lastSuccessfulUpdateAt = this.lastRefresh.toISOString();
+			this.streamError = null;
 			// Inject pending questions into chat messages
 			for (const q of this.all.filter((q) => q.status === 'pending')) {
 				messagesStore.addQuestion(q);
