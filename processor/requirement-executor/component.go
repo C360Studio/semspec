@@ -190,6 +190,10 @@ type Component struct {
 	errors           atomic.Int64
 	lastActivityMu   sync.RWMutex
 	lastActivity     time.Time
+
+	// pendingRecoveryDecisionChecker is a test seam for the awaiting-recovery
+	// timeout path. Production uses PLAN_STATES via hasPendingRecoveryDecision.
+	pendingRecoveryDecisionChecker func(ctx context.Context, slug, requirementID string) bool
 }
 
 // NewComponent creates a new requirement-executor from raw JSON config.

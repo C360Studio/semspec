@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
@@ -156,6 +157,103 @@ func TestRecoveryTimeout_TerminalFailsWithCapturedReason(t *testing.T) {
 	}
 	if c.requirementsFailed.Load() != 1 {
 		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+}
+
+func TestRecoveryTimeout_ExtendsWhenPlanDecisionStillPending(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+	exec := newAwaitingExec("plan-pending", "req-pending")
+	exec.awaitingRecovery = true
+	exec.recoveryReason = "architecture recovery proposed"
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.pendingRecoveryDecisionChecker = func(_ context.Context, slug, requirementID string) bool {
+		return slug == "plan-pending" && requirementID == "req-pending"
+	}
+
+	c.handleRecoveryTimeout(exec, 50*time.Millisecond)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if exec.terminated {
+		t.Fatal("exec should not terminal-fail while a PlanDecision is pending")
+	}
+	if !exec.awaitingRecovery {
+		t.Fatal("exec should remain awaiting recovery while the PlanDecision waits")
+	}
+	if exec.recoveryTimer == nil {
+		t.Fatal("recovery timer should be re-armed")
+	}
+	exec.recoveryTimer.stop()
+	exec.recoveryTimer = nil
+	if c.requirementsFailed.Load() != 0 {
+		t.Fatalf("requirementsFailed = %d, want 0", c.requirementsFailed.Load())
+	}
+}
+
+func TestIsPendingRecoveryDecisionForRequirement(t *testing.T) {
+	tests := []struct {
+		name string
+		dec  workflow.PlanDecision
+		req  string
+		want bool
+	}{
+		{
+			name: "architecture revise proposed for req",
+			dec: workflow.PlanDecision{
+				Kind:           workflow.PlanDecisionKindArchitectureRevise,
+				Status:         workflow.PlanDecisionStatusProposed,
+				AffectedReqIDs: []string{"req-1"},
+			},
+			req:  "req-1",
+			want: true,
+		},
+		{
+			name: "scope incomplete under review for req",
+			dec: workflow.PlanDecision{
+				Kind:           workflow.PlanDecisionKindScopeIncomplete,
+				Status:         workflow.PlanDecisionStatusUnderReview,
+				AffectedReqIDs: []string{"req-1"},
+			},
+			req:  "req-1",
+			want: true,
+		},
+		{
+			name: "accepted is not pending",
+			dec: workflow.PlanDecision{
+				Kind:           workflow.PlanDecisionKindArchitectureRevise,
+				Status:         workflow.PlanDecisionStatusAccepted,
+				AffectedReqIDs: []string{"req-1"},
+			},
+			req:  "req-1",
+			want: false,
+		},
+		{
+			name: "assembly conflict is terminal not recovery wait",
+			dec: workflow.PlanDecision{
+				Kind:           workflow.PlanDecisionKindAssemblyConflict,
+				Status:         workflow.PlanDecisionStatusProposed,
+				AffectedReqIDs: []string{"req-1"},
+			},
+			req:  "req-1",
+			want: false,
+		},
+		{
+			name: "different requirement",
+			dec: workflow.PlanDecision{
+				Kind:           workflow.PlanDecisionKindStoryReprepare,
+				Status:         workflow.PlanDecisionStatusProposed,
+				AffectedReqIDs: []string{"req-2"},
+			},
+			req:  "req-1",
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isPendingRecoveryDecisionForRequirement(tc.dec, tc.req); got != tc.want {
+				t.Fatalf("isPendingRecoveryDecisionForRequirement = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

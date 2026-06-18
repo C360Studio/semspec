@@ -133,6 +133,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.MaxAutoStoryReprepares != 1 {
 		t.Errorf("DefaultConfig().MaxAutoStoryReprepares = %d, want 1", cfg.MaxAutoStoryReprepares)
 	}
+	if cfg.MaxAutoScopeIncompleteRecoveries != 1 {
+		t.Errorf("DefaultConfig().MaxAutoScopeIncompleteRecoveries = %d, want 1", cfg.MaxAutoScopeIncompleteRecoveries)
+	}
 	if cfg.Ports == nil {
 		t.Error("DefaultConfig().Ports must not be nil")
 	}
@@ -156,6 +159,9 @@ func TestNewComponent_AppliesAutoAcceptCapDefaults(t *testing.T) {
 	}
 	if c.config.MaxAutoStoryReprepares != 1 {
 		t.Errorf("MaxAutoStoryReprepares = %d, want default 1", c.config.MaxAutoStoryReprepares)
+	}
+	if c.config.MaxAutoScopeIncompleteRecoveries != 1 {
+		t.Errorf("MaxAutoScopeIncompleteRecoveries = %d, want default 1", c.config.MaxAutoScopeIncompleteRecoveries)
 	}
 }
 

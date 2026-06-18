@@ -1,8 +1,11 @@
 package planmanager
 
 import (
+	"context"
 	"fmt"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestUndeliveredScopeFiles(t *testing.T) {
@@ -88,5 +91,56 @@ func TestUndeliveredScopeFiles_RunShape(t *testing.T) {
 	// The first undelivered file is File08 (0-7 delivered).
 	if missing[0] != "src/main/java/org/sensorhub/impl/sensor/mavsdk/File08.java" {
 		t.Errorf("missing[0] = %q, want File08", missing[0])
+	}
+}
+
+func TestFailPlanOnIncompleteScopeCreatesRecoverableDecisionWithContractImpact(t *testing.T) {
+	c := setupTestComponent(t)
+	plan := &workflow.Plan{
+		ID:     workflow.PlanEntityID("scope-gap"),
+		Slug:   "scope-gap",
+		Title:  "scope-gap",
+		Status: workflow.StatusImplementing,
+		Scope:  workflow.Scope{Create: []string{"src/required.go", "src/missing.go"}},
+		Requirements: []workflow.Requirement{
+			{ID: "req.scope-gap.1"},
+			{ID: "req.scope-gap.2"},
+		},
+	}
+	if err := c.plans.save(context.Background(), plan); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	c.failPlanOnIncompleteScope(context.Background(), plan, []string{"src/missing.go"})
+
+	got, ok := c.plans.get(plan.Slug)
+	if !ok {
+		t.Fatal("plan missing after completeness gate")
+	}
+	if got.EffectiveStatus() != workflow.StatusRejected {
+		t.Fatalf("status = %s, want rejected", got.EffectiveStatus())
+	}
+	if len(got.PlanDecisions) != 1 {
+		t.Fatalf("PlanDecisions len = %d, want 1", len(got.PlanDecisions))
+	}
+	decision := got.PlanDecisions[0]
+	if decision.Kind != workflow.PlanDecisionKindScopeIncomplete {
+		t.Fatalf("decision.Kind = %s, want scope_incomplete", decision.Kind)
+	}
+	if decision.ProposedBy != "plan-manager" {
+		t.Fatalf("decision.ProposedBy = %q, want plan-manager", decision.ProposedBy)
+	}
+	if decision.ContractImpact == nil {
+		t.Fatal("decision.ContractImpact is nil")
+	}
+	if decision.ContractImpact.Kind != workflow.ContractImpactPreserve {
+		t.Fatalf("ContractImpact.Kind = %s, want preserve", decision.ContractImpact.Kind)
+	}
+	if len(decision.ContractImpact.AffectedIDs) != 1 ||
+		decision.ContractImpact.AffectedIDs[0] != "contract.scope.create:src/missing.go" {
+		t.Fatalf("ContractImpact.AffectedIDs = %v, want missing file contract id", decision.ContractImpact.AffectedIDs)
+	}
+	if len(decision.AffectedReqIDs) != 2 {
+		t.Fatalf("AffectedReqIDs = %v, want all requirements", decision.AffectedReqIDs)
 	}
 }

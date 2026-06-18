@@ -138,9 +138,14 @@ func (c *Component) failPlanOnIncompleteScope(ctx context.Context, plan *workflo
 		Title:          "Declared scope.create files not delivered",
 		Rationale:      plan.LastError,
 		AffectedReqIDs: affected,
-		Status:         workflow.PlanDecisionStatusProposed,
-		ProposedBy:     "plan-manager",
-		CreatedAt:      now,
+		ContractImpact: &workflow.ContractImpact{
+			Kind:        workflow.ContractImpactPreserve,
+			Summary:     "Declared scope.create files remain required; retry execution must deliver the missing files or propose an explicit scope amendment.",
+			AffectedIDs: scopeCompletenessAffectedIDs(missing),
+		},
+		Status:     workflow.PlanDecisionStatusProposed,
+		ProposedBy: "plan-manager",
+		CreatedAt:  now,
 	})
 
 	c.logger.Warn("Level-0 completeness gate FAILED — failing plan closed (recoverable) instead of advancing to QA",
@@ -159,4 +164,16 @@ func (c *Component) failPlanOnIncompleteScope(ctx context.Context, plan *workflo
 				"slug", plan.Slug, "error", saveErr)
 		}
 	}
+}
+
+func scopeCompletenessAffectedIDs(missing []string) []string {
+	out := make([]string, 0, len(missing))
+	for _, file := range missing {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		out = append(out, "contract.scope.create:"+file)
+	}
+	return out
 }

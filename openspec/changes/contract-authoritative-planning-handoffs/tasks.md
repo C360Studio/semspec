@@ -65,3 +65,14 @@
 - [x] 8.4 Floor recovery contract-impact policy by action kind so scope/topology-changing actions cannot self-report as preserve/refine
 - [x] 8.5 Fix UI false-green and stale observability state regressions from the PR review
 - [x] 8.6 Fix scoped `architecture_revise` so a single dirty requirement closure does not rewrite unrelated Stories/Scenarios
+
+## 9. Recovery State Machine Audit Follow-Ups
+
+- [x] 9.1 Make `scope_incomplete` a first-class PlanDecision kind across validation, cascade, and auto-accept policy
+- [x] 9.2 Apply `scope_incomplete` accept effects that write recovery guidance and move rejected plans into active retry state
+- [x] 9.3 Prevent requirement-executor from treating `scope_incomplete` as generic completed-QA recovery
+- [x] 9.4 Add deterministic tests for scope-incomplete validation, auto-accept, accept effects, cascade, prompt guidance, and executor handling
+- [x] 9.5 Add or update tests for architecture-revise full-auto timeout policy so human-gated decisions cannot self-fail invisibly
+- [x] 9.6 Run the relevant mock E2E handoff scenario after unit coverage passes
+- [x] 9.7 Fix mock E2E execution-phase reporting so intermediate snapshots do not overwrite final plan status details
+- [x] 9.8 Stabilize mock E2E startup by bypassing unused graph model services and persisting the semembed model cache for real graph stacks
