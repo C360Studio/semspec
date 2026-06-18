@@ -81,10 +81,12 @@ When recovery diagnoses an *architecture-root* wedge (a missing/mis-resolved ups
 a wrong component boundary, an un-runnable integration target), the recovery-agent now picks
 `architecture_revise` instead of `escalate_human`. On accept, plan-manager captures the prior
 architecture into `PreviousArchitectureJSON` (the revision base the architect already reads),
-routes the diagnosis into `ReviewFormattedFindings`, wipes Architecture + Stories + Scenarios,
-resets all requirement executions, and drives the new back-transition `implementing →
+routes the diagnosis into `ReviewFormattedFindings`, clears Architecture, resets the affected
+requirement/story closure, and drives the new back-transition `implementing →
 requirements_generated`. The architect re-fires and *revises* the prior architecture against the
-diagnosis; the full pipeline (Sarah → Bob → execution) re-runs clean.
+diagnosis. Whole-phase decisions may regenerate the full downstream pipeline when explicitly
+justified; scoped decisions preserve unrelated Stories/Scenarios and merge only the dirty closure
+before execution resumes.
 
 Because this fires from `implementing` — a LIVE phase with in-flight executor state, unlike its
 sibling `story_reprepare` (which fires from the quiescent `stories_generated`) — three guards

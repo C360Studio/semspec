@@ -35,10 +35,10 @@ func TestPlanDecision_NoAffectedRequirements(t *testing.T) {
 
 // TestPlanDecision_ArchitectureRevise_NoOp verifies the architecture_revise
 // cascade is a no-op even with Stories + Scenarios present: the plan-manager
-// accept handler already wiped those entities and reset execution inline, so
-// the cascade must not dirty-mark anything (it records only the affected reqs
-// for telemetry). Without an explicit case this kind would fall through to the
-// requirement_change default and wrongly dirty-mark scenarios.
+// accept handler applies the planning re-entry inline, so the cascade must not
+// dirty-mark anything (it records only the affected reqs for telemetry). Without
+// an explicit case this kind would fall through to the requirement_change
+// default and wrongly dirty-mark scenarios.
 func TestPlanDecision_ArchitectureRevise_NoOp(t *testing.T) {
 	proposal := &workflow.PlanDecision{
 		ID:             "plan-decision.slug.recovery.abcd1234",

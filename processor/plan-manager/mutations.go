@@ -404,7 +404,24 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → stories_generated", current)}
 	}
 
-	plan.Stories = req.Stories
+	storiesToSave := req.Stories
+	if plan.PendingArchitectureRevision != nil && len(plan.PendingArchitectureRevision.RequirementIDs) > 0 {
+		merged, removedStoryIDs, acceptedCount, err := mergeStoriesForScopedArchitectureRevision(plan, req.Stories)
+		if err != nil {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("scoped architecture revision merge: %v", err)}
+		}
+		plan.Scenarios = removeScenariosForScopedArchitectureRevision(plan.Scenarios, plan.PendingArchitectureRevision, removedStoryIDs)
+		storiesToSave = merged
+		c.logger.Info("Stories merged for scoped architecture revision",
+			"slug", req.Slug,
+			"proposal_id", plan.PendingArchitectureRevision.ProposalID,
+			"accepted_count", acceptedCount,
+			"emitted_count", len(req.Stories),
+			"preserved_count", len(merged)-acceptedCount,
+			"dirty_requirements", len(plan.PendingArchitectureRevision.RequirementIDs))
+	}
+
+	plan.Stories = storiesToSave
 	plan.Status = workflow.StatusStoriesGenerated
 
 	// ADR-043 follow-up — auto-derive plan.Scope.Create from the union of
@@ -417,7 +434,7 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 	// always reflects what stories actually intend to create. Files
 	// already in scope.include are excluded — they exist already, no
 	// creation intent needed.
-	plan.Scope = ensureScopeCreateCoversStories(plan.Scope, req.Stories)
+	plan.Scope = ensureScopeCreateCoversStories(plan.Scope, plan.Stories)
 
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save stories via mutation", "slug", req.Slug, "error", err)
@@ -426,10 +443,108 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 
 	c.logger.Info("Stories saved via mutation",
 		"slug", req.Slug,
-		"count", len(req.Stories),
+		"count", len(plan.Stories),
 		"scope_create_count", len(plan.Scope.Create))
 
 	return MutationResponse{Success: true}
+}
+
+func mergeStoriesForScopedArchitectureRevision(plan *workflow.Plan, emitted []workflow.Story) ([]workflow.Story, []string, int, error) {
+	scope := plan.PendingArchitectureRevision
+	reqSet := stringSet(scope.RequirementIDs)
+	storySet := stringSet(scope.StoryIDs)
+	if len(reqSet) == 0 {
+		return nil, nil, 0, fmt.Errorf("pending architecture revision has no requirement scope")
+	}
+
+	var removedStoryIDs []string
+	kept := make([]workflow.Story, 0, len(plan.Stories))
+	for _, story := range plan.Stories {
+		if storySet[story.ID] || storyTouchesRequirements(story, reqSet) {
+			removedStoryIDs = append(removedStoryIDs, story.ID)
+			continue
+		}
+		kept = append(kept, story)
+	}
+
+	accepted := make([]workflow.Story, 0, len(emitted))
+	for _, story := range emitted {
+		if !storyTouchesRequirements(story, reqSet) {
+			continue
+		}
+		if outside := storyRequirementsOutsideScope(story, reqSet); len(outside) > 0 {
+			return nil, nil, 0, fmt.Errorf("story %q covers requirements outside accepted architecture revision scope: %v", story.ID, outside)
+		}
+		accepted = append(accepted, story)
+	}
+	if len(accepted) == 0 {
+		return nil, nil, 0, fmt.Errorf("story-preparer emitted no stories for scoped requirements %v", scope.RequirementIDs)
+	}
+
+	merged := append(kept, accepted...)
+	if err := workflow.DeriveStoryScheduling(merged, plan.Requirements); err != nil {
+		return nil, nil, 0, fmt.Errorf("derive merged story scheduling: %w", err)
+	}
+	if err := workflow.ValidateStories(merged); err != nil {
+		return nil, nil, 0, fmt.Errorf("validate merged stories: %w", err)
+	}
+	sort.Strings(removedStoryIDs)
+	return merged, removedStoryIDs, len(accepted), nil
+}
+
+func removeScenariosForScopedArchitectureRevision(scenarios []workflow.Scenario, scope *workflow.ArchitectureRevisionScope, storyIDs []string) []workflow.Scenario {
+	if scope == nil {
+		return scenarios
+	}
+	reqSet := stringSet(scope.RequirementIDs)
+	storySet := stringSet(storyIDs)
+	for _, id := range scope.StoryIDs {
+		if id != "" {
+			storySet[id] = true
+		}
+	}
+	out := make([]workflow.Scenario, 0, len(scenarios))
+	for _, scenario := range scenarios {
+		if storySet[scenario.StoryID] {
+			continue
+		}
+		if reqSet[scenario.RequirementID] {
+			continue
+		}
+		out = append(out, scenario)
+	}
+	return out
+}
+
+func stringSet(ids []string) map[string]bool {
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func storyTouchesRequirements(story workflow.Story, reqSet map[string]bool) bool {
+	for _, id := range story.RequirementIDs {
+		if reqSet[id] {
+			return true
+		}
+	}
+	return false
+}
+
+func storyRequirementsOutsideScope(story workflow.Story, reqSet map[string]bool) []string {
+	var out []string
+	for _, id := range story.RequirementIDs {
+		if id == "" || reqSet[id] {
+			continue
+		}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // ensureScopeCreateCoversStories augments scope.Create with every
@@ -565,6 +680,7 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 		if !current.CanTransitionTo(workflow.StatusScenariosGenerated) {
 			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → scenarios_generated", current)}
 		}
+		plan.PendingArchitectureRevision = nil
 		plan.Status = workflow.StatusScenariosGenerated
 		c.logger.Info("All requirements have scenarios — advanced to scenarios_generated",
 			"slug", req.Slug,
@@ -2026,21 +2142,24 @@ func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug str
 // architecture_revise PlanDecision (RecoveryActionArchitectureRevise). It is
 // the execution-phase counterpart of determineR2ReentryPoint's "architecture"
 // case: capture the prior architecture so the architect REVISES rather than
-// rewrites, wipe Architecture + Stories + Scenarios, reset affected requirement
-// executions so the re-run cannot reuse stale Story owner evidence via Tier-1 dedup,
-// route the recovery diagnosis into ReviewFormattedFindings (the channel the
-// architecture-generator already reads on revision rounds — component.go:301),
-// and drive the back-transition implementing → requirements_generated so the
-// architect re-fires.
+// rewrites, clear Architecture, reset the affected requirement/story closure so
+// the re-run cannot reuse stale Story owner evidence via Tier-1 dedup, route the
+// recovery diagnosis into ReviewFormattedFindings (the channel the architecture-
+// generator already reads on revision rounds — component.go:301), and drive the
+// back-transition implementing → requirements_generated so the architect
+// re-fires. Whole-phase decisions with explicit contract-impact evidence still
+// wipe Stories + Scenarios; scoped decisions preserve unrelated artifacts and
+// merge only the dirty closure after Sarah/Bob regenerate.
 //
 // Called inline from both accept paths (mutation + HTTP). It does the status
 // mutation IN PLACE rather than via setPlanStatusCached for the same reason
 // the story_reprepare block does: the trailing ps.save in the caller is the
 // sole persist point, so an inline status set avoids a double save / double
-// watcher event. The caller skips applyRecoveryHint for this kind — the
-// diagnosis reaches the architect through ReviewFormattedFindings, not through
-// per-entity RecoveryHints (which would otherwise leak stale architecture
-// context into a future developer prompt).
+// watcher event. The caller skips the generic applyRecoveryHint branch for this
+// kind — the diagnosis reaches the architect through ReviewFormattedFindings.
+// Scoped architecture revisions also copy the diagnosis onto affected Stories so
+// Sarah sees it during the scoped merge pass; those old Stories are replaced
+// before execution resumes, so the hint does not leak into unrelated dev prompts.
 //
 // The EXECUTION_STATES reset is I/O (NATS request/reply via resetRequirement-
 // Executions, scoped when the PlanDecision identifies affected requirements,
@@ -2076,7 +2195,11 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 		return fmt.Errorf("reset requirement executions for architecture_revise: %w", err)
 	}
 
-	reviseArchitectureState(plan, proposal)
+	if resetScope == "all" {
+		reviseArchitectureState(plan, proposal)
+	} else {
+		reviseScopedArchitectureState(plan, proposal, resetReqIDs)
+	}
 
 	c.logger.Info("Architecture revise applied — plan re-queued for architecture regeneration",
 		"slug", plan.Slug,
@@ -2085,7 +2208,8 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 		"reset_requirements", len(resetReqIDs),
 		"reset_count", resetCount,
 		"from_status", from,
-		"had_previous_architecture", plan.PreviousArchitectureJSON != "")
+		"had_previous_architecture", plan.PreviousArchitectureJSON != "",
+		"scoped", plan.PendingArchitectureRevision != nil)
 	return nil
 }
 
@@ -2094,10 +2218,12 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 // both stay byte-identical. Branches on proposal.Kind:
 //
 //   - architecture_revise → applyArchitectureRevise (capture prior architecture,
-//     wipe Architecture + Stories + Scenarios, reset affected requirement executions,
-//     drive implementing → requirements_generated). Routes the diagnosis through
-//     ReviewFormattedFindings, so the recovery-hint + story_reprepare branches
-//     are intentionally skipped.
+//     clear Architecture, reset affected requirement executions, drive
+//     implementing → requirements_generated). Whole-phase decisions wipe
+//     Stories/Scenarios; scoped decisions set PendingArchitectureRevision so
+//     unrelated artifacts survive. Routes the diagnosis through
+//     ReviewFormattedFindings, so the generic recovery-hint + story_reprepare
+//     branches are intentionally skipped.
 //   - any other kind → apply the recovery hint when proposed_by=recovery-agent,
 //     and for story_reprepare drive stories_generated/implementing →
 //     preparing_stories so Sarah re-runs with Story.RecoveryHint set (Train C
@@ -2278,7 +2404,7 @@ func planDecisionResetScope(plan *workflow.Plan, proposal *workflow.PlanDecision
 }
 
 func resetScopeFromRequirements(plan *workflow.Plan, affectedReqIDs []string, proposal *workflow.PlanDecision, phase string) (string, []string, error) {
-	closure := cascade.ExpandRequirementClosure(plan.Requirements, affectedReqIDs)
+	closure := cascade.ExpandRequirementStoryClosure(plan.Requirements, plan.Stories, affectedReqIDs)
 	if len(closure) == 0 {
 		if contractImpactAllowsWholePhaseReset(proposal, phase) {
 			return "all", nil, nil
@@ -2337,6 +2463,70 @@ func removeScenariosForStoryReprepare(scenarios []workflow.Scenario, proposal *w
 	return out
 }
 
+func reviseScopedArchitectureState(plan *workflow.Plan, proposal *workflow.PlanDecision, affectedReqIDs []string) (transitioned bool, from workflow.Status) {
+	from = plan.EffectiveStatus()
+	if !from.CanTransitionTo(workflow.StatusRequirementsGenerated) {
+		return false, from
+	}
+
+	prepareArchitectureRevisionBase(plan, proposal)
+
+	storyIDs := storyIDsForRequirements(plan.Stories, affectedReqIDs)
+	applyArchitectureRevisionHintToStories(plan, storyIDs, proposal.Rationale)
+	// The architecture document is regenerated as one artifact, but the scoped
+	// marker below keeps unrelated Stories/Scenarios attached to completed work.
+	plan.PendingArchitectureRevision = &workflow.ArchitectureRevisionScope{
+		ProposalID:     proposal.ID,
+		RequirementIDs: append([]string(nil), affectedReqIDs...),
+		StoryIDs:       storyIDs,
+	}
+	plan.Status = workflow.StatusRequirementsGenerated
+	return true, from
+}
+
+func prepareArchitectureRevisionBase(plan *workflow.Plan, proposal *workflow.PlanDecision) {
+	if proposal.Rationale != "" {
+		plan.ReviewFormattedFindings = proposal.Rationale
+	}
+
+	// Clear any stale carry-over first so a failed marshal leaves no leftover.
+	plan.PreviousArchitectureJSON = ""
+	if plan.Architecture != nil {
+		if b, err := json.Marshal(plan.Architecture); err == nil {
+			plan.PreviousArchitectureJSON = string(b)
+		}
+	}
+	plan.Architecture = nil
+}
+
+func storyIDsForRequirements(stories []workflow.Story, reqIDs []string) []string {
+	reqSet := stringSet(reqIDs)
+	out := make([]string, 0, len(stories))
+	for _, story := range stories {
+		if story.ID == "" || !storyTouchesRequirements(story, reqSet) {
+			continue
+		}
+		out = append(out, story.ID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func applyArchitectureRevisionHintToStories(plan *workflow.Plan, storyIDs []string, hint string) {
+	if hint == "" || len(storyIDs) == 0 {
+		return
+	}
+	target := stringSet(storyIDs)
+	now := time.Now()
+	for i := range plan.Stories {
+		if !target[plan.Stories[i].ID] {
+			continue
+		}
+		plan.Stories[i].RecoveryHint = hint
+		plan.Stories[i].UpdatedAt = now
+	}
+}
+
 // reviseArchitectureState performs the pure in-memory state mutation for an
 // accepted architecture_revise PlanDecision, with no I/O so it is unit-testable
 // in isolation (the seam):
@@ -2346,7 +2536,7 @@ func removeScenariosForStoryReprepare(scenarios []workflow.Scenario, proposal *w
 //   - capture the prior architecture into PreviousArchitectureJSON so the
 //     architect REVISES rather than rewrites (mirrors determineR2ReentryPoint's
 //     "architecture" case);
-//   - wipe Architecture + Stories + Scenarios;
+//   - wipe Architecture + Stories + Scenarios for a whole-phase reset;
 //   - drive the back-transition implementing → requirements_generated.
 //
 // The wipe is gated behind the same CanTransitionTo check the caller performs,
@@ -2361,20 +2551,10 @@ func reviseArchitectureState(plan *workflow.Plan, proposal *workflow.PlanDecisio
 		return false, from
 	}
 
-	if proposal.Rationale != "" {
-		plan.ReviewFormattedFindings = proposal.Rationale
-	}
-
-	// Clear any stale carry-over first so a failed marshal leaves no leftover.
-	plan.PreviousArchitectureJSON = ""
-	if plan.Architecture != nil {
-		if b, err := json.Marshal(plan.Architecture); err == nil {
-			plan.PreviousArchitectureJSON = string(b)
-		}
-	}
-	plan.Architecture = nil
+	prepareArchitectureRevisionBase(plan, proposal)
 	plan.Stories = nil
 	plan.Scenarios = nil
+	plan.PendingArchitectureRevision = nil
 
 	plan.Status = workflow.StatusRequirementsGenerated
 	return true, from

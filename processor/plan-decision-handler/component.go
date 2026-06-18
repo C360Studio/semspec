@@ -300,7 +300,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 	if err != nil {
 		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}
-	expandPlanningReentryClosure(result, plan.Requirements, plan.Scenarios)
+	expandPlanningReentryClosure(result, plan.Requirements, plan.Stories, plan.Scenarios)
 
 	c.logger.Info("cascade complete",
 		"proposal_id", req.ProposalID,
@@ -333,13 +333,13 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Plan
 	return result, nil
 }
 
-func expandPlanningReentryClosure(result *cascade.Result, requirements []workflow.Requirement, scenarios []workflow.Scenario) {
+func expandPlanningReentryClosure(result *cascade.Result, requirements []workflow.Requirement, stories []workflow.Story, scenarios []workflow.Scenario) {
 	if result == nil {
 		return
 	}
 	switch result.Kind {
 	case workflow.PlanDecisionKindArchitectureRevise:
-		result.AffectedRequirementIDs = cascade.ExpandRequirementClosure(requirements, result.AffectedRequirementIDs)
+		result.AffectedRequirementIDs = cascade.ExpandRequirementStoryClosure(requirements, stories, result.AffectedRequirementIDs)
 	case workflow.PlanDecisionKindRequirementChange, workflow.PlanDecisionKindStoryReprepare:
 		result.AffectedRequirementIDs = cascade.ExpandRequirementClosure(requirements, result.AffectedRequirementIDs)
 		result.AffectedScenarioIDs = mergeScenarioIDsForRequirements(result.AffectedScenarioIDs, scenarios, result.AffectedRequirementIDs)

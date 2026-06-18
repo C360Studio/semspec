@@ -739,9 +739,11 @@ func (c *Component) deriveDecision(loop *agentic.LoopEntity, escalationReason st
 //     requirement_change, which silently degraded into a scenarios-only
 //     cascade that left Sarah's stories unchanged.
 //   - architecture_revise → architecture_revise. Heaviest kind: plan-manager
-//     wipes Architecture + Stories + Scenarios + all requirement executions
-//     and drives implementing → requirements_generated so the architect
-//     re-fires. Distinct from story_reprepare (which keeps the architecture).
+//     clears Architecture, resets the affected requirement/story closure, and
+//     drives implementing → requirements_generated so the architect re-fires.
+//     Whole-phase decisions may wipe Stories/Scenarios; scoped decisions
+//     preserve unrelated artifacts. Distinct from story_reprepare (which keeps
+//     the architecture).
 //   - escalate_human / mark_unrecoverable → execution_exhausted. Terminal;
 //     plan-manager auto-archives when the subject req reaches a non-failed
 //     terminal state.

@@ -64,3 +64,4 @@
 - [x] 8.3 Add a legal post-QA architecture recovery transition and regression coverage for `rejected -> requirements_generated`
 - [x] 8.4 Floor recovery contract-impact policy by action kind so scope/topology-changing actions cannot self-report as preserve/refine
 - [x] 8.5 Fix UI false-green and stale observability state regressions from the PR review
+- [x] 8.6 Fix scoped `architecture_revise` so a single dirty requirement closure does not rewrite unrelated Stories/Scenarios

@@ -45,10 +45,11 @@ type Result struct {
 //   - Kind=execution_exhausted: terminal acknowledgement; cascade is a
 //     no-op (callers shouldn't invoke PlanDecision for this kind, but
 //     the function returns empty Result safely if they do).
-//   - Kind=architecture_revise: no-op for Story/Scenario dirty marks. The
-//     plan-manager accept handler wipes Architecture + Stories + Scenarios
-//     and resets execution rows for the affected requirement closure inline;
-//     the re-run regenerates from the architect down.
+//   - Kind=architecture_revise: no-op for Story/Scenario dirty marks here.
+//     The plan-manager accept handler captures the affected requirement/story
+//     closure inline. Whole-phase decisions regenerate from the architect
+//     down; scoped decisions preserve unrelated Stories/Scenarios and merge
+//     only the dirty closure after Winston/Sarah/Bob re-run.
 //
 // Pure business logic — no I/O. Caller loads the plan from KV and passes
 // stories + scenarios. Returns the IDs that were dirty-marked so
@@ -119,12 +120,10 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 		// rejected, so there is nothing to dirty-cascade.
 
 	case workflow.PlanDecisionKindArchitectureRevise:
-		// The plan-manager accept handler wipes Architecture + Stories +
-		// Scenarios and resets scoped execution rows inline, then drives
-		// implementing → requirements_generated. There is nothing left for
-		// the dirty-cascade to mark — the re-run regenerates those entities
-		// from the architect down. No-op beyond the recorded
-		// AffectedRequirementIDs (caller telemetry).
+		// The plan-manager accept handler applies the planning re-entry inline.
+		// This cascade remains telemetry-only; expandPlanningReentryClosure
+		// widens AffectedRequirementIDs before publishing the accepted event so
+		// requirement-executor abandons the same closure plan-manager reset.
 
 	default:
 		// Kind=requirement_change OR unset (back-compat with pre-Kind records).
@@ -219,5 +218,64 @@ func ExpandRequirementClosure(requirements []workflow.Requirement, seeds []strin
 		out = append(out, id)
 	}
 	sort.Strings(out)
+	return out
+}
+
+// ExpandRequirementStoryClosure returns the affected requirement IDs plus every
+// downstream requirement, while also widening through M:N Story coverage. If an
+// affected requirement is covered by a Story, every other requirement covered by
+// that Story must be considered dirty too: replacing the Story invalidates the
+// shared execution evidence for all of its requirement joins.
+func ExpandRequirementStoryClosure(requirements []workflow.Requirement, stories []workflow.Story, seeds []string) []string {
+	selected := make(map[string]struct{}, len(seeds))
+	for _, id := range seeds {
+		if id == "" {
+			continue
+		}
+		selected[id] = struct{}{}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+
+	for {
+		before := len(selected)
+		for _, id := range ExpandRequirementClosure(requirements, keys(selected)) {
+			selected[id] = struct{}{}
+		}
+		for _, story := range stories {
+			if !storyIntersectsRequirements(story, selected) {
+				continue
+			}
+			for _, id := range story.RequirementIDs {
+				if id != "" {
+					selected[id] = struct{}{}
+				}
+			}
+		}
+		if len(selected) == before {
+			break
+		}
+	}
+
+	out := keys(selected)
+	sort.Strings(out)
+	return out
+}
+
+func storyIntersectsRequirements(story workflow.Story, reqIDs map[string]struct{}) bool {
+	for _, id := range story.RequirementIDs {
+		if _, ok := reqIDs[id]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func keys(set map[string]struct{}) []string {
+	out := make([]string, 0, len(set))
+	for id := range set {
+		out = append(out, id)
+	}
 	return out
 }
