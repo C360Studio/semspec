@@ -171,6 +171,12 @@ type Component struct {
 	activeExecs   sscache.Cache[*requirementExecution]
 	activeExecsMu sync.Mutex // guards get-or-set for duplicate trigger detection
 
+	// taskCompletionReqExecLoader is a test seam for recovering a non-terminal
+	// requirement execution from EXECUTION_STATES when a task.> terminal update
+	// arrives but activeExecs has no matching owner. Production uses
+	// loadNonTerminalReqExecFromKV.
+	taskCompletionReqExecLoader func(ctx context.Context, slug, requirementID string) (*requirementExecution, error)
+
 	// Lifecycle
 	wg          sync.WaitGroup
 	replayGate  sync.WaitGroup // tracks watcher replay completion; resumption waits on this

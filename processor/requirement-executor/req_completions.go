@@ -174,15 +174,14 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 
 	exec := c.findExecByTaskID(taskExec.TaskID)
 	if exec == nil {
-		// A terminal task completion that matches no active execution's current
-		// node or reviewer task. Benign + common for nodes whose execution
-		// already completed and was cleaned from activeExecs — but it is ALSO
-		// the silent-drop shape that wedged the 2026-06-13 QA-recovery
-		// re-execution (a re-dispatched node completed, but routing back into
-		// the re-opened DAG found no owner, so the completion vanished and the
-		// requirement never advanced to re-QA — a permanent, invisible wedge).
-		// Log at DEBUG so the gate is visible on a debug run without flooding
-		// the normal path.
+		exec = c.recoverExecForTerminalTaskCompletion(ctx, taskExec)
+	}
+	if exec == nil {
+		// A terminal task completion that matches no active or persisted
+		// non-terminal execution's current node/reviewer task. Benign + common
+		// for nodes whose execution already completed and was cleaned from
+		// activeExecs. Recovery attempts above make the QA-recovery silent-drop
+		// shape fail closed instead of wedging the DAG.
 		c.logger.Debug("terminal task completion matched no active execution — dropping",
 			"task_id", taskExec.TaskID, "stage", taskExec.Stage)
 		return
@@ -258,6 +257,94 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 	}
 
 	c.handleNodeCompleteLocked(ctx, event, exec)
+}
+
+// recoverExecForTerminalTaskCompletion rehydrates an in-flight requirement
+// execution from EXECUTION_STATES when task.> completion routing misses the
+// activeExecs cache. This closes the QA-recovery wedge where a completed
+// requirement is reopened from its deterministic KV row, the first recovered
+// node finishes, and the terminal task update arrives before activeExecs has a
+// matching owner for the new hashed req.run entity.
+func (c *Component) recoverExecForTerminalTaskCompletion(ctx context.Context, taskExec workflow.TaskExecution) *requirementExecution {
+	if taskExec.Slug == "" || taskExec.RequirementID == "" {
+		return nil
+	}
+
+	loader := c.loadNonTerminalReqExecFromKV
+	if c.taskCompletionReqExecLoader != nil {
+		loader = c.taskCompletionReqExecLoader
+	}
+
+	exec, err := loader(ctx, taskExec.Slug, taskExec.RequirementID)
+	if err != nil {
+		c.logger.Warn("Failed to recover requirement execution for terminal task completion",
+			"slug", taskExec.Slug,
+			"requirement_id", taskExec.RequirementID,
+			"task_id", taskExec.TaskID,
+			"error", err)
+		return nil
+	}
+	if exec == nil {
+		return nil
+	}
+
+	exec.mu.Lock()
+	match := !exec.terminated && exec.CurrentNodeTaskID == taskExec.TaskID
+	currentTaskID := exec.CurrentNodeTaskID
+	exec.mu.Unlock()
+	if !match {
+		c.logger.Debug("recovered requirement execution does not own terminal task completion — dropping",
+			"slug", taskExec.Slug,
+			"requirement_id", taskExec.RequirementID,
+			"task_id", taskExec.TaskID,
+			"current_node_task_id", currentTaskID)
+		return nil
+	}
+
+	c.replaceActiveExecForRequirement(exec)
+	c.logger.Info("Recovered requirement execution owner for terminal task completion",
+		"entity_id", exec.EntityID,
+		"slug", exec.Slug,
+		"requirement_id", exec.RequirementID,
+		"task_id", taskExec.TaskID)
+	return exec
+}
+
+// replaceActiveExecForRequirement installs recovered as the active owner for
+// its slug + requirement and removes any stale cache rows for the same
+// requirement. The stale row can carry the first-pass entity ID while the
+// durable EXECUTION_STATES row carries execution-manager's hashed entity ID.
+func (c *Component) replaceActiveExecForRequirement(recovered *requirementExecution) {
+	if recovered == nil {
+		return
+	}
+
+	c.activeExecsMu.Lock()
+	defer c.activeExecsMu.Unlock()
+
+	for _, key := range c.activeExecs.Keys() {
+		exec, ok := c.activeExecs.Get(key)
+		if !ok || exec == nil || exec == recovered {
+			continue
+		}
+		exec.mu.Lock()
+		sameRequirement := exec.Slug == recovered.Slug && exec.RequirementID == recovered.RequirementID
+		if sameRequirement {
+			exec.terminated = true
+			if exec.timeoutTimer != nil {
+				exec.timeoutTimer.stop()
+			}
+			if exec.recoveryTimer != nil {
+				exec.recoveryTimer.stop()
+			}
+		}
+		exec.mu.Unlock()
+		if sameRequirement {
+			c.activeExecs.Delete(key) //nolint:errcheck // best-effort stale cache cleanup
+		}
+	}
+
+	c.activeExecs.Set(recovered.EntityID, recovered) //nolint:errcheck // best-effort recovery routing
 }
 
 // findExecByTaskID scans active executions for one whose dispatched task IDs

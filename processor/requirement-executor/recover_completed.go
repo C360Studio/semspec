@@ -67,6 +67,47 @@ func (c *Component) loadTerminalReqExecFromKV(ctx context.Context, slug, require
 	return c.rebuildExecFromKV(key, &reqExec), nil
 }
 
+// loadNonTerminalReqExecFromKV fetches an in-flight requirement execution for
+// the given slug + requirement ID directly via the deterministic KV key. It is
+// used by the task-completion watcher as a durable fallback when activeExecs
+// has lost the owner for a terminal node completion, which can happen after a
+// QA-recovery reopens a completed requirement under the execution-manager's
+// hashed req.run entity ID.
+//
+// Returns nil + nil for missing or terminal entries. Returns nil + error only
+// for KV transport failure.
+func (c *Component) loadNonTerminalReqExecFromKV(ctx context.Context, slug, requirementID string) (*requirementExecution, error) {
+	if c.natsClient == nil {
+		return nil, nil
+	}
+
+	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "EXECUTION_STATES")
+	if err != nil {
+		return nil, fmt.Errorf("get EXECUTION_STATES bucket: %w", err)
+	}
+	kvStore := c.natsClient.NewKVStore(bucket)
+
+	key := workflow.RequirementExecutionKey(slug, requirementID)
+	entry, err := kvStore.Get(ctx, key)
+	if err != nil {
+		if isKVNotFound(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get %s: %w", key, err)
+	}
+
+	var reqExec workflow.RequirementExecution
+	if err := json.Unmarshal(entry.Value, &reqExec); err != nil {
+		c.logger.Debug("Skipping corrupt EXECUTION_STATES entry during task-completion owner recovery",
+			"key", key, "error", err)
+		return nil, nil
+	}
+	if workflow.IsTerminalReqStage(reqExec.Stage) {
+		return nil, nil
+	}
+	return c.rebuildExecFromKV(key, &reqExec), nil
+}
+
 // loadCompletedReqExecFromKV fetches a completed requirement execution
 // from EXECUTION_STATES. ADR-044 M:N dedup uses this as the evidence
 // source when a non-owner requirement advances past a Story already
