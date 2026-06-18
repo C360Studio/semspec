@@ -38,11 +38,16 @@ Plan approved -> Requirements -> Architecture -> Stories -> Scenarios -> ready_f
                                 developer -> validator -> reviewer
                                               |
                                       Story scenario review
+                                              |
+                                  deliverable closure gates
 ```
 
 Task synthesis happens at execution time from Stories because the best node sequence depends on
 the accepted Story/file ownership surface and the current requirement branch. The executor does
 not invent new scope during implementation; it works the Story boundaries created during planning.
+Accepted `scope.create` paths are deliverable obligations, so Story approval, Requirement
+completion, and final plan convergence all verify that declared files exist before the run can move
+to QA.
 
 ### Contract Authority And Brownfield Topology
 
@@ -90,13 +95,15 @@ Registration happens once at startup in `tools/register.go`.
 
 ### PlanDecision Cancellation
 
-When a PlanDecision is accepted during reactive execution, running scenario loops are cancelled
-via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Scenarios are
-re-queued for fresh execution with the updated behavioral contracts.
+When a PlanDecision is accepted during reactive execution, running agent loops are cancelled
+via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected
+Requirement/Story execution work is re-queued with the updated behavioral contracts.
 
 The current execution path is component-owned: `scenario-orchestrator` dispatches ready
-requirements, `requirement-executor` synthesizes Story task DAGs, and `execution-manager` owns the
-TDD task pipeline.
+requirements, `execution-manager` owns durable requirement/task execution rows, and
+`requirement-executor` synthesizes Story task DAGs plus closes Story/Requirement deliverables.
+When a `scope_incomplete` decision is accepted, affected requirement execution rows are reset and
+only those requirements are force-redispatched.
 
 ## The Semstreams Relationship
 
@@ -355,9 +362,11 @@ Semspec registers its project components at startup alongside the full semstream
 │  scenario-orchestrator  Dispatches ready Requirements by dependency  │
 │                          and Story availability                      │
 │  requirement-executor   Synthesizes Story task DAGs, handles serial  │
-│                          node dispatch, and Story review             │
-│  execution-manager      TDD pipeline per DAG node:                  │
-│                          developer → validator → reviewer            │
+│                          node dispatch, Story review, and deliverable│
+│                          closure gates                               │
+│  execution-manager      Durable requirement/task execution rows plus │
+│                          TDD pipeline per DAG node: developer →      │
+│                          validator → reviewer                        │
 │  qa-reviewer            Release-readiness verdict (Murat persona);   │
 │                          scoped by qa_level                           │
 │                          (synthesis/unit/integration/full)            │
@@ -371,7 +380,8 @@ Semspec registers its project components at startup alongside the full semstream
 ┌──────────── Support ─────────────────────────────────────────────────┐
 │  plan-manager         Requirement/Scenario/PlanDecision HTTP API;    │
 │                        owns PLAN_STATES writes, contract packets,    │
-│                        phase summaries, and event handling           │
+│                        phase summaries, event handling, and Level-0  │
+│                        scope completeness decisions                  │
 │  project-manager      Project management HTTP API                    │
 │  workflow-validator   Document structure validation (request/reply)  │
 │  workflow-documents   File output to .semspec/plans/                 │

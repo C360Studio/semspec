@@ -61,12 +61,22 @@ Generated BMAD/OpenSpec artifacts remain projections. They must show the
 governing contract packet ID/version and accepted amendment references, but they
 do not become the source of truth.
 
+Accepted `scope.create` entries are deliverable obligations, not only file-edit
+permissions. Execution must prove those obligations progressively at Story
+approval, Requirement completion, and final plan convergence before QA can run.
+
 ## Consequences
 
 Validators compare downstream artifacts to the root contract plus accepted
 amendments, not only to the latest mutable plan shape. Silent baseline
 replacement, clean-room project roots, missing acceptance obligations, and
 unexplained scope shrinkage become contract-fidelity failures.
+
+Missing declared deliverables become deterministic closure failures. A
+Story-level gap retries the current Story with missing-file feedback while
+budget remains. A Requirement-level or assembled-branch gap produces a
+`scope_incomplete` PlanDecision that preserves the original contract, resets the
+affected executable closure, and redispatches only those affected requirements.
 
 Recovery actions must carry contract impact. Targeted dirty marking is the
 default; whole-phase reset requires evidence that the entire phase is invalid.
