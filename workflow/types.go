@@ -2004,7 +2004,8 @@ func (k PlanDecisionKind) IsValid() bool {
 		PlanDecisionKindExecutionExhausted,
 		PlanDecisionKindStoryReprepare,
 		PlanDecisionKindArchitectureRevise,
-		PlanDecisionKindAssemblyConflict:
+		PlanDecisionKindAssemblyConflict,
+		PlanDecisionKindScopeIncomplete:
 		return true
 	default:
 		return false

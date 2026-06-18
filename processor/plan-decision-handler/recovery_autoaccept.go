@@ -75,7 +75,7 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 
 	c.logger.Info("Recovery auto-accept watcher started",
 		"bucket", "PLAN_STATES",
-		"filter", "proposed_by=recovery-agent + status=proposed + kind=requirement_change")
+		"filter", "recoverable proposed PlanDecisions within autonomous policy")
 
 	// Dedup: decision-ID → time-accepted. Drop entries older than the
 	// TTL on each pass to keep memory bounded.
@@ -135,6 +135,13 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 					"max_auto_story_reprepares", c.config.MaxAutoStoryReprepares)
 				continue
 			}
+			if dec.Kind == workflow.PlanDecisionKindScopeIncomplete &&
+				countAcceptedScopeIncompleteRecoveries(planView.PlanDecisions) >= c.config.MaxAutoScopeIncompleteRecoveries {
+				c.logger.Warn("scope_incomplete auto-accept budget exhausted; leaving for human review",
+					"slug", planView.Slug, "proposal_id", dec.ID,
+					"max_auto_scope_incomplete_recoveries", c.config.MaxAutoScopeIncompleteRecoveries)
+				continue
+			}
 			acceptedIDs[dec.ID] = now
 			c.invokeAccept(ctx, planView.Slug, dec.ID)
 		}
@@ -192,11 +199,22 @@ func countAcceptedStoryReprepares(decisions []workflow.PlanDecision) int {
 	return n
 }
 
+// countAcceptedScopeIncompleteRecoveries bounds automatic retries after the
+// deterministic Level-0 completeness gate. Repeated accepted misses usually
+// mean the plan over-declared scope or Stories do not own the missing files.
+func countAcceptedScopeIncompleteRecoveries(decisions []workflow.PlanDecision) int {
+	n := 0
+	for i := range decisions {
+		if decisions[i].Kind == workflow.PlanDecisionKindScopeIncomplete &&
+			decisions[i].Status == workflow.PlanDecisionStatusAccepted {
+			n++
+		}
+	}
+	return n
+}
+
 func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	if dec == nil {
-		return false
-	}
-	if dec.ProposedBy != "recovery-agent" {
 		return false
 	}
 	if dec.Status != workflow.PlanDecisionStatusProposed {
@@ -206,7 +224,13 @@ func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	case workflow.PlanDecisionKindRequirementChange,
 		workflow.PlanDecisionKindStoryReprepare,
 		workflow.PlanDecisionKindArchitectureRevise:
-		// auto-acceptable
+		if dec.ProposedBy != "recovery-agent" {
+			return false
+		}
+	case workflow.PlanDecisionKindScopeIncomplete:
+		if dec.ProposedBy != "plan-manager" {
+			return false
+		}
 	default:
 		return false
 	}

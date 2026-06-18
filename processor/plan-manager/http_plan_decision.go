@@ -512,6 +512,12 @@ func (c *Component) handleAcceptPlanDecision(w http.ResponseWriter, r *http.Requ
 		http.Error(w, "Failed to accept change proposal", http.StatusInternalServerError)
 		return
 	}
+	if err := c.startAcceptedPlanDecisionRetry(r.Context(), plan, proposal); err != nil {
+		c.logger.Error("Failed to start accepted plan decision retry",
+			"slug", slug, "proposal_id", proposalID, "kind", proposal.Kind, "error", err)
+		http.Error(w, "Failed to start accepted plan decision retry", http.StatusInternalServerError)
+		return
+	}
 
 	c.logger.Info("Change proposal accepted via REST API", "slug", slug, "proposal_id", proposalID)
 

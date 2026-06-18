@@ -22,6 +22,42 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 		comment string
 	}{
 		{
+			name: "scope_incomplete from plan-manager is auto-acceptable",
+			dec: &workflow.PlanDecision{
+				ProposedBy:     "plan-manager",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindScopeIncomplete,
+				AffectedReqIDs: []string{"req.demo.1"},
+				ContractImpact: recoveryImpact(workflow.ContractImpactPreserve),
+			},
+			wantOK:  true,
+			comment: "Level-0 completeness recovery preserves declared scope and may retry automatically",
+		},
+		{
+			name: "scope_incomplete from recovery-agent is human-gated",
+			dec: &workflow.PlanDecision{
+				ProposedBy:     "recovery-agent",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindScopeIncomplete,
+				AffectedReqIDs: []string{"req.demo.1"},
+				ContractImpact: recoveryImpact(workflow.ContractImpactPreserve),
+			},
+			wantOK:  false,
+			comment: "scope_incomplete is owned by the deterministic plan-manager gate",
+		},
+		{
+			name: "scope_incomplete contract change is human-gated",
+			dec: &workflow.PlanDecision{
+				ProposedBy:     "plan-manager",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindScopeIncomplete,
+				AffectedReqIDs: []string{"req.demo.1"},
+				ContractImpact: recoveryImpact(workflow.ContractImpactChange),
+			},
+			wantOK:  false,
+			comment: "changing declared scope needs review",
+		},
+		{
 			name: "story_reprepare is auto-acceptable",
 			dec: &workflow.PlanDecision{
 				ProposedBy:     "recovery-agent",
@@ -155,5 +191,18 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 				t.Errorf("shouldAutoAcceptRecovery = %v, want %v (%s)", got, tc.wantOK, tc.comment)
 			}
 		})
+	}
+}
+
+func TestCountAcceptedScopeIncompleteRecoveries(t *testing.T) {
+	decisions := []workflow.PlanDecision{
+		{ID: "a", Kind: workflow.PlanDecisionKindScopeIncomplete, Status: workflow.PlanDecisionStatusAccepted},
+		{ID: "b", Kind: workflow.PlanDecisionKindScopeIncomplete, Status: workflow.PlanDecisionStatusProposed},
+		{ID: "c", Kind: workflow.PlanDecisionKindRequirementChange, Status: workflow.PlanDecisionStatusAccepted},
+		{ID: "d", Kind: workflow.PlanDecisionKindScopeIncomplete, Status: workflow.PlanDecisionStatusRejected},
+		{ID: "e", Kind: workflow.PlanDecisionKindScopeIncomplete, Status: workflow.PlanDecisionStatusAccepted},
+	}
+	if got := countAcceptedScopeIncompleteRecoveries(decisions); got != 2 {
+		t.Fatalf("countAcceptedScopeIncompleteRecoveries = %d, want 2", got)
 	}
 }

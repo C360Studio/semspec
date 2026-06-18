@@ -132,6 +132,22 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 	if !exec.awaitingRecovery {
 		return
 	}
+	if c.hasPendingRecoveryDecision(context.Background(), exec.Slug, exec.RequirementID) {
+		nextTimeout := c.recoveryTimeout()
+		timer := time.AfterFunc(nextTimeout, func() {
+			c.handleRecoveryTimeout(exec, nextTimeout)
+		})
+		exec.recoveryTimer = &timeoutHandle{stop: func() { timer.Stop() }}
+		c.logger.Warn("Recovery deadline expired but a PlanDecision is still pending; extending awaiting-recovery instead of terminal-failing",
+			"entity_id", exec.EntityID,
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"reason", exec.recoveryReason,
+			"expired_timeout", timeout,
+			"next_timeout", nextTimeout,
+		)
+		return
+	}
 	c.logger.Warn("Recovery deadline expired; terminal-failing",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
@@ -142,6 +158,72 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 	exec.awaitingRecovery = false
 	exec.recoveryTimer = nil
 	c.markFailedLocked(context.Background(), exec, exec.recoveryReason)
+}
+
+func (c *Component) hasPendingRecoveryDecision(ctx context.Context, slug, requirementID string) bool {
+	if c.pendingRecoveryDecisionChecker != nil {
+		return c.pendingRecoveryDecisionChecker(ctx, slug, requirementID)
+	}
+	if c.natsClient == nil {
+		return false
+	}
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Debug("Recovery timeout: JetStream unavailable while checking pending PlanDecisions",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return false
+	}
+	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	if err != nil {
+		c.logger.Debug("Recovery timeout: PLAN_STATES unavailable while checking pending PlanDecisions",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return false
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		c.logger.Debug("Recovery timeout: plan unavailable while checking pending PlanDecisions",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return false
+	}
+	var plan struct {
+		PlanDecisions []workflow.PlanDecision `json:"plan_decisions"`
+	}
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		c.logger.Debug("Recovery timeout: plan JSON unmarshal failed while checking pending PlanDecisions",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return false
+	}
+	for _, dec := range plan.PlanDecisions {
+		if isPendingRecoveryDecisionForRequirement(dec, requirementID) {
+			return true
+		}
+	}
+	return false
+}
+
+func isPendingRecoveryDecisionForRequirement(dec workflow.PlanDecision, requirementID string) bool {
+	if dec.Status != workflow.PlanDecisionStatusProposed &&
+		dec.Status != workflow.PlanDecisionStatusUnderReview {
+		return false
+	}
+	switch dec.Kind {
+	case workflow.PlanDecisionKindRequirementChange,
+		workflow.PlanDecisionKindStoryReprepare,
+		workflow.PlanDecisionKindArchitectureRevise,
+		workflow.PlanDecisionKindScopeIncomplete:
+		// recoverable or waiting decisions
+	default:
+		return false
+	}
+	if len(dec.AffectedReqIDs) == 0 {
+		return true
+	}
+	for _, affected := range dec.AffectedReqIDs {
+		if affected == requirementID {
+			return true
+		}
+	}
+	return false
 }
 
 // resumeFromRecoveryLocked re-runs a wedged execution after a recovery
@@ -497,18 +579,18 @@ func (c *Component) handlePlanDecisionAccepted(lifecycleCtx, msgCtx context.Cont
 	}
 
 	// architecture_revise and story_reprepare restart the plan from a planning
-	// phase: plan-manager has already reset the relevant EXECUTION_STATES rows
-	// and moved the plan out of implementing. The wedged exec(s) must NOT be
-	// resumed — resuming would re-decompose against the stale DAG and race the
-	// regenerated execution. Abandon the event's scoped affected requirements
-	// (expanded by plan-decision-handler to include downstream dependents); fall
-	// back to every active exec for the slug only when older/unscoped events
-	// do not carry affected requirement IDs. The re-run creates clean execs once
-	// it reaches execution again.
+	// phase; scope_incomplete restarts execution from plan-manager's retry path.
+	// In all three cases plan-manager has already reset/requeued the relevant
+	// work. The wedged exec(s) must NOT be resumed here — resuming would
+	// re-decompose against stale context and race the regenerated execution.
+	// Abandon the event's scoped affected requirements (expanded by
+	// plan-decision-handler where needed); fall back to every active exec for the
+	// slug only when older/unscoped events do not carry affected requirement IDs.
 	if evt.Kind == workflow.PlanDecisionKindArchitectureRevise ||
-		evt.Kind == workflow.PlanDecisionKindStoryReprepare {
+		evt.Kind == workflow.PlanDecisionKindStoryReprepare ||
+		evt.Kind == workflow.PlanDecisionKindScopeIncomplete {
 		abandoned := c.abandonExecsForRequirements(evt.Slug, evt.AffectedRequirementIDs)
-		c.logger.Info("Abandoned in-flight execs on planning re-entry accept",
+		c.logger.Info("Abandoned in-flight execs on plan-manager-owned recovery accept",
 			"slug", evt.Slug, "proposal_id", evt.ProposalID, "kind", evt.Kind,
 			"affected_requirements", len(evt.AffectedRequirementIDs), "abandoned", abandoned)
 		_ = msg.Ack()

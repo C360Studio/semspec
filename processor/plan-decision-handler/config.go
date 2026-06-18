@@ -66,6 +66,14 @@ type Config struct {
 	// reprepare, then a human must decide.
 	MaxAutoStoryReprepares int `json:"max_auto_story_reprepares" schema:"type:int,description:Max story_reprepare recovery decisions auto-accepted per plan before human review,category:advanced,default:1,min:0,max:10"`
 
+	// MaxAutoScopeIncompleteRecoveries bounds how many scope_incomplete
+	// PlanDecisions may be auto-accepted for a single plan. The completeness
+	// gate is deterministic and non-contract-changing when the declared scope
+	// remains required, so one automatic retry is safe. Repeating the same gate
+	// failure after that usually means over-declared scope or poor Story
+	// coverage, which needs planning recovery or human triage.
+	MaxAutoScopeIncompleteRecoveries int `json:"max_auto_scope_incomplete_recoveries" schema:"type:int,description:Max scope_incomplete recovery decisions auto-accepted per plan before human review,category:advanced,default:1,min:0,max:10"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -73,13 +81,14 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:                 "WORKFLOW",
-		ConsumerName:               "plan-decision-handler",
-		TriggerSubject:             "workflow.trigger.plan-decision-cascade",
-		AcceptedSubject:            "workflow.events.plan-decision.accepted",
-		TimeoutSeconds:             120,
-		MaxAutoArchitectureRevises: 1,
-		MaxAutoStoryReprepares:     1,
+		StreamName:                       "WORKFLOW",
+		ConsumerName:                     "plan-decision-handler",
+		TriggerSubject:                   "workflow.trigger.plan-decision-cascade",
+		AcceptedSubject:                  "workflow.events.plan-decision.accepted",
+		TimeoutSeconds:                   120,
+		MaxAutoArchitectureRevises:       1,
+		MaxAutoStoryReprepares:           1,
+		MaxAutoScopeIncompleteRecoveries: 1,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

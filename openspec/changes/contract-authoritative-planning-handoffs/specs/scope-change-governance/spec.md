@@ -55,3 +55,28 @@ within configured autonomous policy.
 #### Scenario: Policy-safe recovery auto-accepts with trace
 - **WHEN** recovery proposes a targeted change within autonomous policy
 - **THEN** the system may auto-accept it and records the policy rule, affected closure, and contract impact
+
+### Requirement: Recoverable PlanDecision kinds are owned end to end
+The system MUST define validation, auto-accept policy, accept effects, cascade semantics, prompt propagation,
+timeout behavior, and UI phase summary behavior for every PlanDecision kind that can leave a plan in a
+recoverable state.
+
+#### Scenario: Scope incomplete is not a half-wired decision
+- **WHEN** the Level-0 completeness gate records a `scope_incomplete` PlanDecision
+- **THEN** the decision is valid, policy-checkable, accepted or human-gated deterministically, and has explicit
+  cascade behavior rather than falling through another kind's default path
+
+#### Scenario: Scope recovery carries missing deliverables into execution
+- **WHEN** a `scope_incomplete` decision is accepted
+- **THEN** the retry state includes the missing declared files and the reason they are still required in the next
+  developer-facing recovery guidance
+
+#### Scenario: Recoverable accepted decisions do not leave a rejected active plan
+- **WHEN** an accepted recovery decision starts a retry or planning re-entry
+- **THEN** the plan status and phase summary move to the active recovery or execution state instead of remaining
+  terminal/rejected while backend work is running
+
+#### Scenario: Human-gated recovery cannot self-timeout invisibly
+- **WHEN** full-auto mode reaches a recovery decision that policy refuses to auto-accept
+- **THEN** timeout handling and UI state keep the plan waiting on that explicit decision instead of silently
+  terminal-failing the requirement before the operator can act

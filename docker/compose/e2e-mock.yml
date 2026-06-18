@@ -9,6 +9,45 @@
 # which routes all LLM calls to http://mock-llm:11434/v1.
 
 services:
+  # Mock configs use BM25 graph embedding and do not call the local graph
+  # model services. Keep these dependency placeholders healthy so the base
+  # e2e stack can boot without pulling/loading Snowflake or Qwen images.
+  semembed:
+    image: alpine:3.19
+    command: ["sh", "-c", "tail -f /dev/null"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 1s
+      timeout: 1s
+      retries: 1
+
+  seminstruct-fast:
+    image: alpine:3.19
+    command: ["sh", "-c", "tail -f /dev/null"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 1s
+      timeout: 1s
+      retries: 1
+
+  seminstruct-answer:
+    image: alpine:3.19
+    command: ["sh", "-c", "tail -f /dev/null"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 1s
+      timeout: 1s
+      retries: 1
+
+  seminstruct-summary:
+    image: alpine:3.19
+    command: ["sh", "-c", "tail -f /dev/null"]
+    healthcheck:
+      test: ["CMD", "true"]
+      interval: 1s
+      timeout: 1s
+      retries: 1
+
   mock-llm:
     build:
       context: ../..

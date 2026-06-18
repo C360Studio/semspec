@@ -2229,6 +2229,10 @@ func (c *Component) applyArchitectureRevise(ctx context.Context, plan *workflow.
 //     preparing_stories so Sarah re-runs with Story.RecoveryHint set (Train C
 //     step 4). The implementing path also resets affected requirement executions
 //     so stale dev loops do not resume against the old story shape.
+//   - scope_incomplete → apply the Level-0 missing-deliverable rationale as
+//     requirement recovery guidance, reset affected execution rows and Stories,
+//     and move rejected/terminal plans back to ready_for_execution. The caller
+//     auto-starts execution after the accepted decision is saved.
 //
 // The status mutations are done IN PLACE (NOT setPlanStatusCached): the caller's
 // trailing save is the sole persist point, avoiding a double save / double
@@ -2244,6 +2248,10 @@ func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *wo
 		return c.applyArchitectureRevise(ctx, plan, proposal)
 	}
 
+	if proposal.Kind == workflow.PlanDecisionKindScopeIncomplete {
+		return c.applyScopeIncompleteRecovery(ctx, plan, proposal, slug)
+	}
+
 	if proposal.ProposedBy == "recovery-agent" && proposal.Rationale != "" {
 		applyRecoveryHint(plan, proposal)
 	}
@@ -2251,6 +2259,97 @@ func (c *Component) applyPlanDecisionAcceptEffects(ctx context.Context, plan *wo
 	if proposal.Kind == workflow.PlanDecisionKindStoryReprepare {
 		if err := c.applyStoryReprepare(ctx, plan, proposal, slug); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (c *Component) applyScopeIncompleteRecovery(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision, slug string) error {
+	reqIDs := affectedRequirementIDsForScopeIncomplete(plan, proposal)
+	if len(reqIDs) == 0 {
+		return fmt.Errorf("scope_incomplete recovery requires affected requirements")
+	}
+
+	current := plan.EffectiveStatus()
+	if current != workflow.StatusImplementing && !current.CanTransitionTo(workflow.StatusReadyForExecution) {
+		return fmt.Errorf("cannot retry scope_incomplete from status %s", current)
+	}
+
+	resetCount, err := c.resetRequirementExecutions(context.WithoutCancel(ctx), slug, "requirements", reqIDs)
+	if err != nil {
+		return fmt.Errorf("reset requirement executions for scope_incomplete: %w", err)
+	}
+	storyResetCount := resetStoriesForRetry(plan, reqIDs)
+
+	if proposal.Rationale != "" {
+		guidance := *proposal
+		guidance.Rationale = scopeIncompleteRecoveryGuidance(proposal)
+		applyRecoveryHint(plan, &guidance)
+	}
+
+	switch {
+	case current == workflow.StatusImplementing:
+		// Already active; the post-save hook will re-trigger the orchestrator.
+	case current.CanTransitionTo(workflow.StatusReadyForExecution):
+		plan.Status = workflow.StatusReadyForExecution
+	}
+
+	c.logger.Info("Scope incomplete recovery applied — plan re-queued for execution",
+		"slug", slug,
+		"proposal_id", proposal.ID,
+		"from_status", current,
+		"affected_reqs", len(reqIDs),
+		"reset_count", resetCount,
+		"story_reset_count", storyResetCount)
+	return nil
+}
+
+func affectedRequirementIDsForScopeIncomplete(plan *workflow.Plan, proposal *workflow.PlanDecision) []string {
+	if proposal != nil && len(proposal.AffectedReqIDs) > 0 {
+		return append([]string(nil), proposal.AffectedReqIDs...)
+	}
+	if plan == nil {
+		return nil
+	}
+	out := make([]string, 0, len(plan.Requirements))
+	for _, req := range plan.Requirements {
+		if req.ID != "" {
+			out = append(out, req.ID)
+		}
+	}
+	return out
+}
+
+func scopeIncompleteRecoveryGuidance(proposal *workflow.PlanDecision) string {
+	if proposal == nil {
+		return ""
+	}
+	rationale := strings.TrimSpace(proposal.Rationale)
+	if rationale == "" {
+		return ""
+	}
+	return "Scope completeness recovery:\n" + rationale +
+		"\n\nThe declared scope.create files above remain required deliverables. Deliver the missing files in the existing project topology, or propose an explicit scope/architecture recovery if the declared scope is wrong. Do not silently omit them."
+}
+
+func (c *Component) startAcceptedPlanDecisionRetry(ctx context.Context, plan *workflow.Plan, proposal *workflow.PlanDecision) error {
+	if plan == nil || proposal == nil || proposal.Kind != workflow.PlanDecisionKindScopeIncomplete {
+		return nil
+	}
+	if !c.shouldAutoStartExecution() {
+		return nil
+	}
+
+	switch plan.EffectiveStatus() {
+	case workflow.StatusReadyForExecution:
+		if err := c.startExecutionFromReady(ctx, plan); err != nil {
+			return fmt.Errorf("start scope_incomplete retry: %w", err)
+		}
+	case workflow.StatusImplementing:
+		pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if err := c.publishScenarioOrchestrator(pubCtx, plan); err != nil {
+			return fmt.Errorf("trigger scope_incomplete retry: %w", err)
 		}
 	}
 	return nil
@@ -2833,6 +2932,11 @@ func (c *Component) handlePlanDecisionAcceptMutation(ctx context.Context, data [
 		c.logger.Error("Failed to save plan after auto-accepting plan_decision",
 			"slug", req.Slug, "proposal_id", req.ProposalID, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+	if err := c.startAcceptedPlanDecisionRetry(ctx, plan, proposal); err != nil {
+		c.logger.Error("Failed to start accepted plan decision retry",
+			"slug", req.Slug, "proposal_id", req.ProposalID, "kind", proposal.Kind, "error", err)
+		return MutationResponse{Success: false, Error: err.Error()}
 	}
 
 	c.logger.Info("Plan decision accepted via mutation",

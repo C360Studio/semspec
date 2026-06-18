@@ -29,6 +29,12 @@ tasks:
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml build semspec sandbox
       - echo "[OK] Docker image built"
 
+  ensure-model-caches:
+    internal: true
+    desc: Ensure external Docker model cache volumes exist
+    cmds:
+      - docker volume create semembed-cache >/dev/null
+
   check-ports:
     internal: true
     desc: Check if required backend E2E ports are available (auto-cleans stale containers)
@@ -106,6 +112,13 @@ tasks:
       - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
       - echo "[OK] Docker environment cleaned"
 
+  clean-model-caches:
+    desc: Remove shared model cache volumes used by E2E graph services
+    cmds:
+      - echo "[CLEAN-MODEL-CACHES] Removing shared model cache volumes..."
+      - docker volume rm semembed-cache 2>/dev/null || true
+      - echo "[OK] Model caches removed"
+
   clean-workspace:
     internal: true
     desc: Clean E2E workspace
@@ -171,7 +184,7 @@ tasks:
 
   up:
     desc: Start e2e infrastructure (NATS + semspec)
-    deps: [build-image]
+    deps: [ensure-model-caches, build-image]
     cmds:
       - echo "[E2E UP] Starting infrastructure..."
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
@@ -219,7 +232,7 @@ tasks:
 
   default:
     desc: Run all e2e tests (full lifecycle)
-    deps: [clean, clean-workspace, check-ports, build, build-image]
+    deps: [clean, clean-workspace, check-ports, ensure-model-caches, build, build-image]
     cmds:
       - echo "[E2E] Starting infrastructure..."
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
@@ -252,7 +265,7 @@ tasks:
 
   debug:
     desc: Start infrastructure for interactive debugging
-    deps: [clean, clean-workspace, check-ports, build, build-image]
+    deps: [clean, clean-workspace, check-ports, ensure-model-caches, build, build-image]
     cmds:
       - echo "[DEBUG] Starting infrastructure for debugging..."
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
@@ -270,7 +283,7 @@ tasks:
   # Mock infrastructure management (for debugging)
   up:mock:
     desc: "Start mock infrastructure - usage: task e2e:up:mock -- <scenario>"
-    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
+    deps: [clean, clean-workspace, check-ports, ensure-model-caches, build, build-image, build-mock-image]
     vars:
       SCENARIO:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
@@ -326,7 +339,7 @@ tasks:
 
   debug:mock:
     desc: "Start mock infrastructure and tail logs - usage: task e2e:debug:mock -- <scenario>"
-    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
+    deps: [clean, clean-workspace, check-ports, ensure-model-caches, build, build-image, build-mock-image]
     vars:
       SCENARIO:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
@@ -395,7 +408,7 @@ tasks:
 
   mock:
     desc: "Run mock LLM scenario - usage: task e2e:mock -- <scenario>"
-    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
+    deps: [clean, clean-workspace, check-ports, ensure-model-caches, build, build-image, build-mock-image]
     vars:
       SCENARIO:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'plan-smoke'
@@ -468,7 +481,7 @@ tasks:
 
   ui:test:mock:
     desc: "Full lifecycle: build + start mock stack + run all @mock tests + cleanup"
-    deps: [check-ports:ui]
+    deps: [check-ports:ui, ensure-model-caches]
     env:
       E2E_FIXTURE: hello-world-py
     cmds:
@@ -491,7 +504,7 @@ tasks:
 
   ui:test:llm:
     desc: "Full lifecycle: build + start real LLM stack + run tests + cleanup — usage: task e2e:ui:test:llm -- <provider> [tier]"
-    deps: [check-ports:ui]
+    deps: [check-ports:ui, ensure-model-caches]
     vars:
       PROVIDER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'local'
@@ -683,7 +696,7 @@ tasks:
 
   watch:llm:
     desc: "Real-LLM run with semspec watch sidecar (live alerts + final bundle) — usage: task e2e:watch:llm -- <provider> [tier]"
-    deps: [check-ports:ui]
+    deps: [check-ports:ui, ensure-model-caches]
     vars:
       PROVIDER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'gemini'
@@ -1064,7 +1077,7 @@ tasks:
 
   ui:llm:up:
     desc: "Start UI E2E stack with real LLM (for interactive debugging) — usage: task e2e:ui:llm:up -- <provider>"
-    deps: [check-ports:ui]
+    deps: [check-ports:ui, ensure-model-caches]
     vars:
       PROVIDER:
         sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'local'
@@ -1095,7 +1108,7 @@ tasks:
 
   ui:mock:up:
     desc: Start UI E2E Docker stack with mock LLM (for interactive debugging)
-    deps: [check-ports:ui]
+    deps: [check-ports:ui, ensure-model-caches]
     env:
       E2E_FIXTURE: hello-world-py
     cmds:
@@ -1117,7 +1130,7 @@ tasks:
 
   ui:up:
     desc: Start UI E2E Docker stack (real LLM — requires running Ollama or API key)
-    deps: [check-ports:ui]
+    deps: [check-ports:ui, ensure-model-caches]
     cmds:
       - echo "[UI:UP] Cleaning stale state..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml down -v --timeout 10 2>/dev/null

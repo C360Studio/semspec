@@ -69,6 +69,36 @@ func TestPlanDecision_ArchitectureRevise_NoOp(t *testing.T) {
 	}
 }
 
+// TestPlanDecision_ScopeIncomplete_NoOp verifies the Level-0 completeness
+// recovery kind does not fall through to requirement_change's scenarios-only
+// cascade. Plan-manager owns the retry reset and missing-file guidance.
+func TestPlanDecision_ScopeIncomplete_NoOp(t *testing.T) {
+	proposal := &workflow.PlanDecision{
+		ID:             "plan-decision.slug.scope-incomplete.1",
+		Kind:           workflow.PlanDecisionKindScopeIncomplete,
+		AffectedReqIDs: []string{"req-0"},
+	}
+	stories := []workflow.Story{{ID: "story-1", RequirementIDs: []string{"req-0"}}}
+	scenarios := []workflow.Scenario{{ID: "scenario-1", RequirementID: "req-0", StoryID: "story-1"}}
+
+	result, err := PlanDecision(proposal, stories, scenarios)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result.AffectedScenarioIDs) != 0 {
+		t.Errorf("AffectedScenarioIDs = %d, want 0 (plan-manager owns scope_incomplete retry)", len(result.AffectedScenarioIDs))
+	}
+	if len(result.AffectedStoryIDs) != 0 {
+		t.Errorf("AffectedStoryIDs = %d, want 0", len(result.AffectedStoryIDs))
+	}
+	if len(result.AffectedRequirementIDs) != 1 {
+		t.Errorf("AffectedRequirementIDs = %d, want 1 (telemetry only)", len(result.AffectedRequirementIDs))
+	}
+	if result.Kind != workflow.PlanDecisionKindScopeIncomplete {
+		t.Errorf("Result.Kind = %q, want scope_incomplete", result.Kind)
+	}
+}
+
 func TestExpandRequirementClosure_DownstreamOnly(t *testing.T) {
 	requirements := []workflow.Requirement{
 		{ID: "req.bootstrap"},

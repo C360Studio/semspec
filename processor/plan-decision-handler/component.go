@@ -85,6 +85,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.MaxAutoStoryReprepares == 0 {
 		config.MaxAutoStoryReprepares = defaults.MaxAutoStoryReprepares
 	}
+	if config.MaxAutoScopeIncompleteRecoveries == 0 {
+		config.MaxAutoScopeIncompleteRecoveries = defaults.MaxAutoScopeIncompleteRecoveries
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}

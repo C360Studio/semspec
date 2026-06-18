@@ -265,8 +265,8 @@ func (s *ExecutionPhaseScenario) stageWaitForApproval(ctx context.Context, resul
 			}
 			if plan.Approved {
 				result.SetDetail("plan_approved", true)
-				result.SetDetail("plan_status", plan.Status)
-				result.SetDetail("plan_stage", plan.Stage)
+				result.SetDetail("plan_status_at_approval", plan.Status)
+				result.SetDetail("plan_stage_at_approval", plan.Stage)
 				return nil
 			}
 		}
@@ -285,6 +285,8 @@ func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, resu
 		}
 		if executionAlreadyStarted(plan.Status, plan.Stage) {
 			result.SetDetail("execution_already_started", true)
+			result.SetDetail("plan_status_at_execution_start", plan.Status)
+			result.SetDetail("plan_stage_at_execution_start", plan.Stage)
 			result.SetDetail("execution_stage", plan.Stage)
 			return nil
 		}
@@ -323,7 +325,10 @@ func (s *ExecutionPhaseScenario) stageWaitForExecutionComplete(ctx context.Conte
 		}
 		return err
 	}
+	result.SetDetail("plan_status", plan.Status)
+	result.SetDetail("plan_stage", plan.Stage)
 	result.SetDetail("plan_final_status", plan.Status)
+	result.SetDetail("plan_final_stage", plan.Stage)
 	return nil
 }
 

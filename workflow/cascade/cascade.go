@@ -50,6 +50,9 @@ type Result struct {
 //     closure inline. Whole-phase decisions regenerate from the architect
 //     down; scoped decisions preserve unrelated Stories/Scenarios and merge
 //     only the dirty closure after Winston/Sarah/Bob re-run.
+//   - Kind=scope_incomplete: no-op for Story/Scenario dirty marks here.
+//     The plan-manager accept handler owns the execution retry and writes
+//     missing-deliverable guidance before re-triggering execution.
 //
 // Pure business logic — no I/O. Caller loads the plan from KV and passes
 // stories + scenarios. Returns the IDs that were dirty-marked so
@@ -119,11 +122,13 @@ func PlanDecision(proposal *workflow.PlanDecision, stories []workflow.Story, sce
 		// (issue #176) is informational: the plan is already failed to
 		// rejected, so there is nothing to dirty-cascade.
 
-	case workflow.PlanDecisionKindArchitectureRevise:
-		// The plan-manager accept handler applies the planning re-entry inline.
-		// This cascade remains telemetry-only; expandPlanningReentryClosure
-		// widens AffectedRequirementIDs before publishing the accepted event so
-		// requirement-executor abandons the same closure plan-manager reset.
+	case workflow.PlanDecisionKindArchitectureRevise,
+		workflow.PlanDecisionKindScopeIncomplete:
+		// The plan-manager accept handler owns the state mutation for both
+		// kinds: architecture_revise applies planning re-entry, while
+		// scope_incomplete applies execution retry with missing-file guidance.
+		// This cascade remains telemetry-only so requirement-executor abandons
+		// stale active execs instead of resuming generic QA recovery.
 
 	default:
 		// Kind=requirement_change OR unset (back-compat with pre-Kind records).

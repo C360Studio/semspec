@@ -146,3 +146,40 @@ func TestHandlePlanDecisionAccepted_StoryReprepareAbandonsInsteadOfResuming(t *t
 		t.Fatal("abandoned exec should be marked terminated")
 	}
 }
+
+func TestHandlePlanDecisionAccepted_ScopeIncompleteAbandonsInsteadOfQAResume(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+
+	exec := newAwaitingExec("mavlink-hard", "req-1")
+	exec.EntityID = "entity-mavlink-scope-req-1"
+	exec.awaitingRecovery = true
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	evt := payloads.PlanDecisionAcceptedEvent{
+		ProposalID:             "plan-decision.mavlink-hard.scope-incomplete",
+		Slug:                   "mavlink-hard",
+		Kind:                   workflow.PlanDecisionKindScopeIncomplete,
+		AffectedRequirementIDs: []string{"req-1"},
+	}
+	payload, err := json.Marshal(evt)
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	envelope, err := json.Marshal(map[string]json.RawMessage{"payload": payload})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	msg := &mockMsg{data: envelope}
+
+	c.handlePlanDecisionAccepted(context.Background(), context.Background(), msg)
+
+	if !msg.acked {
+		t.Fatal("accepted event should be acked")
+	}
+	if _, ok := c.activeExecs.Get(exec.EntityID); ok {
+		t.Fatal("scope_incomplete should abandon stale active exec because plan-manager owns the retry")
+	}
+	if !exec.terminated {
+		t.Fatal("abandoned exec should be marked terminated")
+	}
+}
