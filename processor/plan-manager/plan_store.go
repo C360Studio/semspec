@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -80,7 +81,7 @@ func (s *planStore) reconcile(ctx context.Context) {
 				}
 				var plan workflow.Plan
 				if json.Unmarshal(entry.Value(), &plan) == nil {
-					s.cache.Set(plan.Slug, &plan) //nolint:errcheck // cache set is best-effort
+					s.cache.Set(plan.Slug, clonePlan(&plan)) //nolint:errcheck // cache set is best-effort
 					recovered++
 				}
 			}
@@ -109,7 +110,7 @@ func (s *planStore) reconcile(ctx context.Context) {
 		if plan.Slug == "" {
 			continue
 		}
-		s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
+		s.cache.Set(plan.Slug, clonePlan(plan)) //nolint:errcheck // cache set is best-effort
 		recovered++
 	}
 
@@ -118,14 +119,13 @@ func (s *planStore) reconcile(ctx context.Context) {
 	}
 }
 
-// get returns a shallow copy of a plan by slug.
+// get returns an isolated copy of a plan by slug.
 // Cache is checked first; on miss the KV bucket is queried and the result is
 // back-filled into the cache.
 func (s *planStore) get(slug string) (*workflow.Plan, bool) {
-	// 1. Cache hit — shallow copy to prevent races.
+	// 1. Cache hit — clone to prevent failed mutations from leaking into cache.
 	if plan, ok := s.cache.Get(slug); ok {
-		p := *plan
-		return &p, true
+		return clonePlan(plan), true
 	}
 
 	// 2. KV fallback on cache miss.
@@ -134,9 +134,8 @@ func (s *planStore) get(slug string) (*workflow.Plan, bool) {
 		if err == nil {
 			var plan workflow.Plan
 			if json.Unmarshal(entry.Value(), &plan) == nil {
-				s.cache.Set(plan.Slug, &plan) //nolint:errcheck // cache set is best-effort
-				p := plan
-				return &p, true
+				s.cache.Set(plan.Slug, clonePlan(&plan)) //nolint:errcheck // cache set is best-effort
+				return clonePlan(&plan), true
 			}
 		}
 	}
@@ -149,7 +148,7 @@ func (s *planStore) list() []*workflow.Plan {
 	plans := make([]*workflow.Plan, 0)
 	for _, key := range s.cache.Keys() {
 		if plan, ok := s.cache.Get(key); ok {
-			plans = append(plans, plan)
+			plans = append(plans, clonePlan(plan))
 		}
 	}
 	sort.Slice(plans, func(i, j int) bool {
@@ -320,8 +319,8 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 		return err
 	}
 
-	// 1. Update cache.
-	s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
+	// 1. Update cache with a store-owned copy.
+	s.cache.Set(plan.Slug, clonePlan(plan)) //nolint:errcheck // cache set is best-effort
 
 	// 2. Write to KV bucket (observable — this IS the event).
 	// Requirements and Scenarios are already inline on the plan struct.
@@ -342,6 +341,78 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 	}
 
 	return nil
+}
+
+func clonePlan(plan *workflow.Plan) *workflow.Plan {
+	if plan == nil {
+		return nil
+	}
+	cloned := deepCloneValue(reflect.ValueOf(plan))
+	if !cloned.IsValid() || cloned.IsNil() {
+		return nil
+	}
+	return cloned.Interface().(*workflow.Plan)
+}
+
+func deepCloneValue(v reflect.Value) reflect.Value {
+	if !v.IsValid() {
+		return v
+	}
+
+	switch v.Kind() {
+	case reflect.Pointer:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		out := reflect.New(v.Type().Elem())
+		out.Elem().Set(deepCloneValue(v.Elem()))
+		return out
+	case reflect.Interface:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		elem := deepCloneValue(v.Elem())
+		out := reflect.New(v.Type()).Elem()
+		if elem.Type().AssignableTo(v.Type()) || elem.Type().Implements(v.Type()) {
+			out.Set(elem)
+			return out
+		}
+		out.Set(v)
+		return out
+	case reflect.Slice:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		for i := 0; i < v.Len(); i++ {
+			out.Index(i).Set(deepCloneValue(v.Index(i)))
+		}
+		return out
+	case reflect.Map:
+		if v.IsNil() {
+			return reflect.Zero(v.Type())
+		}
+		out := reflect.MakeMapWithSize(v.Type(), v.Len())
+		for _, key := range v.MapKeys() {
+			out.SetMapIndex(deepCloneValue(key), deepCloneValue(v.MapIndex(key)))
+		}
+		return out
+	case reflect.Struct:
+		if v.Type() == reflect.TypeOf(time.Time{}) {
+			return v
+		}
+		out := reflect.New(v.Type()).Elem()
+		for i := 0; i < v.NumField(); i++ {
+			dst := out.Field(i)
+			if !dst.CanSet() {
+				return v
+			}
+			dst.Set(deepCloneValue(v.Field(i)))
+		}
+		return out
+	default:
+		return v
+	}
 }
 
 // approve transitions a plan to approved status and writes through all layers.

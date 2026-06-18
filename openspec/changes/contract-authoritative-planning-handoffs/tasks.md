@@ -76,3 +76,11 @@
 - [x] 9.6 Run the relevant mock E2E handoff scenario after unit coverage passes
 - [x] 9.7 Fix mock E2E execution-phase reporting so intermediate snapshots do not overwrite final plan status details
 - [x] 9.8 Stabilize mock E2E startup by bypassing unused graph model services and persisting the semembed model cache for real graph stacks
+
+## 10. Deterministic State Mutation Audit Follow-Ups
+
+- [x] 10.1 Audit PlanDecision accept paths for half-applied state when reset or cascade effects fail
+- [x] 10.2 Ensure plan-store reads and writes isolate cached plans from caller mutation
+- [x] 10.3 Add regression coverage for failed PlanDecision accept effects leaving persisted plan state unchanged
+- [x] 10.4 Fix any cache/KV mutation atomicity defects found by the audit
+- [x] 10.5 Run focused plan-manager tests, repo tests, lint, and relevant mock E2E coverage
