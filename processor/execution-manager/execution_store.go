@@ -3,6 +3,7 @@ package executionmanager
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -264,19 +265,22 @@ func (s *executionStore) saveReq(ctx context.Context, key string, exec *workflow
 // live in-process (the 2026-06-16 re-dispatch wedge the #203 reset targets). We
 // delete from BOTH caches: a key only ever lives in one, so the other Delete is
 // a harmless no-op.
-// Cache delete errors are non-fatal (cache may already be cleared via TTL).
-// KV delete errors are logged at INFO — a silent failure here can leave the
-// KV entry stranded and break post-/retry recovery (the orchestrator's
-// subsequent re-create would fail with "req execution already exists").
-func (s *executionStore) deleteReq(ctx context.Context, key string) {
+// Cache delete errors are non-fatal (cache may already be cleared via TTL), but
+// KV delete errors are returned. Recovery accepts depend on durable reset; if
+// EXECUTION_STATES keeps the row, the orchestrator's subsequent req.create can
+// reload it and wedge with "req execution already exists" (#226).
+func (s *executionStore) deleteReq(ctx context.Context, key string) error {
 	s.reqCache.Delete(key)  //nolint:errcheck
 	s.taskCache.Delete(key) //nolint:errcheck
 	if s.kvStore != nil {
 		if err := s.kvStore.Delete(ctx, key); err != nil {
-			s.logger.Info("deleteReq: KV delete failed (cache cleared, KV may have stranded entry)",
-				"key", key, "error", err)
+			if errors.Is(err, natsclient.ErrKVKeyNotFound) {
+				return nil
+			}
+			return fmt.Errorf("delete execution KV %s: %w", key, err)
 		}
 	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------

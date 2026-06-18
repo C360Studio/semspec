@@ -1353,7 +1353,7 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 			}
 		}
 		// Already implementing — re-trigger orchestrator without a status change.
-		if err := c.triggerScenarioOrchestrator(pubCtx, plan); err != nil {
+		if err := c.publishScenarioOrchestrator(pubCtx, plan); err != nil {
 			c.logger.Error("Failed to re-trigger orchestrator", "slug", slug, "error", err)
 			writeJSONError(w, "Failed to re-trigger orchestrator: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1620,21 +1620,8 @@ func isFailedRetryStage(stage string) bool {
 
 // triggerScenarioOrchestrator publishes a scenario orchestration trigger for the plan.
 // Used by retry when the plan is already in implementing status.
-func (c *Component) triggerScenarioOrchestrator(ctx context.Context, plan *workflow.Plan) error {
-	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
-	tc := natsclient.NewTraceContext()
-
-	trigger := &payloads.ScenarioOrchestrationTrigger{
-		PlanSlug:     plan.Slug,
-		TraceID:      tc.TraceID,
-		Requirements: plan.Requirements,
-		Scenarios:    plan.Scenarios,
-		Stories:      plan.Stories,
-	}
-	if plan.GitHub != nil {
-		trigger.PlanBranch = plan.GitHub.PlanBranch
-	}
-
+func (c *Component) triggerScenarioOrchestrator(ctx context.Context, trigger *payloads.ScenarioOrchestrationTrigger) error {
+	subject := fmt.Sprintf("scenario.orchestrate.%s", trigger.PlanSlug)
 	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {

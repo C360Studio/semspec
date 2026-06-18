@@ -77,6 +77,12 @@ recoverable state.
 - **THEN** the retry state includes the missing declared files and the reason they are still required in the next
   developer-facing recovery guidance
 
+#### Scenario: Scope recovery redispatches reopened requirements
+- **WHEN** an accepted `scope_incomplete` decision re-queues affected requirements for execution
+- **THEN** the orchestration retry identifies those affected requirements as force redispatches, and execution state
+  either recreates them as fresh pending executions or fails the recovery instead of treating stale rows as benign
+  idempotent dispatches
+
 #### Scenario: Recoverable accepted decisions do not leave a rejected active plan
 - **WHEN** an accepted recovery decision starts a retry or planning re-entry
 - **THEN** the plan status and phase summary move to the active recovery or execution state instead of remaining

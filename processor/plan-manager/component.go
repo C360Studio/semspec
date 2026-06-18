@@ -72,8 +72,8 @@ type Component struct {
 	// orchestratorTriggerPublisher is the seam tests use to assert automatic
 	// execution start without requiring a live JetStream connection. Nil means
 	// "publish through triggerScenarioOrchestrator." Production code never sets
-	// this; tests can install a stub that captures the plan and returns an error.
-	orchestratorTriggerPublisher func(ctx context.Context, plan *workflow.Plan) error
+	// this; tests can install a stub that captures the trigger and returns an error.
+	orchestratorTriggerPublisher func(ctx context.Context, trigger *payloads.ScenarioOrchestrationTrigger) error
 
 	// slugMutexes serializes mutation handlers per plan slug. NATS dispatches
 	// each subscription's handler in its own goroutine, so two mutations for

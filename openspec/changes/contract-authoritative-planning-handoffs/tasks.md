@@ -92,3 +92,11 @@
 - [x] 11.3 Fail closed with actionable recovery evidence when deliverable closure cannot be inspected or retries are exhausted
 - [x] 11.4 Add unit coverage for path normalization, Story-scoped missing deliverables, clean approvals, and retry/exhaustion behavior
 - [x] 11.5 Run focused requirement-executor tests plus the relevant mock E2E handoff coverage
+
+## 12. Scope-Incomplete Redispatch Recovery
+
+- [x] 12.1 Carry affected requirement IDs from accepted `scope_incomplete` decisions into the scenario-orchestrator retry trigger
+- [x] 12.2 Force-recreate only those affected requirement execution rows during redispatch so stale `req.*` rows cannot wedge the retry
+- [x] 12.3 Return reset/delete failures from execution-manager instead of reporting successful recovery with durable execution state still present
+- [x] 12.4 Add focused unit coverage for trigger force IDs, req.create force recreation, and ordinary duplicate-dispatch rejection
+- [x] 12.5 Run focused plan-manager, scenario-orchestrator, execution-manager, and mock execution-phase coverage

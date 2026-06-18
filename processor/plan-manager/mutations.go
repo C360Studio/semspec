@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/workflow/cascade"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -1146,7 +1147,7 @@ func (c *Component) handleStoryStatusMutation(ctx context.Context, data []byte) 
 	// race with terminal-state transitions.
 	if req.Target == workflow.StoryStatusComplete || req.Target == workflow.StoryStatusFailed {
 		if plan.EffectiveStatus() == workflow.StatusImplementing {
-			if err := c.triggerScenarioOrchestrator(ctx, plan); err != nil {
+			if err := c.publishScenarioOrchestrator(ctx, plan); err != nil {
 				c.logger.Warn("Failed to re-fire scenario orchestrator after story status change",
 					"slug", req.Slug, "story_id", req.StoryID, "target", req.Target, "error", err)
 			}
@@ -1280,7 +1281,7 @@ func (c *Component) shouldAutoStartExecution() bool {
 	return c.natsClient != nil || c.orchestratorTriggerPublisher != nil
 }
 
-func (c *Component) startExecutionFromReady(ctx context.Context, plan *workflow.Plan) error {
+func (c *Component) startExecutionFromReady(ctx context.Context, plan *workflow.Plan, forceRequirementIDs ...[]string) error {
 	if len(plan.Requirements) == 0 {
 		return fmt.Errorf("plan has no requirements")
 	}
@@ -1294,7 +1295,7 @@ func (c *Component) startExecutionFromReady(ctx context.Context, plan *workflow.
 	if err := c.setPlanStatusCached(pubCtx, plan, workflow.StatusImplementing); err != nil {
 		return fmt.Errorf("set implementing: %w", err)
 	}
-	if err := c.publishScenarioOrchestrator(pubCtx, plan); err != nil {
+	if err := c.publishScenarioOrchestrator(pubCtx, plan, forceRequirementIDs...); err != nil {
 		c.logger.Error("Failed to auto-trigger execution, rolling back status", "slug", plan.Slug, "error", err)
 		_ = c.setPlanStatusCached(pubCtx, plan, workflow.StatusReadyForExecution)
 		return fmt.Errorf("trigger scenario orchestrator: %w", err)
@@ -1303,11 +1304,34 @@ func (c *Component) startExecutionFromReady(ctx context.Context, plan *workflow.
 	return nil
 }
 
-func (c *Component) publishScenarioOrchestrator(ctx context.Context, plan *workflow.Plan) error {
+func (c *Component) publishScenarioOrchestrator(ctx context.Context, plan *workflow.Plan, forceRequirementIDs ...[]string) error {
+	trigger := scenarioOrchestrationTriggerForPlan(plan, natsclient.NewTraceContext().TraceID, firstForceRequirementIDs(forceRequirementIDs))
 	if c.orchestratorTriggerPublisher != nil {
-		return c.orchestratorTriggerPublisher(ctx, plan)
+		return c.orchestratorTriggerPublisher(ctx, trigger)
 	}
-	return c.triggerScenarioOrchestrator(ctx, plan)
+	return c.triggerScenarioOrchestrator(ctx, trigger)
+}
+
+func scenarioOrchestrationTriggerForPlan(plan *workflow.Plan, traceID string, forceRequirementIDs []string) *payloads.ScenarioOrchestrationTrigger {
+	trigger := &payloads.ScenarioOrchestrationTrigger{
+		PlanSlug:            plan.Slug,
+		TraceID:             traceID,
+		Requirements:        plan.Requirements,
+		Scenarios:           plan.Scenarios,
+		Stories:             plan.Stories,
+		ForceRequirementIDs: uniqueSortedStrings(forceRequirementIDs),
+	}
+	if plan.GitHub != nil {
+		trigger.PlanBranch = plan.GitHub.PlanBranch
+	}
+	return trigger
+}
+
+func firstForceRequirementIDs(forceRequirementIDs [][]string) []string {
+	if len(forceRequirementIDs) == 0 {
+		return nil
+	}
+	return forceRequirementIDs[0]
 }
 
 // escalateRevision transitions the plan to StatusRejected when the review iteration
@@ -2342,13 +2366,13 @@ func (c *Component) startAcceptedPlanDecisionRetry(ctx context.Context, plan *wo
 
 	switch plan.EffectiveStatus() {
 	case workflow.StatusReadyForExecution:
-		if err := c.startExecutionFromReady(ctx, plan); err != nil {
+		if err := c.startExecutionFromReady(ctx, plan, proposal.AffectedReqIDs); err != nil {
 			return fmt.Errorf("start scope_incomplete retry: %w", err)
 		}
 	case workflow.StatusImplementing:
 		pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		if err := c.publishScenarioOrchestrator(pubCtx, plan); err != nil {
+		if err := c.publishScenarioOrchestrator(pubCtx, plan, proposal.AffectedReqIDs); err != nil {
 			return fmt.Errorf("trigger scope_incomplete retry: %w", err)
 		}
 	}
