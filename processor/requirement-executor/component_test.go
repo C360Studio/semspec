@@ -36,6 +36,8 @@ type stubSandbox struct {
 	// requirement branch forks from the resolved DependsOn base, not plan/HEAD.
 	createdBranchBases []string
 	deleteWorktreeErr  error
+	execByTaskID       map[string]*sandbox.ExecResult
+	execErr            error
 	createBranchErr    error
 	// createBranchErrOnce, when set, is returned on the FIRST CreateBranch
 	// call and then cleared — subsequent calls return nil. Used to simulate
@@ -76,6 +78,20 @@ func (s *stubSandbox) DeleteBranch(_ context.Context, branch string) error {
 	defer s.mu.Unlock()
 	s.deletedBranchNames = append(s.deletedBranchNames, branch)
 	return nil
+}
+
+func (s *stubSandbox) Exec(_ context.Context, taskID, _ string, _ int) (*sandbox.ExecResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.execErr != nil {
+		return nil, s.execErr
+	}
+	if s.execByTaskID != nil {
+		if res, ok := s.execByTaskID[taskID]; ok {
+			return res, nil
+		}
+	}
+	return &sandbox.ExecResult{ExitCode: 0}, nil
 }
 
 func (s *stubSandbox) deletedSnapshot() []string {

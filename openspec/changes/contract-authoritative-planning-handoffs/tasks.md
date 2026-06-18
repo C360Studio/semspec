@@ -84,3 +84,11 @@
 - [x] 10.3 Add regression coverage for failed PlanDecision accept effects leaving persisted plan state unchanged
 - [x] 10.4 Fix any cache/KV mutation atomicity defects found by the audit
 - [x] 10.5 Run focused plan-manager tests, repo tests, lint, and relevant mock E2E coverage
+
+## 11. Progressive Deliverable Closure Gates
+
+- [x] 11.1 Add deterministic Story/Requirement gates that compare accepted `scope.create` obligations against delivered files before marking execution complete
+- [x] 11.2 Retry the current Story with missing-file feedback when a reviewer approves scenarios but declared deliverables are absent
+- [x] 11.3 Fail closed with actionable recovery evidence when deliverable closure cannot be inspected or retries are exhausted
+- [x] 11.4 Add unit coverage for path normalization, Story-scoped missing deliverables, clean approvals, and retry/exhaustion behavior
+- [x] 11.5 Run focused requirement-executor tests plus the relevant mock E2E handoff coverage
