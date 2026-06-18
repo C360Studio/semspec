@@ -100,3 +100,4 @@
 - [x] 12.3 Return reset/delete failures from execution-manager instead of reporting successful recovery with durable execution state still present
 - [x] 12.4 Add focused unit coverage for trigger force IDs, req.create force recreation, and ordinary duplicate-dispatch rejection
 - [x] 12.5 Run focused plan-manager, scenario-orchestrator, execution-manager, and mock execution-phase coverage
+- [x] 12.6 Add regression coverage for sequential dependent redispatch after upfront scope-incomplete reset

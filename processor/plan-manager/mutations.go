@@ -2303,6 +2303,10 @@ func (c *Component) applyScopeIncompleteRecovery(ctx context.Context, plan *work
 	if err != nil {
 		return fmt.Errorf("reset requirement executions for scope_incomplete: %w", err)
 	}
+	if resetCount == 0 {
+		c.logger.Warn("scope_incomplete recovery affected requirements but reset no execution rows",
+			"slug", slug, "proposal_id", proposal.ID, "affected_reqs", len(reqIDs))
+	}
 	storyResetCount := resetStoriesForRetry(plan, reqIDs)
 
 	if proposal.Rationale != "" {
