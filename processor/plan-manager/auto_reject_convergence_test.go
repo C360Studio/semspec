@@ -110,10 +110,11 @@ func TestCheckPlanConvergence_AutoReject_AllFailed_TransitionsToRejected(t *test
 // AutoRejectOnExhaustion=false (human-in-the-loop mode).
 //
 // We test two sub-cases:
-//   (a) AutoRejectOnExhaustion=true, partial failure (completed=1/failed=1/total=2)
-//       → auto-reject fires (all terminal, some failed, auto mode on).
-//   (b) AutoRejectOnExhaustion=false (default), same convergence shape
-//       → plan stays implementing (human-in-the-loop default, no auto-reject).
+//
+//	(a) AutoRejectOnExhaustion=true, partial failure (completed=1/failed=1/total=2)
+//	    → auto-reject fires (all terminal, some failed, auto mode on).
+//	(b) AutoRejectOnExhaustion=false (default), same convergence shape
+//	    → plan stays implementing (human-in-the-loop default, no auto-reject).
 func TestCheckPlanConvergence_AutoReject_PartialFailed_HumanLoopStaysImplementing(t *testing.T) {
 	ctx := context.Background()
 	c := setupTestComponent(t)

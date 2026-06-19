@@ -2836,18 +2836,26 @@ func TestScopeScenariosToCurrentStory_FallsBackToLegacyUnlinkedScenarios(t *test
 // GAP 3 — Story restructure rebuild: story executing → executing
 //
 // Context: when the requirement reviewer rejects a Story as "restructure", the
-// executor must delete the requirement branch, recreate it from HEAD (fresh
-// slate), reset all DAG state, and re-dispatch the synthesizer. This is the
-// exact path that wedged in paid runs when a buggy recovery path left the exec
-// in a non-dispatchable state. These tests pin the branch-rebuild side-effects
+// executor must delete the requirement branch, recreate it (fresh slate), reset
+// all DAG state, and re-dispatch the synthesizer. This is the exact path that
+// wedged in paid runs when a buggy recovery path left the exec in a
+// non-dispatchable state. These tests pin the branch-rebuild side-effects
 // through the real handler path (handleRequirementReviewerCompleteLocked →
 // startRestructureRetryLocked) using the existing stubSandbox seam.
+//
+// NOTE on the rebuild base: production currently recreates from a hardcoded
+// "HEAD" regardless of exec.BaseBranch — a known bug (#243); the recovery-resume
+// path correctly uses selectReqBranchBase. The primary test below sets no
+// BaseBranch, so "HEAD" is the correct fallback there and we do NOT assert
+// "restructure always uses HEAD". The desired non-empty-base behavior is pinned
+// (skipped) by TestHandleReviewerComplete_Restructure_PreservesBaseBranch.
 // ---------------------------------------------------------------------------
 
 // TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch is the
 // primary regression guard for the restructure-rebuild path. It verifies that:
 //   - sandbox.DeleteBranch is called for the requirement branch
-//   - sandbox.CreateBranch is called for the same branch from "HEAD"
+//   - sandbox.CreateBranch is called for the same branch (base "HEAD" here,
+//     the correct fallback for an exec with no BaseBranch)
 //   - exec.RetryCount is incremented
 //   - exec.DAG and exec.SortedNodeIDs are cleared (full DAG reset)
 //   - exec.CurrentNodeIdx is reset to -1
@@ -2914,8 +2922,13 @@ func TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch(t *testing
 		t.Errorf("CreateBranch calls = %v, want [%q] — fresh branch must be recreated",
 			createdBranches, branchName)
 	}
+	// This exec sets no BaseBranch, so "HEAD" is the correct fallback base. We do
+	// NOT assert "restructure always uses HEAD" — that would cement bug #243
+	// (restructure ignores a set BaseBranch). The desired behavior when a
+	// BaseBranch IS present is pinned by the skipped
+	// TestHandleReviewerComplete_Restructure_PreservesBaseBranch below.
 	if len(createdBases) != 1 || createdBases[0] != "HEAD" {
-		t.Errorf("CreateBranch base = %v, want [\"HEAD\"] — restructure always starts from HEAD",
+		t.Errorf("CreateBranch base = %v, want [\"HEAD\"] (the no-BaseBranch fallback)",
 			createdBases)
 	}
 
@@ -2956,6 +2969,64 @@ func TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch(t *testing
 	// We assert requirementsCompleted stayed 0 (no spurious double-complete).
 	if c.requirementsCompleted.Load() != 0 {
 		t.Errorf("requirementsCompleted = %d, want 0 — restructure is not a completion", c.requirementsCompleted.Load())
+	}
+}
+
+// TestHandleReviewerComplete_Restructure_PreservesBaseBranch is the
+// desired-behavior characterization for bug #243: when the requirement has a
+// DependsOn-derived BaseBranch, a restructure rebuild must recreate the branch
+// from that base (via selectReqBranchBase), NOT from "HEAD" — otherwise the
+// prerequisite's work and per-requirement isolation are lost. The recovery
+// resume path (awaiting_recovery.go) already does this; startRestructureRetryLocked
+// hardcodes "HEAD" (component.go:2207). SKIPPED until #243 is fixed; unskip it
+// as the regression guard for that fix.
+func TestHandleReviewerComplete_Restructure_PreservesBaseBranch(t *testing.T) {
+	t.Skip("#243: startRestructureRetryLocked recreates from HEAD, dropping exec.BaseBranch; unskip when fixed")
+
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	const branchName = "semspec/requirement-req-base"
+	const baseBranch = "semspec/requirement-req-prereq"
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.plan-restructure-req-base",
+		Slug:              "plan-restructure",
+		RequirementID:     "req-base",
+		storeKey:          workflow.RequirementExecutionKey("plan-restructure", "req-base"),
+		RequirementBranch: branchName,
+		BaseBranch:        baseBranch, // forked from a prerequisite branch
+		RetryCount:        0,
+		MaxRetries:        3,
+		CurrentNodeIdx:    1,
+		DAG:               &TaskDAG{},
+		SortedNodeIDs:     []string{"node-0", "node-1"},
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-restructure-base",
+		TaskID:       "task-restructure-base",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageRequirementReview,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"verdict":"rejected","rejection_type":"restructure","feedback":"redo"}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	stub.mu.Lock()
+	createdBases := make([]string, len(stub.createdBranchBases))
+	copy(createdBases, stub.createdBranchBases)
+	stub.mu.Unlock()
+
+	want := selectReqBranchBase("", baseBranch)
+	if len(createdBases) != 1 || createdBases[0] != want {
+		t.Errorf("CreateBranch base = %v, want [%q] — restructure must preserve the DependsOn base, not HEAD",
+			createdBases, want)
 	}
 }
 

@@ -104,13 +104,13 @@ func makeReqKVEntry(t *testing.T, re workflow.RequirementExecution) *reqWatcherK
 // an already-running execution — a correctness violation on top of the wedge.
 func TestHandleReqPending_NonPendingStage_IsNoOp(t *testing.T) {
 	nonPendingStages := []string{
-		"active",       // exact #226 wedge: buggy reset left this behind
-		"decomposing",  // claimed but not yet executing
-		"executing",    // live execution
-		"reviewing",    // under reviewer
-		"completed",    // terminal
-		"failed",       // terminal
-		"error",        // terminal
+		"active",      // exact #226 wedge: buggy reset left this behind
+		"decomposing", // claimed but not yet executing
+		"executing",   // live execution
+		"reviewing",   // under reviewer
+		"completed",   // terminal
+		"failed",      // terminal
+		"error",       // terminal
 	}
 
 	for _, stage := range nonPendingStages {
