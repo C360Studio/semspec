@@ -1,12 +1,43 @@
 package recoveryagent
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
+
+// TestBuildRecoveryPlanDecision_ShortRecoveryIDNoPanic guards #31: the payload's
+// Validate only checks RecoveryID is non-empty, so a 1-7 char ID can arrive on
+// the recovery.requested.<slug> boundary. The decision-ID suffix used a raw
+// RecoveryID[:8] slice, which panics for a short ID. shortRecoveryID must
+// truncate safely and the build must produce a well-formed ID.
+func TestBuildRecoveryPlanDecision_ShortRecoveryIDNoPanic(t *testing.T) {
+	for _, id := range []string{"", "a", "abc", "1234567", "12345678", "123456789abc"} {
+		req := &payloads.RecoveryRequested{
+			RecoveryID:       id,
+			Slug:             "short-recovery",
+			Layer:            payloads.RecoveryLayerPhaseLocal,
+			EscalationReason: "test",
+			RequirementID:    "req-1",
+		}
+		dec := buildRecoveryPlanDecision(req, nil, payloads.RecoveryActionRefinePrompt, "diag", true, nil, time.Now())
+		if !strings.HasPrefix(dec.ID, "plan-decision.short-recovery.recovery.") {
+			t.Errorf("RecoveryID=%q: decision ID = %q, malformed", id, dec.ID)
+		}
+	}
+}
+
+func TestShortRecoveryID(t *testing.T) {
+	cases := map[string]string{"": "", "abc": "abc", "12345678": "12345678", "123456789": "12345678"}
+	for in, want := range cases {
+		if got := shortRecoveryID(in); got != want {
+			t.Errorf("shortRecoveryID(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
 
 // TestBuildRecoveryPlanDecision_PrefersAffectedRequirementIDsOverSingleID is
 // the autonomy contract from the recovery-agent side: when plan-manager

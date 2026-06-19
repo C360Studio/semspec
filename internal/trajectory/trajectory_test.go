@@ -275,3 +275,25 @@ func TestLogSummary_NilLogger(t *testing.T) {
 		t.Errorf("expected no NATS request when logger nil, got subject %q", stub.gotSubject)
 	}
 }
+
+func TestFetch_TypedNilRequester(t *testing.T) {
+	// A typed-nil pointer satisfies the Requester interface but is unusable:
+	// `client == nil` is false (the interface holds a *stubRequester type), yet
+	// calling Request would dereference a nil pointer and panic. Fetch must
+	// reject it cleanly rather than relying on every call site to guard (#32).
+	var typedNil *stubRequester // nil pointer of a concrete Requester impl
+	_, err := Fetch(context.Background(), typedNil, "loop-x", 0)
+	if err == nil {
+		t.Fatal("Fetch with a typed-nil Requester returned nil error; want 'nats client required'")
+	}
+	if !strings.Contains(err.Error(), "nats client required") {
+		t.Errorf("error = %q, want it to mention 'nats client required'", err.Error())
+	}
+}
+
+func TestFetch_InterfaceNilRequester(t *testing.T) {
+	_, err := Fetch(context.Background(), nil, "loop-x", 0)
+	if err == nil || !strings.Contains(err.Error(), "nats client required") {
+		t.Fatalf("Fetch(nil) err = %v, want 'nats client required'", err)
+	}
+}
