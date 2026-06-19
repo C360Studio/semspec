@@ -187,6 +187,11 @@ type ReqNodeRequest struct {
 type ExecClaimRequest struct {
 	Key   string `json:"key"`   // KV key
 	Stage string `json:"stage"` // target in-progress stage
+	// ExpectedFromStage, when set, makes the claim a compare-and-swap on the
+	// stage: the handler rejects unless the entity is currently at this source
+	// stage. Empty preserves the legacy exact-duplicate-target check only
+	// (back-compat for callers that don't pin a source). See #157.
+	ExpectedFromStage string `json:"expected_from_stage,omitempty"`
 }
 
 // ExecMutationResponse is the reply to all execution mutation requests.
@@ -645,30 +650,59 @@ func (c *Component) handleExecClaimMutation(ctx context.Context, data []byte) Ex
 		return ExecMutationResponse{Success: false, Error: "key and phase required"}
 	}
 
+	// Serialize get-check-save so the claim is an atomic compare-and-swap on the
+	// stage (#157). Without this, two interleaved claims can both read the same
+	// source stage and both save (last-writer-wins), double-dispatching the
+	// entity. The lock is process-local; cross-process safety would need a KV
+	// ExpectedRevision CAS in saveTask/saveReq.
+	c.claimMu.Lock()
+	defer c.claimMu.Unlock()
+
 	// Try task first, then req
 	if exec, ok := c.store.getTask(req.Key); ok {
-		if exec.Stage == req.Stage {
-			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("already at stage %s", req.Stage)}
+		if resp, allowed := claimStageGuard(req, exec.Stage); !allowed {
+			return resp
 		}
 		exec.Stage = req.Stage
 		if err := c.store.saveTask(ctx, req.Key, exec); err != nil {
 			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 		}
-		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Stage)
+		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Stage, "from", req.ExpectedFromStage)
 		return ExecMutationResponse{Success: true}
 	}
 
 	if exec, ok := c.store.getReq(req.Key); ok {
-		if exec.Stage == req.Stage {
-			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("already at stage %s", req.Stage)}
+		if resp, allowed := claimStageGuard(req, exec.Stage); !allowed {
+			return resp
 		}
 		exec.Stage = req.Stage
 		if err := c.store.saveReq(ctx, req.Key, exec); err != nil {
 			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 		}
-		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Stage)
+		c.logger.Info("Execution claimed via mutation", "key", req.Key, "phase", req.Stage, "from", req.ExpectedFromStage)
 		return ExecMutationResponse{Success: true}
 	}
 
 	return ExecMutationResponse{Success: false, Error: fmt.Sprintf("execution not found: %s", req.Key)}
+}
+
+// claimStageGuard enforces the claim precondition against the entity's current
+// stage. When ExpectedFromStage is set it is a strict compare-and-swap source
+// check (reject unless the entity is at the expected source); otherwise it falls
+// back to the legacy "already at target" duplicate reject. Returns
+// (rejectResponse, false) on reject, (zero, true) on pass. See #157.
+func claimStageGuard(req ExecClaimRequest, current string) (ExecMutationResponse, bool) {
+	if req.ExpectedFromStage != "" && current != req.ExpectedFromStage {
+		return ExecMutationResponse{
+			Success: false,
+			Error:   fmt.Sprintf("claim rejected: expected source stage %q, found %q", req.ExpectedFromStage, current),
+		}, false
+	}
+	if current == req.Stage {
+		return ExecMutationResponse{
+			Success: false,
+			Error:   fmt.Sprintf("already at stage %s", req.Stage),
+		}, false
+	}
+	return ExecMutationResponse{}, true
 }

@@ -82,8 +82,8 @@ func (c *Component) handleReqPending(ctx context.Context, entry jetstream.KeyVal
 
 	key := entry.Key()
 
-	// Claim: pending → decomposing (atomic via execution-manager mutation).
-	if !c.claimExecution(ctx, key, phaseDecomposing) {
+	// Claim: pending → decomposing (atomic compare-and-swap via execution-manager mutation).
+	if !c.claimExecution(ctx, key, "pending", phaseDecomposing) {
 		return
 	}
 
@@ -238,15 +238,18 @@ func (c *Component) initReqExecution(ctx context.Context, exec *requirementExecu
 	c.dispatchSynthesizerLocked(ctx, exec)
 }
 
-// claimExecution sends a claim mutation to execution-manager. Returns true if
-// the claim succeeded (this instance owns the entry).
-func (c *Component) claimExecution(ctx context.Context, key, stage string) bool {
+// claimExecution sends a claim mutation to execution-manager. fromStage pins the
+// expected source stage so the claim is a compare-and-swap (#157): a concurrent
+// or stale claim from a different stage is rejected. Returns true if the claim
+// succeeded (this instance owns the entry).
+func (c *Component) claimExecution(ctx context.Context, key, fromStage, toStage string) bool {
 	resp, err := c.sendMutation(ctx, mutExecClaim, map[string]any{
-		"key":   key,
-		"stage": stage,
+		"key":                 key,
+		"stage":               toStage,
+		"expected_from_stage": fromStage,
 	})
 	if err != nil {
-		c.logger.Debug("Claim execution failed", "key", key, "stage", stage, "error", err)
+		c.logger.Debug("Claim execution failed", "key", key, "from", fromStage, "stage", toStage, "error", err)
 		return false
 	}
 	return resp.Success
