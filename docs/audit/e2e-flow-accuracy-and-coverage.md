@@ -1,6 +1,9 @@
 # E2E Flow Accuracy & Deterministic-Test-Coverage Audit
 
-Status: **audit-only first pass.** No code or doc changes in this commit beyond this report.
+Status: **audit first pass.** This commit lands the report and applies the doc-side corrections it
+identified to `docs/e2e-flow.md` (the 14 doc fixes catalogued below; 11 doc-side land here, the 3
+code-only fixes in a later PR). No production code is changed in this PR; the deterministic-test
+backlog and production fixes land in subsequent PRs.
 Pinned to `main` @ `7de7f430` (#236). This audit exists to satisfy the 2026-06-19 HARD GATE:
 **no new paid-LLM e2e run until `docs/e2e-flow.md` is verified accurate AND every Plan state it
 describes has a deterministic test.** It also delivers the state-machine inventory + gap list
