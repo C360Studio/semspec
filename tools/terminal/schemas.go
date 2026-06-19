@@ -1,6 +1,7 @@
 package terminal
 
 import (
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	ssmodel "github.com/c360studio/semstreams/model"
@@ -99,6 +100,8 @@ func schemaForDeliverable(deliverableType string) map[string]any {
 		return architectureSchema()
 	case "review":
 		return reviewSchema()
+	case "recovery":
+		return recoverySchema()
 	case "qa-review":
 		return qaReviewSchema()
 	case "lesson":
@@ -723,6 +726,90 @@ func reviewSchema() map[string]any {
 			},
 		},
 		"required":             []string{"verdict", "feedback", "summary", "rejection_type", "findings", "scenario_verdicts"},
+		"additionalProperties": false,
+	}
+}
+
+func recoverySchema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"description": "Recovery action to apply. Pick one closed-set value and write it first.",
+				"enum": []string{
+					string(payloads.RecoveryActionRefinePrompt),
+					string(payloads.RecoveryActionNarrowScope),
+					string(payloads.RecoveryActionSplitReq),
+					string(payloads.RecoveryActionStoryReprepare),
+					string(payloads.RecoveryActionArchitectureRevise),
+					string(payloads.RecoveryActionEscalateHuman),
+					string(payloads.RecoveryActionMarkUnrecoverable),
+				},
+			},
+			"diagnosis": map[string]any{
+				"type":        "string",
+				"description": "2-6 sentences explaining what the trajectory shows, why the prior agent wedged, and why the selected action fits.",
+			},
+			"recovery_succeeded": map[string]any{
+				"type":        "boolean",
+				"description": "true when the selected action plausibly fixes the wedge; false for escalate_human or mark_unrecoverable.",
+			},
+			"contract_impact": map[string]any{
+				"type":        "object",
+				"description": "How accepting this recovery affects the authoritative contract.",
+				"properties": map[string]any{
+					"kind": map[string]any{
+						"type":        "string",
+						"description": "preserve keeps the accepted contract; refine changes downstream shape while preserving obligations; change mutates obligations/topology/scope.",
+						"enum":        []string{"preserve", "refine", "change"},
+					},
+					"summary": map[string]any{
+						"type":        "string",
+						"description": "Concise contract-impact summary.",
+					},
+					"affected_ids": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Requirement, story, scenario, or capability IDs affected by the action. Emit [] when the impact is plan-wide or not ID-specific.",
+					},
+				},
+				"required":             []string{"kind", "summary", "affected_ids"},
+				"additionalProperties": false,
+			},
+			"refined_prompt": map[string]any{
+				"type":        []any{"string", "null"},
+				"description": "Complete replacement prompt for refine_prompt. Set null for every other action.",
+			},
+			"scope_changes": map[string]any{
+				"type":        "object",
+				"description": "Structured narrowing/splitting summary. For non narrow_scope/split_req actions, set summary to empty string and arrays to [].",
+				"properties": map[string]any{
+					"summary": map[string]any{
+						"type":        "string",
+						"description": "What scope is being narrowed or split, and why.",
+					},
+					"keep": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Files, concerns, or requirement slices that remain in scope. Emit [] when not applicable.",
+					},
+					"drop": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Files, concerns, or requirement slices to remove from the immediate retry. Emit [] when not applicable.",
+					},
+					"split_requirements": map[string]any{
+						"type":        "array",
+						"items":       map[string]any{"type": "string"},
+						"description": "Proposed smaller requirement titles or slices for split_req. Emit [] when not applicable.",
+					},
+				},
+				"required":             []string{"summary", "keep", "drop", "split_requirements"},
+				"additionalProperties": false,
+			},
+		},
+		"required":             []string{"action", "diagnosis", "recovery_succeeded", "contract_impact", "refined_prompt", "scope_changes"},
 		"additionalProperties": false,
 	}
 }
