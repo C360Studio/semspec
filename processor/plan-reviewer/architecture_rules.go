@@ -91,6 +91,8 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 		result.Findings = append(result.Findings,
 			componentCohesionViolationFindings(plan.Architecture)...)
 		result.Findings = append(result.Findings,
+			componentFileNamespaceFindings(plan.Architecture)...)
+		result.Findings = append(result.Findings,
 			capabilityUnresolvedInArchitectureFindings(plan)...)
 		result.Findings = append(result.Findings,
 			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries)...)
@@ -291,6 +293,129 @@ func componentCohesionViolationFindings(arch *workflow.ArchitectureDocument) []w
 		})
 	}
 	return findings
+}
+
+// componentFileNamespaceFindings flags a likely file→component MISPLACEMENT
+// (#237): a file owned by component A whose path contains a directory segment
+// matching a DIFFERENT component B's distinctive name token. This catches the
+// STRUCTURAL class of #237 — a file physically placed under another component's
+// package namespace — generalizably, from the plan's own component names, with
+// no hardcoded domain dictionary.
+//
+// "Distinctive" = a token carried by exactly ONE component name. Tokens shared
+// across components (e.g. "mavsdk"/"semantic" in both mavsdk-semantic-datastreams
+// and mavsdk-semantic-controlstreams) are NOT domain-discriminating and are
+// ignored, so only a segment that uniquely identifies another component fires.
+//
+// Warning severity, matching componentCohesionViolationFindings: the reviewer
+// sees only DECLARED data and a single cohesive component can legitimately own
+// multiple domains (an OSH driver entry class owns telemetry + control), so this
+// NUDGES rather than blocks. It deliberately does NOT attempt the SEMANTIC case
+// (a control-logic file under a neutral path with no domain keyword, e.g. the
+// 2026-06-19 ConstAltitudeLLA.java/PD.java in processing/) — that placement
+// judgment is the LLM reviewer's job (planReviewerCompletenessR2 criterion 6a),
+// not a deterministic check, because catching it would require a project-specific
+// domain dictionary that does not generalize.
+func componentFileNamespaceFindings(arch *workflow.ArchitectureDocument) []workflow.PlanReviewFinding {
+	if arch == nil || len(arch.ComponentBoundaries) < 2 {
+		return nil
+	}
+
+	// token → set of component names carrying it (from the component NAME).
+	tokenOwners := make(map[string]map[string]struct{})
+	for _, c := range arch.ComponentBoundaries {
+		if c.Name == "" {
+			continue
+		}
+		for tok := range componentNameTokens(c.Name) {
+			if tokenOwners[tok] == nil {
+				tokenOwners[tok] = make(map[string]struct{})
+			}
+			tokenOwners[tok][c.Name] = struct{}{}
+		}
+	}
+	distinctiveOwner := func(tok string) (string, bool) {
+		owners := tokenOwners[tok]
+		if len(owners) != 1 {
+			return "", false
+		}
+		for n := range owners {
+			return n, true
+		}
+		return "", false
+	}
+
+	var findings []workflow.PlanReviewFinding
+	for _, c := range arch.ComponentBoundaries {
+		if c.Name == "" {
+			continue
+		}
+		ownTokens := componentNameTokens(c.Name)
+		for _, f := range c.ImplementationFiles {
+			for _, seg := range pathDirSegments(f) {
+				if _, isOwn := ownTokens[seg]; isOwn {
+					continue // segment matches the owner's own namespace — fine
+				}
+				owner, ok := distinctiveOwner(seg)
+				if !ok || owner == c.Name {
+					continue
+				}
+				findings = append(findings, workflow.PlanReviewFinding{
+					SOPID:       "architecture.file_under_foreign_component_namespace",
+					SOPTitle:    "Implementation file sits under another component's package namespace (#237)",
+					Severity:    "warning",
+					Status:      "violation",
+					Category:    "structural",
+					Phase:       "architecture",
+					TargetID:    f,
+					Action:      "move",
+					TargetField: fmt.Sprintf("component_boundaries[%s].implementation_files", c.Name),
+					TargetValue: fmt.Sprintf("%s → %s", f, owner),
+					Issue:       fmt.Sprintf("File %q is owned by component %q but its path lies under the %q namespace, which uniquely identifies component %q. It likely belongs to %q (the 2026-06-19 #237 misplacement class). If %q genuinely shares a cohesive entry class with %q's other files, ignore this warning.", f, c.Name, seg, owner, owner, f, c.Name),
+					Suggestion:  fmt.Sprintf("Move %q to component %q's implementation_files, or confirm the placement is intentional (cohesive shared entry class). Warning, not a block — the LLM reviewer's placement-coherence criterion (6a) and the dev-review ownership gate are the deeper checks.", f, owner),
+				})
+				break // one finding per file
+			}
+		}
+	}
+	return findings
+}
+
+// componentNameTokens splits a component name into distinctive lowercase tokens
+// (split on any non-alphanumeric run; tokens shorter than 5 chars are dropped as
+// too generic to be a reliable namespace signal). Returned as a set.
+func componentNameTokens(name string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, tok := range strings.FieldsFunc(strings.ToLower(name), func(r rune) bool {
+		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+	}) {
+		if len(tok) >= 5 {
+			out[tok] = struct{}{}
+		}
+	}
+	return out
+}
+
+// pathDirSegments returns the lowercase directory segments of a file path
+// (excluding the filename itself), each split on any non-alphanumeric run so a
+// segment like "control-streams" yields "control"/"streams". Segments shorter
+// than 5 chars are dropped to match componentNameTokens.
+func pathDirSegments(file string) []string {
+	dir := path.Dir(strings.ReplaceAll(file, "\\", "/"))
+	if dir == "." || dir == "/" || dir == "" {
+		return nil
+	}
+	var out []string
+	for _, raw := range strings.Split(dir, "/") {
+		for _, tok := range strings.FieldsFunc(strings.ToLower(raw), func(r rune) bool {
+			return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
+		}) {
+			if len(tok) >= 5 {
+				out = append(out, tok)
+			}
+		}
+	}
+	return out
 }
 
 // integratingComponents returns the components that integrate into resolution r,

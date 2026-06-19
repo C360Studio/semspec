@@ -405,6 +405,36 @@ func TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity(t *testing.T) {
 	}
 }
 
+// TestRenderPlanReviewerPrompt_R2PlacementCoherence pins #237's R2 semantic
+// gate: the round-2 reviewer must judge whether each component's
+// implementation_files belong to that component's domain, catching the
+// 2026-06-19 control-classes-in-a-telemetry-component misplacement that passed
+// every deterministic gate and reached execution. The caveat (a cohesive
+// component may own multiple domains) must ride along so the directive doesn't
+// over-trigger.
+func TestRenderPlanReviewerPrompt_R2PlacementCoherence(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x"}`,
+		Round:       2,
+	})
+	for _, want := range []string{
+		"File→component placement coherence",
+		"#237",
+		"COHESIVE component legitimately owns MULTIPLE domains", // false-positive caveat
+		"Goodhart guard",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("R2 prompt missing #237 placement-coherence string %q\nGot:\n%s", want, out)
+		}
+	}
+	// R1 (pre-architecture) must NOT carry it.
+	r1 := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{Slug: "abc123", PlanContent: `{"goal":"x"}`, Round: 1})
+	if strings.Contains(r1, "File→component placement coherence") {
+		t.Errorf("R1 prompt should NOT carry the R2 placement-coherence criterion")
+	}
+}
+
 // TestRenderPlanReviewerPrompt_R2UntouchedByR1Edits guards against accidentally
 // dragging the R1 phase-boundary stanza into R2 (which reviews requirements +
 // scenarios + architecture and SHOULD demand implementation-adjacent rigor).
