@@ -147,7 +147,7 @@ func TestHandleClaimMutation_Guards(t *testing.T) {
 		},
 		{
 			name: "plan not found returns error",
-			setup: func(t *testing.T, c *Component) string {
+			setup: func(_ *testing.T, _ *Component) string {
 				return "nonexistent-plan"
 			},
 			target:          workflow.StatusDrafting,
@@ -155,7 +155,7 @@ func TestHandleClaimMutation_Guards(t *testing.T) {
 		},
 		{
 			name: "empty slug rejected",
-			setup: func(t *testing.T, c *Component) string {
+			setup: func(_ *testing.T, _ *Component) string {
 				return ""
 			},
 			target:          workflow.StatusDrafting,
