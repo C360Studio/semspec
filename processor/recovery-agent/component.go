@@ -799,7 +799,7 @@ func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.Lo
 		affectedReqs = []string{req.RequirementID}
 	}
 
-	decisionID := fmt.Sprintf("plan-decision.%s.recovery.%s", req.Slug, req.RecoveryID[:8])
+	decisionID := fmt.Sprintf("plan-decision.%s.recovery.%s", req.Slug, shortRecoveryID(req.RecoveryID))
 
 	// Story IDs are passed through unconditionally. They're only
 	// load-bearing when Kind=story_reprepare (cascade + applyRecoveryHint
@@ -833,6 +833,18 @@ func buildRecoveryPlanDecision(req *payloads.RecoveryRequested, loop *agentic.Lo
 		ContractImpact:   impact,
 		CreatedAt:        now,
 	}
+}
+
+// shortRecoveryID returns the first 8 chars of a recovery ID for the decision-ID
+// suffix, or the whole ID when it is shorter. Guards the slice against a
+// malformed (short) RecoveryID arriving on the recovery.requested.<slug>
+// boundary — payload Validate only checks non-empty, so a 1-7 char ID would
+// panic on a raw [:8] slice (#31).
+func shortRecoveryID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
 }
 
 func recoveryContractImpact(action payloads.RecoveryActionKind, diagnosis string, provided *workflow.ContractImpact, affectedIDs []string) *workflow.ContractImpact {

@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"time"
 
@@ -90,6 +91,23 @@ type Requester interface {
 	Request(ctx context.Context, subject string, data []byte, timeout time.Duration) ([]byte, error)
 }
 
+// isNilRequester reports whether client is unusable: nil at the interface level,
+// OR a typed-nil pointer/interface wrapped in the interface. A concrete
+// (*Client)(nil) passes a plain `client == nil` check (the interface holds a
+// type) but panics on first method call — every call site otherwise has to do
+// its own typed-nil dance (#32).
+func isNilRequester(client Requester) bool {
+	if client == nil {
+		return true
+	}
+	switch v := reflect.ValueOf(client); v.Kind() {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice, reflect.Func, reflect.Chan:
+		return v.IsNil()
+	default:
+		return false
+	}
+}
+
 // ErrNotFound is returned when the agentic-loop responder reports that no
 // trajectory exists for the requested loop ID. Callers should treat this as
 // terminal for that loop — retrying will not help.
@@ -104,7 +122,7 @@ var ErrNotFound = fmt.Errorf("trajectory not found")
 // error, so callers can distinguish "missing" from "transport failure" and
 // avoid retrying for ever.
 func Fetch(ctx context.Context, client Requester, loopID string, limit int) (*agentic.Trajectory, error) {
-	if client == nil {
+	if isNilRequester(client) {
 		return nil, fmt.Errorf("nats client required")
 	}
 	if loopID == "" {
