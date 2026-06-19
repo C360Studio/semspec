@@ -9,6 +9,7 @@ import (
 
 	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // TestHandleQAVerdictMutation_PersistsVerdictSummary covers the needs_changes
@@ -154,6 +155,184 @@ func TestHandleQAVerdictMutation_PersistsSummaryOnMergeFail(t *testing.T) {
 	}
 	if stored.LastError == "" {
 		t.Error("LastError should record the merge failure for operator visibility")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GAP 2 — reviewing_qa -> rejected status outcome (#226/#235).
+//
+// The prior tests cover VerdictSummary persistence and RecoveryRequested
+// emission but do NOT assert the persisted plan.Status. A handler bug could
+// correctly emit RecoveryRequested while forgetting to flip the status field,
+// leaving the plan stuck in reviewing_qa. These tests close that gap by
+// asserting the post-mutation stored.Status for both verdict arms (needs_changes
+// and rejected) and verifying that PlanDecisions carrying the recovery-submit
+// schema shape (ContractImpact field, not a review-verdict shape) survive
+// round-trip through handleQAVerdictMutation.
+// ---------------------------------------------------------------------------
+
+// TestHandleQAVerdictMutation_NeedsChanges_SetsRejectedStatus is the primary
+// status-transition assertion for the needs_changes arm. The existing
+// TestHandleQAVerdictMutation_PersistsVerdictSummary only checked the summary
+// field; this test checks that the plan actually transitions to rejected so
+// the recovery agent can be dispatched and the plan does not stay at reviewing_qa.
+func TestHandleQAVerdictMutation_NeedsChanges_SetsRejectedStatus(t *testing.T) {
+	ctx := context.Background()
+	c := setupTestComponent(t)
+	publisher, fetch := captureRecoveryPublisher()
+	c.recoveryPublisher = publisher
+
+	slug := "qa-nc-status"
+	plan := setupTestPlan(t, c, slug)
+	plan.Status = workflow.StatusReviewingQA
+	if err := c.plans.save(ctx, plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	event := workflow.QAVerdictEvent{
+		Slug:    slug,
+		Level:   workflow.QALevelUnit,
+		Verdict: workflow.QAVerdictNeedsChanges,
+		Summary: "Coverage gap on error paths.",
+		TraceID: "trace-nc-status",
+	}
+	data, _ := json.Marshal(event)
+
+	resp := c.handleQAVerdictMutation(ctx, data)
+	if !resp.Success {
+		t.Fatalf("mutation failed: %s", resp.Error)
+	}
+
+	stored, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan missing from store after mutation")
+	}
+	// The plan must transition to rejected (not stay at reviewing_qa) so the
+	// recovery dispatch path is unblocked. This was the #226 paid-run wedge:
+	// recovery fired but the plan stayed at reviewing_qa, re-triggering QA.
+	if stored.Status != workflow.StatusRejected {
+		t.Errorf("stored.Status = %q, want rejected (needs_changes must flip to rejected)", stored.Status)
+	}
+	if got := fetch(); len(got) != 1 {
+		t.Errorf("expected 1 RecoveryRequested, got %d", len(got))
+	}
+}
+
+// TestHandleQAVerdictMutation_Rejected_SetsRejectedStatus mirrors the above for
+// the rejected arm. The rejected verdict is the "unrecoverable" escalation
+// variant; the status transition and recovery-dispatch must still fire.
+func TestHandleQAVerdictMutation_Rejected_SetsRejectedStatus(t *testing.T) {
+	ctx := context.Background()
+	c := setupTestComponent(t)
+	publisher, fetch := captureRecoveryPublisher()
+	c.recoveryPublisher = publisher
+
+	slug := "qa-rejected-status"
+	plan := setupTestPlan(t, c, slug)
+	plan.Status = workflow.StatusReviewingQA
+	if err := c.plans.save(ctx, plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	event := workflow.QAVerdictEvent{
+		Slug:    slug,
+		Level:   workflow.QALevelUnit,
+		Verdict: workflow.QAVerdictRejected,
+		Summary: "Unrecoverable scope drift across all requirements.",
+		TraceID: "trace-rejected-status",
+	}
+	data, _ := json.Marshal(event)
+
+	resp := c.handleQAVerdictMutation(ctx, data)
+	if !resp.Success {
+		t.Fatalf("mutation failed: %s", resp.Error)
+	}
+
+	stored, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan missing from store after mutation")
+	}
+	if stored.Status != workflow.StatusRejected {
+		t.Errorf("stored.Status = %q, want rejected", stored.Status)
+	}
+	if got := fetch(); len(got) != 1 {
+		t.Errorf("expected 1 RecoveryRequested, got %d", len(got))
+	}
+}
+
+// TestHandleQAVerdictMutation_NeedsChanges_PersistsPlanDecisionWithContractImpact
+// closes the #235 schema gap: qa-reviewer emits PlanDecisions using the
+// recovery-submit shape (kind + ContractImpact), NOT the old review-verdict
+// shape. The handler must persist them verbatim so the recovery agent's
+// auto-accept path (which keys on ContractImpact) can fire without operator
+// intervention. Before #235 the recovery agent emitted a review-verdict-shaped
+// decision that the auto-accept watcher silently ignored, leaving the plan
+// stuck in rejected forever.
+func TestHandleQAVerdictMutation_NeedsChanges_PersistsPlanDecisionWithContractImpact(t *testing.T) {
+	ctx := context.Background()
+	c := setupTestComponent(t)
+	c.recoveryPublisher = func(_ context.Context, _ *payloads.RecoveryRequested) {}
+
+	slug := "qa-nc-plan-decision"
+	plan := setupTestPlan(t, c, slug)
+	plan.Status = workflow.StatusReviewingQA
+	if err := c.plans.save(ctx, plan); err != nil {
+		t.Fatalf("save plan: %v", err)
+	}
+
+	// Simulate a qa-reviewer emitting a PlanDecision using the recovery-submit
+	// schema shape — kind=architecture_revise + ContractImpact present.
+	// This is the shape validated by #235: the action/diagnosis/contract_impact
+	// fields, NOT a review-verdict shape. plan-manager must persist it verbatim.
+	contractImpact := &workflow.ContractImpact{
+		Kind:        workflow.ContractImpactChange,
+		Summary:     "Control-streams files moved to wrong component.",
+		AffectedIDs: []string{"req.qa-nc-plan-decision.r1"},
+	}
+	decision := workflow.PlanDecision{
+		ID:             "pd.qa-nc-plan-decision.recovery.1",
+		Kind:           workflow.PlanDecisionKindArchitectureRevise,
+		Rationale:      "QA identified a file-placement violation across component boundaries.",
+		Status:         workflow.PlanDecisionStatusProposed,
+		ContractImpact: contractImpact,
+		AffectedReqIDs: []string{"r1"},
+	}
+	event := workflow.QAVerdictEvent{
+		Slug:          slug,
+		Level:         workflow.QALevelUnit,
+		Verdict:       workflow.QAVerdictNeedsChanges,
+		Summary:       "File placement violates component boundaries.",
+		PlanDecisions: []workflow.PlanDecision{decision},
+	}
+	data, _ := json.Marshal(event)
+
+	resp := c.handleQAVerdictMutation(ctx, data)
+	if !resp.Success {
+		t.Fatalf("mutation failed: %s", resp.Error)
+	}
+
+	stored, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan missing from store after mutation")
+	}
+	// Status must be rejected (not reviewing_qa) regardless of attached PlanDecisions.
+	if stored.Status != workflow.StatusRejected {
+		t.Errorf("stored.Status = %q, want rejected", stored.Status)
+	}
+	// The PlanDecision with ContractImpact must survive the round-trip so the
+	// auto-accept watcher can evaluate it and fire without operator intervention.
+	if len(stored.PlanDecisions) != 1 {
+		t.Fatalf("stored PlanDecisions len = %d, want 1", len(stored.PlanDecisions))
+	}
+	pd := stored.PlanDecisions[0]
+	if pd.Kind != workflow.PlanDecisionKindArchitectureRevise {
+		t.Errorf("PlanDecision.Kind = %q, want architecture_revise (recovery-submit schema shape)", pd.Kind)
+	}
+	if pd.ContractImpact == nil {
+		t.Fatal("PlanDecision.ContractImpact = nil, want non-nil (recovery-submit schema requires contract_impact)")
+	}
+	if pd.ContractImpact.Kind != workflow.ContractImpactChange {
+		t.Errorf("PlanDecision.ContractImpact.Kind = %q, want change", pd.ContractImpact.Kind)
 	}
 }
 
