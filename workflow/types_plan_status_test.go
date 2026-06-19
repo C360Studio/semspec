@@ -273,6 +273,72 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// Legacy paths still valid after additions
 		{StatusCreated, StatusDrafting, true},
 		{StatusCreated, StatusDrafted, true},
+
+		// --- Transitions missing from prior coverage ---
+
+		// created → rejected (escalation)
+		{StatusCreated, StatusRejected, true},
+
+		// reviewed → approved / rejected
+		{StatusReviewed, StatusApproved, true},
+		{StatusReviewed, StatusRejected, true},
+
+		// reviewing_scenarios → scenarios_reviewed (R2 approved, auto_approve=false)
+		{StatusReviewingScenarios, StatusScenariosReviewed, true},
+
+		// scenarios_reviewed → ready_for_execution (human "Approve & Continue")
+		{StatusScenariosReviewed, StatusReadyForExecution, true},
+		// scenarios_reviewed → rejected (escalation)
+		{StatusScenariosReviewed, StatusRejected, true},
+
+		// preparing_stories → stories_generated (Sarah happy path)
+		{StatusPreparingStories, StatusStoriesGenerated, true},
+		// preparing_stories → rejected (escalation)
+		{StatusPreparingStories, StatusRejected, true},
+
+		// stories_generated → preparing_stories (R3 retry — accepted story_reprepare PlanDecision)
+		{StatusStoriesGenerated, StatusPreparingStories, true},
+
+		// ready_for_execution → implementing (scenario orchestrator picks up)
+		{StatusReadyForExecution, StatusImplementing, true},
+
+		// implementing → complete (level=none; direct terminal with no review)
+		{StatusImplementing, StatusComplete, true},
+		// implementing → rejected (execution escalation)
+		{StatusImplementing, StatusRejected, true},
+
+		// complete → archived (shelve)
+		{StatusComplete, StatusArchived, true},
+		// complete → ready_for_execution (re-execute all requirements)
+		{StatusComplete, StatusReadyForExecution, true},
+
+		// archived → complete (unarchive)
+		{StatusArchived, StatusComplete, true},
+		// archived → ready_for_execution (unarchive + retry)
+		{StatusArchived, StatusReadyForExecution, true},
+
+		// rejected → ready_for_execution (retry failed requirements)
+		{StatusRejected, StatusReadyForExecution, true},
+
+		// Legal today but NO production performer (audit 2026-06-19,
+		// docs/audit/e2e-flow-accuracy-and-coverage.md §dead edges) —
+		// candidates for tightening:
+		// implementing → reviewing_rollup (legacy alias; new code emits reviewing_qa)
+		{StatusImplementing, StatusReviewingRollup, true},
+		// implementing → reviewing_qa already covered above (line 236)
+		// ready_for_qa → rejected already covered above (line 240)
+		// rejected → created already covered above (line 170)
+		// rejected → implementing (resume stalled plan — no orchestrator path today)
+		{StatusRejected, StatusImplementing, true},
+		// preparing_stories → architecture_generated (R3 phase-targeted retry — no performer today)
+		{StatusPreparingStories, StatusArchitectureGenerated, true},
+
+		// Negative: confirm a sample of genuinely-illegal transitions stay false
+		// archived cannot transition to implementing or drafting
+		{StatusArchived, StatusImplementing, false},
+		{StatusArchived, StatusDrafted, false},
+		// complete cannot go directly to implementing
+		{StatusComplete, StatusImplementing, false},
 	}
 
 	for _, tt := range tests {
