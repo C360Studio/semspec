@@ -466,25 +466,30 @@ func (c *Component) dispatchRequirement(
 			"requirement_id", req.ID, "error", err)
 		return err
 	}
-	if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs, force); err != nil {
-		// A "req execution already exists" rejection is a benign idempotency
-		// outcome, not a failure (issue #180): when plan-manager re-fires the
-		// orchestrator on a completion AND the DAG gate independently re-dispatches
-		// a now-ready requirement, both paths race to req.create and the executor's
-		// dedup correctly rejects the loser. The requirement got exactly one
-		// execution. Treat it as success — Debug-log and return nil — so the
-		// orchestrate cycle ACKs (no Error-level noise, and no NAK→redelivery churn
-		// that would re-run the whole cycle and re-log on every redelivery).
-		if isIdempotentReqRejection(err) {
-			c.logger.Debug("requirement already dispatched (idempotent re-fire), skipping",
-				"requirement_id", req.ID, "detail", err)
-			return nil
-		}
-		c.logger.Error("failed to trigger requirement execution",
-			"requirement_id", req.ID, "error", err)
-		return err
+	err = c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, base, req, scenarios, prereqs, force)
+	return c.routeDispatchError(req.ID, err)
+}
+
+// routeDispatchError classifies a triggerRequirementExecution error (#180). A
+// benign "already exists" idempotency rejection — when plan-manager re-fires the
+// orchestrator on a completion AND the DAG gate independently re-dispatches a
+// now-ready requirement, both race to req.create and the executor's dedup rejects
+// the loser — is Debug-logged and SWALLOWED (return nil) so the orchestrate cycle
+// ACKs: no Error-level noise, and no NAK→redelivery churn that would re-run the
+// whole cycle and re-log on every redelivery. Any other error is Error-logged and
+// propagated; nil passes through.
+func (c *Component) routeDispatchError(reqID string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return nil
+	if isIdempotentReqRejection(err) {
+		c.logger.Debug("requirement already dispatched (idempotent re-fire), skipping",
+			"requirement_id", reqID, "detail", err)
+		return nil
+	}
+	c.logger.Error("failed to trigger requirement execution",
+		"requirement_id", reqID, "error", err)
+	return err
 }
 
 // isIdempotentReqRejection reports whether a dispatch error is the benign
