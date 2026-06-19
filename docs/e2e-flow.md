@@ -111,8 +111,9 @@ flowchart TD
         ReqExec --> TaskLoop["developer -> validator -> reviewer"]
         TaskLoop --> StoryReview["Story scenario review"]
         StoryReview -->|Story approved| ReqExec
-        ReqExec -->|requirement complete| Orch
-        Orch -->|all complete| QAReady["ready_for_qa"]
+        ReqExec -->|requirement terminal| Conv["plan-manager<br/>convergence watcher"]
+        Conv -->|dependents remain| Orch
+        Conv -->|all complete| QAReady["ready_for_qa"]
         StoryReview -->|retry under cap| ReqExec
         StoryReview -->|cap exhausted| Recovery["RecoveryRequested"]
         TaskLoop -->|TDD exhausted| Recovery
@@ -120,15 +121,18 @@ flowchart TD
 
     subgraph QA["Release gate"]
         QAReady --> QAWork["qa-reviewer<br/>reviewing_qa"]
-        QAWork -->|approved| Complete["complete or awaiting_review"]
+        QAWork -->|approved, no gate| Complete["complete"]
+        QAWork -->|approved, gated| AwaitingReview["awaiting_review"]
         QAWork -->|needs changes| Recovery
     end
 
-    Complete -->|PR feedback| Feedback["affected requirements reset"]
+    AwaitingReview -->|PR feedback mapped| Feedback["affected requirements reset"]
+    AwaitingReview -->|external approval| Complete
+    AwaitingReview -->|external rejection| Rejected3["rejected or archived"]
     Feedback --> Ready
     Recovery -->|story_reprepare| StoryPrep
     Recovery -->|architecture_revise| ReqReady
-    Recovery -->|human rejects| Rejected3["rejected or archived"]
+    Recovery -->|human rejects| Rejected3
 ```
 
 ## Plan State Chart
@@ -137,10 +141,13 @@ flowchart TD
 stateDiagram-v2
     [*] --> created
     created --> exploring: analyst claim
-    exploring --> explored: exploration committed
-    explored --> drafting: planner claim
     created --> drafting: revision draft skips analyst
+    created --> drafted: revision shortcut
+    exploring --> explored: exploration committed
+    exploring --> rejected: analyst exhaustion
+    explored --> drafting: planner claim
     drafting --> drafted: draft committed
+    drafting --> rejected: draft exhaustion
     drafted --> reviewing_draft: R1 claim
     reviewing_draft --> reviewed: R1 approved
     reviewed --> approved: auto-approve or human approval
@@ -161,20 +168,25 @@ stateDiagram-v2
     preparing_stories --> rejected: retry exhaustion
 
     stories_generated --> generating_scenarios: scenario-generator claim
+    stories_generated --> preparing_stories: accepted story_reprepare (R3)
     generating_scenarios --> scenarios_generated: scenarios committed
     generating_scenarios --> rejected: retry exhaustion
 
     scenarios_generated --> reviewing_scenarios: scenario/story review claim
-    reviewing_scenarios --> ready_for_execution: approved
+    reviewing_scenarios --> ready_for_execution: approved, auto_approve=true
+    reviewing_scenarios --> scenarios_reviewed: approved, human gate (auto_approve=false)
     reviewing_scenarios --> created: plan-level revision
     reviewing_scenarios --> approved: requirement-level revision
     reviewing_scenarios --> requirements_generated: architecture-level revision
     reviewing_scenarios --> architecture_generated: story/scenario revision
     reviewing_scenarios --> rejected: cap or fatal failure
+    scenarios_reviewed --> ready_for_execution: human Approve and Continue
 
     ready_for_execution --> implementing: execute
+    ready_for_execution --> rejected: orchestration failure
     implementing --> ready_for_qa: all requirements complete, QA enabled
     implementing --> complete: all requirements complete, QA none
+    implementing --> awaiting_review: all complete, QA none, review gated
     implementing --> rejected: unrecoverable or auto-reject
     implementing --> preparing_stories: accepted story_reprepare
     implementing --> requirements_generated: accepted architecture_revise
@@ -187,7 +199,27 @@ stateDiagram-v2
     awaiting_review --> complete: external approval
     awaiting_review --> rejected: external rejection
     awaiting_review --> archived: operator archives
+
+    complete --> archived: shelve
+    complete --> ready_for_execution: re-execute
+    archived --> complete: unarchive
+    archived --> ready_for_execution: unarchive and retry
+
+    rejected --> requirements_generated: accepted post-QA architecture_revise
+    rejected --> ready_for_execution: retry / scope_incomplete recovery
+    rejected --> approved: manual R2 restart
+
+    implementing --> changed: accepted change proposal
+    complete --> changed: accepted change proposal
 ```
+
+The chart draws two representative `--> changed` edges for readability. In code, an accepted
+change-proposal can enter `changed` from **seven** source states via one generic setter
+(`processor/plan-manager/http_plan_decision.go` `setPlanStatusCached(StatusChanged)`):
+`requirements_generated`, `architecture_generated`, `scenarios_generated`, `scenarios_reviewed`,
+`ready_for_execution`, `implementing`, and `complete`. `changed` then re-enters the pipeline at
+`generating_requirements` for partial regeneration. The `rejected -->` and `archived <-->`
+back-edges shown above are recovery/operator paths, not normal forward flow.
 
 ## Planning And Design Detail
 
@@ -274,8 +306,9 @@ intent, and contract obligation references.
 
 Why: convert the spec spine into executable units with dependencies and ownership boundaries.
 
-Happy path: `plan-manager` validates DAG, ownership partition, capability coverage, and no
-unexplained contract loss, then stores `requirements_generated`.
+Happy path: `plan-manager` validates DAG, ownership partition, and capability coverage, then
+stores `requirements_generated`. (The unexplained-contract-loss gate runs at the draft handler
+that sets `drafted`, not at this transition.)
 
 Retry or recovery: parse, validation, or manager feedback retries; exhaustion emits
 `generation.failed` and rejects the Plan.
@@ -348,7 +381,8 @@ contract coverage, and findings.
 
 Why: prevent execution against missing, contradictory, or untestable evidence.
 
-Happy path: approved review moves to `ready_for_execution` when auto-approved.
+Happy path: an approved review moves to `ready_for_execution` when `auto_approve=true`; when
+`auto_approve=false` it parks at `scenarios_reviewed` for a human gate (Step 10).
 
 Retry or recovery: revision findings choose a re-entry point: plan, requirements, architecture,
 stories, or scenarios. Cap exhaustion rejects the Plan.
@@ -361,11 +395,14 @@ When: the Plan has passed scenario/story review.
 
 Where: `PLAN_STATES` and plan API.
 
-What: moves the Plan to `ready_for_execution` if human approval is required.
+What: when `auto_approve=false`, scenario/story review parks the Plan at `scenarios_reviewed`
+(the human gate); an operator then promotes it to `ready_for_execution`. When `auto_approve=true`,
+review advances straight to `ready_for_execution`.
 
 Why: make execution an explicit commitment point.
 
-Happy path: the Plan waits for execution.
+Happy path: the Plan rests in `scenarios_reviewed` until a human clicks Approve & Continue, then
+moves to `ready_for_execution`.
 
 Retry or recovery: the operator can reject or archive instead of executing.
 
@@ -401,9 +438,10 @@ sequenceDiagram
     EM-->>RE: task terminal state
     RE->>RR: review Story scenarios
     RR-->>RE: approved, fixable, restructure, or exhausted
-    RE-->>SO: requirement completed
-    SO-->>PM: all requirements terminal
-    PM->>QA: ready_for_qa / QA request
+    RE->>PM: requirement execution terminal (EXECUTION_STATES watch)
+    PM->>PM: convergence watcher counts terminal reqs
+    PM->>SO: re-fire orchestrate for dependents
+    PM->>QA: all complete -> ready_for_qa / QA request
     QA-->>PM: QA verdict
 ```
 
@@ -478,7 +516,10 @@ Happy path: valid submitted work advances to structural validation.
 
 Retry or recovery: parse failure, empty file list, claimed files with a clean worktree, forbidden
 file ownership, or unapproved topology-controlled paths return a developer rejection or recovery
-request depending on severity.
+request depending on severity. A distinct terminal outcome is `phaseError` (`execution-manager`
+`markErrorLocked`): infrastructure faults — worktree creation failure, worktree loss, merge
+failure, per-execution timeout, or any `INFRASTRUCTURE:`-prefixed error — terminate the task in
+error rather than as a reviewable rejection or a recovery escalation.
 
 ### 15. Validate Structure
 
@@ -608,7 +649,11 @@ Why: let external review drive targeted rework without discarding the whole Plan
 
 Happy path: affected requirement executions reset and the Plan returns to `ready_for_execution`.
 
-Retry or recovery: external rejection can move the Plan to `rejected`; archival is operator action.
+Retry or recovery: external rejection can move the Plan to `rejected`. Terminal-state operator
+actions close the lifecycle: a `complete` Plan can be shelved to `archived` or re-executed to
+`ready_for_execution`; an `archived` Plan can be unarchived back to `complete` or
+unarchived-and-retried to `ready_for_execution` (`plan-manager` `handleDeletePlan` /
+`handleUnarchivePlan` / `handleRetryPlan`).
 
 ## Operator And UI Observability
 
@@ -711,11 +756,19 @@ SemTeams note: do not spend reviewer retries on developer errors; keep budgets s
 
 Who initiates: `execution-manager` or `requirement-executor`.
 
-State effect: the same reviewer loop reruns.
+State effect: there are two budget-distinct reviewer-retry mechanisms, plus the fixable-finding
+path. (1) Reviewer output could not be **parsed** or was internally invalid → the same reviewer
+loop reruns and does NOT consume a TDD cycle (`execution-manager/component.go` `ReviewRetryCount`).
+(2) The reviewer loop itself fails on **outcome** (timeout / iteration cap) → the **developer**
+is re-dispatched and that DOES consume a TDD cycle. (3) A fixable reviewer finding also retries
+the developer (see Developer Retry). Do not conflate the free parse-rerun with the cycle-consuming
+outcome failure.
 
-Typical cause: reviewer output could not be parsed or was internally invalid.
+Typical cause: reviewer output could not be parsed or was internally invalid (mechanism 1);
+reviewer loop timed out or hit its iteration cap (mechanism 2).
 
-SemTeams note: parse retries are reviewer reliability, not product rework.
+SemTeams note: parse retries are reviewer reliability, not product rework; do not let a reviewer
+infra failure read as a free rerun.
 
 ### Story Fixable Retry
 
@@ -753,8 +806,10 @@ traceable to affected nodes.
 
 Who initiates: accepted recovery decision.
 
-State effect: `implementing -> preparing_stories` for affected requirements/stories, or a
-whole-phase story reset only when contract impact proves the phase is obsolete.
+State effect: `implementing -> preparing_stories` (or `stories_generated -> preparing_stories`
+when an accepted re-prep arrives before execution; the execution-reset block is skipped when the
+plan is not `implementing`) for affected requirements/stories, or a whole-phase story reset only
+when contract impact proves the phase is obsolete.
 
 Typical cause: Story boundaries or Story-to-file ownership are wrong.
 
