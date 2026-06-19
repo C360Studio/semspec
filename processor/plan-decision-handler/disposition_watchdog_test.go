@@ -1,17 +1,27 @@
 package changeproposalhandler
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
 )
 
-// allPlanDecisionKinds is the authoritative enumeration of PlanDecisionKind.
-// It MUST stay in sync with PlanDecisionKind.IsValid() in workflow/types.go.
-// Adding a new PlanDecisionKind without adding it here fails
-// TestPlanDecisionKind_AllKindsEnumerated; adding it here without a declared
-// disposition fails TestRecoveryDisposition_Watchdog. That is the forcing
-// function for #221 invariant 1.
+// allPlanDecisionKinds enumerates PlanDecisionKind for the per-kind disposition
+// assertions below. It is NOT trusted as the source of truth on its own:
+// TestRecoveryDisposition_WatchdogExhaustive parses workflow/types.go and fails
+// if any constant declared there is missing from this list or from
+// kindDisposition (and vice-versa). So a new PlanDecisionKind added to the
+// source cannot pass CI without being given a deterministic disposition — that
+// is the real forcing function for #221 invariant 1, independent of whether
+// anyone remembers to update this hand-maintained list.
 var allPlanDecisionKinds = []workflow.PlanDecisionKind{
 	workflow.PlanDecisionKindRequirementChange,
 	workflow.PlanDecisionKindExecutionExhausted,
@@ -131,5 +141,110 @@ func TestRecoveryDisposition_Watchdog(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// declaredPlanDecisionKinds parses the workflow package source and returns the
+// string value of every constant declared with type PlanDecisionKind. This is
+// the genuinely-exhaustive enumeration: it discovers kinds from source rather
+// than a hand-maintained list, so a newly-added constant is caught even if a
+// developer forgets to update allPlanDecisionKinds / kindDisposition.
+func declaredPlanDecisionKinds(t *testing.T) []string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed; cannot locate workflow source")
+	}
+	workflowDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "workflow")
+	entries, err := os.ReadDir(workflowDir)
+	if err != nil {
+		t.Fatalf("read workflow dir %q: %v", workflowDir, err)
+	}
+
+	fset := token.NewFileSet()
+	var kinds []string
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, filepath.Join(workflowDir, e.Name()), nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", e.Name(), err)
+		}
+		for _, decl := range file.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs, ok := spec.(*ast.ValueSpec)
+				if !ok || len(vs.Values) == 0 {
+					// No explicit value → iota-style inheritance, not a
+					// string kind declaration we care about.
+					continue
+				}
+				id, ok := vs.Type.(*ast.Ident)
+				if !ok || id.Name != "PlanDecisionKind" {
+					continue
+				}
+				for _, val := range vs.Values {
+					bl, ok := val.(*ast.BasicLit)
+					if !ok || bl.Kind != token.STRING {
+						continue
+					}
+					s, err := strconv.Unquote(bl.Value)
+					if err != nil {
+						continue
+					}
+					kinds = append(kinds, s)
+				}
+			}
+		}
+	}
+	return kinds
+}
+
+// TestRecoveryDisposition_WatchdogExhaustive is the genuine #221 INV1 forcing
+// function. It parses the workflow source for every declared PlanDecisionKind
+// and asserts a two-way correspondence with the watchdog's kindDisposition map
+// (and allPlanDecisionKinds): every declared kind has a disposition, and every
+// disposition/list entry is a real declared kind. Adding a PlanDecisionKind to
+// workflow/types.go without giving it a disposition fails here — the
+// hand-maintained list can no longer silently drift out of coverage.
+func TestRecoveryDisposition_WatchdogExhaustive(t *testing.T) {
+	declared := declaredPlanDecisionKinds(t)
+	if len(declared) == 0 {
+		t.Fatal("discovered zero PlanDecisionKind constants in workflow source — " +
+			"the AST parse is broken, so the exhaustiveness guarantee is void")
+	}
+
+	declaredSet := make(map[string]bool, len(declared))
+	listSet := make(map[string]bool, len(allPlanDecisionKinds))
+	for _, k := range allPlanDecisionKinds {
+		listSet[string(k)] = true
+	}
+
+	for _, k := range declared {
+		declaredSet[k] = true
+		if _, ok := kindDisposition[workflow.PlanDecisionKind(k)]; !ok {
+			t.Errorf("PlanDecisionKind %q is declared in workflow/types.go but has no entry in "+
+				"kindDisposition — #221 INV1 requires every kind to auto-accept, human-gate, or terminate", k)
+		}
+		if !listSet[k] {
+			t.Errorf("PlanDecisionKind %q is declared in workflow/types.go but missing from "+
+				"allPlanDecisionKinds", k)
+		}
+	}
+
+	// Reverse direction: no stale entries that no longer correspond to a kind.
+	for k := range kindDisposition {
+		if !declaredSet[string(k)] {
+			t.Errorf("kindDisposition lists %q which is not a declared PlanDecisionKind (stale entry)", k)
+		}
+	}
+	for k := range listSet {
+		if !declaredSet[k] {
+			t.Errorf("allPlanDecisionKinds lists %q which is not a declared PlanDecisionKind (stale entry)", k)
+		}
 	}
 }
