@@ -170,6 +170,11 @@ type Component struct {
 	running        bool
 	mu             sync.RWMutex
 	lifecycleMu    sync.Mutex
+	// claimMu serializes handleExecClaimMutation's get-check-save so a stage
+	// claim is atomic in-process: without it two interleaved claims can both
+	// read the same source stage and both save (last-writer-wins), double-
+	// dispatching a task/requirement (#157).
+	claimMu sync.Mutex
 
 	// Metrics
 	triggersProcessed   atomic.Int64

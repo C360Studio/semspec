@@ -68,8 +68,8 @@ func (c *Component) handleTaskPending(ctx context.Context, entry jetstream.KeyVa
 
 	key := entry.Key()
 
-	// Claim: pending → developing (atomic via mutation handler).
-	if !c.claimTaskExecution(ctx, key, phaseDeveloping) {
+	// Claim: pending → developing (atomic compare-and-swap via mutation handler).
+	if !c.claimTaskExecution(ctx, key, "pending", phaseDeveloping) {
 		return
 	}
 
@@ -201,9 +201,11 @@ func (c *Component) initTaskExecution(ctx context.Context, exec *taskExecution) 
 }
 
 // claimTaskExecution sends a claim mutation to this component's own mutation
-// handler. Returns true if the claim succeeded.
-func (c *Component) claimTaskExecution(ctx context.Context, key, stage string) bool {
-	data, err := json.Marshal(ExecClaimRequest{Key: key, Stage: stage})
+// handler. fromStage pins the expected source stage so the claim is a
+// compare-and-swap (#157); a concurrent or stale claim from a different stage is
+// rejected. Returns true if the claim succeeded.
+func (c *Component) claimTaskExecution(ctx context.Context, key, fromStage, toStage string) bool {
+	data, err := json.Marshal(ExecClaimRequest{Key: key, Stage: toStage, ExpectedFromStage: fromStage})
 	if err != nil {
 		return false
 	}
