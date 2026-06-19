@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
@@ -74,5 +75,75 @@ func TestMarkEscalatedLocked_FiresRecoveryRequested(t *testing.T) {
 	}
 	if r.RecoveryID == "" {
 		t.Error("RecoveryID should be populated with a fresh UUID")
+	}
+}
+
+// TestMarkEscalatedLocked_CarriesAffectedStoryIDs pins #81: the task-level
+// escalation must resolve the parent requirement's Story IDs and carry them on
+// RecoveryRequested.AffectedStoryIDs, so the recovery-agent can propose a
+// story_reprepare (it copies these into PlanDecision.AffectedStoryIDs). The task
+// exec does not hold them — they live on the requirement execution — so the
+// handler loads it from the store by reqID. Without this the wedge silently
+// degrades to a scenarios-only requirement_change.
+func TestMarkEscalatedLocked_CarriesAffectedStoryIDs(t *testing.T) {
+	c := newTestComponent(t)
+	publisher, fetch := captureRecoveryPublisher()
+	c.recoveryPublisher = publisher
+
+	exec := newTestExec("affected-stories-slug", "task-as")
+	exec.RequirementID = "req-as-1"
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	// Seed the parent requirement execution carrying the Story IDs.
+	reqKey := workflow.RequirementExecutionKey("affected-stories-slug", "req-as-1")
+	if err := c.store.saveReq(testCtx(t), reqKey, &workflow.RequirementExecution{
+		Slug:           "affected-stories-slug",
+		RequirementID:  "req-as-1",
+		SortedStoryIDs: []string{"story.as.1", "story.as.2"},
+	}); err != nil {
+		t.Fatalf("seed req exec: %v", err)
+	}
+
+	exec.mu.Lock()
+	c.markEscalatedLocked(testCtx(t), exec, "tdd budget exhausted")
+	exec.mu.Unlock()
+
+	got := fetch()
+	if len(got) != 1 {
+		t.Fatalf("want 1 RecoveryRequested, got %d", len(got))
+	}
+	want := []string{"story.as.1", "story.as.2"}
+	if len(got[0].AffectedStoryIDs) != len(want) {
+		t.Fatalf("AffectedStoryIDs = %v, want %v (#81)", got[0].AffectedStoryIDs, want)
+	}
+	for i, id := range want {
+		if got[0].AffectedStoryIDs[i] != id {
+			t.Errorf("AffectedStoryIDs[%d] = %q, want %q", i, got[0].AffectedStoryIDs[i], id)
+		}
+	}
+}
+
+// TestMarkEscalatedLocked_NoParentReqExecLeavesAffectedStoryIDsEmpty confirms the
+// resolution is best-effort: a missing parent requirement execution leaves the
+// field empty rather than failing the escalation (the prior behaviour).
+func TestMarkEscalatedLocked_NoParentReqExecLeavesAffectedStoryIDsEmpty(t *testing.T) {
+	c := newTestComponent(t)
+	publisher, fetch := captureRecoveryPublisher()
+	c.recoveryPublisher = publisher
+
+	exec := newTestExec("no-parent-slug", "task-np")
+	exec.RequirementID = "req-np-1"
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	exec.mu.Lock()
+	c.markEscalatedLocked(testCtx(t), exec, "tdd budget exhausted")
+	exec.mu.Unlock()
+
+	got := fetch()
+	if len(got) != 1 {
+		t.Fatalf("want 1 RecoveryRequested, got %d", len(got))
+	}
+	if len(got[0].AffectedStoryIDs) != 0 {
+		t.Errorf("AffectedStoryIDs = %v, want empty when no parent req exec is stored", got[0].AffectedStoryIDs)
 	}
 }

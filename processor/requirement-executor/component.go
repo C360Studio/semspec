@@ -155,6 +155,13 @@ type Component struct {
 	// CanTransitionTo so the full walk chain is exercisable without NATS.
 	storyStatusClaimer storyStatusClaimerFunc
 
+	// nodeResultsSender is the seam for the NodeResults reset/replace mutation
+	// fired by the recovery-resume and restructure/fixable retry paths. Defaults
+	// to sendReqReplaceNodeResults (nil natsClient short-circuits); tests install
+	// a capturing stub so the PRODUCER call sites can be pinned — a refactor that
+	// drops the call would otherwise pass every handler-side test (#82).
+	nodeResultsSender func(ctx context.Context, key string, results []workflow.NodeResult) error
+
 	// Story-gate (Murat) review knowledge — symmetric with the per-task
 	// reviewer in execution-manager so the requirement-level gate sees the
 	// same project standards + team lessons rather than judging in isolation.
@@ -247,6 +254,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			return workflow.ClaimStoryStatus(ctx, nc, slug, storyID, target, logger)
 		},
 	}
+	// Default the node-results seam to the real NATS round-trip; tests override
+	// it to capture the producer call sites (#82).
+	c.nodeResultsSender = c.sendReqReplaceNodeResults
 	c.initReviewKnowledge()
 
 	for _, p := range cfg.Ports.Inputs {
@@ -2141,7 +2151,7 @@ func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requireme
 	// Mirror the NodeResults trim to KV — it is append-only via
 	// handleReqNodeMutation, so without this stale current-Story entries
 	// reappear on the next restart via rebuildExecFromKV. Best-effort.
-	if err := c.sendReqReplaceNodeResults(ctx, exec.storeKey, workflowNodeResults(exec.NodeResults)); err != nil {
+	if err := c.nodeResultsSender(ctx, exec.storeKey, workflowNodeResults(exec.NodeResults)); err != nil {
 		c.logger.Warn("Failed to trim KV NodeResults on fixable retry",
 			"entity_id", exec.EntityID, "error", err)
 	}

@@ -1349,6 +1349,18 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 		trajectory.LogSummary(ctx, c.logger, c.natsClient, exec.DeveloperLoopID, "tdd-escalated", 0)
 	}
 
+	// Resolve the parent requirement's Story IDs so the recovery-agent can
+	// target a story_reprepare (it copies these into PlanDecision.AffectedStoryIDs
+	// for the cascade). The task exec does not carry them — they live on the
+	// requirement execution — so load it from EXECUTION_STATES by reqID. Without
+	// this the wedge degrades to a scenarios-only requirement_change and the
+	// Story shape is never re-prepared (#81). Best-effort: a cache/KV miss just
+	// leaves the field empty (the prior behaviour).
+	var affectedStoryIDs []string
+	if reqExec, ok := c.store.getReq(workflow.RequirementExecutionKey(exec.Slug, exec.RequirementID)); ok {
+		affectedStoryIDs = reqExec.SortedStoryIDs
+	}
+
 	c.emitRecoveryRequested(ctx, &payloads.RecoveryRequested{
 		RecoveryID:          uuid.New().String(),
 		Layer:               payloads.RecoveryLayerPhaseLocal,
@@ -1359,6 +1371,7 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 		EscalationReason:    reason,
 		LastFailureFeedback: exec.Feedback,
 		TraceID:             exec.TraceID,
+		AffectedStoryIDs:    affectedStoryIDs,
 	})
 
 	// Notify callers that the TDD pipeline escalated (treated as failure).

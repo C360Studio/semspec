@@ -67,9 +67,10 @@ func (c *Component) sendReqReplaceNodeResults(ctx context.Context, key string, r
 }
 
 // sendReqResetNodeResults wipes the NodeResults slice on the existing
-// requirement execution KV entry.
+// requirement execution KV entry. Routes through the nodeResultsSender seam so
+// tests can pin the producer call sites (#82).
 func (c *Component) sendReqResetNodeResults(ctx context.Context, key string) error {
-	return c.sendReqReplaceNodeResults(ctx, key, nil)
+	return c.nodeResultsSender(ctx, key, nil)
 }
 
 // sendReqReset asks execution-manager to DELETE a requirement execution KV
