@@ -15,7 +15,7 @@ state, claim the next in-progress status, do one bounded piece of work, and hand
 to the owning manager.
 
 `Single writer`: `plan-manager` owns plan aggregates in `PLAN_STATES`; `execution-manager` owns
-task state in `EXECUTION_STATES`.
+durable requirement and task execution rows in `EXECUTION_STATES`.
 
 `Claims before work`: workers move an entity to an in-progress status before doing LLM, sandbox,
 or reviewer work.
@@ -33,8 +33,18 @@ standalone-project markers are topology facts, not incidental files.
 `Reviews are gates`: draft, scenario/story, task, requirement, and QA reviews are explicit state
 gates.
 
+`Deliverables close progressively`: Story and Requirement completion compare accepted
+`scope.create` obligations against delivered files before they can become terminal evidence.
+
+`Completeness is a recovery path`: the final Level-0 gate compares the assembled branch against
+declared `scope.create`; missing files create a recoverable `scope_incomplete` PlanDecision.
+
 `Recovery is explicit`: exhausted retries produce `RecoveryRequested` and `PlanDecision` evidence
 instead of silently looping.
+
+`Recovery redispatch is explicit`: accepted `scope_incomplete` recovery resets affected execution
+rows and Stories, carries missing-file guidance forward, and force-redispatches only named
+requirements so stale execution rows cannot wedge the retry.
 
 `UI summarizes truth`: banners, detail panels, and live status derive from plan-manager phase
 summaries; feed rows remain drill-down evidence, not the source of current state.
@@ -54,6 +64,10 @@ rationale, affected nodes, and contract impact. Scope shrinkage is blocked unles
 accepted amendment explains why the original obligation changed. Whole-phase resets require
 contract-impact evidence that the entire phase is invalid; otherwise recovery dirties the smallest
 requirement/story/scenario closure that consumes the changed artifact.
+
+Accepted `scope.create` entries are deliverable obligations, not just edit permissions. Semspec
+checks them at Story approval, Requirement completion, and final plan convergence so missing files
+are caught before QA or converted into explicit recovery.
 
 Topology validation stays generic. Detectors emit facts about build roots, package manifests,
 workspace files, module boundaries, baseline extension points, and standalone-project markers.
@@ -110,9 +124,16 @@ flowchart TD
         Orch --> ReqExec["requirement-executor"]
         ReqExec --> TaskLoop["developer -> validator -> reviewer"]
         TaskLoop --> StoryReview["Story scenario review"]
-        StoryReview -->|Story approved| ReqExec
-        ReqExec -->|requirement complete| Orch
-        Orch -->|all complete| QAReady["ready_for_qa"]
+        StoryReview -->|Story approved| StoryGate["Story deliverable closure"]
+        StoryGate -->|closed| ReqExec
+        StoryGate -->|missing under cap| ReqExec
+        StoryGate -->|missing exhausted| Recovery
+        ReqExec --> ReqGate["Requirement deliverable closure"]
+        ReqGate -->|requirement complete| Orch
+        ReqGate -->|missing| Recovery
+        Orch -->|all requirements terminal| ScopeGate["Level-0 scope completeness"]
+        ScopeGate -->|all scope.create delivered| QAReady["ready_for_qa"]
+        ScopeGate -->|missing scope.create| ScopeDecision["scope_incomplete PlanDecision"]
         StoryReview -->|retry under cap| ReqExec
         StoryReview -->|cap exhausted| Recovery["RecoveryRequested"]
         TaskLoop -->|TDD exhausted| Recovery
@@ -128,6 +149,8 @@ flowchart TD
     Feedback --> Ready
     Recovery -->|story_reprepare| StoryPrep
     Recovery -->|architecture_revise| ReqReady
+    Recovery -->|scope_incomplete| ScopeDecision
+    ScopeDecision -->|accepted retry| Orch
     Recovery -->|human rejects| Rejected3["rejected or archived"]
 ```
 
@@ -176,6 +199,9 @@ stateDiagram-v2
     implementing --> ready_for_qa: all requirements complete, QA enabled
     implementing --> complete: all requirements complete, QA none
     implementing --> rejected: unrecoverable or auto-reject
+    implementing --> rejected: Level-0 scope_incomplete proposed
+    implementing --> implementing: accepted scope_incomplete redispatch
+    rejected --> ready_for_execution: accepted scope_incomplete retry
     implementing --> preparing_stories: accepted story_reprepare
     implementing --> requirements_generated: accepted architecture_revise
 
@@ -401,10 +427,18 @@ sequenceDiagram
     EM-->>RE: task terminal state
     RE->>RR: review Story scenarios
     RR-->>RE: approved, fixable, restructure, or exhausted
+    RE->>RE: Story deliverable closure
+    RE->>RE: Requirement deliverable closure
     RE-->>SO: requirement completed
     SO-->>PM: all requirements terminal
-    PM->>QA: ready_for_qa / QA request
-    QA-->>PM: QA verdict
+    PM->>PM: Level-0 scope completeness gate
+    alt scope complete
+        PM->>QA: ready_for_qa / QA request
+        QA-->>PM: QA verdict
+    else missing declared deliverables
+        PM->>PM: scope_incomplete PlanDecision
+        PM-->>SO: accepted retry with ForceRequirementIDs
+    end
 ```
 
 ### 11. Execute Plan
@@ -441,18 +475,23 @@ Why: avoid concurrent writes to the same Story or dependent branch.
 Happy path: publishes `execution.mutation.req.create` for each dispatchable requirement.
 
 Retry or recovery: blocked requirements wait; completed requirements re-fire orchestration to
-unblock dependents.
+unblock dependents. Accepted `scope_incomplete` recovery supplies `ForceRequirementIDs`; the
+orchestrator removes those requirements from its completed set for this sweep so the DAG can
+re-dispatch only the affected closure.
 
 ### 13. Start Requirement Execution
 
-Who: `requirement-executor`.
+Who: `execution-manager` persists the requirement row; `requirement-executor` claims and runs it.
 
-When: `EXECUTION_STATES req.*` is `pending`.
+When: `execution.mutation.req.create` arrives, then `EXECUTION_STATES req.*` is `pending`.
 
 Where: `EXECUTION_STATES`, requirement branch, and sandbox workspace.
 
-What: claims `decomposing`, creates a branch, synthesizes a task DAG from Stories, carries allowed
-files and contract obligations into the task prompt, and reserves the current Story.
+What: `execution-manager` creates the durable requirement execution row. If the create is forced
+by accepted `scope_incomplete` recovery, it deletes and recreates the stale row or fails the
+recovery loudly. `requirement-executor` then claims `decomposing`, creates a branch, synthesizes a
+task DAG from Stories, carries allowed files and contract obligations into the task prompt, and
+reserves the current Story.
 
 Why: turn a Story into serial implementation tasks with branch isolation.
 
@@ -558,6 +597,29 @@ future-run eligible.
 Retry or recovery: publish or decomposer failures are logged and observable, but do not block the
 current task, Story, requirement, QA, or recovery transition.
 
+### 17b. Close Story And Requirement Deliverables
+
+Who: `requirement-executor`.
+
+When: the Story reviewer approves a Story, and again immediately before a Requirement becomes
+`completed`.
+
+Where: authoritative Plan from `PLAN_STATES`, the reviewer/requirement worktree, Story
+`files_owned`, and accepted `scope.create` obligations.
+
+What: runs `git ls-files -z` in the reviewer worktree and compares delivered files against the
+accepted `scope.create` paths owned by the current Story or Requirement.
+
+Why: prevent a thin scenario or over-narrow task DAG from declaring success while files that the
+contract promised to create are still absent.
+
+Happy path: every owned `scope.create` obligation exists, so the approved Story or Requirement can
+close.
+
+Retry or recovery: Story-level gaps retry the current Story with missing-file feedback while the
+retry budget remains. Exhausted Story gaps, Requirement-level gaps, and inspection failures fail
+closed with `scope_incomplete` evidence rather than letting terminal execution continue.
+
 ### 18. Reconcile Requirement Completion
 
 Who: `plan-manager` execution convergence watcher.
@@ -568,19 +630,24 @@ Where: `EXECUTION_STATES` and `PLAN_STATES`.
 
 What: reconciles completion and re-fires orchestration while the Plan is `implementing`.
 
-Why: advance dependent requirements without a central coordinator loop.
+Why: advance dependent requirements without a central coordinator loop, then prove the assembled
+branch satisfies declared deliverables before QA.
 
 Happy path: all completed requirements move the Plan to `ready_for_qa`, or `complete` if QA is
-disabled.
+disabled, after the Level-0 scope completeness gate sees every declared `scope.create` file on the
+assembled branch.
 
 Retry or recovery: failed requirements leave the Plan in `implementing` unless policy
-auto-rejects; recovery decisions can re-enter planning.
+auto-rejects. Missing assembled deliverables create a `scope_incomplete` PlanDecision, set the Plan
+to recoverable `rejected`, and stop before QA. Accepting the decision resets affected requirement
+executions and Stories, applies missing-file guidance, moves the Plan back to execution when legal,
+and force-redispatches the affected requirements.
 
 ### 19. Run QA
 
 Who: `qa-reviewer` and sandbox QA.
 
-When: the Plan is `ready_for_qa`.
+When: the Plan is `ready_for_qa` after execution convergence and Level-0 scope completeness pass.
 
 Where: QA worktree, `PLAN_STATES`, and optional sandbox test execution.
 
@@ -625,6 +692,7 @@ The first screen should answer:
 - how many requirements/tasks are pending, running, completed, or failed during execution
 - whether a PlanDecision is proposed, auto-accepted, rejected, waiting, or already applied
 - which requirements, Stories, files, or contract obligations a recovery action dirties
+- which declared deliverables are missing, and whether recovery reset/redispatch actually ran
 - whether lesson decomposition is in progress, and whether its output can affect this run or only
   future prompts
 - what QA evidence exists, including failed/skipped executable checks and failure category
@@ -655,6 +723,10 @@ flowchart LR
     Story --> FixStory["fixable -> same branch"]
     Story --> RebuildStory["restructure -> rebuild branch"]
     Story --> StoryRecovery["cap -> PlanDecision"]
+
+    Kind -->|Accepted scope.create missing| Deliverable["Deliverable closure"]
+    Deliverable --> StoryGap["Story retry while under cap"]
+    Deliverable --> ScopeGap["scope_incomplete"]
 
     Kind -->|QA or PR feedback| Release["Release recovery"]
     Release --> StoryReprep["story_reprepare"]
@@ -749,6 +821,24 @@ build/workspace file creation, or QA topology failure.
 SemTeams note: changing the contract is allowed, but it must be named, reviewed by policy, and
 traceable to affected nodes.
 
+### `scope_incomplete`
+
+Who initiates: `requirement-executor` deliverable closure gates or the `plan-manager` Level-0
+scope completeness gate.
+
+State effect: proposed `scope_incomplete` PlanDecision with preserve-contract impact. The
+plan-level gate moves `implementing -> rejected` so the Plan cannot advance to QA with missing
+declared deliverables. Accepted recovery resets affected requirement executions and Stories,
+returns the Plan to `ready_for_execution` or active `implementing` when legal, and force-redispatches
+only the affected Requirement IDs.
+
+Typical cause: an accepted `scope.create` file was not delivered by the Story, Requirement, or
+assembled branch that promised it.
+
+SemTeams note: missing deliverables should be treated as failed contract closure. Retry the
+affected executable slice with explicit missing-file guidance, or propose a real contract amendment
+that changes the obligation.
+
 ### `story_reprepare`
 
 Who initiates: accepted recovery decision.
@@ -803,7 +893,9 @@ execution, and during external review. It writes through API requests, GitHub me
 `plan-manager`: protects the Plan aggregate and enforces legal transitions. It owns Plans,
 contract packets, Requirements, Architecture, Stories, Scenarios, QA runs, PlanDecisions, and
 UI-facing phase summaries. It acts on every `plan.mutation.*` event and execution convergence
-event. It writes `PLAN_STATES`, `ENTITY_STATES`, and plan artifact files.
+event. It writes `PLAN_STATES`, `ENTITY_STATES`, and plan artifact files. It also owns the
+Level-0 scope completeness decision that blocks QA when the assembled branch is missing declared
+deliverables.
 
 `planner`: converts intent and project context into a reviewable spec spine. It owns Exploration,
 Goal, Context, and Scope. It acts on `created`, `explored`, and revision drafts. It writes through
@@ -832,15 +924,18 @@ and required verification tiers. It acts on `stories_generated`. It writes `PLAN
 `scenario-orchestrator`: dispatches only requirements that are safe to run now. It owns scheduling
 decisions, not durable requirement state. It acts on execute and after requirement terminal events.
 It publishes `execution.mutation.req.create` and reads `PLAN_STATES` plus `EXECUTION_STATES`.
+When recovery provides `ForceRequirementIDs`, it removes only those IDs from the completed set for
+the sweep so they can be re-dispatched.
 
-`requirement-executor`: owns a requirement branch and Story-level execution flow. It owns
-requirement execution, branch lifecycle, Story reservations, and Story review. It acts on
-`EXECUTION_STATES req.*` pending and task completions. It writes `EXECUTION_STATES` and Story
-status through `PLAN_STATES`.
+`requirement-executor`: owns active requirement branch behavior and Story-level execution flow. It
+owns branch lifecycle, Story reservations, Story review, and Story/Requirement deliverable closure.
+It acts on `EXECUTION_STATES req.*` pending and task completions. It mutates requirement execution
+through execution mutations and writes Story status through `PLAN_STATES`.
 
-`execution-manager`: runs the TDD task pipeline. It owns task execution state, sandbox worktree,
-and task merge result. It acts on `EXECUTION_STATES task.*` pending. It writes `EXECUTION_STATES`,
-the sandbox worktree, and the requirement branch.
+`execution-manager`: owns durable requirement and task execution rows and runs the TDD task
+pipeline. It owns task execution state, sandbox worktree, and task merge result. It acts on
+`execution.mutation.req.*` and `EXECUTION_STATES task.*` pending. It writes `EXECUTION_STATES`, the
+sandbox worktree, and the requirement branch.
 
 `structural-validator`: catches deterministic failures before reviewer loops burn cycles. It owns
 structural validation, ownership, and topology verdicts. It acts after developer submit and before
@@ -906,6 +1001,8 @@ when required executable evidence is missing or skipped.
 `PlanDecision`: requires kind, rationale, affected requirements/stories/files, and status.
 Recovery actions are explicit proposals, not hidden state mutation. Contract-impact fields explain
 whether the decision preserves, refines, or changes the original contract.
+`scope_incomplete` is the preserve-contract decision kind for declared deliverables that were not
+delivered.
 
 `Lesson`: requires role, summary, source, evidence references, category IDs when available, and
 lifecycle metadata. Lessons emitted during a run are available to later role prompts; they do not
@@ -934,11 +1031,16 @@ execution, wait, recovery, lesson, or QA summary needed by UI surfaces.
 10. Implementation happens in isolated worktrees with developer, validator, reviewer, ownership,
     and topology gates.
 11. Requirement completion is Story-review based; task approval alone is not enough.
-12. Integrated QA gates release and must fail closed when required evidence is absent.
-13. Exhausted retries become recovery decisions with explicit accepted/rejected outcomes.
-14. Lesson decomposition is an async sidecar: it records future prompt memory without blocking the
+12. Story and Requirement deliverable closure must compare accepted `scope.create` obligations
+    against delivered files before terminal execution evidence is accepted.
+13. Plan-level execution convergence must run a final Level-0 scope completeness check before QA.
+14. Integrated QA gates release and must fail closed when required evidence is absent.
+15. Exhausted retries become recovery decisions with explicit accepted/rejected outcomes.
+16. `scope_incomplete` recovery must reset affected requirement executions and Stories, carry
+    missing-file guidance, and force-redispatch only affected requirements.
+17. Lesson decomposition is an async sidecar: it records future prompt memory without blocking the
     current TDD or recovery path.
-15. UI current-state surfaces derive from authoritative phase summaries, not raw feed inference.
+18. UI current-state surfaces derive from authoritative phase summaries, not raw feed inference.
 
 ### Storage And Event Expectations
 
@@ -946,7 +1048,7 @@ execution, wait, recovery, lesson, or QA summary needed by UI surfaces.
 
 `Contract packet`: Plan-owned root contract, topology facts, and amendment ledger.
 
-`EXECUTION_STATES`: durable execution and task store.
+`EXECUTION_STATES`: durable requirement execution and task store.
 
 `AGENT_LOOPS`: inspectable agent run history.
 
@@ -973,6 +1075,7 @@ These are the main live code surfaces behind this document:
 - `processor/plan-manager/http.go` and `processor/plan-manager/phase_summary.go` for
   UI-facing phase summaries.
 - `processor/plan-manager/execution_events.go` for requirement convergence and QA transitions.
+- `processor/plan-manager/completeness_gate.go` for Level-0 `scope.create` closure.
 - `processor/planner/component.go` for analyst and draft generation.
 - `processor/plan-reviewer/plan_watcher.go` for draft and scenario/story review gates.
 - `processor/requirement-generator/plan_watcher.go`.
@@ -983,9 +1086,11 @@ These are the main live code surfaces behind this document:
 - `processor/scenario-generator/plan_watcher.go`.
 - `processor/scenario-orchestrator/component.go`.
 - `processor/requirement-executor/component.go`.
+- `processor/requirement-executor/deliverable_gate.go`.
 - `processor/requirement-executor/req_watcher.go`.
 - `processor/requirement-executor/req_completions.go`.
 - `processor/execution-manager/component.go`.
+- `processor/execution-manager/mutations.go` for requirement/task execution row ownership.
 - `processor/execution-manager/task_watcher.go`.
 - `processor/execution-manager/loop_completions.go`.
 - `processor/execution-manager/team_knowledge.go` for lesson-decomposer dispatch and threshold
@@ -993,6 +1098,7 @@ These are the main live code surfaces behind this document:
 - `processor/lesson-decomposer/component.go` for async evidence-cited lesson generation.
 - `processor/qa-reviewer/component.go`.
 - `workflow/payloads/recovery.go`.
+- `processor/plan-decision-handler/recovery_autoaccept.go`.
 - `ui/src/lib/components/plan/RecoveryDetail.svelte`.
 - `ui/src/lib/components/plan/LessonActivityDetail.svelte`.
 - `ui/src/lib/components/plan/ExecutionDetail.svelte`.

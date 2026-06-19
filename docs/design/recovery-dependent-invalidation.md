@@ -99,6 +99,14 @@ For each dependent `d` in the subtree:
   entry — `mutations.go:137`). The orchestrator's next sweep re-creates it as
   `pending` via `req.create` (it is no longer in EXECUTION_STATES). Reusable
   sender already exists: `plan-manager/http.go:1170 sendReqReset`.
+- **Reset must be durable:** delete errors are not informational. Recovery must
+  abort loudly if a durable `EXECUTION_STATES` row cannot be removed, because a
+  surviving stale row can make later redispatch skip or wedge.
+- **Force redispatch is targeted:** accepted `scope_incomplete` recovery carries
+  affected requirement IDs through the orchestrator trigger. Those IDs are
+  removed from the completed set for the sweep, and `req.create` uses
+  `force=true` so a stale row is replaced rather than treated as a benign
+  duplicate.
 - **Delete its branches:** `semspec/requirement-<d>` AND `semspec/reqbase-<d>`
   (best-effort, 404-benign) so re-dispatch recreates from the rebuilt base
   (`initReqExecution`'s `ErrBranchExistsAtDifferentBase` path also covers this
