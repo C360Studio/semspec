@@ -423,6 +423,16 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 	}
 
 	plan.Stories = storiesToSave
+	// #80: a full Story replacement (e.g. Sarah re-emitting with different Story
+	// IDs on a story_reprepare) orphans scenarios pinned to the now-removed Story
+	// IDs — they bloat the plan KV blob and misreport plan.Scenarios counts. Drop
+	// scenarios whose StoryID is no longer present; preserve empty-StoryID (legacy
+	// / pre-per-Story) scenarios. The scoped architecture-revision branch above
+	// already curates scenarios and intentionally preserves unrelated ones, so it
+	// is skipped here.
+	if plan.PendingArchitectureRevision == nil {
+		plan.Scenarios = dropOrphanScenarios(plan.Scenarios, plan.Stories)
+	}
 	plan.Status = workflow.StatusStoriesGenerated
 
 	// ADR-043 follow-up — auto-derive plan.Scope.Create from the union of
@@ -448,6 +458,34 @@ func (c *Component) handleStoriesMutation(ctx context.Context, data []byte) Muta
 		"scope_create_count", len(plan.Scope.Create))
 
 	return MutationResponse{Success: true}
+}
+
+// dropOrphanScenarios removes scenarios whose StoryID is set but no longer
+// present in stories, preserving empty-StoryID (legacy / pre-per-Story)
+// scenarios. Guards #80: a Story re-emission with new IDs must not leave
+// scenarios pinned to dead Story IDs. Returns a fresh slice so it never aliases
+// the cached plan's backing array (cf. #223 cached-plan isolation).
+func dropOrphanScenarios(scenarios []workflow.Scenario, stories []workflow.Story) []workflow.Scenario {
+	if len(scenarios) == 0 {
+		return scenarios
+	}
+	valid := make(map[string]struct{}, len(stories))
+	for _, s := range stories {
+		if s.ID != "" {
+			valid[s.ID] = struct{}{}
+		}
+	}
+	kept := make([]workflow.Scenario, 0, len(scenarios))
+	for _, sc := range scenarios {
+		if sc.StoryID == "" {
+			kept = append(kept, sc) // legacy scenario predating the per-Story chain
+			continue
+		}
+		if _, ok := valid[sc.StoryID]; ok {
+			kept = append(kept, sc)
+		}
+	}
+	return kept
 }
 
 func mergeStoriesForScopedArchitectureRevision(plan *workflow.Plan, emitted []workflow.Story) ([]workflow.Story, []string, int, error) {
