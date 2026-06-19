@@ -1,12 +1,15 @@
 package recoveryagent
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/agentic"
 )
 
 func TestParseRecoveryResult(t *testing.T) {
@@ -156,6 +159,23 @@ func TestParseRecoveryResult(t *testing.T) {
 		}
 	})
 
+	t.Run("salvages diagnosis from feedback-only review-shaped result", func(t *testing.T) {
+		raw := `{"verdict":"rejected","summary":"Build failed before tests.","feedback":"The architecture mis-resolved org.sensorhub:sensorhub-core:2.0.1 as a source_build without a build-native acquisition path. Revise the architecture to provide a resolvable artifact or composite build contract.","findings":[],"rejection_type":"fixable","scenario_verdicts":[]}`
+		got, err := parseRecoveryResult(raw)
+		if err != nil {
+			t.Fatalf("expected #235 feedback-only recovery result to parse, got error: %v", err)
+		}
+		if got.Action != payloads.RecoveryActionRefinePrompt {
+			t.Errorf("Action: got %q, want refine_prompt inferred from feedback", got.Action)
+		}
+		if !strings.Contains(got.Diagnosis, "source_build") {
+			t.Errorf("diagnosis did not fall back to feedback: %q", got.Diagnosis)
+		}
+		if got.Diagnosis != got.RefinedPrompt {
+			t.Errorf("feedback fallback should populate diagnosis and refined_prompt; diagnosis=%q refined_prompt=%q", got.Diagnosis, got.RefinedPrompt)
+		}
+	})
+
 	// refined_prompt still wins when BOTH it and feedback are present (the
 	// schema-correct field takes precedence; feedback is only a fallback).
 	t.Run("prefers refined_prompt over feedback when both present", func(t *testing.T) {
@@ -219,6 +239,83 @@ func TestParseRecoveryResult(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRecoverySubmitWorkSchemaMatchesParserContract(t *testing.T) {
+	tools := recoverySubmitTools(&recoveryTestToolRegistry{
+		tools: []agentic.ToolDefinition{{
+			Name:        "submit_work",
+			Description: "Submit recovery decision",
+			Parameters:  map[string]any{"type": "object"},
+		}},
+	}, nil, "submit_work")
+	if len(tools) != 1 {
+		t.Fatalf("got %d tools, want 1 submit_work", len(tools))
+	}
+	props := schemaProps(t, tools[0].Parameters)
+
+	structFields := jsonFields(reflect.TypeOf(rawRecoveryResult{}))
+	for field := range structFields {
+		if field == "feedback" {
+			if _, ok := props[field]; ok {
+				t.Fatalf("feedback is a parser fallback for non-schema review-shaped output; it must not be in the recovery submit_work schema")
+			}
+			continue
+		}
+		if _, ok := props[field]; !ok {
+			t.Errorf("rawRecoveryResult field %q missing from recovery submit_work schema", field)
+		}
+	}
+	for field := range props {
+		if !structFields[field] {
+			t.Errorf("recovery submit_work schema property %q has no rawRecoveryResult field", field)
+		}
+	}
+	for _, reviewOnly := range []string{"verdict", "findings", "rejection_type", "scenario_verdicts"} {
+		if _, ok := props[reviewOnly]; ok {
+			t.Errorf("recovery submit_work schema includes review-only field %q", reviewOnly)
+		}
+	}
+}
+
+type recoveryTestToolRegistry struct {
+	tools []agentic.ToolDefinition
+}
+
+func (r *recoveryTestToolRegistry) ListTools() []agentic.ToolDefinition {
+	return r.tools
+}
+
+func (r *recoveryTestToolRegistry) Execute(_ context.Context, _ agentic.ToolCall) (agentic.ToolResult, error) {
+	return agentic.ToolResult{}, nil
+}
+
+func schemaProps(t *testing.T, schema map[string]any) map[string]any {
+	t.Helper()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing properties")
+	}
+	return props
+}
+
+func jsonFields(typ reflect.Type) map[string]bool {
+	for typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+	fields := map[string]bool{}
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		tag := field.Tag.Get("json")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		name := strings.Split(tag, ",")[0]
+		if name != "" {
+			fields[name] = true
+		}
+	}
+	return fields
 }
 
 // Note: the user-prompt content tests previously here (TestBuildUserPrompt*)

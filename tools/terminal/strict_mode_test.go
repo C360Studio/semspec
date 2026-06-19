@@ -16,6 +16,7 @@ func allDeliverableSchemas() map[string]map[string]any {
 		"stories":      storiesSchema(),
 		"architecture": architectureSchema(),
 		"review":       reviewSchema(),
+		"recovery":     recoverySchema(),
 		"developer":    developerSchema(),
 		"lesson":       lessonSchema(),
 		"qa-review":    qaReviewSchema(),

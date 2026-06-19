@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
@@ -18,6 +19,7 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 		{"scenarios", []string{"scenarios"}},
 		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "test_surface"}},
 		{"review", []string{"verdict", "feedback"}},
+		{"recovery", []string{"action", "diagnosis", "recovery_succeeded", "contract_impact", "refined_prompt", "scope_changes"}},
 		{"developer", []string{"summary", "files_modified"}},
 		{"lesson", []string{"summary", "detail", "injection_form", "root_cause_role"}},
 		{"", []string{"summary", "files_modified"}}, // default
@@ -57,6 +59,44 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRecoverySchema_ActionEnumMatchesConstants(t *testing.T) {
+	schema := recoverySchema()
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing properties")
+	}
+	action, ok := props["action"].(map[string]any)
+	if !ok {
+		t.Fatal("schema missing action")
+	}
+	enum, ok := action["enum"].([]string)
+	if !ok {
+		t.Fatalf("action.enum missing or not []string: %T", action["enum"])
+	}
+
+	want := map[string]bool{
+		string(payloads.RecoveryActionRefinePrompt):       false,
+		string(payloads.RecoveryActionNarrowScope):        false,
+		string(payloads.RecoveryActionSplitReq):           false,
+		string(payloads.RecoveryActionStoryReprepare):     false,
+		string(payloads.RecoveryActionArchitectureRevise): false,
+		string(payloads.RecoveryActionEscalateHuman):      false,
+		string(payloads.RecoveryActionMarkUnrecoverable):  false,
+	}
+	for _, value := range enum {
+		if _, known := want[value]; !known {
+			t.Errorf("action.enum has %q, not a RecoveryActionKind constant", value)
+			continue
+		}
+		want[value] = true
+	}
+	for value, seen := range want {
+		if !seen {
+			t.Errorf("action.enum missing %q — recovery schema drifted from RecoveryActionKind constants", value)
+		}
 	}
 }
 

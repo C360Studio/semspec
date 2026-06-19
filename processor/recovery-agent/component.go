@@ -516,7 +516,7 @@ func (c *Component) dispatchRecovery(ctx context.Context, req *payloads.Recovery
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       assembled.UserMessage,
-		Tools:        terminal.ToolsForEndpoint(c.toolRegistry, "review", endpoint, availableTools...),
+		Tools:        recoverySubmitTools(c.toolRegistry, endpoint, availableTools...),
 		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleRecoveryAgent, availableTools),
 		WorkflowSlug: workflow.WorkflowSlugWedgeRecovery,
 		WorkflowStep: stepRecover,
@@ -1005,6 +1005,10 @@ func clip(s string, n int) string {
 // wire palette (submit_work + scratchpad — see prompt/tool_filter.go).
 func recoveryAvailableToolNames() []string {
 	return []string{"submit_work", "scratchpad"}
+}
+
+func recoverySubmitTools(reg component.ToolRegistryReader, endpoint *ssmodel.EndpointConfig, allowedTools ...string) []agentic.ToolDefinition {
+	return terminal.ToolsForEndpoint(reg, "recovery", endpoint, allowedTools...)
 }
 
 // resolveProvider maps a model string to a prompt.Provider. Mirrors the

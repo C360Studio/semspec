@@ -116,8 +116,19 @@ func parseRecoveryResult(raw string) (*parsedRecoveryResult, error) {
 			return nil, errResultMissingAction
 		}
 	}
-	if rr.Diagnosis == "" {
-		return nil, errResultMissingDiag
+	if strings.TrimSpace(rr.Diagnosis) == "" {
+		// #235: gemini-pro can emit review-shaped recovery output where the
+		// actual diagnosis lives under `feedback`. If we already salvage
+		// feedback as the action payload, salvage it as diagnosis too rather
+		// than dead-rejecting a recoverable QA-recovery.
+		switch {
+		case strings.TrimSpace(rr.Feedback) != "":
+			rr.Diagnosis = rr.Feedback
+		case strings.TrimSpace(rr.RefinedPrompt) != "":
+			rr.Diagnosis = rr.RefinedPrompt
+		default:
+			return nil, errResultMissingDiag
+		}
 	}
 
 	action := payloads.RecoveryActionKind(rr.Action)
