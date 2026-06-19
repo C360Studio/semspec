@@ -2843,12 +2843,11 @@ func TestScopeScenariosToCurrentStory_FallsBackToLegacyUnlinkedScenarios(t *test
 // through the real handler path (handleRequirementReviewerCompleteLocked →
 // startRestructureRetryLocked) using the existing stubSandbox seam.
 //
-// NOTE on the rebuild base: production currently recreates from a hardcoded
-// "HEAD" regardless of exec.BaseBranch — a known bug (#243); the recovery-resume
-// path correctly uses selectReqBranchBase. The primary test below sets no
-// BaseBranch, so "HEAD" is the correct fallback there and we do NOT assert
-// "restructure always uses HEAD". The desired non-empty-base behavior is pinned
-// (skipped) by TestHandleReviewerComplete_Restructure_PreservesBaseBranch.
+// NOTE on the rebuild base: the rebuild recreates from the DependsOn-derived
+// base via selectReqBranchBase (mirroring resumeFromRecoveryLocked), falling
+// back to "HEAD" only when no BaseBranch is set (#243). The primary test below
+// sets no BaseBranch, so it asserts the "HEAD" fallback; the non-empty-base
+// behavior is pinned by TestHandleReviewerComplete_Restructure_PreservesBaseBranch.
 // ---------------------------------------------------------------------------
 
 // TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch is the
@@ -2922,10 +2921,8 @@ func TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch(t *testing
 		t.Errorf("CreateBranch calls = %v, want [%q] — fresh branch must be recreated",
 			createdBranches, branchName)
 	}
-	// This exec sets no BaseBranch, so "HEAD" is the correct fallback base. We do
-	// NOT assert "restructure always uses HEAD" — that would cement bug #243
-	// (restructure ignores a set BaseBranch). The desired behavior when a
-	// BaseBranch IS present is pinned by the skipped
+	// This exec sets no BaseBranch, so "HEAD" is the correct fallback base. The
+	// non-empty-base behavior (recreate from exec.BaseBranch) is pinned by
 	// TestHandleReviewerComplete_Restructure_PreservesBaseBranch below.
 	if len(createdBases) != 1 || createdBases[0] != "HEAD" {
 		t.Errorf("CreateBranch base = %v, want [\"HEAD\"] (the no-BaseBranch fallback)",
@@ -2972,17 +2969,12 @@ func TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch(t *testing
 	}
 }
 
-// TestHandleReviewerComplete_Restructure_PreservesBaseBranch is the
-// desired-behavior characterization for bug #243: when the requirement has a
-// DependsOn-derived BaseBranch, a restructure rebuild must recreate the branch
-// from that base (via selectReqBranchBase), NOT from "HEAD" — otherwise the
-// prerequisite's work and per-requirement isolation are lost. The recovery
-// resume path (awaiting_recovery.go) already does this; startRestructureRetryLocked
-// hardcodes "HEAD" (component.go:2207). SKIPPED until #243 is fixed; unskip it
-// as the regression guard for that fix.
+// TestHandleReviewerComplete_Restructure_PreservesBaseBranch is the regression
+// guard for #243: when the requirement has a DependsOn-derived BaseBranch, a
+// restructure rebuild recreates the branch from that base (via
+// selectReqBranchBase), NOT from "HEAD" — otherwise the prerequisite's work and
+// per-requirement isolation are lost. Mirrors the recovery-resume path.
 func TestHandleReviewerComplete_Restructure_PreservesBaseBranch(t *testing.T) {
-	t.Skip("#243: startRestructureRetryLocked recreates from HEAD, dropping exec.BaseBranch; unskip when fixed")
-
 	c := newTestComponent(t)
 	stub := &stubSandbox{}
 	c.sandbox = stub

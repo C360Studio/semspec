@@ -2203,10 +2203,15 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 			c.logger.Warn("Failed to delete old requirement branch",
 				"branch", exec.RequirementBranch, "error", err)
 		}
-		// Create a fresh branch.
-		if err := c.sandbox.CreateBranch(ctx, exec.RequirementBranch, "HEAD"); err != nil {
+		// Recreate from the DependsOn-derived base, not "HEAD": a requirement
+		// that forks from a prerequisite branch must keep that base on a
+		// restructure rebuild, or it loses the prerequisite's work and its
+		// per-requirement isolation (#243). Mirrors resumeFromRecoveryLocked;
+		// selectReqBranchBase falls back to "HEAD" when no base is set.
+		recreateBase := selectReqBranchBase("", exec.BaseBranch)
+		if err := c.sandbox.CreateBranch(ctx, exec.RequirementBranch, recreateBase); err != nil {
 			c.logger.Warn("Failed to recreate requirement branch",
-				"branch", exec.RequirementBranch, "error", err)
+				"branch", exec.RequirementBranch, "base", recreateBase, "error", err)
 		}
 	}
 
