@@ -38,10 +38,9 @@ const (
 	// autoAcceptable: a well-formed recovery proposal of this kind can be
 	// auto-accepted by shouldAutoAcceptRecovery (subject to per-kind caps).
 	autoAcceptable disposition = iota
-	// humanGatedOrTerminal: this kind is NEVER auto-accepted. It is either a
-	// terminal record (execution_exhausted, assembly_conflict) or contract-
-	// changing and requires an operator decision (architecture_revise). It must
-	// surface as a visible proposed/terminal state, never silently auto-resolve.
+	// humanGatedOrTerminal: this kind is NEVER auto-accepted. It is a terminal
+	// record (execution_exhausted, assembly_conflict) that must surface as a
+	// visible proposed/terminal state, never silently auto-resolve.
 	humanGatedOrTerminal
 )
 
@@ -54,10 +53,12 @@ var kindDisposition = map[workflow.PlanDecisionKind]struct {
 	want     disposition
 	proposer string
 }{
-	workflow.PlanDecisionKindRequirementChange:  {autoAcceptable, "recovery-agent"},
-	workflow.PlanDecisionKindStoryReprepare:     {autoAcceptable, "recovery-agent"},
-	workflow.PlanDecisionKindScopeIncomplete:    {autoAcceptable, "plan-manager"},
-	workflow.PlanDecisionKindArchitectureRevise: {humanGatedOrTerminal, ""},
+	workflow.PlanDecisionKindRequirementChange: {autoAcceptable, "recovery-agent"},
+	workflow.PlanDecisionKindStoryReprepare:    {autoAcceptable, "recovery-agent"},
+	workflow.PlanDecisionKindScopeIncomplete:   {autoAcceptable, "plan-manager"},
+	// #211: full-auto is full-auto — a scoped architecture_revise auto-accepts
+	// (bounded by MaxAutoArchitectureRevises), no human gate.
+	workflow.PlanDecisionKindArchitectureRevise: {autoAcceptable, "recovery-agent"},
 	workflow.PlanDecisionKindExecutionExhausted: {humanGatedOrTerminal, ""},
 	workflow.PlanDecisionKindAssemblyConflict:   {humanGatedOrTerminal, ""},
 }
