@@ -66,22 +66,6 @@ jobs:
         run: |
           echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> "$GITHUB_ENV"
 
-      - name: Stack bring-up diagnostic
-        # One-shot: bring up the mock stack via the SAME deps the ladder uses
-        # (task e2e:up:mock runs ensure-model-caches etc.), then capture the
-        # sandbox failure reason if up --wait fails. Self-contained teardown.
-        run: |
-          set +e
-          echo "DOCKER_GID=${DOCKER_GID:-unset} runner uid=$(id -u) gid=$(id -g)"
-          DC="docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml"
-          task e2e:up:mock -- plan-smoke; echo "up:mock rc=$?"
-          echo "=== ps -a ==="; $DC ps -a
-          echo "=== sandbox compose logs ==="; $DC logs sandbox 2>&1 | tail -80
-          echo "=== sandbox inspect ==="; docker inspect semspec-e2e-sandbox-1 --format 'exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}}' 2>&1
-          echo "=== semspec logs tail ==="; $DC logs semspec 2>&1 | tail -15
-          task e2e:down:mock >/dev/null 2>&1; $DC down -v >/dev/null 2>&1
-          exit 0
-
       - name: Run mock ladder
         run: |
           set -uo pipefail

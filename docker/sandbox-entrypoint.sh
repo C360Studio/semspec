@@ -15,6 +15,15 @@
 # misconfigured credential never blocks the sandbox from starting.
 set -e
 
+# The mounted /workspace is owned by the host user, whose uid can differ from the
+# sandbox uid (e.g. a CI runner at uid 1001 vs the sandbox image's uid 1000).
+# git's dubious-ownership guard then aborts the sandbox's "ensure valid HEAD"
+# commit with exit 128, so the container exits before serving /health and
+# `up --wait` fails the whole stack. The sandbox is a controlled execution
+# environment that owns whatever repo it operates on (workspace + per-node
+# worktrees), so trust them all. Non-fatal if git is unavailable.
+git config --global --add safe.directory '*' 2>/dev/null || true
+
 if [ -n "${GITHUB_TOKEN:-}" ]; then
 	HOME="${HOME:-/home/sandbox}"
 	(
