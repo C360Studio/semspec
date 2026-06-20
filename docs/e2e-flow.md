@@ -679,6 +679,26 @@ The activity feed is still useful evidence, but it is not allowed to be the only
 current truth. Feed items that no longer match the current phase should be labeled as stale,
 orphaned, or historical rather than silently appearing as live execution.
 
+## State Machine Invariants
+
+Six invariants hold across the whole flow. They are the properties a paid e2e run should never be
+the first thing to discover — each is statically checkable, and each is pinned by a deterministic
+(no-LLM) test so a regression fails CI rather than a multi-hour run. This checklist is the contract
+between the state chart above and the test suite; when a transition is added, the matching invariant
+test is the gate, not a live run.
+
+| # | Invariant | Pinned by (deterministic test) |
+|---|-----------|--------------------------------|
+| **INV1** | No `PlanDecision` in `proposed` waits forever: every `PlanDecisionKind` either auto-accepts (within its per-plan cap) or is human-gated with a visible paused class — none lands in no-owner limbo. | `plan-decision-handler/disposition_watchdog_test.go` (`TestRecoveryDisposition_Watchdog`, `TestRecoveryDisposition_WatchdogExhaustive` — AST-parses every `PlanDecisionKind` const and cross-checks it has a disposition). |
+| **INV2** | Every `PlanDecisionKind` is valid, routed, and its cascade/accept path is exercised; the plan-state chokepoints reject illegal source stages. | `plan-manager/chokepoint_mutations_test.go` (`TestHandleClaimMutation_*`, `TestHandleGenerationFailedMutation`, `TestHandleReviewedMutation`, `TestHandleApprovedMutation`); `plan-decision-handler/architecture_revise_cap_test.go`. |
+| **INV3** | Every recoverable rejected/stalled state has a tested transition back into dispatch — no reset leaves an orphaned `task.<slug>.node-*` key and no requirement stays wedged after recovery (the redispatch-wedge class). | `plan-manager/reset_execution_taskkeys_test.go` (reset clears task-node keys); `scenario-orchestrator/force_redispatch_test.go` + `execution-manager/req_create_force_test.go` (force redispatch delete+recreate); `requirement-executor` restructure tests (`TestHandleReviewerComplete_Restructure_*`); `plan-manager/qa_verdict_test.go` (`reviewing_qa → rejected` fires recovery). |
+| **INV4** | Deferred-terminal timers do not punish intentional human-gated waits: a proposal that is policy-held does not get killed by the inactivity clock. | `plan-decision-handler/architecture_revise_cap_test.go` (cap → leave for human, not auto-accept); the INV1 disposition watchdog. |
+| **INV5** | Recovery diagnostics reach the next responsible agent — no dead-reject on a field that is present only in prose; the dedicated recovery schema is what the recovery agent emits, and Story IDs / node-result resets ride the escalation. | `tools/terminal/schemas_test.go` (recovery deliverable schema); `requirement-executor/awaiting_recovery_test.go`, `node_results_seam_test.go`, `req_completions_recovery_test.go`. |
+| **INV6** | The operator UI phase is derived from the authoritative state machine, not stale heuristics: every authoritative `stage` maps to an explicit operator label/phase (no raw snake-case fallthrough), and the derived pipeline advances monotonically with the backend stage. | `ui/src/lib/types/planStageContract.test.ts` (totality + monotonicity over every `PlanStage`); backend `phase_summary` derivation in `plan-manager`. |
+
+The authoritative source for INV6 is `phase_summary` on the plan API response (see *Operator And UI
+Observability* above); the UI never re-derives phase from raw loop rows.
+
 ## Retry And Recovery Taxonomy
 
 ```mermaid
