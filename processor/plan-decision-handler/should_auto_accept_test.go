@@ -82,7 +82,7 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 			comment: "pre-existing path unchanged",
 		},
 		{
-			name: "architecture_revise stays human-gated even if malformed as refine",
+			name: "architecture_revise (refine impact) auto-accepts in full-auto",
 			dec: &workflow.PlanDecision{
 				ProposedBy:     "recovery-agent",
 				Status:         workflow.PlanDecisionStatusProposed,
@@ -90,8 +90,8 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 				AffectedReqIDs: []string{"req.demo.1"},
 				ContractImpact: recoveryImpact(workflow.ContractImpactRefine),
 			},
-			wantOK:  false,
-			comment: "architecture recovery changes topology/contract and cannot self-downgrade",
+			wantOK:  true,
+			comment: "#211: full-auto auto-accepts a scoped, recovery-agent architecture_revise",
 		},
 		{
 			name: "narrow_scope requirement_change stays human-gated even if malformed as preserve",
@@ -108,7 +108,7 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 			comment: "scope-narrowing is contract-changing even though it maps to requirement_change",
 		},
 		{
-			name: "contract-changing recovery stays human-gated",
+			name: "architecture_revise (change impact) auto-accepts in full-auto",
 			dec: &workflow.PlanDecision{
 				ProposedBy:     "recovery-agent",
 				Status:         workflow.PlanDecisionStatusProposed,
@@ -116,8 +116,31 @@ func TestShouldAutoAcceptRecovery_WidenedForStoryReprepare(t *testing.T) {
 				AffectedReqIDs: []string{"req.demo.1"},
 				ContractImpact: recoveryImpact(workflow.ContractImpactChange),
 			},
+			wantOK:  true,
+			comment: "#211: architecture_revise is inherently contract-changing; full-auto accepts it (cap-bounded), no human gate",
+		},
+		{
+			name: "architecture_revise without scope stays gated (no target)",
+			dec: &workflow.PlanDecision{
+				ProposedBy:     "recovery-agent",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindArchitectureRevise,
+				ContractImpact: recoveryImpact(workflow.ContractImpactChange),
+			},
 			wantOK:  false,
-			comment: "auto-accept may not silently amend the root contract",
+			comment: "#211: cap-bounded auto-accept still needs AffectedReqIDs to target; an unscoped whole-phase revise is not auto-accepted",
+		},
+		{
+			name: "architecture_revise from a non-recovery-agent proposer stays gated",
+			dec: &workflow.PlanDecision{
+				ProposedBy:     "qa-reviewer",
+				Status:         workflow.PlanDecisionStatusProposed,
+				Kind:           workflow.PlanDecisionKindArchitectureRevise,
+				AffectedReqIDs: []string{"req.demo.1"},
+				ContractImpact: recoveryImpact(workflow.ContractImpactChange),
+			},
+			wantOK:  false,
+			comment: "the auto-accept filter is recovery-agent-only by design",
 		},
 		{
 			name: "missing contract impact stays human-gated",

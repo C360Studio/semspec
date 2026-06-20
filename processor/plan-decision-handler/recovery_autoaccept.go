@@ -159,9 +159,12 @@ func (c *Component) watchRecoveryProposals(ctx context.Context) {
 //     step 4). The cascade dirty-marks Stories + scenarios; plan-manager
 //     drives stories_generated → preparing_stories so Sarah re-runs with
 //     the diagnosis as Story.RecoveryHint.
-//   - PlanDecisionKindArchitectureRevise — parsed for visibility but not
-//     auto-accepted unless a future policy explicitly permits contract-changing
-//     architecture recovery.
+//   - PlanDecisionKindArchitectureRevise — #211 policy: full-auto is full-auto.
+//     A scoped, recovery-agent-emitted architecture_revise auto-accepts so a
+//     post-QA topology defect self-heals without a human gate. It is inherently
+//     contract-changing, so it bypasses the contract-change guards that hold
+//     other kinds for review; runaway is bounded by the MaxAutoArchitectureRevises
+//     cap loop-guard in the watcher, not a human approval.
 //
 // Other kinds (execution_exhausted terminal records, qa-reviewer
 // proposals, human proposals) stay human-gated. AffectedReqIDs is the
@@ -240,6 +243,19 @@ func shouldAutoAcceptRecovery(dec *workflow.PlanDecision) bool {
 	if dec.ContractImpact == nil || !dec.ContractImpact.Kind.IsValid() {
 		return false
 	}
+
+	// #211 — full-auto is full-auto: a scoped, recovery-agent-emitted
+	// architecture_revise auto-accepts so a post-QA topology defect self-heals
+	// without a human gate. architecture_revise is inherently contract-changing
+	// (recoveryDecisionRequiresContractChange == true; ContractImpact Kind is
+	// forced to change), so it must bypass the contract-change guards below that
+	// hold other kinds for review. Runaway is bounded by MaxAutoArchitectureRevises
+	// in the watcher, not by an operator. An UNSCOPED architecture_revise already
+	// returned above (empty AffectedReqIDs) — auto-accept has nothing to target.
+	if dec.Kind == workflow.PlanDecisionKindArchitectureRevise {
+		return true
+	}
+
 	if recoveryDecisionRequiresContractChange(dec) {
 		return false
 	}
