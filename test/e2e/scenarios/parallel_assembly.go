@@ -254,7 +254,7 @@ func (s *ParallelAssemblyScenario) stageWaitForPlanGoal(ctx context.Context, res
 
 func (s *ParallelAssemblyScenario) stageWaitForApproval(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		select {
@@ -265,16 +265,30 @@ func (s *ParallelAssemblyScenario) stageWaitForApproval(ctx context.Context, res
 			if err != nil {
 				continue
 			}
-			if plan.Approved {
+			// Reactive mode (the mock e2e default) auto-dispatches execution the
+			// moment the plan is approved, and the ADR-049 ownership gate then
+			// fast-fails it to recovery + AutoRejectOnExhaustion — all within a
+			// second or two. So "approved" OR "already executing" both mean the
+			// plan passed review; we may never catch the bare approved tick.
+			if plan.Approved || executionAlreadyStarted(plan.Status, plan.Stage) {
 				result.SetDetail("plan_approved", true)
 				result.SetDetail("plan_stage", plan.Stage)
 				return nil
 			}
 			// The plan MUST pass R2 review to reach execution — a blocking
 			// finding here would mean the repaired/new rules wrongly rejected a
-			// conformant architecture (disjoint files, scope-aligned).
-			if plan.Stage == "escalated" || plan.Stage == "error" || plan.Status == "rejected" {
-				return fmt.Errorf("plan reached terminal state before approval: stage=%s status=%s", plan.Stage, plan.Status)
+			// conformant architecture (disjoint files, scope-aligned). But a
+			// post-execution rejection IS this scenario's success path: if the
+			// ownership gate has already fired, the plan was approved and reached
+			// the dev node, so treat it as approved rather than a review
+			// regression.
+			if plan.Stage == "escalated" || plan.Stage == "error" || plan.Status == "rejected" || plan.Status == "failed" {
+				if _, _, ok := s.observedOwnershipGap(ctx); ok {
+					result.SetDetail("plan_approved", true)
+					result.SetDetail("plan_stage", plan.Stage)
+					return nil
+				}
+				return fmt.Errorf("plan reached terminal state before approval with no ownership-gap evidence (likely a plan-review regression): stage=%s status=%s", plan.Stage, plan.Status)
 			}
 		}
 	}
@@ -282,14 +296,31 @@ func (s *ParallelAssemblyScenario) stageWaitForApproval(ctx context.Context, res
 
 func (s *ParallelAssemblyScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	if plan, err := s.http.GetPlan(ctx, slug); err == nil && executionAlreadyStarted(plan.Status, plan.Stage) {
+	// Reactive mode auto-dispatches at ready_for_execution, so by now the plan
+	// may already be executing — or already terminated through the ADR-049 gate
+	// (escalated/rejected by AutoRejectOnExhaustion). A manual execute would then
+	// 400; reactive already did the work and stageWaitForOwnershipGap makes the
+	// real assertion. Only POST /execute when the plan is genuinely still parked
+	// awaiting a manual trigger.
+	if plan, err := s.http.GetPlan(ctx, slug); err == nil && plan != nil &&
+		(executionAlreadyStarted(plan.Status, plan.Stage) || planExecutionTerminal(plan.Status, plan.Stage)) {
 		result.SetDetail("execution_already_started", true)
 		result.SetDetail("execution_stage", plan.Stage)
+		result.SetDetail("execution_status", plan.Status)
 		return nil
 	}
 
 	resp, err := s.http.ExecutePlan(ctx, slug)
 	if err != nil {
+		// A late reactive dispatch can move the plan out of ready_for_execution
+		// between the GetPlan above and this call — re-check before failing.
+		if plan, gerr := s.http.GetPlan(ctx, slug); gerr == nil && plan != nil &&
+			(executionAlreadyStarted(plan.Status, plan.Stage) || planExecutionTerminal(plan.Status, plan.Stage)) {
+			result.SetDetail("execution_already_started", true)
+			result.SetDetail("execution_stage", plan.Stage)
+			result.SetDetail("execution_status", plan.Status)
+			return nil
+		}
 		return fmt.Errorf("execute plan: %w", err)
 	}
 	if resp.Error != "" {
@@ -309,11 +340,6 @@ func (s *ParallelAssemblyScenario) stageTriggerExecution(ctx context.Context, re
 func (s *ParallelAssemblyScenario) stageWaitForOwnershipGap(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	// Substrings that uniquely identify the ADR-049 move-3 escalation reason
-	// emitted by execution-manager (handleValidationFailedLocked) — see
-	// processor/execution-manager/component.go and ownership_check.go.
-	markers := []string{"planning gap (ADR-049 ownership)", "ADR-049 ownership", "declared file scope"}
-
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -321,31 +347,49 @@ func (s *ParallelAssemblyScenario) stageWaitForOwnershipGap(ctx context.Context,
 		case <-ctx.Done():
 			return fmt.Errorf("ownership/planning gap never observed in EXECUTION_STATES: %w", ctx.Err())
 		case <-ticker.C:
-			// A clean completion is a regression: move 3 should have blocked it.
+			// A clean completion is a regression: move 3 should have blocked the
+			// out-of-territory write before any complete state.
 			plan, err := s.http.GetPlan(ctx, slug)
-			if err == nil && plan.Status == "complete" {
-				return fmt.Errorf("plan reached 'complete' — the out-of-territory write was NOT caught at the dev node (ADR-049 move-3 regression)")
+			if err == nil && plan != nil && (plan.Status == "complete" || plan.Status == "complete_with_deferrals") {
+				return fmt.Errorf("plan reached %q — the out-of-territory write was NOT caught at the dev node (ADR-049 move-3 regression)", plan.Status)
 			}
 
-			kvResp, err := s.http.GetKVEntries(ctx, "EXECUTION_STATES")
-			if err != nil {
-				continue
-			}
-			for _, entry := range kvResp.Entries {
-				raw := string(entry.Value)
-				for _, m := range markers {
-					if strings.Contains(raw, m) {
-						result.SetDetail("ownership_gap_key", entry.Key)
-						result.SetDetail("ownership_gap_marker", m)
-						if plan != nil {
-							result.SetDetail("plan_status_at_gap", plan.Status)
-						}
-						return nil
-					}
+			if key, marker, ok := s.observedOwnershipGap(ctx); ok {
+				result.SetDetail("ownership_gap_key", key)
+				result.SetDetail("ownership_gap_marker", marker)
+				if plan != nil {
+					result.SetDetail("plan_status_at_gap", plan.Status)
 				}
+				return nil
 			}
 		}
 	}
+}
+
+// ownershipGapMarkers are substrings that uniquely identify the ADR-049 move-3
+// escalation reason emitted by execution-manager (handleValidationFailedLocked)
+// — see processor/execution-manager/component.go and ownership_check.go.
+var ownershipGapMarkers = []string{"planning gap (ADR-049 ownership)", "ADR-049 ownership", "declared file scope"}
+
+// observedOwnershipGap reports whether EXECUTION_STATES already carries the
+// ADR-049 move-3 planning-gap escalation for this run — proof the dev-review
+// ownership gate fired (this scenario's success signal). Returns the matching
+// KV key and marker for diagnostics. Best-effort: a KV fetch error reads as
+// "not yet observed" so the caller keeps polling.
+func (s *ParallelAssemblyScenario) observedOwnershipGap(ctx context.Context) (key, marker string, ok bool) {
+	kvResp, err := s.http.GetKVEntries(ctx, "EXECUTION_STATES")
+	if err != nil {
+		return "", "", false
+	}
+	for _, entry := range kvResp.Entries {
+		raw := string(entry.Value)
+		for _, m := range ownershipGapMarkers {
+			if strings.Contains(raw, m) {
+				return entry.Key, m, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 func (s *ParallelAssemblyScenario) stageVerifyMockStats(ctx context.Context, result *Result) error {
