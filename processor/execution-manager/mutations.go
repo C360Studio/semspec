@@ -578,6 +578,17 @@ func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) Exe
 		return ExecMutationResponse{Success: false, Error: "key required"}
 	}
 
+	// Cancel any non-terminal child loops for this requirement BEFORE deleting
+	// the row, so a reset (architecture_revise / story_reprepare / scope_incomplete
+	// / retry) doesn't orphan a dev/reviewer/validator loop that keeps burning
+	// tokens or writes stale artifacts after its execution row is gone (#224).
+	// Resolve slug+reqID from the stored entry to avoid fragile key parsing;
+	// getReq returns false for task.* keys (which have no requirement children).
+	// cancelChildrenForRequirement already skips terminated execs.
+	if reqExec, ok := c.store.getReq(req.Key); ok {
+		c.cancelChildrenForRequirement(ctx, reqExec.Slug, reqExec.RequirementID, "requirement_reset")
+	}
+
 	if err := c.store.deleteReq(ctx, req.Key); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("delete: %v", err)}
 	}
