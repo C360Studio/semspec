@@ -67,23 +67,19 @@ jobs:
           echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> "$GITHUB_ENV"
 
       - name: Stack bring-up diagnostic
-        # One-shot: confirm the mock stack reaches healthy on this runner and
-        # capture the sandbox failure reason if it does not. Self-contained (own
-        # teardown); the ladder below re-runs the full lifecycle per scenario.
+        # One-shot: bring up the mock stack via the SAME deps the ladder uses
+        # (task e2e:up:mock runs ensure-model-caches etc.), then capture the
+        # sandbox failure reason if up --wait fails. Self-contained teardown.
         run: |
           set +e
           echo "DOCKER_GID=${DOCKER_GID:-unset} runner uid=$(id -u) gid=$(id -g)"
-          task e2e:build >/dev/null 2>&1
-          docker compose -p semspec-e2e -f docker/compose/e2e.yml build semspec sandbox >/dev/null 2>&1
-          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm >/dev/null 2>&1
-          mkdir -p test/e2e/workspace && ( cd test/e2e/workspace && [ -d .git ] || { git init -q && git config user.email e@t.l && git config user.name t && echo x > README.md && git add README.md && git commit -q -m init; } )
-          echo "=== workspace ownership ==="; ls -lan test/e2e | grep workspace; ls -lan test/e2e/workspace | head
           DC="docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml"
-          MOCK_SCENARIO=plan-smoke $DC up -d --wait; echo "up --wait rc=$?"
+          task e2e:up:mock -- plan-smoke; echo "up:mock rc=$?"
           echo "=== ps -a ==="; $DC ps -a
           echo "=== sandbox compose logs ==="; $DC logs sandbox 2>&1 | tail -80
           echo "=== sandbox inspect ==="; docker inspect semspec-e2e-sandbox-1 --format 'exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}}' 2>&1
-          $DC down -v >/dev/null 2>&1
+          echo "=== semspec logs tail ==="; $DC logs semspec 2>&1 | tail -15
+          task e2e:down:mock >/dev/null 2>&1; $DC down -v >/dev/null 2>&1
           exit 0
 
       - name: Run mock ladder
