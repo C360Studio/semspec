@@ -58,6 +58,75 @@ func TestArchitectureSchemaStructParity(t *testing.T) {
 		reflect.TypeOf(workflow.APISurface{}), itemsProps(t, urProps, "apis"))
 }
 
+// TestExplorationSchemaStructParity extends the same schema↔struct drift guard
+// to the analyst sub-phase deliverable (ADR-040 Move 1). The exploration schema
+// is parsed straight into workflow.Exploration, so a field that exists in the
+// schema but not the struct (or vice versa) is the exact #125/#126 class of bug
+// for the capability wire shape. capabilities[] maps to workflow.Capability.
+func TestExplorationSchemaStructParity(t *testing.T) {
+	schema := schemaForDeliverable("exploration")
+	props := schemaProps(t, schema)
+
+	// Top level: capabilities + open_questions. Every field is analyst-authored;
+	// no system-owned exceptions.
+	assertSchemaStructParity(t, "Exploration",
+		reflect.TypeOf(workflow.Exploration{}), props)
+
+	// capabilities[].items — workflow.Capability. name/lifecycle/description/
+	// depends_on/surfaces are all model-emitted; no system-owned exceptions.
+	assertSchemaStructParity(t, "Capability",
+		reflect.TypeOf(workflow.Capability{}), itemsProps(t, props, "capabilities"))
+}
+
+// TestPlanSchemaStructParity guards the planner sub-phase deliverable. Unlike
+// the parse-into-one-struct deliverables above, workflow.Plan is the durable
+// entity and carries many SYSTEM-owned fields (id, status, review_*, github,
+// qa_*, …) that the model never emits. So the top level is a one-directional
+// SUBSET check — every planSchema property must map to a Plan json field (a
+// schema prop with no struct field is a value nothing unmarshals) — while the
+// reverse direction (struct fields absent from the schema) is intentionally not
+// asserted. The scope sub-object IS isomorphic to workflow.Scope, so it gets the
+// full bidirectional parity check.
+func TestPlanSchemaStructParity(t *testing.T) {
+	schema := schemaForDeliverable("plan")
+	props := schemaProps(t, schema)
+
+	assertSchemaPropsSubsetOfStruct(t, "Plan",
+		reflect.TypeOf(workflow.Plan{}), props)
+
+	assertSchemaStructParity(t, "Scope",
+		reflect.TypeOf(workflow.Scope{}), objectProps(t, props, "scope"))
+}
+
+// assertSchemaPropsSubsetOfStruct fails when a schema property has no matching
+// struct json field — the model emits a value nothing unmarshals. It does NOT
+// assert the reverse (struct fields absent from the schema), which is the right
+// shape for deliverables whose consuming struct is a durable entity with
+// system-owned fields the model never sets.
+func assertSchemaPropsSubsetOfStruct(t *testing.T, label string, structType reflect.Type, props map[string]any) {
+	t.Helper()
+	structFields := structJSONFields(structType)
+	for f := range props {
+		if !structFields[f] {
+			t.Errorf("%s: schema property %q has NO matching struct field — the model emits a value nothing unmarshals. Remove it from the schema or add the struct field.", label, f)
+		}
+	}
+}
+
+// objectProps navigates props[key].properties for an object (non-array) field.
+func objectProps(t *testing.T, props map[string]any, key string) map[string]any {
+	t.Helper()
+	field, ok := props[key].(map[string]any)
+	if !ok {
+		t.Fatalf("schema missing object property %q", key)
+	}
+	p, ok := field["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("schema property %q has no properties", key)
+	}
+	return p
+}
+
 // assertSchemaStructParity fails when the struct's JSON field set and the schema
 // property set diverge, modulo systemOwned (fields the system fills, not the
 // model). Both directions are checked: a struct field absent from the schema (the

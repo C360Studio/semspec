@@ -72,6 +72,17 @@ func ToolsForEndpoint(reg component.ToolRegistryReader, deliverableType string, 
 	return tools
 }
 
+// SchemaForDeliverable exposes the submit_work parameter schema for a
+// deliverable type to out-of-package schema↔struct parity tests. The
+// requirement-generator and scenario-generator parse the model's submit_work
+// payload into UNEXPORTED structs (requirementItem, llmScenario), so their
+// parity tests must run in those packages and need the canonical schema from
+// here. This is a read-only thin wrapper over schemaForDeliverable; production
+// dispatch code uses ToolsForDeliverable / ToolsForEndpoint, never this.
+func SchemaForDeliverable(deliverableType string) map[string]any {
+	return schemaForDeliverable(deliverableType)
+}
+
 // schemaForDeliverable returns a submit_work parameter schema with named
 // properties specific to the given deliverable type. Each role gets only
 // the fields it needs — no kitchen-sink union.
