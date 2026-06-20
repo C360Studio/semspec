@@ -104,6 +104,16 @@ COPY --from=builder /sandbox /usr/local/bin/sandbox
 COPY docker/sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
 
+# Trust mounted repos regardless of host uid. /workspace is owned by the host
+# user, whose uid can differ from the sandbox uid (CI runner 1001 vs sandbox
+# 1000); without this, git's dubious-ownership guard aborts the sandbox's
+# "ensure valid HEAD" commit (exit 128), the container never serves /health, and
+# `up --wait` fails the whole stack. --system writes /etc/gitconfig as root, so
+# every git invocation reads it regardless of HOME — more robust than the
+# entrypoint's per-user --global (the sandbox binary may run git with a
+# different HOME).
+RUN git config --system --add safe.directory '*'
+
 USER sandbox
 # Explicit HOME so the entrypoint writes ~/.netrc + ~/.curlrc to the sandbox
 # user's home deterministically (Docker does not always derive HOME from USER).
