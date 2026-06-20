@@ -1,0 +1,102 @@
+name: Mock Ladder
+
+# Deterministic, FREE (mock-LLM) end-to-end gate. Runs every scenario under
+# test/e2e/fixtures/mock-responses/ through the full stack with the mock LLM, so
+# a pipeline/recovery/ownership-gate regression fails CI instead of being
+# discovered by a paid LLM run. Each scenario is a full infra lifecycle
+# (build -> up mock stack -> run -> teardown) for isolation. No paid tokens, no
+# model downloads — e2e-mock.yml stubs semembed/seminstruct to alpine no-ops.
+#
+# Runs in parallel with the fast lint-and-test gate (ci.yml), so it never blocks
+# quick feedback. To make it a required merge gate, add "mock-ladder" to the
+# branch-protection required checks for main.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read # pull ghcr.io/c360studio/semsource at stack bring-up
+
+concurrency:
+  group: mock-ladder-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock-ladder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Provide empty .env
+        # The root Taskfile declares `dotenv: ['.env']`; .env is gitignored and
+        # absent in CI. The mock LLM needs no API keys, so an empty file
+        # satisfies the loader without supplying secrets.
+        run: touch .env
+
+      - name: Run mock ladder
+        run: |
+          set -uo pipefail
+          # Source of truth for the scenario set is the fixture directories, so a
+          # new mock scenario is gated automatically. Names are directory names
+          # (no spaces), so word-splitting the list is safe.
+          SCENARIOS="$(ls -1 test/e2e/fixtures/mock-responses/ | sort | tr '\n' ' ')"
+          echo "Scenarios: ${SCENARIOS}"
+          mkdir -p /tmp/ladder
+          fails=""
+          for s in ${SCENARIOS}; do
+            echo "::group::mock-ladder ${s}"
+            start=$(date +%s)
+            if task e2e:mock -- "${s}" > "/tmp/ladder/${s}.log" 2>&1; then
+              res="PASS"
+            else
+              res="FAIL"
+              fails="${fails} ${s}"
+            fi
+            echo "${res} ${s} ($(( $(date +%s) - start ))s)"
+            # On failure surface the tail inline; full logs are uploaded below.
+            if [ "${res}" = "FAIL" ]; then tail -100 "/tmp/ladder/${s}.log"; fi
+            echo "::endgroup::"
+          done
+          echo "=== mock ladder summary ==="
+          for s in ${SCENARIOS}; do
+            case " ${fails} " in
+              *" ${s} "*) echo "FAIL  ${s}" ;;
+              *)          echo "PASS  ${s}" ;;
+            esac
+          done
+          if [ -n "${fails# }" ]; then
+            echo "Mock ladder FAILED:${fails}"
+            exit 1
+          fi
+          echo "Mock ladder: all scenarios passed."
+
+      - name: Upload scenario logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-ladder-logs
+          path: /tmp/ladder/
+          retention-days: 7
