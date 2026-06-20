@@ -177,21 +177,34 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		planState = 'active';
 	}
 
-	// Determine requirements phase state (auto-cascade: approved → requirements → scenarios → ready)
+	// Determine requirements phase state (auto-cascade: approved → requirements →
+	// architecture → stories → scenarios → ready). The "requirements" pipeline
+	// phase covers the whole design cascade, so every intermediate generating/
+	// review stage reads as active rather than dipping back to none (#221 INV6:
+	// the derived phase must advance monotonically with the backend stage).
 	const reqsDoneStages: PlanStage[] = [
 		'scenarios_reviewed',
 		'ready_for_execution',
 		'tasks_approved',
 		'implementing',
 		'executing',
+		'ready_for_qa',
+		'reviewing_qa',
 		'reviewing_rollup',
 		'complete',
 		'complete_with_deferrals'
 	];
 	const reqsActiveStages: PlanStage[] = [
 		'approved',
+		'generating_requirements',
 		'requirements_generated',
+		'generating_architecture',
+		'architecture_generated',
+		'preparing_stories',
+		'stories_generated',
+		'generating_scenarios',
 		'scenarios_generated',
+		'reviewing_scenarios',
 		// Legacy stages
 		'phases_generated',
 		'phases_approved',
@@ -213,8 +226,11 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		executeState = 'complete';
 	} else if (stage === 'failed') {
 		executeState = 'failed';
-	} else if (stage === 'reviewing_rollup') {
-		executeState = 'active'; // rollup review is the final gate before complete
+	} else if (stage === 'reviewing_rollup' || stage === 'ready_for_qa' || stage === 'reviewing_qa') {
+		// QA gate + rollup review are execute-phase gates before complete; they
+		// must read as active, not none, or the operator pipeline regresses
+		// after implementation finishes (#221 INV6).
+		executeState = 'active';
 	} else if (isExecuting || stage === 'implementing' || stage === 'executing') {
 		executeState = 'active';
 	}
@@ -235,34 +251,61 @@ export const LOCKED_STAGES: readonly string[] = [
 ] as const;
 
 /**
- * Human-readable label for a plan stage.
+ * STAGE_LABELS maps every authoritative PlanStage to a human-readable operator
+ * label. Typed as Record<PlanStage, string>, so a stage added to the PlanStage
+ * union is a COMPILE error here until a label is supplied — the operator phase is
+ * derived from the authoritative state machine, never a raw snake_case
+ * fallthrough (#221 INV6). The contract test in planStageContract.test.ts pins
+ * the same property at runtime, plus pipeline monotonicity.
+ */
+export const STAGE_LABELS: Record<PlanStage, string> = {
+	created: 'Created',
+	draft: 'Draft',
+	exploring: 'Exploring',
+	explored: 'Explored',
+	drafting: 'Draft',
+	drafted: 'Drafted',
+	reviewing_draft: 'Reviewing Draft',
+	ready_for_approval: 'Ready for Approval',
+	reviewed: 'Reviewed',
+	needs_changes: 'Needs Changes',
+	planning: 'Planning',
+	approved: 'Approved',
+	rejected: 'Rejected',
+	generating_requirements: 'Generating Requirements',
+	requirements_generated: 'Requirements Generated',
+	generating_architecture: 'Generating Architecture',
+	architecture_generated: 'Architecture Generated',
+	preparing_stories: 'Preparing Stories',
+	stories_generated: 'Stories Generated',
+	generating_scenarios: 'Generating Scenarios',
+	scenarios_generated: 'Scenarios Generated',
+	reviewing_scenarios: 'Reviewing Scenarios',
+	scenarios_reviewed: 'Scenarios Reviewed',
+	awaiting_review: 'Awaiting Review',
+	changed: 'Change Accepted',
+	ready_for_execution: 'Ready to Execute',
+	phases_generated: 'Phases Generated',
+	phases_approved: 'Phases Approved',
+	tasks_generated: 'Tasks Generated',
+	tasks_approved: 'Ready to Execute',
+	tasks: 'Ready to Execute',
+	implementing: 'Executing',
+	executing: 'Executing',
+	ready_for_qa: 'Ready for QA',
+	reviewing_qa: 'Reviewing QA',
+	reviewing_rollup: 'Reviewing',
+	complete: 'Complete',
+	complete_with_deferrals: 'Complete — e2e deferred',
+	archived: 'Archived',
+	failed: 'Failed'
+};
+
+/**
+ * Human-readable label for a plan stage. STAGE_LABELS is exhaustive over
+ * PlanStage; the `?? stage` fallback only guards malformed/out-of-contract data
+ * arriving from the wire.
  */
 export function getStageLabel(stage: PlanStage): string {
-	const labels: Record<string, string> = {
-		draft: 'Draft',
-		drafting: 'Draft',
-		ready_for_approval: 'Ready for Approval',
-		reviewed: 'Reviewed',
-		needs_changes: 'Needs Changes',
-		planning: 'Planning',
-		approved: 'Approved',
-		rejected: 'Rejected',
-		requirements_generated: 'Requirements Generated',
-		scenarios_generated: 'Scenarios Generated',
-		scenarios_reviewed: 'Scenarios Reviewed',
-		ready_for_execution: 'Ready to Execute',
-		phases_generated: 'Phases Generated',
-		phases_approved: 'Phases Approved',
-		tasks_generated: 'Tasks Generated',
-		tasks_approved: 'Ready to Execute',
-		tasks: 'Ready to Execute',
-		implementing: 'Executing',
-		executing: 'Executing',
-		reviewing_rollup: 'Reviewing',
-		complete: 'Complete',
-		complete_with_deferrals: 'Complete — e2e deferred',
-		archived: 'Archived',
-		failed: 'Failed'
-	};
-	return labels[stage] ?? stage;
+	return STAGE_LABELS[stage] ?? stage;
 }
