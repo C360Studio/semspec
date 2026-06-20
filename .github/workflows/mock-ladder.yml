@@ -1,0 +1,127 @@
+name: Mock Ladder
+
+# Deterministic, FREE (mock-LLM) end-to-end gate. Runs every scenario under
+# test/e2e/fixtures/mock-responses/ through the full stack with the mock LLM, so
+# a pipeline/recovery/ownership-gate regression fails CI instead of being
+# discovered by a paid LLM run. Each scenario is a full infra lifecycle
+# (build -> up mock stack -> run -> teardown) for isolation. No paid tokens, no
+# model downloads — e2e-mock.yml stubs semembed/seminstruct to alpine no-ops.
+#
+# STATUS: PARKED (manual workflow_dispatch only) — see issue #258.
+# The gate workflow is correct and 13/13 locally, but the e2e stack does not yet
+# come up on a stock ubuntu-latest runner: semspec (root) and sandbox (non-root)
+# share the /workspace bind-mount, so the sandbox can't write the
+# root-owned /workspace/.semspec tree and exits 1, failing `up --wait`. Mac
+# Docker Desktop's uid mapping hides this; Linux exposes it. The steps below
+# already fix the gitignored-workspace, docker-socket GID, and git
+# dubious-ownership layers; the remaining piece is unifying the /workspace uid
+# across containers (issue #258). When that lands, switch the trigger back to:
+#   on:
+#     pull_request: { branches: [main] }
+#     push:         { branches: [main] }
+# and add "mock-ladder" to the branch-protection required checks for main.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: read # pull ghcr.io/c360studio/semsource at stack bring-up
+
+concurrency:
+  group: mock-ladder-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mock-ladder:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Provide empty .env
+        # The root Taskfile declares `dotenv: ['.env']`; .env is gitignored and
+        # absent in CI. The mock LLM needs no API keys, so an empty file
+        # satisfies the loader without supplying secrets.
+        run: touch .env
+
+      - name: Match sandbox uid/gid + docker GID to the runner
+        # The sandbox bind-mounts /workspace (host-owned) and the host docker
+        # socket. On Mac Docker Desktop the uid mapping hides ownership, but on a
+        # Linux runner the sandbox image's baked uid (1000) differs from the
+        # runner user (1001) that owns /workspace, so the sandbox can't write it
+        # (mkdir worktrees -> permission denied) and git flags dubious ownership —
+        # the container exits 1 and up --wait fails the whole stack. Build the
+        # sandbox image AS the runner's uid/gid so it owns /workspace, and resolve
+        # the docker group GID so the DooD socket is accessible. NOTE: this is
+        # necessary but not yet sufficient — semspec still runs as root and
+        # creates /workspace/.semspec first; see issue #258.
+        run: |
+          {
+            echo "SANDBOX_UID=$(id -u)"
+            echo "SANDBOX_GID=$(id -g)"
+            echo "DOCKER_GID=$(getent group docker | cut -d: -f3)"
+          } >> "$GITHUB_ENV"
+
+      - name: Run mock ladder
+        run: |
+          set -uo pipefail
+          # Source of truth for the scenario set is the fixture directories, so a
+          # new mock scenario is gated automatically. Names are directory names
+          # (no spaces), so word-splitting the list is safe.
+          SCENARIOS="$(ls -1 test/e2e/fixtures/mock-responses/ | sort | tr '\n' ' ')"
+          echo "Scenarios: ${SCENARIOS}"
+          mkdir -p /tmp/ladder
+          fails=""
+          for s in ${SCENARIOS}; do
+            echo "::group::mock-ladder ${s}"
+            start=$(date +%s)
+            if task e2e:mock -- "${s}" > "/tmp/ladder/${s}.log" 2>&1; then
+              res="PASS"
+            else
+              res="FAIL"
+              fails="${fails} ${s}"
+            fi
+            echo "${res} ${s} ($(( $(date +%s) - start ))s)"
+            # On failure surface the tail inline; full logs are uploaded below.
+            if [ "${res}" = "FAIL" ]; then tail -100 "/tmp/ladder/${s}.log"; fi
+            echo "::endgroup::"
+          done
+          echo "=== mock ladder summary ==="
+          for s in ${SCENARIOS}; do
+            case " ${fails} " in
+              *" ${s} "*) echo "FAIL  ${s}" ;;
+              *)          echo "PASS  ${s}" ;;
+            esac
+          done
+          if [ -n "${fails# }" ]; then
+            echo "Mock ladder FAILED:${fails}"
+            exit 1
+          fi
+          echo "Mock ladder: all scenarios passed."
+
+      - name: Upload scenario logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mock-ladder-logs
+          path: /tmp/ladder/
+          retention-days: 7
