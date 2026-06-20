@@ -64,8 +64,15 @@ services:
       start_period: 2s
 
   semspec:
+    # Run as the host uid (set by CI to the runner user; default 0/root locally
+    # — Mac Docker Desktop maps it transparently) so the /workspace files semspec
+    # writes are host-owned and the host-side e2e runner can clean them between
+    # scenarios. semspec only writes /workspace (+ /tmp); /etc/gitconfig (built
+    # in) gives it a HOME-independent git identity. See issue #258.
+    user: "${SANDBOX_UID:-0}:${SANDBOX_GID:-0}"
     command: ["--config", "/app/configs/e2e-mock.json", "--repo", "/workspace", "--log-level", "${LOG_LEVEL:-info}"]
     environment:
+      - HOME=/tmp
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
       - SANDBOX_URL=http://sandbox:8090
@@ -87,13 +94,8 @@ services:
       mock-llm:
         condition: service_healthy
 
-  # Run the mock sandbox as root so it can write the /workspace/.semspec tree
-  # that semspec (also root) creates. On a Linux CI runner the host-owned
-  # /workspace plus the sandbox image's baked non-root uid otherwise collide:
-  # semspec (root) creates .semspec first, the non-root sandbox can't write
-  # inside it (mkdir worktrees -> permission denied), the container exits 1, and
-  # `up --wait` fails the whole stack. Mac Docker Desktop's uid mapping hides
-  # this; running root sidesteps it entirely. Scoped to this mock/CI overlay —
-  # real-LLM stacks keep the non-root sandbox boundary. See issue #258.
-  sandbox:
-    user: "0:0"
+  # The sandbox is built with SANDBOX_UID/SANDBOX_GID (CI sets them to the runner
+  # user; default 1000) so its `sandbox` user — with a real passwd entry and an
+  # owned HOME — matches semspec's uid. Every /workspace write across both
+  # containers is then host-owned and cleanable by the host-side e2e runner,
+  # closing the root-vs-runner ownership conflict on Linux runners. See #258.

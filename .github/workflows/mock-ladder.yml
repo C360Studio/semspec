@@ -63,18 +63,30 @@ jobs:
         # satisfies the loader without supplying secrets.
         run: touch .env
 
+      - name: Match container uid/gid to the runner
+        # Run semspec + sandbox as the runner user so every /workspace write is
+        # host-owned and the host-side e2e runner can clean it between scenarios.
+        # SANDBOX_UID/GID feed the sandbox image build (proper passwd entry +
+        # owned HOME) and the semspec `user:` override; DOCKER_GID lets the
+        # non-root sandbox reach the DooD socket. See issue #258.
+        run: |
+          {
+            echo "SANDBOX_UID=$(id -u)"
+            echo "SANDBOX_GID=$(id -g)"
+            echo "DOCKER_GID=$(getent group docker | cut -d: -f3)"
+          } >> "$GITHUB_ENV"
+
       - name: Stack bring-up probe
-        # Validation aid (#258): bring the mock stack up once and confirm the
-        # sandbox stays healthy on this runner before the full ladder. The mock
-        # sandbox runs as root (e2e-mock.yml user:"0:0") so it can write the
-        # root-owned /workspace/.semspec tree semspec creates. Dumps sandbox logs
-        # if up --wait still fails. Self-contained teardown.
+        # Validation aid (#258): bring the mock stack up once and confirm both
+        # containers stay healthy on this runner before the full ladder. Dumps
+        # sandbox + semspec logs if up --wait still fails. Self-contained teardown.
         run: |
           set +e
           DC="docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml"
           task e2e:up:mock -- plan-smoke; echo "up:mock rc=$?"
           echo "=== ps ==="; $DC ps -a --format 'table {{.Service}}\t{{.Status}}'
           echo "=== sandbox logs ==="; $DC logs sandbox 2>&1 | tail -30
+          echo "=== semspec logs ==="; $DC logs semspec 2>&1 | tail -15
           task e2e:down:mock >/dev/null 2>&1; $DC down -v >/dev/null 2>&1
           exit 0
 

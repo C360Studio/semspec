@@ -37,6 +37,15 @@ COPY --from=builder /build/configs /app/configs
 # Create workspace directory
 RUN mkdir -p /workspace
 
+# System-wide git identity + ownership trust so semspec can run as a non-root,
+# arbitrary uid (CI runs it as the host uid so /workspace files are host-owned
+# and cleanable by the host-side e2e runner; see issue #258). --system writes
+# /etc/gitconfig, read by every git invocation regardless of HOME, so git
+# operations work for a uid with no passwd entry or home dir.
+RUN git config --system user.email "semspec@semspec.dev" \
+    && git config --system user.name "Semspec" \
+    && git config --system --add safe.directory '*'
+
 # Set default environment
 ENV NATS_URL=nats://localhost:4222
 ENV SEMSPEC_REPO_PATH=/workspace
