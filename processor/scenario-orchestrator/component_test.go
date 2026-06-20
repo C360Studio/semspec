@@ -1,9 +1,12 @@
 package scenarioorchestrator
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -796,4 +799,51 @@ func TestIsIdempotentReqRejection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestRouteDispatchError pins the #180 ROUTING (the classifier above is tested
+// separately): a benign idempotency rejection must be swallowed (return nil) and
+// logged at DEBUG — not ERROR, which on a JetStream consumer turns into
+// NAK→redelivery churn that re-runs the whole orchestrate cycle. A genuine error
+// must propagate and log at ERROR.
+func TestRouteDispatchError(t *testing.T) {
+	newComp := func() (*Component, *bytes.Buffer) {
+		c := newTestComponent(t)
+		buf := &bytes.Buffer{}
+		c.logger = slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		return c, buf
+	}
+
+	t.Run("idempotent rejection swallowed and logged DEBUG not ERROR", func(t *testing.T) {
+		c, buf := newComp()
+		err := c.routeDispatchError("req.1", fmt.Errorf("req.create rejected: req execution already exists: k"))
+		if err != nil {
+			t.Errorf("idempotent rejection should return nil, got %v", err)
+		}
+		out := buf.String()
+		if strings.Contains(out, `"level":"ERROR"`) {
+			t.Errorf("idempotent rejection must NOT log ERROR (NAK/redelivery churn); got %s", out)
+		}
+		if !strings.Contains(out, `"level":"DEBUG"`) {
+			t.Errorf("idempotent rejection should log DEBUG; got %s", out)
+		}
+	})
+
+	t.Run("genuine error propagated and logged ERROR", func(t *testing.T) {
+		c, buf := newComp()
+		err := c.routeDispatchError("req.2", fmt.Errorf("req.create mutation failed: context deadline exceeded"))
+		if err == nil {
+			t.Fatal("genuine dispatch error should propagate, got nil")
+		}
+		if !strings.Contains(buf.String(), `"level":"ERROR"`) {
+			t.Errorf("genuine error should log ERROR; got %s", buf.String())
+		}
+	})
+
+	t.Run("nil passes through", func(t *testing.T) {
+		c, _ := newComp()
+		if err := c.routeDispatchError("req.3", nil); err != nil {
+			t.Errorf("nil error should return nil, got %v", err)
+		}
+	})
 }
