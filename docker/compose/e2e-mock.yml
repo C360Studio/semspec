@@ -86,3 +86,14 @@ services:
         condition: service_healthy
       mock-llm:
         condition: service_healthy
+
+  # Run the mock sandbox as root so it can write the /workspace/.semspec tree
+  # that semspec (also root) creates. On a Linux CI runner the host-owned
+  # /workspace plus the sandbox image's baked non-root uid otherwise collide:
+  # semspec (root) creates .semspec first, the non-root sandbox can't write
+  # inside it (mkdir worktrees -> permission denied), the container exits 1, and
+  # `up --wait` fails the whole stack. Mac Docker Desktop's uid mapping hides
+  # this; running root sidesteps it entirely. Scoped to this mock/CI overlay —
+  # real-LLM stacks keep the non-root sandbox boundary. See issue #258.
+  sandbox:
+    user: "0:0"

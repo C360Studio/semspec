@@ -63,23 +63,20 @@ jobs:
         # satisfies the loader without supplying secrets.
         run: touch .env
 
-      - name: Match sandbox uid/gid + docker GID to the runner
-        # The sandbox bind-mounts /workspace (host-owned) and the host docker
-        # socket. On Mac Docker Desktop the uid mapping hides ownership, but on a
-        # Linux runner the sandbox image's baked uid (1000) differs from the
-        # runner user (1001) that owns /workspace, so the sandbox can't write it
-        # (mkdir worktrees -> permission denied) and git flags dubious ownership —
-        # the container exits 1 and up --wait fails the whole stack. Build the
-        # sandbox image AS the runner's uid/gid so it owns /workspace, and resolve
-        # the docker group GID so the DooD socket is accessible. NOTE: this is
-        # necessary but not yet sufficient — semspec still runs as root and
-        # creates /workspace/.semspec first; see issue #258.
+      - name: Stack bring-up probe
+        # Validation aid (#258): bring the mock stack up once and confirm the
+        # sandbox stays healthy on this runner before the full ladder. The mock
+        # sandbox runs as root (e2e-mock.yml user:"0:0") so it can write the
+        # root-owned /workspace/.semspec tree semspec creates. Dumps sandbox logs
+        # if up --wait still fails. Self-contained teardown.
         run: |
-          {
-            echo "SANDBOX_UID=$(id -u)"
-            echo "SANDBOX_GID=$(id -g)"
-            echo "DOCKER_GID=$(getent group docker | cut -d: -f3)"
-          } >> "$GITHUB_ENV"
+          set +e
+          DC="docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml"
+          task e2e:up:mock -- plan-smoke; echo "up:mock rc=$?"
+          echo "=== ps ==="; $DC ps -a --format 'table {{.Service}}\t{{.Status}}'
+          echo "=== sandbox logs ==="; $DC logs sandbox 2>&1 | tail -30
+          task e2e:down:mock >/dev/null 2>&1; $DC down -v >/dev/null 2>&1
+          exit 0
 
       - name: Run mock ladder
         run: |
