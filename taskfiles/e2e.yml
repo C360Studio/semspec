@@ -124,6 +124,10 @@ tasks:
     desc: Clean E2E workspace
     silent: false
     cmds:
+      # The workspace dir is gitignored, so a fresh checkout (CI, new clone)
+      # lacks it. Create it as the current user BEFORE the docker mount below,
+      # otherwise the daemon auto-creates it root-owned and the git init fails.
+      - mkdir -p test/e2e/workspace
       - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
       - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
       # Re-initialize a bare git repo so sandbox can start (requires a git repository).
