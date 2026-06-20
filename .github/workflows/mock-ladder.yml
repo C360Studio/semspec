@@ -63,7 +63,8 @@ jobs:
         # Desktop (root:root socket); on Linux runners the socket is root:docker,
         # so resolve the runner's docker GID (the compose file flags this as the
         # one-env-var Linux override). Without it the sandbox exits 1 at startup.
-        run: echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> "$GITHUB_ENV"
+        run: |
+          echo "DOCKER_GID=$(getent group docker | cut -d: -f3)" >> "$GITHUB_ENV"
 
       - name: Stack bring-up diagnostic
         # One-shot: confirm the mock stack reaches healthy on this runner and
