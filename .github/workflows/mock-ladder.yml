@@ -7,21 +7,20 @@ name: Mock Ladder
 # (build -> up mock stack -> run -> teardown) for isolation. No paid tokens, no
 # model downloads — e2e-mock.yml stubs semembed/seminstruct to alpine no-ops.
 #
-# STATUS: PARKED (manual workflow_dispatch only) — see issue #258.
-# The gate workflow is correct and 13/13 locally, but the e2e stack does not yet
-# come up on a stock ubuntu-latest runner: semspec (root) and sandbox (non-root)
-# share the /workspace bind-mount, so the sandbox can't write the
-# root-owned /workspace/.semspec tree and exits 1, failing `up --wait`. Mac
-# Docker Desktop's uid mapping hides this; Linux exposes it. The steps below
-# already fix the gitignored-workspace, docker-socket GID, and git
-# dubious-ownership layers; the remaining piece is unifying the /workspace uid
-# across containers (issue #258). When that lands, switch the trigger back to:
-#   on:
-#     pull_request: { branches: [main] }
-#     push:         { branches: [main] }
-# and add "mock-ladder" to the branch-protection required checks for main.
+# Validated 13/13 on ubuntu-latest (#258). Getting the e2e stack to come up on a
+# stock Linux runner required unifying every /workspace writer on the runner uid
+# (semspec + sandbox run as the host user; see e2e-mock.yml + #258) — Mac Docker
+# Desktop's uid mapping hides the mismatch that Linux exposes.
+#
+# Runs in parallel with the fast lint-and-test gate (ci.yml), so it never blocks
+# quick feedback. To make it a required merge gate, add "mock-ladder" to the
+# branch-protection required checks for main.
 
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch: {}
 
 permissions:
@@ -63,17 +62,12 @@ jobs:
         # satisfies the loader without supplying secrets.
         run: touch .env
 
-      - name: Match sandbox uid/gid + docker GID to the runner
-        # The sandbox bind-mounts /workspace (host-owned) and the host docker
-        # socket. On Mac Docker Desktop the uid mapping hides ownership, but on a
-        # Linux runner the sandbox image's baked uid (1000) differs from the
-        # runner user (1001) that owns /workspace, so the sandbox can't write it
-        # (mkdir worktrees -> permission denied) and git flags dubious ownership —
-        # the container exits 1 and up --wait fails the whole stack. Build the
-        # sandbox image AS the runner's uid/gid so it owns /workspace, and resolve
-        # the docker group GID so the DooD socket is accessible. NOTE: this is
-        # necessary but not yet sufficient — semspec still runs as root and
-        # creates /workspace/.semspec first; see issue #258.
+      - name: Match container uid/gid to the runner
+        # Run semspec + sandbox as the runner user so every /workspace write is
+        # host-owned and the host-side e2e runner can clean it between scenarios.
+        # SANDBOX_UID/GID feed the sandbox image build (proper passwd entry +
+        # owned HOME) and the semspec `user:` override; DOCKER_GID lets the
+        # non-root sandbox reach the DooD socket. See issue #258.
         run: |
           {
             echo "SANDBOX_UID=$(id -u)"
