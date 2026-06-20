@@ -68,20 +68,22 @@ jobs:
 
       - name: Stack bring-up diagnostic
         # One-shot: confirm the mock stack reaches healthy on this runner and
-        # surface sandbox logs if it does not. Self-contained (own teardown); the
-        # ladder below re-runs the full lifecycle per scenario.
+        # capture the sandbox failure reason if it does not. Self-contained (own
+        # teardown); the ladder below re-runs the full lifecycle per scenario.
         run: |
           set +e
-          echo "DOCKER_GID=${DOCKER_GID:-unset}"
+          echo "DOCKER_GID=${DOCKER_GID:-unset} runner uid=$(id -u) gid=$(id -g)"
           task e2e:build >/dev/null 2>&1
           docker compose -p semspec-e2e -f docker/compose/e2e.yml build semspec sandbox >/dev/null 2>&1
           docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm >/dev/null 2>&1
           mkdir -p test/e2e/workspace && ( cd test/e2e/workspace && [ -d .git ] || { git init -q && git config user.email e@t.l && git config user.name t && echo x > README.md && git add README.md && git commit -q -m init; } )
-          MOCK_SCENARIO=plan-smoke docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
-          echo "up --wait rc=$?"
-          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
-          echo "=== sandbox logs ==="; docker logs semspec-e2e-sandbox-1 2>&1 | tail -60
-          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v >/dev/null 2>&1
+          echo "=== workspace ownership ==="; ls -lan test/e2e | grep workspace; ls -lan test/e2e/workspace | head
+          DC="docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml"
+          MOCK_SCENARIO=plan-smoke $DC up -d --wait; echo "up --wait rc=$?"
+          echo "=== ps -a ==="; $DC ps -a
+          echo "=== sandbox compose logs ==="; $DC logs sandbox 2>&1 | tail -80
+          echo "=== sandbox inspect ==="; docker inspect semspec-e2e-sandbox-1 --format 'exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}}' 2>&1
+          $DC down -v >/dev/null 2>&1
           exit 0
 
       - name: Run mock ladder
