@@ -2293,8 +2293,16 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 //
 // The walk uses the same legal state-machine hops as recovery resume
 // (Executing→Failed→Pending→Ready) instead of adding a shortcut mutation.
-// Missing plan state is treated as no candidates here; dispatchSynthesizerLocked
-// already fails loudly when PLAN_STATES is unavailable.
+//
+// A plan-load failure (e.g. a transient PLAN_STATES read returning nil) or a
+// current Story missing from the plan fails CLOSED here (candidates=1, reopened=0)
+// so the caller markFailedLocked-s BEFORE wiping NodeResults / deleting the branch.
+// Failing open would skip the reset, then dispatchSynthesizerLocked would re-claim
+// the still-Executing Story (Executing→Executing rejected) and self-wedge as a
+// false M:N contention — the exact #260 symptom this guard exists to prevent
+// (loadPlanFromKV swallows transient NATS errors as (nil,nil), so this is reachable
+// on a momentary KV blip, not only a persistent outage). A genuinely-absent current
+// Story (CurrentStoryIdx out of range / empty ID) has nothing to reset and fails open.
 //
 // Caller must hold exec.mu.
 func (c *Component) resetCurrentStoryForRestructureLocked(ctx context.Context, exec *requirementExecution) storyReopenResult {
@@ -2308,18 +2316,23 @@ func (c *Component) resetCurrentStoryForRestructureLocked(ctx context.Context, e
 
 	plan, err := c.loadPlanForExecution(ctx, exec.Slug)
 	if err != nil || plan == nil {
+		// Fail closed: a nil/errored plan load (incl. a transient PLAN_STATES
+		// blip surfaced as (nil,nil) by loadPlanFromKV) must not skip the reset
+		// and let the retry re-dispatch the still-Executing Story (#260).
 		c.logger.Warn("restructure retry: could not load plan to reset current Story",
 			"slug", exec.Slug, "requirement_id", exec.RequirementID,
 			"story_id", storyID, "error", err)
-		return storyReopenResult{}
+		return storyReopenResult{candidates: 1}
 	}
 
 	story, ok := findStoryByID(plan, storyID)
 	if !ok {
+		// Fail closed: the current Story must exist in the plan during execution;
+		// a missing one is an inconsistency, not a license to re-dispatch.
 		c.logger.Warn("restructure retry: current Story missing from plan",
 			"slug", exec.Slug, "requirement_id", exec.RequirementID,
 			"story_id", storyID)
-		return storyReopenResult{}
+		return storyReopenResult{candidates: 1}
 	}
 	if story.Status != "" && !story.Status.IsValid() {
 		c.logger.Warn("restructure retry: current Story has invalid status",
