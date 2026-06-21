@@ -46,3 +46,6 @@ jobs:
 
       - name: go test
         run: go test ./...
+
+      - name: go integration tests
+        run: go test -race -tags integration -count=1 ./...

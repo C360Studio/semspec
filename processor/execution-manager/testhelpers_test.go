@@ -159,6 +159,7 @@ func newTestComponent(t *testing.T) *Component {
 		t.Fatalf("newTestComponent: NewComponent failed: %v", err)
 	}
 	c := disc.(*Component)
+	c.config.Model = "default"
 
 	// Initialize typed caches that are normally created in Start().
 	ctx := context.Background()
@@ -178,6 +179,7 @@ func newTestComponent(t *testing.T) *Component {
 		t.Fatalf("newTestComponent: create execution store: %v", err)
 	}
 	c.store = store
+	c.cachePlanBucket(defaultPlanBucket{})
 	return c
 }
 
@@ -225,6 +227,29 @@ func (e *mockKVEntry) Revision() uint64                { return 1 }
 func (e *mockKVEntry) Created() time.Time              { return time.Time{} }
 func (e *mockKVEntry) Delta() uint64                   { return 0 }
 func (e *mockKVEntry) Operation() jetstream.KeyValueOp { return e.op }
+
+// defaultPlanBucket gives state-machine unit tests a minimal PLAN_STATES row
+// for whichever slug they use. Tests that need to prove missing-plan behavior
+// construct Component directly instead of using newTestComponent.
+type defaultPlanBucket struct{}
+
+func (defaultPlanBucket) Get(_ context.Context, key string) (jetstream.KeyValueEntry, error) {
+	value, _ := json.Marshal(workflow.Plan{Slug: key})
+	return &mockPlanEntry{key: key, value: value}, nil
+}
+
+type mockPlanEntry struct {
+	key   string
+	value []byte
+}
+
+func (e *mockPlanEntry) Bucket() string                  { return planStatesBucketName }
+func (e *mockPlanEntry) Key() string                     { return e.key }
+func (e *mockPlanEntry) Value() []byte                   { return append([]byte(nil), e.value...) }
+func (e *mockPlanEntry) Revision() uint64                { return 1 }
+func (e *mockPlanEntry) Created() time.Time              { return time.Time{} }
+func (e *mockPlanEntry) Delta() uint64                   { return 0 }
+func (e *mockPlanEntry) Operation() jetstream.KeyValueOp { return jetstream.KeyValuePut }
 
 // makeKVEntry builds a mockKVEntry for handleTaskPending unit tests.
 func makeKVEntry(t *testing.T, key string, fields map[string]any) *mockKVEntry {

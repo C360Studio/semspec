@@ -15,13 +15,15 @@ var integrationScenarios = []workflow.Scenario{
 	{ID: "sc-3", RequirementID: "req-2"},
 }
 
+var integrationStories []workflow.Story
+
 func TestPlanDecision_AffectsOneRequirement(t *testing.T) {
 	proposal := &workflow.PlanDecision{
 		ID:             "cp-1",
 		AffectedReqIDs: []string{"req-1"}, // affects sc-1, sc-2
 	}
 
-	result, err := PlanDecision(proposal, integrationScenarios)
+	result, err := PlanDecision(proposal, integrationStories, integrationScenarios)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +42,7 @@ func TestPlanDecision_AffectsAllRequirements(t *testing.T) {
 		AffectedReqIDs: []string{"req-1", "req-2"},
 	}
 
-	result, err := PlanDecision(proposal, integrationScenarios)
+	result, err := PlanDecision(proposal, integrationStories, integrationScenarios)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -56,7 +58,7 @@ func TestPlanDecision_NoMatchingScenarios(t *testing.T) {
 		AffectedReqIDs: []string{"req-nonexistent"},
 	}
 
-	result, err := PlanDecision(proposal, integrationScenarios)
+	result, err := PlanDecision(proposal, integrationStories, integrationScenarios)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

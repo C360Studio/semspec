@@ -137,6 +137,8 @@ func newSandboxClient(url string) sandboxClient {
 // NATS substrate. See reopenOwnedStoriesForRecoveryLocked.
 type storyStatusClaimerFunc func(ctx context.Context, slug, storyID string, target workflow.StoryStatus) bool
 
+type planLoaderFunc func(ctx context.Context, slug string) (*workflow.Plan, error)
+
 // Component orchestrates per-requirement execution.
 type Component struct {
 	config        Config
@@ -154,6 +156,11 @@ type Component struct {
 	// workflow.ClaimStoryStatus; tests inject a fake that enforces
 	// CanTransitionTo so the full walk chain is exercisable without NATS.
 	storyStatusClaimer storyStatusClaimerFunc
+
+	// planLoader is a test seam for code paths that need a current PLAN_STATES
+	// snapshot while exercising story-status transitions without a live NATS KV.
+	// Production leaves it nil and falls through to loadPlanFromKV.
+	planLoader planLoaderFunc
 
 	// nodeResultsSender is the seam for the NodeResults reset/replace mutation
 	// fired by the recovery-resume and restructure/fixable retry paths. Defaults
@@ -1483,6 +1490,13 @@ func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.
 	return &plan, nil
 }
 
+func (c *Component) loadPlanForExecution(ctx context.Context, slug string) (*workflow.Plan, error) {
+	if c.planLoader != nil {
+		return c.planLoader(ctx, slug)
+	}
+	return c.loadPlanFromKV(ctx, slug)
+}
+
 // buildReviewPrompt constructs the prompt for requirement-level review.
 // Includes requirement context, scenarios grouped by tier with tier-aware
 // verification instructions (ADR-041 Move 6 — the load-bearing fix for
@@ -2207,6 +2221,14 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 	exec.LastReviewFeedback = feedback
 	exec.terminated = false
 
+	if result := c.resetCurrentStoryForRestructureLocked(ctx, exec); !result.allReady() {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf(
+			"restructure retry could not reset Story reservation (%d/%d stories ready)",
+			result.reopened, result.candidates,
+		))
+		return
+	}
+
 	// Delete the old branch to avoid polluted context.
 	if c.sandbox != nil && exec.RequirementBranch != "" {
 		if err := c.sandbox.DeleteBranch(ctx, exec.RequirementBranch); err != nil {
@@ -2260,6 +2282,80 @@ func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requi
 	)
 
 	c.dispatchSynthesizerLocked(ctx, exec)
+}
+
+// resetCurrentStoryForRestructureLocked walks the current Story back to Ready
+// before a restructure retry re-dispatches it. The requirement reviewer runs at
+// the current-Story gate, so the next synthesizer pass will try to reclaim
+// SortedStoryIDs[CurrentStoryIdx]. If the previous attempt left that Story in
+// Executing, the reservation mutation would otherwise reject Executing→Executing
+// and the retry would self-wedge as a false M:N contention.
+//
+// The walk uses the same legal state-machine hops as recovery resume
+// (Executing→Failed→Pending→Ready) instead of adding a shortcut mutation.
+// Missing plan state is treated as no candidates here; dispatchSynthesizerLocked
+// already fails loudly when PLAN_STATES is unavailable.
+//
+// Caller must hold exec.mu.
+func (c *Component) resetCurrentStoryForRestructureLocked(ctx context.Context, exec *requirementExecution) storyReopenResult {
+	if exec == nil || exec.CurrentStoryIdx < 0 || exec.CurrentStoryIdx >= len(exec.SortedStoryIDs) {
+		return storyReopenResult{}
+	}
+	storyID := exec.SortedStoryIDs[exec.CurrentStoryIdx]
+	if storyID == "" || c.storyStatusClaimer == nil {
+		return storyReopenResult{}
+	}
+
+	plan, err := c.loadPlanForExecution(ctx, exec.Slug)
+	if err != nil || plan == nil {
+		c.logger.Warn("restructure retry: could not load plan to reset current Story",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"story_id", storyID, "error", err)
+		return storyReopenResult{}
+	}
+
+	story, ok := findStoryByID(plan, storyID)
+	if !ok {
+		c.logger.Warn("restructure retry: current Story missing from plan",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"story_id", storyID)
+		return storyReopenResult{}
+	}
+	if story.Status != "" && !story.Status.IsValid() {
+		c.logger.Warn("restructure retry: current Story has invalid status",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"story_id", storyID, "status", story.Status)
+		return storyReopenResult{candidates: 1}
+	}
+	if owner := workflow.DeterministicStoryOwner(story); owner != "" && owner != exec.RequirementID {
+		c.logger.Warn("restructure retry: refusing to reset non-owned Story reservation",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"story_id", storyID, "owner_requirement_id", owner)
+		return storyReopenResult{candidates: 1}
+	}
+
+	reopened, candidates := reopenStoriesFromPlan(ctx, exec.Slug, plan, []string{storyID},
+		func(ctx context.Context, slug, storyID string, target workflow.StoryStatus) bool {
+			ok := c.storyStatusClaimer(ctx, slug, storyID, target)
+			if !ok {
+				c.logger.Warn("restructure retry: story status reset step rejected",
+					"slug", slug, "requirement_id", exec.RequirementID,
+					"story_id", storyID, "target", target)
+			}
+			return ok
+		})
+
+	result := storyReopenResult{candidates: candidates, reopened: reopened}
+	if result.allReady() {
+		c.logger.Info("restructure retry: current Story reset to ready",
+			"slug", exec.Slug, "requirement_id", exec.RequirementID,
+			"story_id", storyID)
+		return result
+	}
+	c.logger.Warn("restructure retry: current Story could not be reset to ready",
+		"slug", exec.Slug, "requirement_id", exec.RequirementID,
+		"story_id", storyID, "reopened", result.reopened, "candidates", result.candidates)
+	return result
 }
 
 // isNodeDirty returns true if a node should be re-executed on retry.
