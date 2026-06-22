@@ -19,7 +19,7 @@ services:
       retries: 3
 
   semsource:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       nats:
         condition: service_healthy
