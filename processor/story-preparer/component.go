@@ -683,31 +683,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	// Sarah's readiness gate: per-story structural invariants (shape, files,
-	// tasks) + cross-story DAG and file-ownership race prevention.
-	if err := workflow.ValidateStories(stories); err != nil {
-		c.generationsFailed.Add(1)
-		msg := fmt.Sprintf("story validation failed: %s", err.Error())
-		c.logger.Warn("Stories rejected by Sarah's readiness gate",
-			"slug", slug, "loop_id", loop.ID, "error", err)
-		c.retryOrFail(ctx, slug, msg)
-		return
-	}
-
-	// ADR-051 Slice 2b: cross-entity story rules (component + requirement
-	// resolution, files-owned-within-component) need the plan's architecture +
-	// requirements — both present in kvPlan here, since architecture_generated
-	// precedes preparing_stories. Running them pre-publish bounces a story that
-	// names a non-existent component/requirement or widens ownership back to
-	// Sarah for regeneration BEFORE the scenario phase runs against it, instead
-	// of deferring to the late R2 plan-reviewer pass (mergeStoryFindings stays
-	// the backstop).
-	if err := workflow.ValidateStoriesAgainstPlan(kvPlan, stories); err != nil {
-		c.generationsFailed.Add(1)
-		msg := fmt.Sprintf("story plan-coverage validation failed: %s", err.Error())
-		c.logger.Warn("Stories rejected by cross-entity plan-coverage gate",
-			"slug", slug, "loop_id", loop.ID, "error", err)
-		c.retryOrFail(ctx, slug, msg)
+	if !c.validateStoriesPrePublish(ctx, slug, loop.ID, kvPlan, stories) {
 		return
 	}
 
@@ -734,6 +710,42 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"slug", slug,
 		"loop_id", loop.ID,
 		"stories", len(stories))
+}
+
+// validateStoriesPrePublish runs Sarah's readiness gate and the ADR-051
+// Slice 2b cross-entity plan-coverage gate before the stories mutation is
+// published. On any rejection it records the failure and re-dispatches via
+// retryOrFail, returning false to tell the caller to stop. Returns true when
+// the stories clear both gates.
+func (c *Component) validateStoriesPrePublish(ctx context.Context, slug, loopID string, kvPlan *workflow.Plan, stories []workflow.Story) bool {
+	// Sarah's readiness gate: per-story structural invariants (shape, files,
+	// tasks) + cross-story DAG and file-ownership race prevention.
+	if err := workflow.ValidateStories(stories); err != nil {
+		c.generationsFailed.Add(1)
+		msg := fmt.Sprintf("story validation failed: %s", err.Error())
+		c.logger.Warn("Stories rejected by Sarah's readiness gate",
+			"slug", slug, "loop_id", loopID, "error", err)
+		c.retryOrFail(ctx, slug, msg)
+		return false
+	}
+
+	// ADR-051 Slice 2b: cross-entity story rules (component + requirement
+	// resolution, files-owned-within-component) need the plan's architecture +
+	// requirements — both present in kvPlan here, since architecture_generated
+	// precedes preparing_stories. Running them pre-publish bounces a story that
+	// names a non-existent component/requirement or widens ownership back to
+	// Sarah for regeneration BEFORE the scenario phase runs against it, instead
+	// of deferring to the late R2 plan-reviewer pass (mergeStoryFindings stays
+	// the backstop).
+	if err := workflow.ValidateStoriesAgainstPlan(kvPlan, stories); err != nil {
+		c.generationsFailed.Add(1)
+		msg := fmt.Sprintf("story plan-coverage validation failed: %s", err.Error())
+		c.logger.Warn("Stories rejected by cross-entity plan-coverage gate",
+			"slug", slug, "loop_id", loopID, "error", err)
+		c.retryOrFail(ctx, slug, msg)
+		return false
+	}
+	return true
 }
 
 // retryOrFail attempts to re-dispatch story preparation with the error
