@@ -713,7 +713,7 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 
 	consider := func(raw, origin string) {
 		f := workflow.NormalizeFilePath(raw)
-		if f == "" || !isConcreteScopedFile(f) {
+		if f == "" || !workflow.IsConcreteScopedFile(f) {
 			return
 		}
 		if _, dup := seen[f]; dup {
@@ -751,33 +751,10 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 	return findings
 }
 
-// wellKnownExtensionlessDeliverables are root-level deliverable files that carry
-// no extension but are real owned artifacts a parallel story can collide on the
-// same way README did. Without this set isConcreteScopedFile would exempt them
-// (path.Ext == "") and Gate 1 would miss a Dockerfile/Makefile co-write.
-var wellKnownExtensionlessDeliverables = map[string]bool{
-	"Dockerfile":  true,
-	"Makefile":    true,
-	"Jenkinsfile": true,
-	"Vagrantfile": true,
-	"Procfile":    true,
-}
-
-// isConcreteScopedFile reports whether a normalized scoped path is a single
-// literal file (not a directory entry or glob). It must either carry a file
-// extension or be a well-known extensionless deliverable, and contain no glob
-// metacharacters. Directory entries ("src") and patterns ("src/**/*.java")
-// return false — a component owns concrete files, not dirs or patterns, so
-// requiring those to be "owned" would false-positive.
-func isConcreteScopedFile(p string) bool {
-	if strings.ContainsAny(p, "*?[") {
-		return false
-	}
-	if path.Ext(p) != "" {
-		return true
-	}
-	return wellKnownExtensionlessDeliverables[path.Base(p)]
-}
+// IsConcreteScopedFile and the well-known-deliverable set moved to the workflow
+// package (workflow/file_ownership.go) so these SOP rules and the
+// architecture-generator's ADR-051 early ownership gate share ONE concreteness
+// definition and the well-known set cannot drift between callers.
 
 // topologyContractFindings rejects architecture component files that introduce
 // new build/workspace/package root manifests outside the authoritative contract.

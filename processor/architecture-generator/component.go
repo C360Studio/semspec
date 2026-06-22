@@ -650,6 +650,20 @@ func (c *Component) validateGeneratedArchitecture(ctx context.Context, architect
 			failures = append(failures, failure{"capability_coverage",
 				fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())})
 		}
+
+		// ADR-051: every concrete scope.include deliverable must be owned by a
+		// component at architecture time. scope.include is planner-authored and
+		// the architect must attach it (the build.gradle/README orphan class) —
+		// caught here in-loop, the architect revises BEFORE any stories or
+		// scenarios are generated against an orphaning architecture. scope.create
+		// ownership is deliberately NOT checked here: it is reconciled from
+		// Story.FilesOwned at the stories phase (ensureScopeCreateCoversStories),
+		// so it is draft-partial now and would false-positive.
+		if orphans := workflow.UnownedScopedIncludeFiles(kvPlan.Scope, architecture.ComponentBoundaries); len(orphans) > 0 {
+			failures = append(failures, failure{"scoped_include_unowned", fmt.Sprintf(
+				"architecture validation failed (scoped include unowned): scope.include deliverable(s) [%s] are owned by no component. Add each to the implementation_files of the source component that produces it (a README/doc may ride as a companion alongside source, but must have such an owner; if it is a read-only reference, move it to scope.do_not_touch).",
+				strings.Join(orphans, ", "))})
+		}
 	}
 	if err := workflow.ValidateUpstreamImports(architecture.UpstreamResolutions); err != nil {
 		failures = append(failures, failure{"upstream_import_resolution",
