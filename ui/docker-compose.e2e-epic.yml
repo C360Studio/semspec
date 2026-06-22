@@ -73,7 +73,7 @@ services:
 
   # External semsource: Meshtastic (smallest — start first)
   semsource-meshtastic:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       nats:
         condition: service_healthy
@@ -104,7 +104,7 @@ services:
 
   # External semsource: OGC Connected Systems spec (medium — second)
   semsource-ogc:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       nats:
         condition: service_healthy
@@ -132,7 +132,7 @@ services:
 
   # External semsource: OpenSensorHub core (largest Java repo — start last)
   semsource-osh:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       nats:
         condition: service_healthy
@@ -166,7 +166,7 @@ services:
   # for the same Java AST indexing memory; serializing keeps each
   # seed-burst inside the 4G limit OSH already set.
   semsource-mavsdk-java:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       nats:
         condition: service_healthy
@@ -197,7 +197,7 @@ services:
   # sensorhub-driver-mavsdk this prompt extends from). Chained last so its
   # ~200MB clone + Java AST burst doesn't collide with anything else.
   semsource-osh-addons:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       nats:
         condition: service_healthy

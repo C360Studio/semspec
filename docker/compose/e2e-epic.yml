@@ -29,7 +29,7 @@ volumes:
 services:
   # External semsource: OpenSensorHub core (Java)
   semsource-osh:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     environment:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
@@ -50,7 +50,7 @@ services:
 
   # External semsource: Meshtastic documentation
   semsource-meshtastic:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     environment:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
@@ -66,7 +66,7 @@ services:
 
   # External semsource: OGC Connected Systems spec
   semsource-ogc:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     environment:
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
