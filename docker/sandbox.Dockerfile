@@ -6,7 +6,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o /sandbox ./cmd/sandbox
+RUN CGO_ENABLED=0 go build -buildvcs=false -o /sandbox ./cmd/sandbox
 
 # Stage 2: Runtime image with the toolchains agents need to build and test code.
 FROM ubuntu:24.04

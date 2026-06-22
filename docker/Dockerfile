@@ -16,7 +16,7 @@ RUN go mod download
 COPY . .
 
 # Build the semspec binary (CGO enabled for tree-sitter)
-RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
+RUN CGO_ENABLED=1 GOOS=linux go build -buildvcs=false -o /semspec ./cmd/semspec
 
 # Runtime stage
 FROM alpine:3.19
