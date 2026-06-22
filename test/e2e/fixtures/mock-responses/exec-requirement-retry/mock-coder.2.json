@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Implemented /goodbye GET endpoint returning JSON, with a unit test.\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
+        "arguments": "{\"summary\":\"Implemented /goodbye GET endpoint returning JSON, with a unit test.\",\"files_modified\":[\"api/app.py\",\"api/test_goodbye.py\"],\"file_intents\":[{\"path\":\"api/app.py\",\"intent\":\"modified_existing\",\"rationale\":\"Existing endpoint implementation file changed by the task.\"},{\"path\":\"api/test_goodbye.py\",\"intent\":\"companion_test\",\"rationale\":\"Companion test file covering the changed implementation.\"}]}"
       }
     }
   ],

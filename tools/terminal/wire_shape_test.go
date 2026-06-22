@@ -116,11 +116,11 @@ func TestStrictModeWireShape(t *testing.T) {
 		if got, want := schema["additionalProperties"], false; got != want {
 			t.Errorf("schema.additionalProperties = %v, want false", got)
 		}
-		// Top-level required must include both developer fields (developer
+		// Top-level required must include all developer fields (developer
 		// schema is fully strict-mode-compliant since it always was).
 		req, ok := schema["required"].([]any)
-		if !ok || len(req) != 2 {
-			t.Errorf("schema.required = %v, want [summary, files_modified]", schema["required"])
+		if !ok || len(req) != 3 {
+			t.Errorf("schema.required = %v, want [summary, files_modified, file_intents]", schema["required"])
 		}
 	})
 

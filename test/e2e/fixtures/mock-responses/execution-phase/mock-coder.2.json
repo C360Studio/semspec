@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\", \"files_modified\": [\"api/test_goodbye.py\"]}"
+        "arguments": "{\"summary\":\"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\",\"files_modified\":[\"api/test_goodbye.py\"],\"file_intents\":[{\"path\":\"api/test_goodbye.py\",\"intent\":\"companion_test\",\"rationale\":\"Companion test file covering the changed implementation.\"}]}"
       }
     }
   ],

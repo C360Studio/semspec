@@ -96,6 +96,18 @@ type ownershipVerdict struct {
 	// path stages everything (`git add -A`) and it would silently pollute the
 	// branch. Hard fail routed to DEV-RETRY: the developer must remove it.
 	RootScratch []string
+	// DeclaredScratch are worktree changes the developer explicitly classified
+	// as scratch_or_probe in submit_work. These are developer cleanup failures,
+	// not evidence that the architecture/story partition omitted a real
+	// deliverable.
+	DeclaredScratch []string
+	// UnclassifiedNewSource are newly-created source/test files missing a
+	// submit_work file_intents entry. Since semspec controls the tool schema,
+	// missing intent is a developer/tool-contract failure, not a planning gap.
+	UnclassifiedNewSource []string
+	// MismatchedFileIntent are new files whose declared intent contradicts git
+	// status, e.g. a new source file declared as modified_existing.
+	MismatchedFileIntent []string
 }
 
 // clean reports whether there are no hard-fail violations (scratch artefacts,
@@ -106,7 +118,10 @@ func (v ownershipVerdict) clean() bool {
 		len(v.ModifiedDocUnowned) == 0 &&
 		len(v.NewUnownedOutOfTerritory) == 0 &&
 		len(v.NewTopologyControlled) == 0 &&
-		len(v.RootScratch) == 0
+		len(v.RootScratch) == 0 &&
+		len(v.DeclaredScratch) == 0 &&
+		len(v.UnclassifiedNewSource) == 0 &&
+		len(v.MismatchedFileIntent) == 0
 }
 
 // parsePorcelain parses `git status --porcelain=v1` output into entries. It is
@@ -205,7 +220,8 @@ func isIgnorableBuildArtifact(p string) bool {
 // is never a deliverable, only dev scratch (e.g. a FindClass.java probe).
 var sourceFileExts = map[string]struct{}{
 	".java": {}, ".kt": {}, ".kts": {}, ".scala": {}, ".groovy": {},
-	".go": {}, ".py": {}, ".rb": {}, ".rs": {}, ".ts": {}, ".js": {},
+	".go": {}, ".py": {}, ".rb": {}, ".rs": {}, ".ts": {}, ".tsx": {},
+	".js": {}, ".jsx": {}, ".mjs": {}, ".cjs": {}, ".mts": {}, ".cts": {},
 	".c": {}, ".cc": {}, ".cpp": {}, ".cxx": {}, ".h": {}, ".hpp": {}, ".cs": {},
 }
 
@@ -253,10 +269,11 @@ func withinTerritory(norm string, territory map[string]struct{}) bool {
 
 // decideOwnership classifies a worktree change set against the owned file set.
 // Pure: no git, no IO. owned is the normalized set of Story.FilesOwned.
-func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) ownershipVerdict {
+func decideOwnership(changes []porcelainEntry, owned map[string]struct{}, intents []payloads.FileIntent) ownershipVerdict {
 	var v ownershipVerdict
 	owned = expandOwnedMapWithCompanionTests(owned)
 	territory := ownedTerritory(owned)
+	intentByPath := fileIntentByPath(intents)
 	for _, c := range changes {
 		norm := workflow.NormalizeFilePath(c.Path)
 		if norm == "" {
@@ -271,6 +288,21 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 		if pattern, ok := isJunkArtifact(norm); ok {
 			v.JunkViolations = append(v.JunkViolations, fmt.Sprintf("%s (%s)", norm, pattern))
 			continue
+		}
+		intent := strings.TrimSpace(intentByPath[norm])
+		if intent == payloads.FileIntentScratchOrProbe {
+			v.DeclaredScratch = append(v.DeclaredScratch, norm)
+			continue
+		}
+		if c.isNew() && isSourceFile(norm) {
+			switch intent {
+			case "":
+				v.UnclassifiedNewSource = append(v.UnclassifiedNewSource, norm)
+				continue
+			case payloads.FileIntentModifiedExisting:
+				v.MismatchedFileIntent = append(v.MismatchedFileIntent, fmt.Sprintf("%s declared %s but git status reports a new file", norm, intent))
+				continue
+			}
 		}
 		if _, isOwned := owned[norm]; isOwned {
 			continue
@@ -294,12 +326,6 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// A NEW unowned doc is hygiene-only (an undeclared coverage
 				// matrix / scratch note); advisory, surfaced to the reviewer.
 				v.NewUnowned = append(v.NewUnowned, norm)
-			case len(territory) == 0 || withinTerritory(norm, territory):
-				// No declared territory (manual / E2E dispatch with no story
-				// context — the production caller skips the gate entirely in this
-				// case, so this only guards direct callers), or an in-package
-				// class split: advisory, matching pre-ADR-049 behavior.
-				v.NewUnowned = append(v.NewUnowned, norm)
 			case firstSegment(norm) == "" && isSourceFile(norm):
 				// A new SOURCE file at the worktree ROOT (no package directory) — a
 				// dev's throwaway probe (FindClass.java). Never a deliverable (source
@@ -309,6 +335,12 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// silently pollutes the branch. Hard fail routed to dev-retry so the
 				// developer removes it.
 				v.RootScratch = append(v.RootScratch, norm)
+			case len(territory) == 0 || withinTerritory(norm, territory):
+				// No declared territory (manual / E2E dispatch with no story
+				// context — the production caller skips the gate entirely in this
+				// case, so this only guards direct callers), or an in-package
+				// class split: advisory, matching pre-ADR-049 behavior.
+				v.NewUnowned = append(v.NewUnowned, norm)
 			case firstSegment(norm) == "":
 				// A new NON-source file at the root (a stray note, an undeclared
 				// root config) — not a deliverable parallel stories converge on, and
@@ -330,6 +362,18 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 		}
 	}
 	return v
+}
+
+func fileIntentByPath(intents []payloads.FileIntent) map[string]string {
+	out := make(map[string]string, len(intents))
+	for _, intent := range intents {
+		path := workflow.NormalizeFilePath(intent.Path)
+		if path == "" {
+			continue
+		}
+		out[path] = strings.TrimSpace(intent.Intent)
+	}
+	return out
 }
 
 func expandOwnedMapWithCompanionTests(owned map[string]struct{}) map[string]struct{} {
@@ -355,7 +399,7 @@ func expandOwnedMapWithCompanionTests(owned map[string]struct{}) map[string]stru
 // validation / E2E / any dispatch without story context). A git failure is
 // surfaced as a non-blocking advisory rather than a hard fail — the gate must
 // not wedge a run on a plumbing hiccup.
-func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []string, workDir string, runner CommandRunner) []payloads.CheckResult {
+func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []string, intents []payloads.FileIntent, workDir string, runner CommandRunner) []payloads.CheckResult {
 	const checkName = payloads.CheckFileOwnershipContainment
 
 	// No story ownership context (manual validation / E2E / any dispatch
@@ -399,18 +443,22 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 		}}
 	}
 
-	verdict := decideOwnership(parsePorcelain(stdout), ownedSet)
+	verdict := decideOwnership(parsePorcelain(stdout), ownedSet, intents)
 
 	var results []payloads.CheckResult
 
-	// Required gate 1 (#175/#177): scratch artefacts, a non-owner co-writing a
-	// shared doc, or root-level source scratch — the shapes a developer CAN fix
-	// by retrying (remove the scratch / stop editing the shared doc). Routed to
-	// dev-retry, NOT recovery, and never left advisory (the commit path stages
-	// everything, so advisory scratch silently pollutes the branch).
+	// Required gate 1 (#175/#177): scratch artefacts, declared scratch/probes,
+	// a non-owner co-writing a shared doc, or root-level source scratch — the
+	// shapes a developer CAN fix by retrying (remove the scratch / stop editing
+	// the shared doc). Routed to dev-retry, NOT recovery, and never left
+	// advisory (the commit path stages everything, so advisory scratch silently
+	// pollutes the branch).
 	containmentClean := len(verdict.JunkViolations) == 0 &&
 		len(verdict.ModifiedDocUnowned) == 0 &&
-		len(verdict.RootScratch) == 0
+		len(verdict.RootScratch) == 0 &&
+		len(verdict.DeclaredScratch) == 0 &&
+		len(verdict.UnclassifiedNewSource) == 0 &&
+		len(verdict.MismatchedFileIntent) == 0
 	containment := payloads.CheckResult{
 		Name:     checkName,
 		Passed:   containmentClean,
@@ -427,6 +475,15 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 		}
 		if len(verdict.RootScratch) > 0 {
 			fmt.Fprintf(&b, "Root-level source file(s) that are not deliverables must be removed before submit (a source file belongs in a package directory, not the worktree root — write throwaway probes to /tmp): %s. ", strings.Join(verdict.RootScratch, ", "))
+		}
+		if len(verdict.DeclaredScratch) > 0 {
+			fmt.Fprintf(&b, "File(s) declared as scratch_or_probe must be removed before submit (write probes, notes, or placeholder classes to /tmp, not the worktree): %s. ", strings.Join(verdict.DeclaredScratch, ", "))
+		}
+		if len(verdict.UnclassifiedNewSource) > 0 {
+			fmt.Fprintf(&b, "New source/test file(s) are missing submit_work file_intents entries; classify each actual new source/test path as owned_deliverable, companion_test, planning_gap_required_file, or scratch_or_probe before submitting: %s. ", strings.Join(verdict.UnclassifiedNewSource, ", "))
+		}
+		if len(verdict.MismatchedFileIntent) > 0 {
+			fmt.Fprintf(&b, "submit_work file_intents contradict git status: %s. ", strings.Join(verdict.MismatchedFileIntent, "; "))
 		}
 		if len(verdict.ModifiedDocUnowned) > 0 {
 			fmt.Fprintf(&b, "Modified shared documentation this story does not own: %s. A doc owned by no story (or by another story) is co-written by parallel stories and cannot be merged at assembly — only edit docs in your file scope; if a deliverable doc isn't yours, surface it as a planning gap. ", strings.Join(verdict.ModifiedDocUnowned, ", "))

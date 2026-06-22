@@ -16,12 +16,19 @@ func TestValidateDeveloperDeliverable(t *testing.T) {
 			input: map[string]any{
 				"summary":        "Implemented loan calculator with unit tests",
 				"files_modified": []any{"calculator/calc.go", "calculator/calc_test.go"},
+				"file_intents": []any{
+					map[string]any{"path": "calculator/calc.go", "intent": "modified_existing", "rationale": "Updated existing calculator."},
+					map[string]any{"path": "calculator/calc_test.go", "intent": "companion_test", "rationale": "Added unit coverage."},
+				},
 			},
 		},
 		{
 			name: "missing summary",
 			input: map[string]any{
 				"files_modified": []any{"calc.go"},
+				"file_intents": []any{
+					map[string]any{"path": "calc.go", "intent": "modified_existing", "rationale": "Updated existing file."},
+				},
 			},
 			wantError: "summary is required",
 		},
@@ -30,6 +37,9 @@ func TestValidateDeveloperDeliverable(t *testing.T) {
 			input: map[string]any{
 				"summary":        "",
 				"files_modified": []any{"calc.go"},
+				"file_intents": []any{
+					map[string]any{"path": "calc.go", "intent": "modified_existing", "rationale": "Updated existing file."},
+				},
 			},
 			wantError: "summary is required",
 		},
@@ -45,6 +55,7 @@ func TestValidateDeveloperDeliverable(t *testing.T) {
 			input: map[string]any{
 				"summary":        "Agent stopped with nothing",
 				"files_modified": []any{},
+				"file_intents":   []any{},
 			},
 			wantError: "files_modified must not be empty",
 		},
@@ -69,8 +80,73 @@ func TestValidateDeveloperDeliverable(t *testing.T) {
 			input: map[string]any{
 				"summary":        "Did the thing",
 				"files_modified": []any{"calc.go", ""},
+				"file_intents": []any{
+					map[string]any{"path": "calc.go", "intent": "modified_existing", "rationale": "Updated existing file."},
+					map[string]any{"path": "", "intent": "modified_existing", "rationale": "Invalid empty path."},
+				},
 			},
 			wantError: "must be a non-empty path",
+		},
+		{
+			name: "missing file_intents",
+			input: map[string]any{
+				"summary":        "Did the thing",
+				"files_modified": []any{"calc.go"},
+			},
+			wantError: "file_intents is required",
+		},
+		{
+			name: "file_intents wrong type",
+			input: map[string]any{
+				"summary":        "Did the thing",
+				"files_modified": []any{"calc.go"},
+				"file_intents":   "calc.go",
+			},
+			wantError: "file_intents must be an array",
+		},
+		{
+			name: "file_intents missing files_modified path",
+			input: map[string]any{
+				"summary":        "Did the thing",
+				"files_modified": []any{"calc.go", "calc_test.go"},
+				"file_intents": []any{
+					map[string]any{"path": "calc.go", "intent": "modified_existing", "rationale": "Updated existing file."},
+				},
+			},
+			wantError: "exactly one entry",
+		},
+		{
+			name: "file_intents path not in files_modified",
+			input: map[string]any{
+				"summary":        "Did the thing",
+				"files_modified": []any{"calc.go"},
+				"file_intents": []any{
+					map[string]any{"path": "other.go", "intent": "modified_existing", "rationale": "Updated existing file."},
+				},
+			},
+			wantError: "must match a files_modified entry",
+		},
+		{
+			name: "file_intents invalid enum",
+			input: map[string]any{
+				"summary":        "Did the thing",
+				"files_modified": []any{"calc.go"},
+				"file_intents": []any{
+					map[string]any{"path": "calc.go", "intent": "probably_test", "rationale": "Nope."},
+				},
+			},
+			wantError: "intent must be one of",
+		},
+		{
+			name: "file_intents missing rationale",
+			input: map[string]any{
+				"summary":        "Did the thing",
+				"files_modified": []any{"calc.go"},
+				"file_intents": []any{
+					map[string]any{"path": "calc.go", "intent": "modified_existing", "rationale": ""},
+				},
+			},
+			wantError: "rationale is required",
 		},
 	}
 
@@ -103,6 +179,7 @@ func TestDeveloperValidatorIsRegistered(t *testing.T) {
 	err := v(map[string]any{
 		"summary":        "nothing",
 		"files_modified": []any{},
+		"file_intents":   []any{},
 	})
 	if err == nil {
 		t.Error("registered developer validator must reject empty files_modified")

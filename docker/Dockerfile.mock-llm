@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build the mock-llm binary (no CGO needed — pure Go)
-RUN CGO_ENABLED=0 GOOS=linux go build -o /mock-llm ./cmd/mock-llm
+RUN CGO_ENABLED=0 GOOS=linux go build -buildvcs=false -o /mock-llm ./cmd/mock-llm
 
 # Runtime stage — minimal image
 FROM alpine:3.19

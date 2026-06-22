@@ -5,124 +5,18 @@ package projectmanager
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/test/integration/graphmock"
 	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	sgraph "github.com/c360studio/semstreams/graph"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
-
-// ---------------------------------------------------------------------------
-// Mock graph-ingest — handles triple writes and queries via Core NATS
-// ---------------------------------------------------------------------------
-
-type mockGraphIngest struct {
-	mu       sync.Mutex
-	entities map[string]*sgraph.EntityState
-}
-
-func startMockGraphIngest(t *testing.T, nc *natsclient.Client) *mockGraphIngest {
-	t.Helper()
-	m := &mockGraphIngest{entities: make(map[string]*sgraph.EntityState)}
-
-	nc.SubscribeForRequests(context.Background(), "graph.mutation.triple.add", func(_ context.Context, data []byte) ([]byte, error) {
-		var req sgraph.AddTripleRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			return json.Marshal(map[string]any{"success": false, "error": err.Error()})
-		}
-
-		m.mu.Lock()
-		defer m.mu.Unlock()
-
-		entity, ok := m.entities[req.Triple.Subject]
-		if !ok {
-			entity = &sgraph.EntityState{
-				ID:        req.Triple.Subject,
-				UpdatedAt: time.Now(),
-			}
-			m.entities[req.Triple.Subject] = entity
-		}
-
-		found := false
-		for i, tr := range entity.Triples {
-			if tr.Predicate == req.Triple.Predicate {
-				entity.Triples[i] = req.Triple
-				found = true
-				break
-			}
-		}
-		if !found {
-			entity.Triples = append(entity.Triples, req.Triple)
-		}
-		entity.Version++
-		entity.UpdatedAt = time.Now()
-
-		return json.Marshal(map[string]any{"success": true, "kv_revision": entity.Version})
-	})
-
-	nc.SubscribeForRequests(context.Background(), "graph.ingest.query.entity", func(_ context.Context, data []byte) ([]byte, error) {
-		var req struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(data, &req); err != nil {
-			return nil, err
-		}
-		m.mu.Lock()
-		entity, ok := m.entities[req.ID]
-		m.mu.Unlock()
-		if !ok {
-			return nil, fmt.Errorf("not found: %s", req.ID)
-		}
-		return json.Marshal(entity)
-	})
-
-	nc.SubscribeForRequests(context.Background(), "graph.ingest.query.prefix", func(_ context.Context, data []byte) ([]byte, error) {
-		var req struct {
-			Prefix string `json:"prefix"`
-			Limit  int    `json:"limit"`
-		}
-		if err := json.Unmarshal(data, &req); err != nil {
-			return nil, err
-		}
-		m.mu.Lock()
-		var matches []sgraph.EntityState
-		for id, entity := range m.entities {
-			if strings.HasPrefix(id, req.Prefix) {
-				matches = append(matches, *entity)
-				if req.Limit > 0 && len(matches) >= req.Limit {
-					break
-				}
-			}
-		}
-		m.mu.Unlock()
-		return json.Marshal(map[string]any{"entities": matches})
-	})
-
-	return m
-}
-
-func tripleValue(triples []message.Triple, predicate string) string {
-	for _, t := range triples {
-		if t.Predicate == predicate {
-			if s, ok := t.Object.(string); ok {
-				return s
-			}
-			data, _ := json.Marshal(t.Object)
-			return string(data)
-		}
-	}
-	return ""
-}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -135,7 +29,7 @@ func TestIntegration_SaveWritesTriples(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	mock := startMockGraphIngest(t, tc.Client)
+	mock := graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".semspec"), 0755); err != nil {
@@ -183,26 +77,24 @@ func TestIntegration_SaveWritesTriples(t *testing.T) {
 
 	// Verify triples were written to mock graph.
 	entityID := workflow.ProjectConfigEntityID("project")
-	mock.mu.Lock()
-	entity, ok := mock.entities[entityID]
-	mock.mu.Unlock()
+	entity, ok := mock.Entity(entityID)
 
 	if !ok {
 		t.Fatal("no entity written to graph")
 	}
 
-	if v := tripleValue(entity.Triples, semspec.ProjectConfigName); v != "test-project" {
+	if v := graphmock.TripleValue(entity.Triples, semspec.ProjectConfigName); v != "test-project" {
 		t.Errorf("triple name = %q, want test-project", v)
 	}
-	if v := tripleValue(entity.Triples, semspec.ProjectConfigType); v != "project" {
+	if v := graphmock.TripleValue(entity.Triples, semspec.ProjectConfigType); v != "project" {
 		t.Errorf("triple type = %q, want project", v)
 	}
-	if v := tripleValue(entity.Triples, semspec.ProjectConfigOrg); v != "testorg" {
+	if v := graphmock.TripleValue(entity.Triples, semspec.ProjectConfigOrg); v != "testorg" {
 		t.Errorf("triple org = %q, want testorg", v)
 	}
 
 	// Verify JSON blob triple is round-trippable.
-	jsonBlob := tripleValue(entity.Triples, semspec.ProjectConfigJSON)
+	jsonBlob := graphmock.TripleValue(entity.Triples, semspec.ProjectConfigJSON)
 	if jsonBlob == "" {
 		t.Fatal("no JSON blob triple written")
 	}
@@ -222,7 +114,7 @@ func TestIntegration_ReconcileGraphWins(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	mock := startMockGraphIngest(t, tc.Client)
+	mock := graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	semspecDir := filepath.Join(repoRoot, ".semspec")
@@ -268,9 +160,7 @@ func TestIntegration_ReconcileGraphWins(t *testing.T) {
 	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigName, "new-name")
 
 	// Verify mock has the entity.
-	mock.mu.Lock()
-	_, exists := mock.entities[entityID]
-	mock.mu.Unlock()
+	_, exists := mock.Entity(entityID)
 	if !exists {
 		t.Fatal("setup: entity not in mock graph")
 	}
@@ -304,7 +194,7 @@ func TestIntegration_ReconcileFileWins(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	mock := startMockGraphIngest(t, tc.Client)
+	mock := graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	semspecDir := filepath.Join(repoRoot, ".semspec")
@@ -346,9 +236,7 @@ func TestIntegration_ReconcileFileWins(t *testing.T) {
 	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigUpdatedAt, oldTime.Format(time.RFC3339))
 	_ = tw.WriteTriple(ctx, entityID, semspec.ProjectConfigJSON, string(jsonBlob))
 
-	mock.mu.Lock()
-	_, exists := mock.entities[entityID]
-	mock.mu.Unlock()
+	_, exists := mock.Entity(entityID)
 	if !exists {
 		t.Fatal("setup: entity not in mock graph")
 	}
@@ -373,7 +261,7 @@ func TestIntegration_ReconcileNoGraph(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	_ = startMockGraphIngest(t, tc.Client)
+	graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	semspecDir := filepath.Join(repoRoot, ".semspec")
@@ -407,7 +295,7 @@ func TestIntegration_StandardsSaveAndReconcile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	_ = startMockGraphIngest(t, tc.Client)
+	mock := graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".semspec"), 0755); err != nil {
@@ -440,8 +328,8 @@ func TestIntegration_StandardsSaveAndReconcile(t *testing.T) {
 	// Verify triples written.
 	entityID := workflow.ProjectConfigEntityID("standards")
 	jsonBlob := ""
-	if mock, ok := getMockEntity(t, tc.Client, ctx, entityID); ok {
-		jsonBlob = tripleValue(mock.Triples, semspec.ProjectConfigJSON)
+	if entity, ok := mock.Entity(entityID); ok {
+		jsonBlob = graphmock.TripleValue(entity.Triples, semspec.ProjectConfigJSON)
 	}
 	if jsonBlob == "" {
 		t.Fatal("no JSON blob triple for standards")
@@ -476,7 +364,7 @@ func TestIntegration_SaveApprovedConfig(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	mock := startMockGraphIngest(t, tc.Client)
+	mock := graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".semspec"), 0755); err != nil {
@@ -523,33 +411,16 @@ func TestIntegration_SaveApprovedConfig(t *testing.T) {
 	// Verify ApprovedAt triples were written for all three.
 	for _, configType := range []string{"project", "checklist", "standards"} {
 		entityID := workflow.ProjectConfigEntityID(configType)
-		mock.mu.Lock()
-		entity, ok := mock.entities[entityID]
-		mock.mu.Unlock()
+		entity, ok := mock.Entity(entityID)
 		if !ok {
 			t.Errorf("%s: entity not in graph", configType)
 			continue
 		}
-		approvedVal := tripleValue(entity.Triples, semspec.ProjectConfigApprovedAt)
+		approvedVal := graphmock.TripleValue(entity.Triples, semspec.ProjectConfigApprovedAt)
 		if approvedVal == "" {
 			t.Errorf("%s: expected approved_at triple, got empty", configType)
 		}
 	}
-}
-
-// getMockEntity queries the mock graph-ingest for an entity via NATS.
-func getMockEntity(t *testing.T, nc *natsclient.Client, ctx context.Context, entityID string) (*sgraph.EntityState, bool) {
-	t.Helper()
-	reqData, _ := json.Marshal(map[string]string{"id": entityID})
-	respData, err := nc.RequestWithRetry(ctx, "graph.ingest.query.entity", reqData, 5*time.Second, natsclient.DefaultRetryConfig())
-	if err != nil {
-		return nil, false
-	}
-	var entity sgraph.EntityState
-	if err := json.Unmarshal(respData, &entity); err != nil {
-		return nil, false
-	}
-	return &entity, true
 }
 
 // TestIntegration_ChecklistSaveAndReconcile verifies the full round-trip
@@ -559,7 +430,7 @@ func TestIntegration_ChecklistSaveAndReconcile(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	_ = startMockGraphIngest(t, tc.Client)
+	graphmock.Start(t, tc.Client)
 
 	repoRoot := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".semspec"), 0755); err != nil {

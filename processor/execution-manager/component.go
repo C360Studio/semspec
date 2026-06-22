@@ -35,6 +35,7 @@ import (
 	"time"
 
 	sscache "github.com/c360studio/semstreams/pkg/cache"
+	"github.com/c360studio/semstreams/pkg/retry"
 
 	"github.com/c360studio/semspec/internal/trajectory"
 	"github.com/c360studio/semspec/model"
@@ -74,6 +75,8 @@ const (
 	stageDevelop = "develop" // developer writes tests then implements code (full TDD cycle)
 	stageReview  = "review"  // LLM code review with verdict + feedback
 
+	planStatesBucketName = "PLAN_STATES"
+
 	// Phase values written to entity triples.
 	phaseDeveloping       = "developing"
 	phaseValidating       = "validating"
@@ -96,6 +99,13 @@ type worktreeManager interface {
 	MergeWorktree(ctx context.Context, taskID string, opts ...sandbox.MergeOption) (*sandbox.MergeResult, error)
 	ListWorktreeFiles(ctx context.Context, taskID string) ([]sandbox.FileEntry, error)
 	GitStatus(ctx context.Context, taskID string) (string, error)
+}
+
+// planKeyValue is the narrow read surface execution-manager needs from
+// PLAN_STATES. Keeping the cached type small makes startup-race tests honest
+// without faking the entire JetStream KeyValue API.
+type planKeyValue interface {
+	Get(ctx context.Context, key string) (jetstream.KeyValueEntry, error)
 }
 
 // newWorktreeManager returns a worktreeManager backed by the sandbox client,
@@ -132,11 +142,15 @@ type Component struct {
 	// store is the 3-layer execution store (cache + KV + triples).
 	store *executionStore
 
-	// planBucket is a best-effort read-only handle to PLAN_STATES so the
-	// TaskContext builder can surface plan-level fields (currently just the
-	// architect's TestSurface) to the developer prompt. nil when the bucket
-	// is unavailable at startup — callers treat that as "no test_surface".
-	planBucket jetstream.KeyValue
+	// planBucket is the required read-only handle to PLAN_STATES. Execution
+	// prompts depend on plan-level fields (contract constraints, test surface,
+	// harness profiles, upstream resolutions), so Start waits for plan-manager
+	// to create the bucket instead of allowing prompt assembly to run without it.
+	planBucket   planKeyValue
+	planBucketMu sync.Mutex
+	// planBucketOpener is an optional test hook. Production leaves it nil and
+	// waitForPlanBucket uses the component's NATS client.
+	planBucketOpener func(context.Context) (planKeyValue, error)
 
 	// activeExecs is a typed TTL cache mapping entityID → *taskExecution.
 	// Holds runtime pipeline state (mutexes, timers) for in-flight executions.
@@ -288,8 +302,11 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("create task routing cache: %w", err)
 	}
 
-	// Initialize EXECUTION_STATES bucket and store.
-	c.initExecutionStore(ctx)
+	// Initialize EXECUTION_STATES bucket/store and bind required PLAN_STATES
+	// dependency for prompt context.
+	if err := c.initExecutionStore(ctx); err != nil {
+		return err
+	}
 
 	// Reconcile: recover in-flight executions from graph state.
 	// Also populates the execution store from KV or graph.
@@ -397,11 +414,16 @@ func (c *Component) Stop(timeout time.Duration) error {
 // initAgentGraph connects to the ENTITY_STATES KV bucket and loads error
 // categories. When the bucket is unavailable, agent selection is disabled
 // and the orchestrator falls back to using the model from the trigger payload.
-// initExecutionStore creates the EXECUTION_STATES KV bucket and initializes
-// the 3-layer execution store. If bucket creation fails, the store operates
-// in cache+graph-only mode (graceful degradation).
-func (c *Component) initExecutionStore(ctx context.Context) {
+// initExecutionStore creates the EXECUTION_STATES KV bucket, initializes the
+// 3-layer execution store, and waits for the PLAN_STATES dependency used by
+// execution prompt assembly. EXECUTION_STATES KV can degrade to cache+graph
+// mode, but PLAN_STATES is load-bearing: without it developer/reviewer prompts
+// lose the authoritative plan contract.
+func (c *Component) initExecutionStore(ctx context.Context) error {
 	var kvStore *natsclient.KVStore
+	if c.natsClient == nil {
+		return errors.New("nats client unavailable")
+	}
 
 	bucket, err := c.natsClient.CreateKeyValueBucket(ctx, jetstream.KeyValueConfig{
 		Bucket:  c.config.ExecutionStateBucket,
@@ -417,41 +439,78 @@ func (c *Component) initExecutionStore(ctx context.Context) {
 
 	store, err := newExecutionStore(ctx, kvStore, c.tripleWriter, c.logger)
 	if err != nil {
-		c.logger.Error("Failed to create execution store", "error", err)
-		return
+		return fmt.Errorf("create execution store: %w", err)
 	}
 	c.store = store
 
-	// Best-effort read handle to PLAN_STATES for plan-level lookups during
-	// TaskContext population (test_surface injection). Failure is non-fatal.
-	if js, err := c.natsClient.JetStream(); err == nil {
-		if pb, err := js.KeyValue(ctx, "PLAN_STATES"); err == nil {
-			c.planBucket = pb
-		} else {
-			c.logger.Warn("PLAN_STATES bucket unavailable — test_surface injection disabled",
-				"error", err)
-		}
+	pb, err := c.waitForPlanBucket(ctx)
+	if err != nil {
+		return fmt.Errorf("wait for %s bucket: %w", planStatesBucketName, err)
 	}
+	c.cachePlanBucket(pb)
+	c.logger.Info("PLAN_STATES bucket ready for execution prompt context", "bucket", planStatesBucketName)
+	return nil
+}
+
+func (c *Component) waitForPlanBucket(ctx context.Context) (planKeyValue, error) {
+	if c.planBucketOpener != nil {
+		return retry.DoWithResult(ctx, retry.Config{
+			MaxAttempts:  30,
+			InitialDelay: 200 * time.Millisecond,
+			MaxDelay:     2 * time.Second,
+			Multiplier:   1.5,
+		}, func() (planKeyValue, error) {
+			return c.planBucketOpener(ctx)
+		})
+	}
+	if c.natsClient == nil {
+		return nil, errors.New("nats client unavailable")
+	}
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, err
+	}
+	return workflow.WaitForKVBucket(ctx, js, planStatesBucketName)
+}
+
+func (c *Component) currentPlanBucket() planKeyValue {
+	c.planBucketMu.Lock()
+	defer c.planBucketMu.Unlock()
+	return c.planBucket
+}
+
+func (c *Component) cachePlanBucket(bucket planKeyValue) bool {
+	if bucket == nil {
+		return false
+	}
+	c.planBucketMu.Lock()
+	defer c.planBucketMu.Unlock()
+	firstBind := c.planBucket == nil
+	c.planBucket = bucket
+	return firstBind
 }
 
 // readPlan loads the plan from PLAN_STATES once so a single dispatch can derive
 // all of its architecture-backed prompt context (test_surface, harness
 // profiles, upstream resolutions) from one fetch + unmarshal instead of one
-// per field. Returns nil when the bucket, key, or value is unavailable;
-// callers treat nil as "no plan context" and proceed.
-func (c *Component) readPlan(ctx context.Context, slug string) *workflow.Plan {
-	if c.planBucket == nil || slug == "" {
-		return nil
+// per field.
+func (c *Component) readPlan(ctx context.Context, slug string) (*workflow.Plan, error) {
+	if slug == "" {
+		return nil, errors.New("plan slug is empty")
 	}
-	entry, err := c.planBucket.Get(ctx, slug)
+	bucket := c.currentPlanBucket()
+	if bucket == nil {
+		return nil, fmt.Errorf("%s bucket unavailable", planStatesBucketName)
+	}
+	entry, err := bucket.Get(ctx, slug)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("get plan %q from %s: %w", slug, planStatesBucketName, err)
 	}
 	var plan workflow.Plan
 	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
-		return nil
+		return nil, fmt.Errorf("unmarshal plan %q from %s: %w", slug, planStatesBucketName, err)
 	}
-	return &plan
+	return &plan, nil
 }
 
 // planArchitecture nil-safely returns the plan's architecture document.
@@ -580,15 +639,11 @@ func cloneStringStringMap(in map[string]string) map[string]string {
 // missing, req missing, no hint set) — recovery hints are advisory,
 // not load-bearing. Best-effort.
 func (c *Component) lookupRecoveryHint(ctx context.Context, slug, requirementID string) string {
-	if c.planBucket == nil || slug == "" || requirementID == "" {
+	if slug == "" || requirementID == "" {
 		return ""
 	}
-	entry, err := c.planBucket.Get(ctx, slug)
-	if err != nil {
-		return ""
-	}
-	var plan workflow.Plan
-	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+	plan, err := c.readPlan(ctx, slug)
+	if err != nil || plan == nil {
 		return ""
 	}
 	for _, req := range plan.Requirements {
@@ -853,6 +908,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", parseErr)
 	} else {
 		exec.FilesModified = result.FilesModified
+		exec.DeveloperFileIntents = result.FileIntents
 		exec.DeveloperOutput = result.Output
 		exec.DeveloperLLMRequestIDs = result.LLMRequestIDs
 	}
@@ -870,9 +926,9 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		}
 		switch {
 		case parseErr != nil:
-			feedback = "Your previous attempt ended without calling submit_work. You must call submit_work with a summary and a non-empty files_modified array before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer." + scopeHint
+			feedback = "Your previous attempt ended without a valid submit_work call. You must call submit_work with a summary, a non-empty files_modified array, and one file_intents entry for every files_modified path before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer." + scopeHint
 		default:
-			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified." + scopeHint
+			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified and one file_intents entry for each path." + scopeHint
 		}
 		c.routeFixableRejection(ctx, exec, feedback)
 		return
@@ -1495,6 +1551,7 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	exec.TDDCycle++
 	exec.FilesModified = nil
 	exec.DeveloperOutput = nil
+	exec.DeveloperFileIntents = nil
 	exec.DeveloperLLMRequestIDs = nil
 	exec.ValidationPassed = false
 	exec.ValidationResults = nil
@@ -1592,7 +1649,7 @@ func resolveProvider(modelStr string) prompt.Provider {
 // assembler elides schema prose).
 // The ctx parameter is used for graph reads (error trends, lessons); context.WithoutCancel
 // is applied so these reads survive caller cancellation without inheriting the deadline.
-func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution, modelName string) *prompt.AssemblyContext {
+func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution, modelName string) (*prompt.AssemblyContext, error) {
 	var (
 		maxTokens int
 		endpoint  *ssmodel.EndpointConfig
@@ -1626,7 +1683,10 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		// Fetch the plan once; derive every architecture-backed field from it
 		// rather than re-fetching PLAN_STATES per field (3 reads × 3 roles per
 		// TDD cycle pre-consolidation).
-		plan := c.readPlan(ctx, exec.Slug)
+		plan, err := c.readPlan(ctx, exec.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("load plan %q for %s prompt: %w", exec.Slug, role, err)
+		}
 		asmCtx.ContractProjection = prompt.BuildContractProjection(plan, role)
 		asmCtx.TaskContext = &prompt.TaskContext{
 			PlanGoal:            exec.Title,
@@ -1641,11 +1701,9 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			FileScope:           append([]string(nil), exec.FileScope...),
 			Scenarios:           scenariosToSpecs(exec.Scenarios),
 			UpstreamResolutions: prompt.ProjectUpstreams(planArchitecture(plan)),
-		}
-		if plan != nil {
-			// #204: re-inject the plan's hard constraints into the dev/validator/
-			// reviewer prompt — decomposition otherwise never carries them here.
-			asmCtx.TaskContext.PlanConstraints = append([]string(nil), plan.Constraints...)
+			// #204: decomposition does not carry hard plan constraints into
+			// task execution, so re-inject them for dev/validator/reviewer.
+			PlanConstraints: append([]string(nil), plan.Constraints...),
 		}
 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
@@ -1697,7 +1755,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		}
 	}
 
-	return asmCtx
+	return asmCtx, nil
 }
 
 // availableToolNames returns the full list of tool names registered in the system.
@@ -1764,10 +1822,6 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		return
 	}
 
-	taskID := fmt.Sprintf("dev-%s-%s", exec.EntityID, uuid.New().String())
-	exec.DeveloperTaskID = taskID
-	c.taskRouting.Set(taskID, exec.EntityID)
-
 	// Resolve developer model via capability registry. config.Model is the
 	// component-level override knob; the canonical path is CapabilityCoding →
 	// registry. exec.Model (set upstream by req-executor when it dispatched
@@ -1781,7 +1835,16 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	// Assemble system prompt via fragment pipeline. Pass devModel so the
 	// assembler sees HasResponseFormat for the endpoint the dispatch will
 	// hit; ResponseFormat is attached on the TaskMessage below.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec, devModel)
+	asmCtx, err := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec, devModel)
+	if err != nil {
+		c.logger.Error("Cannot dispatch developer without plan context",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("developer prompt plan context unavailable: %v", err))
+		return
+	}
 	assembled := c.assembler.Assemble(asmCtx)
 
 	userPrompt := exec.Prompt
@@ -1811,6 +1874,10 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	if c.modelRegistry != nil {
 		endpoint = c.modelRegistry.GetEndpoint(devModel)
 	}
+
+	taskID := fmt.Sprintf("dev-%s-%s", exec.EntityID, uuid.New().String())
+	exec.DeveloperTaskID = taskID
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	task := &agentic.TaskMessage{
 		TaskID: taskID,
@@ -1984,6 +2051,7 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		ExecutionID:     uuid.New().String(),
 		Slug:            exec.Slug,
 		FilesModified:   exec.FilesModified,
+		FileIntents:     append([]payloads.FileIntent(nil), exec.DeveloperFileIntents...),
 		WorktreePath:    exec.WorktreePath,
 		TaskID:          exec.TaskID,
 		DeveloperLoopID: exec.DeveloperLoopID,
@@ -2098,10 +2166,6 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		return
 	}
 
-	taskID := fmt.Sprintf("rev-%s-%s", exec.EntityID, uuid.New().String())
-	exec.ReviewerTaskID = taskID
-	c.taskRouting.Set(taskID, exec.EntityID)
-
 	// Resolve the reviewer model up-front so buildAssemblyContext sees the
 	// endpoint the dispatch will actually hit (ResponseFormat support is
 	// per-endpoint and gates schema-prose elision in the assembled prompt).
@@ -2110,7 +2174,16 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	reviewerModel := model.ResolveModel(c.modelRegistry, c.config.CodeReviewerModel, model.CapabilityReviewing)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec, reviewerModel)
+	asmCtx, err := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec, reviewerModel)
+	if err != nil {
+		c.logger.Error("Cannot dispatch code reviewer without plan context",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("reviewer prompt plan context unavailable: %v", err))
+		return
+	}
 	assembled := c.assembler.Assemble(asmCtx)
 
 	// User prompt carries task context (what to review), not implementation
@@ -2135,6 +2208,10 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	if c.modelRegistry != nil {
 		reviewerEndpoint = c.modelRegistry.GetEndpoint(reviewerModel)
 	}
+
+	taskID := fmt.Sprintf("rev-%s-%s", exec.EntityID, uuid.New().String())
+	exec.ReviewerTaskID = taskID
+	c.taskRouting.Set(taskID, exec.EntityID)
 
 	task := &agentic.TaskMessage{
 		TaskID: taskID,
@@ -2468,14 +2545,14 @@ func (c *Component) publishTask(ctx context.Context, subject string, task *agent
 	baseMsg := message.NewBaseMessage(task.Schema(), task, componentName)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.logger.Debug("Failed to marshal task message", "error", err)
+		c.logger.Error("Failed to marshal task message", "error", err)
 		c.errors.Add(1)
 		return
 	}
 
 	if c.natsClient != nil {
 		if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-			c.logger.Debug("Failed to publish task", "subject", subject, "error", err)
+			c.logger.Error("Failed to publish task", "subject", subject, "error", err)
 			c.errors.Add(1)
 		}
 	}

@@ -4,18 +4,15 @@ package executionmanager
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/test/integration/graphmock"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	sgraph "github.com/c360studio/semstreams/graph"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -44,7 +41,7 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	defer cancel()
 
 	// Start mock graph-ingest to handle triple writes and queries.
-	startMockGraphIngest(t, tc.Client)
+	graphmock.Start(t, tc.Client)
 
 	tw := &graphutil.TripleWriter{
 		NATSClient:    tc.Client,
@@ -135,7 +132,7 @@ func TestIntegration_ReconcileSkipsTerminal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	startMockGraphIngest(t, tc.Client)
+	graphmock.Start(t, tc.Client)
 
 	tw := &graphutil.TripleWriter{
 		NATSClient:    tc.Client,
@@ -186,7 +183,7 @@ func TestIntegration_TripleRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	startMockGraphIngest(t, tc.Client)
+	graphmock.Start(t, tc.Client)
 
 	tw := &graphutil.TripleWriter{
 		NATSClient:    tc.Client,
@@ -222,120 +219,4 @@ func TestIntegration_TripleRoundTrip(t *testing.T) {
 
 func testLogger() *slog.Logger {
 	return slog.Default()
-}
-
-// mockGraphIngest provides in-memory graph-ingest NATS responders for testing.
-// It handles graph.mutation.triple.add and graph.ingest.query.entity/prefix.
-type mockGraphIngest struct {
-	mu       sync.Mutex
-	entities map[string]*sgraph.EntityState // entityID → state
-}
-
-func startMockGraphIngest(t *testing.T, nc *natsclient.Client) *mockGraphIngest {
-	t.Helper()
-	m := &mockGraphIngest{entities: make(map[string]*sgraph.EntityState)}
-
-	// Handle triple writes.
-	nc.SubscribeForRequests(context.Background(), "graph.mutation.triple.add", func(_ context.Context, data []byte) ([]byte, error) {
-		var req sgraph.AddTripleRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			return json.Marshal(map[string]any{"success": false, "error": err.Error()})
-		}
-
-		m.mu.Lock()
-		defer m.mu.Unlock()
-
-		entity, ok := m.entities[req.Triple.Subject]
-		if !ok {
-			entity = &sgraph.EntityState{
-				ID:        req.Triple.Subject,
-				UpdatedAt: time.Now(),
-			}
-			m.entities[req.Triple.Subject] = entity
-		}
-
-		// Upsert triple — replace existing predicate or append.
-		found := false
-		for i, t := range entity.Triples {
-			if t.Predicate == req.Triple.Predicate {
-				entity.Triples[i] = req.Triple
-				found = true
-				break
-			}
-		}
-		if !found {
-			entity.Triples = append(entity.Triples, req.Triple)
-		}
-		entity.Version++
-		entity.UpdatedAt = time.Now()
-
-		return json.Marshal(map[string]any{"success": true, "kv_revision": entity.Version})
-	})
-
-	// Handle entity queries.
-	nc.SubscribeForRequests(context.Background(), "graph.ingest.query.entity", func(_ context.Context, data []byte) ([]byte, error) {
-		var req struct {
-			ID string `json:"id"`
-		}
-		if err := json.Unmarshal(data, &req); err != nil {
-			return nil, err
-		}
-
-		m.mu.Lock()
-		entity, ok := m.entities[req.ID]
-		m.mu.Unlock()
-
-		if !ok {
-			return nil, fmt.Errorf("not found: %s", req.ID)
-		}
-		return json.Marshal(entity)
-	})
-
-	// Handle prefix queries.
-	nc.SubscribeForRequests(context.Background(), "graph.ingest.query.prefix", func(_ context.Context, data []byte) ([]byte, error) {
-		var req struct {
-			Prefix string `json:"prefix"`
-			Limit  int    `json:"limit"`
-		}
-		if err := json.Unmarshal(data, &req); err != nil {
-			return nil, err
-		}
-
-		m.mu.Lock()
-		var matches []sgraph.EntityState
-		for id, entity := range m.entities {
-			if len(id) >= len(req.Prefix) && id[:len(req.Prefix)] == req.Prefix {
-				matches = append(matches, *entity)
-				if req.Limit > 0 && len(matches) >= req.Limit {
-					break
-				}
-			}
-		}
-		m.mu.Unlock()
-
-		return json.Marshal(map[string]any{"entities": matches})
-	})
-
-	// Flush ensures all subscriptions are registered on the server before any
-	// caller fires requests. Without this, there is a race between the async
-	// subscribe round-trip and the first WriteTriple call.
-	if conn := nc.GetConnection(); conn != nil {
-		_ = conn.Flush()
-	}
-
-	return m
-}
-
-// tripleValue is a convenience to convert message.Triple objects to string.
-func tripleValue(triples []message.Triple, predicate string) string {
-	for _, t := range triples {
-		if t.Predicate == predicate {
-			if s, ok := t.Object.(string); ok {
-				return s
-			}
-			data, _ := json.Marshal(t.Object)
-			return string(data)
-		}
-	}
-	return ""
 }

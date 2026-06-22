@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Added Sub function with passing unit test\", \"files_modified\": [\"pkg/math/sub.go\", \"pkg/math/sub_test.go\"]}"
+        "arguments": "{\"summary\":\"Added Sub function with passing unit test\",\"files_modified\":[\"pkg/math/sub.go\",\"pkg/math/sub_test.go\"],\"file_intents\":[{\"path\":\"pkg/math/sub.go\",\"intent\":\"owned_deliverable\",\"rationale\":\"New implementation file owned by the scenario.\"},{\"path\":\"pkg/math/sub_test.go\",\"intent\":\"companion_test\",\"rationale\":\"Companion test file covering the changed implementation.\"}]}"
       }
     }
   ],

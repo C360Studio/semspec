@@ -242,6 +242,7 @@ These are not stylistic preferences. The compiler / interpreter / type checker e
 
 Honest reporting is mandatory:
 - files_modified in your submit_work call MUST list every file you actually created or changed in this worktree, and MUST NOT list files you only intended to write or wrote to /tmp.
+- file_intents in your submit_work call MUST contain exactly one entry for every files_modified path. Use intent="modified_existing" for edits to existing files, "owned_deliverable" for new in-scope implementation files, "companion_test" for tests that belong with an owned implementation file, "planning_gap_required_file" when the implementation genuinely requires a new source/test path outside your declared file scope, and "scratch_or_probe" only to admit a throwaway file that you must remove before submitting.
 - The system runs ` + "`git status`" + ` against the worktree the moment your loop ends, BEFORE the validator or reviewer runs. If files_modified is non-empty but git status is empty, your submit is rejected immediately as a claim/observation mismatch — no validator dispatch, no reviewer dispatch, just a rejection that consumes a TDD cycle. Caught 2026-05-03 on openrouter @easy /health where a developer ran ` + "`cat main.go`" + ` three times and submitted with files_modified=["main.go"] plus a confident multi-sentence summary about implementing a /health endpoint. Zero write commands had been issued. Reading a file is not modifying it. ` + "`cat`" + `, ` + "`ls`" + `, ` + "`grep`" + `, and ` + "`find`" + ` are read-only — they do not change the worktree.
 - The actual write commands look like: ` + "`cat > path << 'EOF' ... EOF`" + `, ` + "`tee path < input`" + `, ` + "`sed -i 's/old/new/' path`" + `, ` + "`printf '...' >> path`" + `, ` + "`mv src dst`" + `, ` + "`cp src dst`" + `. If your bash transcript for this task contains ONLY read commands and you call submit_work with non-empty files_modified, you have hallucinated the work and the system will catch it.
 - If you're unsure whether a write succeeded (heredoc syntax, redirect path, sandbox quoting), run bash('git status') BEFORE submit_work. Empty output means you have not written anything yet — go write it before submitting.
@@ -462,10 +463,14 @@ qa-reviewer judges coverage against this declared surface.`)
 
 {
   "summary": "Implemented /goodbye endpoint with tests",
-  "files_modified": ["api/app.py", "api/test_goodbye.py"]
+  "files_modified": ["api/app.py", "api/test_goodbye.py"],
+  "file_intents": [
+    {"path": "api/app.py", "intent": "modified_existing", "rationale": "Updated the existing API app to add the endpoint."},
+    {"path": "api/test_goodbye.py", "intent": "companion_test", "rationale": "Added tests for the endpoint behavior."}
+  ]
 }
 
-Required: summary (string), files_modified (array of file paths you created or changed).`,
+Required: summary (string), files_modified (array of file paths you created or changed), file_intents (array with one path/intent/rationale object per files_modified path).`,
 				`Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 			),
 		},

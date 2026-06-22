@@ -847,16 +847,13 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		}
 	}
 
-	// The plan is now approved. The coordinator's KV watcher sees the status
-	// change and drives the pipeline forward (requirement generation → scenario
-	// generation → review). No manual dispatch needed — the KV write IS the event.
-	//
-	// For round 2 (requirements+scenarios already exist), check if we need to
-	// advance to ready_for_execution.
+	// The plan is now approved. For round 2 (requirements+scenarios already
+	// exist), advancing to ready_for_execution must also dispatch execution
+	// when an execution publisher is available.
 	if len(plan.Requirements) > 0 && len(plan.Scenarios) > 0 {
 		if plan.Status != workflow.StatusReadyForExecution && plan.Status != workflow.StatusImplementing {
 			c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
-			if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
+			if err := c.transitionToReadyForExecution(r.Context(), plan); err != nil {
 				c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
 				http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
 				return
@@ -1359,8 +1356,9 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 			return
 		}
 	} else {
-		// Transition back to ready_for_execution so the orchestrator picks it up.
-		if err := c.setPlanStatusCached(pubCtx, plan, workflow.StatusReadyForExecution); err != nil {
+		// Transition back to ready_for_execution and dispatch the selected
+		// requirements when an execution publisher is available.
+		if err := c.transitionToReadyForExecution(pubCtx, plan, retryReqIDs); err != nil {
 			c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
 			writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
 			return

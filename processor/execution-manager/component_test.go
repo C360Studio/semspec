@@ -1168,7 +1168,7 @@ func TestHandleDeveloperComplete_EmptyFilesModified_RoutesToRetry(t *testing.T) 
 	event := &agentic.LoopCompletedEvent{
 		TaskID:       exec.DeveloperTaskID,
 		Outcome:      agentic.OutcomeSuccess,
-		Result:       `{"summary": "done", "files_modified": []}`,
+		Result:       `{"summary": "done", "files_modified": [], "file_intents": []}`,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 	}
@@ -1213,7 +1213,7 @@ func TestHandleDeveloperComplete_HallucinatedClaim_RoutesToRetry(t *testing.T) {
 	event := &agentic.LoopCompletedEvent{
 		TaskID:       exec.DeveloperTaskID,
 		Outcome:      agentic.OutcomeSuccess,
-		Result:       `{"summary": "Implemented /health endpoint that returns HTTP 200", "files_modified": ["main.go"]}`,
+		Result:       `{"summary": "Implemented /health endpoint that returns HTTP 200", "files_modified": ["main.go"], "file_intents": [{"path": "main.go", "intent": "modified_existing", "rationale": "Claimed existing endpoint implementation was changed."}]}`,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 	}
@@ -1283,7 +1283,7 @@ func TestHandleDeveloperComplete_LeakedToWorkspace_RoutesPathConfusion(t *testin
 	event := &agentic.LoopCompletedEvent{
 		TaskID:       exec.DeveloperTaskID,
 		Outcome:      agentic.OutcomeSuccess,
-		Result:       `{"summary": "Configured gradle build with test deps", "files_modified": ["build.gradle", "src/test/java/org/sensorhub/MeshtasticDriverBuildTest.java"]}`,
+		Result:       `{"summary": "Configured gradle build with test deps", "files_modified": ["build.gradle", "src/test/java/org/sensorhub/MeshtasticDriverBuildTest.java"], "file_intents": [{"path": "build.gradle", "intent": "modified_existing", "rationale": "Claimed existing build configuration was updated."}, {"path": "src/test/java/org/sensorhub/MeshtasticDriverBuildTest.java", "intent": "companion_test", "rationale": "Claimed companion test coverage was added."}]}`,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 	}

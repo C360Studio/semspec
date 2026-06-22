@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
@@ -46,6 +47,53 @@ func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
 	}
 	if got.Plan.Status != workflow.StatusApproved {
 		t.Errorf("Plan.Status = %q, want %q", got.Plan.Status, workflow.StatusApproved)
+	}
+}
+
+func TestHandlePromotePlan_Round2ReentryAutoStartsExecution(t *testing.T) {
+	c := setupTestComponent(t)
+	slug := "promote-round2-reentry"
+
+	plan := setupTestPlan(t, c, slug)
+	plan.Approved = true
+	plan.Status = workflow.StatusScenariosReviewed
+	plan.Requirements = []workflow.Requirement{{ID: "requirement.1", Title: "Fix ownership gate"}}
+	plan.Stories = []workflow.Story{{ID: "story.1", RequirementIDs: []string{"requirement.1"}, Status: workflow.StoryStatusReady}}
+	plan.Scenarios = []workflow.Scenario{{ID: "scenario.1", RequirementID: "requirement.1", StoryID: "story.1"}}
+	_ = c.plans.save(context.Background(), plan)
+
+	published := false
+	c.orchestratorTriggerPublisher = func(_ context.Context, got *payloads.ScenarioOrchestrationTrigger) error {
+		published = true
+		if got.PlanSlug != slug {
+			t.Fatalf("published slug = %q, want %q", got.PlanSlug, slug)
+		}
+		if len(got.Requirements) != 1 || got.Requirements[0].ID != "requirement.1" {
+			t.Fatalf("published requirements = %v, want requirement.1", got.Requirements)
+		}
+		if len(got.Scenarios) != 1 || got.Scenarios[0].ID != "scenario.1" {
+			t.Fatalf("published scenarios = %v, want scenario.1", got.Scenarios)
+		}
+		return nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-manager/plans/"+slug+"/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, slug)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !published {
+		t.Fatal("expected round-2 promote to publish scenario orchestrator trigger")
+	}
+	got, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan missing after promote")
+	}
+	if got.EffectiveStatus() != workflow.StatusImplementing {
+		t.Fatalf("status = %s, want implementing", got.EffectiveStatus())
 	}
 }
 

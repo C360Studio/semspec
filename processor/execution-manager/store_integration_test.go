@@ -35,11 +35,7 @@ func TestIntegration_ExecutionStoreCreated(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	comp := newExecIntegrationComponent(t, tc)
-	if err := comp.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+	comp := startExecIntegrationComponent(t, tc, ctx)
 
 	if comp.store == nil {
 		t.Fatal("store is nil after Start()")
@@ -73,11 +69,7 @@ func TestIntegration_TaskCreateMutation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	comp := newExecIntegrationComponent(t, tc)
-	if err := comp.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+	comp := startExecMutationIntegrationComponent(t, tc, ctx)
 
 	// Send task.create mutation via request/reply.
 	createReq := TaskCreateRequest{
@@ -120,8 +112,8 @@ func TestIntegration_TaskCreateMutation(t *testing.T) {
 	if exec.TaskID != "task-001" {
 		t.Errorf("TaskID = %q, want %q", exec.TaskID, "task-001")
 	}
-	if exec.Stage != "developing" {
-		t.Errorf("Stage = %q, want %q", exec.Stage, "developing")
+	if exec.Stage != "pending" {
+		t.Errorf("Stage = %q, want %q", exec.Stage, "pending")
 	}
 	if exec.MaxTDDCycles != 3 {
 		t.Errorf("MaxTDDCycles = %d, want %d", exec.MaxTDDCycles, 3)
@@ -152,11 +144,7 @@ func TestIntegration_TaskPhaseMutation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	comp := newExecIntegrationComponent(t, tc)
-	if err := comp.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+	comp := startExecMutationIntegrationComponent(t, tc, ctx)
 
 	// Create task.
 	createReq, _ := json.Marshal(TaskCreateRequest{
@@ -223,11 +211,7 @@ func TestIntegration_ReqCreateMutation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	comp := newExecIntegrationComponent(t, tc)
-	if err := comp.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+	comp := startExecMutationIntegrationComponent(t, tc, ctx)
 
 	createReq, _ := json.Marshal(ReqCreateRequest{
 		Slug:          "plan-b",
@@ -257,8 +241,8 @@ func TestIntegration_ReqCreateMutation(t *testing.T) {
 	if !ok {
 		t.Fatalf("store.getReq(%q) not found", expectedKey)
 	}
-	if exec.Stage != "decomposing" {
-		t.Errorf("Stage = %q, want %q", exec.Stage, "decomposing")
+	if exec.Stage != "pending" {
+		t.Errorf("Stage = %q, want %q", exec.Stage, "pending")
 	}
 	if exec.RequirementID != "req-001" {
 		t.Errorf("RequirementID = %q, want %q", exec.RequirementID, "req-001")
@@ -288,11 +272,7 @@ func TestIntegration_TaskCompleteTerminal(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	comp := newExecIntegrationComponent(t, tc)
-	if err := comp.Start(ctx); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
+	comp := startExecMutationIntegrationComponent(t, tc, ctx)
 
 	// Create.
 	createReq, _ := json.Marshal(TaskCreateRequest{

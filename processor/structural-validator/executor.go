@@ -140,7 +140,7 @@ func (e *Executor) Execute(ctx context.Context, trigger *payloads.ValidationRequ
 	// the 2026-06-13 mavlink-hard README assembly wedge upstream of merge
 	// (issues #175 / #177).
 	results = append(results,
-		e.runFileOwnershipContainment(ctx, workflow.NormalizeFilePaths(trigger.FilesOwned), workDir, runner)...)
+		e.runFileOwnershipContainment(ctx, workflow.NormalizeFilePaths(trigger.FilesOwned), trigger.FileIntents, workDir, runner)...)
 
 	// Advisory anti-mock governance check — only when test files are present.
 	if hasTestFiles(filesModified) {

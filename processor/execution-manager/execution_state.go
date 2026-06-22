@@ -31,6 +31,7 @@ type taskExecution struct {
 	// Raw LLM outputs (large blobs, not worth persisting to KV).
 	DeveloperOutput        json.RawMessage
 	DeveloperLLMRequestIDs []string
+	DeveloperFileIntents   []payloads.FileIntent
 	ValidationResults      []payloads.CheckResult
 	ReviewerLLMRequestIDs  []string
 

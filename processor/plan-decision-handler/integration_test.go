@@ -42,7 +42,7 @@ func seedPlanToKV(t *testing.T, nc *natsclient.Client, plan *workflow.Plan) {
 	if err != nil {
 		t.Fatalf("seedPlanToKV: marshal plan: %v", err)
 	}
-	if err := kvStore.Put(ctx, plan.Slug, data); err != nil {
+	if _, err := kvStore.Put(ctx, plan.Slug, data); err != nil {
 		t.Fatalf("seedPlanToKV: put %q: %v", plan.Slug, err)
 	}
 }

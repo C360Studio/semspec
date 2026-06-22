@@ -28,6 +28,14 @@ func ownedSetOf(paths ...string) map[string]struct{} {
 	return m
 }
 
+func intentsOf(intent string, paths ...string) []payloads.FileIntent {
+	out := make([]payloads.FileIntent, 0, len(paths))
+	for _, p := range workflow.NormalizeFilePaths(paths) {
+		out = append(out, payloads.FileIntent{Path: p, Intent: intent, Rationale: "test fixture"})
+	}
+	return out
+}
+
 func TestParsePorcelain(t *testing.T) {
 	in := " M src/A.java\n" +
 		"?? patch.diff\n" +
@@ -123,6 +131,7 @@ func TestDecideOwnership(t *testing.T) {
 		name                  string
 		porcelain             string
 		owned                 map[string]struct{}
+		intents               []payloads.FileIntent
 		wantJunk              []string // matched by path prefix (pattern suffix ignored)
 		wantModDocUnowned     []string // hard-fail: non-owner co-writing a shared doc
 		wantModUnowned        []string // advisory: non-owner editing non-doc
@@ -130,6 +139,9 @@ func TestDecideOwnership(t *testing.T) {
 		wantNewOutOfTerritory []string // hard-fail: new source/test outside territory
 		wantNewTopology       []string // hard-fail: new topology-controlled project/build file
 		wantRootScratch       []string // hard-fail (dev-retry): root-level source scratch
+		wantDeclaredScratch   []string // hard-fail (dev-retry): worktree path declared scratch_or_probe
+		wantUnclassified      []string // hard-fail (dev-retry): new source/test missing intent
+		wantIntentMismatch    []string // hard-fail (dev-retry): intent contradicts git status
 	}{
 		{
 			name:              "modified non-owned DOC (README wedge) hard-fails",
@@ -155,32 +167,92 @@ func TestDecideOwnership(t *testing.T) {
 			owned:     ownedSetOf("src/A.java"),
 		},
 		{
-			name:      "new owned source file is clean",
+			name:      "new owned source file with declared deliverable intent is clean",
 			porcelain: "A  src/A.java",
 			owned:     ownedSetOf("src/A.java"),
+			intents:   intentsOf(payloads.FileIntentOwnedDeliverable, "src/A.java"),
 		},
 		{
 			name:           "new unowned source (class split) in same dir is advisory",
 			porcelain:      "?? src/FooHelper.java",
 			owned:          ownedSetOf("src/Foo.java"),
+			intents:        intentsOf(payloads.FileIntentOwnedDeliverable, "src/FooHelper.java"),
 			wantNewUnowned: []string{"src/FooHelper.java"},
 		},
 		{
 			name:           "new unowned source in an OWNED subdirectory is advisory (in territory)",
 			porcelain:      "?? src/main/java/com/x/internal/Helper.java",
 			owned:          ownedSetOf("src/main/java/com/x/Driver.java"),
+			intents:        intentsOf(payloads.FileIntentOwnedDeliverable, "src/main/java/com/x/internal/Helper.java"),
 			wantNewUnowned: []string{"src/main/java/com/x/internal/Helper.java"},
 		},
 		{
 			name:                  "new unowned source OUTSIDE territory is an ownership gap (hard fail)",
 			porcelain:             "?? src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java",
 			owned:                 ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:               intentsOf(payloads.FileIntentPlanningGapRequiredFile, "src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java"),
 			wantNewOutOfTerritory: []string{"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java"},
+		},
+		{
+			name:                "nested Dummy.java declared scratch_or_probe is dev-cleanup, NOT a planning gap",
+			porcelain:           "?? src/main/java/Dummy.java",
+			owned:               ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:             intentsOf(payloads.FileIntentScratchOrProbe, "src/main/java/Dummy.java"),
+			wantDeclaredScratch: []string{"src/main/java/Dummy.java"},
+		},
+		{
+			name:                "in-territory DummyTest.java declared scratch_or_probe is still dev-cleanup",
+			porcelain:           "?? src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java",
+			owned:               ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:             intentsOf(payloads.FileIntentScratchOrProbe, "src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java"),
+			wantDeclaredScratch: []string{"src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java"},
+		},
+		{
+			name:                "Go dummy_test.go declared scratch_or_probe is dev-cleanup, NOT a planning gap",
+			porcelain:           "?? pkg/driver/dummy_test.go",
+			owned:               ownedSetOf("internal/driver/driver.go"),
+			intents:             intentsOf(payloads.FileIntentScratchOrProbe, "pkg/driver/dummy_test.go"),
+			wantDeclaredScratch: []string{"pkg/driver/dummy_test.go"},
+		},
+		{
+			name:                "TypeScript scratch.spec.tsx declared scratch_or_probe is dev-cleanup, NOT a planning gap",
+			porcelain:           "?? web/src/scratch.spec.tsx",
+			owned:               ownedSetOf("web/src/Driver.tsx"),
+			intents:             intentsOf(payloads.FileIntentScratchOrProbe, "web/src/scratch.spec.tsx"),
+			wantDeclaredScratch: []string{"web/src/scratch.spec.tsx"},
+		},
+		{
+			name:                "Python temp.py declared scratch_or_probe is dev-cleanup, NOT a planning gap",
+			porcelain:           "?? scripts/temp.py",
+			owned:               ownedSetOf("src/driver/main.py"),
+			intents:             intentsOf(payloads.FileIntentScratchOrProbe, "scripts/temp.py"),
+			wantDeclaredScratch: []string{"scripts/temp.py"},
+		},
+		{
+			name:             "new source without file_intents is dev-retry, NOT a planning gap",
+			porcelain:        "?? src/main/java/Dummy.java",
+			owned:            ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantUnclassified: []string{"src/main/java/Dummy.java"},
+		},
+		{
+			name:               "new source declared modified_existing is dev-retry, NOT a planning gap",
+			porcelain:          "?? src/main/java/Dummy.java",
+			owned:              ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:            intentsOf(payloads.FileIntentModifiedExisting, "src/main/java/Dummy.java"),
+			wantIntentMismatch: []string{"src/main/java/Dummy.java declared modified_existing but git status reports a new file"},
+		},
+		{
+			name:                  "legitimate source whose name contains probe still remains a planning gap",
+			porcelain:             "?? src/main/java/org/acme/probe/TelemetryProbe.java",
+			owned:                 ownedSetOf("src/main/java/org/acme/driver/Driver.java"),
+			intents:               intentsOf(payloads.FileIntentPlanningGapRequiredFile, "src/main/java/org/acme/probe/TelemetryProbe.java"),
+			wantNewOutOfTerritory: []string{"src/main/java/org/acme/probe/TelemetryProbe.java"},
 		},
 		{
 			name:                  "new unowned TEST outside territory is an ownership gap (hard fail)",
 			porcelain:             "?? src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java",
 			owned:                 ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:               intentsOf(payloads.FileIntentCompanionTest, "src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java"),
 			wantNewOutOfTerritory: []string{"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java"},
 		},
 		{
@@ -191,9 +263,10 @@ func TestDecideOwnership(t *testing.T) {
 			// the ADR-049 ownership gap).
 		},
 		{
-			name:            "root-level source scratch (FindClass.java) is dev-cleanup, NOT a planning gap and NOT advisory",
+			name:            "root-level source cannot be a deliverable, NOT a planning gap and NOT advisory",
 			porcelain:       "?? FindClass.java",
 			owned:           ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:         intentsOf(payloads.FileIntentOwnedDeliverable, "FindClass.java"),
 			wantRootScratch: []string{"FindClass.java"},
 		},
 		{
@@ -201,6 +274,13 @@ func TestDecideOwnership(t *testing.T) {
 			porcelain:      "?? NOTES.txt",
 			owned:          ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
 			wantNewUnowned: []string{"NOTES.txt"},
+		},
+		{
+			name:                "root-level NON-source declared scratch_or_probe is dev-cleanup",
+			porcelain:           "?? NOTES.txt",
+			owned:               ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			intents:             intentsOf(payloads.FileIntentScratchOrProbe, "NOTES.txt"),
+			wantDeclaredScratch: []string{"NOTES.txt"},
 		},
 		{
 			name:            "new root settings.gradle is topology planning gap",
@@ -223,6 +303,7 @@ func TestDecideOwnership(t *testing.T) {
 			name:      "new Java companion test for owned main class is clean",
 			porcelain: "?? src/test/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystemTest.java",
 			owned:     ownedSetOf("src/main/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystem.java"),
+			intents:   intentsOf(payloads.FileIntentCompanionTest, "src/test/java/org/sensorhub/impl/sensor/mavsdk/UnmannedSystemTest.java"),
 		},
 		{
 			name:           "new unowned DOC outside territory stays advisory (hygiene only)",
@@ -231,9 +312,10 @@ func TestDecideOwnership(t *testing.T) {
 			wantNewUnowned: []string{"docs/TRADEOFFS.md"},
 		},
 		{
-			name:           "empty owned set leaves a new source advisory (no story context)",
+			name:           "empty owned set with declared deliverable leaves a new source advisory (no story context)",
 			porcelain:      "?? src/New.java",
 			owned:          ownedSetOf(), // no declared territory → cannot be 'outside' it
+			intents:        intentsOf(payloads.FileIntentOwnedDeliverable, "src/New.java"),
 			wantNewUnowned: []string{"src/New.java"},
 		},
 		{
@@ -243,7 +325,8 @@ func TestDecideOwnership(t *testing.T) {
 			// their implementation_files → it is in this story's FilesOwned → the
 			// node gate treats it as owned (clean), and DeriveStoryScheduling
 			// serializes the sharing stories. No ownership gap.
-			owned: ownedSetOf("src/driver/mavsdk/MavsdkDriver.java", "src/driver/mavsdk/Telemetry.java"),
+			owned:   ownedSetOf("src/driver/mavsdk/MavsdkDriver.java", "src/driver/mavsdk/Telemetry.java"),
+			intents: intentsOf(payloads.FileIntentOwnedDeliverable, "src/driver/mavsdk/MavsdkDriver.java"),
 		},
 		{
 			name:      "patch.diff committed is junk",
@@ -306,7 +389,7 @@ func TestDecideOwnership(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			v := decideOwnership(parsePorcelain(tc.porcelain), tc.owned)
+			v := decideOwnership(parsePorcelain(tc.porcelain), tc.owned, tc.intents)
 
 			// Junk findings carry a "(pattern)" suffix; compare on the path prefix.
 			gotJunkPaths := make([]string, len(v.JunkViolations))
@@ -333,6 +416,15 @@ func TestDecideOwnership(t *testing.T) {
 			}
 			if !equalSets(v.RootScratch, tc.wantRootScratch) {
 				t.Errorf("rootScratch = %v, want %v", sortedCopy(v.RootScratch), sortedCopy(tc.wantRootScratch))
+			}
+			if !equalSets(v.DeclaredScratch, tc.wantDeclaredScratch) {
+				t.Errorf("declaredScratch = %v, want %v", sortedCopy(v.DeclaredScratch), sortedCopy(tc.wantDeclaredScratch))
+			}
+			if !equalSets(v.UnclassifiedNewSource, tc.wantUnclassified) {
+				t.Errorf("unclassifiedNewSource = %v, want %v", sortedCopy(v.UnclassifiedNewSource), sortedCopy(tc.wantUnclassified))
+			}
+			if !equalSets(v.MismatchedFileIntent, tc.wantIntentMismatch) {
+				t.Errorf("mismatchedFileIntent = %v, want %v", sortedCopy(v.MismatchedFileIntent), sortedCopy(tc.wantIntentMismatch))
 			}
 		})
 	}
@@ -377,7 +469,10 @@ func TestDecideOwnership_NewUnownedSourceFile_FailsContainment(t *testing.T) {
 			"?? src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java\n",
 	)
 
-	v := decideOwnership(changes, owned)
+	v := decideOwnership(changes, owned, intentsOf(payloads.FileIntentPlanningGapRequiredFile,
+		"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java",
+		"src/test/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriverTest.java",
+	))
 
 	if v.clean() {
 		t.Fatalf("decideOwnership treated newly-created unowned SOURCE/TEST files as advisory "+
@@ -419,7 +514,7 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 
 	t.Run("empty owned skips gate (no check row)", func(t *testing.T) {
 		runner := &fakeRunner{stdout: " M README.md"}
-		results := e.runFileOwnershipContainment(context.Background(), nil, "/wt", runner)
+		results := e.runFileOwnershipContainment(context.Background(), nil, nil, "/wt", runner)
 		if len(results) != 0 {
 			t.Fatalf("expected no check rows when owned is empty, got %+v", results)
 		}
@@ -431,7 +526,7 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("modified-unowned DOC hard fails the required gate", func(t *testing.T) {
 		runner := &fakeRunner{stdout: " M README.md\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		results := e.runFileOwnershipContainment(context.Background(), owned, nil, "/wt", runner)
 		c := findResult(t, results, "file-ownership-containment")
 		if c.Passed || !c.Required {
 			t.Fatalf("expected required FAIL, got %+v", c)
@@ -444,7 +539,7 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("modified-unowned non-doc (build.gradle) is advisory, gate passes", func(t *testing.T) {
 		runner := &fakeRunner{stdout: " M build.gradle\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		results := e.runFileOwnershipContainment(context.Background(), owned, nil, "/wt", runner)
 		c := findResult(t, results, "file-ownership-containment")
 		if !c.Passed {
 			t.Fatalf("build-file edit by a non-owner must NOT hard-fail (usually mergeable), got %+v", c)
@@ -458,7 +553,7 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("junk hard fails the required gate", func(t *testing.T) {
 		runner := &fakeRunner{stdout: "?? patch.diff\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		results := e.runFileOwnershipContainment(context.Background(), owned, nil, "/wt", runner)
 		c := findResult(t, results, "file-ownership-containment")
 		if c.Passed {
 			t.Fatalf("expected required FAIL on patch.diff, got %+v", c)
@@ -471,7 +566,8 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("in-territory new-unowned is advisory, gate passes", func(t *testing.T) {
 		runner := &fakeRunner{stdout: "?? src/Helper.java\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		intents := intentsOf(payloads.FileIntentOwnedDeliverable, "src/Helper.java")
+		results := e.runFileOwnershipContainment(context.Background(), owned, intents, "/wt", runner)
 		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
 		if !c.Passed {
 			t.Fatalf("required gate should pass when only in-territory new-unowned present, got %+v", c)
@@ -488,7 +584,8 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("out-of-territory new source emits a planning-gap Required failure", func(t *testing.T) {
 		runner := &fakeRunner{stdout: "?? other/pkg/New.java\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		intents := intentsOf(payloads.FileIntentPlanningGapRequiredFile, "other/pkg/New.java")
+		results := e.runFileOwnershipContainment(context.Background(), owned, intents, "/wt", runner)
 		// The base containment row (junk/doc) still passes — the gap is its own row.
 		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
 		if !c.Passed {
@@ -503,10 +600,47 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 		}
 	})
 
+	t.Run("declared scratch_or_probe emits dev-cleanup containment failure, not planning-gap recovery", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? src/main/java/Dummy.java\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		intents := intentsOf(payloads.FileIntentScratchOrProbe, "src/main/java/Dummy.java")
+		results := e.runFileOwnershipContainment(context.Background(), owned, intents, "/wt", runner)
+		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
+		if c.Passed || !c.Required {
+			t.Fatalf("expected required containment failure for Dummy.java scratch, got %+v", c)
+		}
+		if !strings.Contains(c.Stderr, "Dummy.java") || !strings.Contains(c.Stderr, "scratch_or_probe") {
+			t.Errorf("expected Dummy.java dev-cleanup message, got %q", c.Stderr)
+		}
+		for _, r := range results {
+			if r.Name == payloads.CheckFileOwnershipPlanningGap {
+				t.Fatalf("Dummy.java scratch must not emit planning-gap recovery row: %+v", r)
+			}
+		}
+	})
+
+	t.Run("unclassified new source emits dev-retry containment failure, not planning-gap recovery", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? src/main/java/Dummy.java\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, nil, "/wt", runner)
+		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
+		if c.Passed || !c.Required {
+			t.Fatalf("expected required containment failure for missing file_intents, got %+v", c)
+		}
+		if !strings.Contains(c.Stderr, "file_intents") || !strings.Contains(c.Stderr, "src/main/java/Dummy.java") {
+			t.Errorf("expected file_intents guidance naming Dummy.java, got %q", c.Stderr)
+		}
+		for _, r := range results {
+			if r.Name == payloads.CheckFileOwnershipPlanningGap {
+				t.Fatalf("missing intent must not emit planning-gap recovery row: %+v", r)
+			}
+		}
+	})
+
 	t.Run("new topology-controlled file emits a planning-gap Required failure", func(t *testing.T) {
 		runner := &fakeRunner{stdout: "?? osh-core/settings.gradle\n M src/A.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		results := e.runFileOwnershipContainment(context.Background(), owned, nil, "/wt", runner)
 		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
 		if !c.Passed {
 			t.Fatalf("containment (junk/doc) should pass; the topology gap is a separate row, got %+v", c)
@@ -523,7 +657,8 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("all owned and clean passes with no advisory", func(t *testing.T) {
 		runner := &fakeRunner{stdout: " M src/A.java\nA  src/B.java\n"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java", "src/B.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		intents := intentsOf(payloads.FileIntentOwnedDeliverable, "src/B.java")
+		results := e.runFileOwnershipContainment(context.Background(), owned, intents, "/wt", runner)
 		if len(results) != 1 {
 			t.Fatalf("expected only the required result, got %+v", results)
 		}
@@ -535,7 +670,7 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 	t.Run("git failure is advisory not a hard fail", func(t *testing.T) {
 		runner := &fakeRunner{exitCode: 128, stderr: "not a git repository"}
 		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		results := e.runFileOwnershipContainment(context.Background(), owned, nil, "/wt", runner)
 		if len(results) != 1 || !results[0].Passed || results[0].Required {
 			t.Fatalf("git failure must not hard-fail, got %+v", results)
 		}
@@ -608,7 +743,8 @@ func TestRunFileOwnershipContainment_RealGit(t *testing.T) {
 	write("src/Helper.java", "class Helper {}\n")
 
 	owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
-	results := (&Executor{}).runFileOwnershipContainment(context.Background(), owned, dir, &localRunner{})
+	intents := intentsOf(payloads.FileIntentOwnedDeliverable, "src/Helper.java")
+	results := (&Executor{}).runFileOwnershipContainment(context.Background(), owned, intents, dir, &localRunner{})
 
 	c := findResult(t, results, "file-ownership-containment")
 	if c.Passed {

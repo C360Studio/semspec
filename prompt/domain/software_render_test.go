@@ -294,36 +294,40 @@ func TestAssemblerEndToEnd_RequirementGenerator(t *testing.T) {
 	}
 }
 
-// TestAssembler_PlanConstraintsReachDeveloper pins #204's re-injection: the
+// TestAssembler_PlanConstraintsReachExecutionRoles pins #204's re-injection: the
 // plan's hard constraints (extracted by the planner) must appear in the
 // developer/validator/reviewer prompt, which decomposition otherwise never
 // carries them to. Without this, a dev can satisfy thin scenarios while
 // violating a stated prohibition ("do not stub") it never saw.
-func TestAssembler_PlanConstraintsReachDeveloper(t *testing.T) {
+func TestAssembler_PlanConstraintsReachExecutionRoles(t *testing.T) {
 	r := prompt.NewRegistry()
 	r.RegisterAll(Software()...)
 	a := prompt.NewAssembler(r)
 
 	const constraint = "do not stub MAVSDK/OSH classes"
-	out := a.Assemble(&prompt.AssemblyContext{
-		Role:           prompt.RoleDeveloper,
-		Provider:       prompt.ProviderOpenAI,
-		AvailableTools: []string{"bash", "submit_work"},
-		TaskContext: &prompt.TaskContext{
-			PlanGoal:        "Implement the driver",
-			PlanConstraints: []string{constraint, "full Connected Systems API coverage"},
-			WorktreePath:    "/work/wt",
-		},
-	})
-	if out.RenderError != nil {
-		t.Fatalf("unexpected RenderError: %v", out.RenderError)
-	}
-	combined := out.SystemMessage + "\n" + out.UserMessage
-	if !strings.Contains(combined, "PLAN CONSTRAINTS") {
-		t.Errorf("developer prompt missing the PLAN CONSTRAINTS block — #204 re-injection regressed")
-	}
-	if !strings.Contains(combined, constraint) {
-		t.Errorf("developer prompt missing the verbatim constraint %q", constraint)
+	for _, role := range []prompt.Role{prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleReviewer} {
+		t.Run(string(role), func(t *testing.T) {
+			out := a.Assemble(&prompt.AssemblyContext{
+				Role:           role,
+				Provider:       prompt.ProviderOpenAI,
+				AvailableTools: []string{"bash", "submit_work"},
+				TaskContext: &prompt.TaskContext{
+					PlanGoal:        "Implement the driver",
+					PlanConstraints: []string{constraint, "full Connected Systems API coverage"},
+					WorktreePath:    "/work/wt",
+				},
+			})
+			if out.RenderError != nil {
+				t.Fatalf("unexpected RenderError: %v", out.RenderError)
+			}
+			combined := out.SystemMessage + "\n" + out.UserMessage
+			if !strings.Contains(combined, "PLAN CONSTRAINTS") {
+				t.Errorf("%s prompt missing the PLAN CONSTRAINTS block — #204 re-injection regressed", role)
+			}
+			if !strings.Contains(combined, constraint) {
+				t.Errorf("%s prompt missing the verbatim constraint %q", role, constraint)
+			}
+		})
 	}
 
 	// Belt-and-suspenders: no constraints → no constraints block (no empty header).

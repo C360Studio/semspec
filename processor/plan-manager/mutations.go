@@ -1300,23 +1300,28 @@ func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []
 	if !current.CanTransitionTo(workflow.StatusReadyForExecution) {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → ready_for_execution", current)}
 	}
-	plan.Status = workflow.StatusReadyForExecution
-
-	if err := ps.save(ctx, plan); err != nil {
-		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	if err := c.transitionToReadyForExecution(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("ready for execution: %v", err)}
 	}
 
 	c.logger.Info("Plan ready for execution via mutation", "slug", req.Slug)
-	if c.shouldAutoStartExecution() {
-		if err := c.startExecutionFromReady(ctx, plan); err != nil {
-			return MutationResponse{Success: false, Error: fmt.Sprintf("start execution: %v", err)}
-		}
-	}
 	return MutationResponse{Success: true}
 }
 
 func (c *Component) shouldAutoStartExecution() bool {
 	return c.natsClient != nil || c.orchestratorTriggerPublisher != nil
+}
+
+func (c *Component) transitionToReadyForExecution(ctx context.Context, plan *workflow.Plan, forceRequirementIDs ...[]string) error {
+	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusReadyForExecution); err != nil {
+		return err
+	}
+	if c.shouldAutoStartExecution() {
+		if err := c.startExecutionFromReady(ctx, plan, forceRequirementIDs...); err != nil {
+			return fmt.Errorf("start execution: %w", err)
+		}
+	}
+	return nil
 }
 
 func (c *Component) startExecutionFromReady(ctx context.Context, plan *workflow.Plan, forceRequirementIDs ...[]string) error {
@@ -2048,9 +2053,10 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 		return MutationResponse{Success: false, Error: "no requirement executions were reset — cannot re-execute"}
 	}
 
-	// Transition awaiting_review → ready_for_execution.
+	// Transition awaiting_review → ready_for_execution, then dispatch the
+	// affected requirements when an execution publisher is available.
 	durableCtx := context.WithoutCancel(ctx)
-	if err := c.setPlanStatusCached(durableCtx, plan, workflow.StatusReadyForExecution); err != nil {
+	if err := c.transitionToReadyForExecution(durableCtx, plan, affectedReqIDs); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("transition to ready_for_execution: %v", err)}
 	}
 

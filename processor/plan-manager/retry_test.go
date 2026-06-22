@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // newRetryTestComponent builds a Component with a plan store but no NATS.
@@ -112,6 +113,48 @@ func TestHandleRetryPlan_RequirementsScopeShape(t *testing.T) {
 	})
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusConflict, w.Body.String())
+	}
+}
+
+func TestHandleRetryPlan_ReentryAutoStartsExecution(t *testing.T) {
+	c := newRetryTestComponent(t)
+	slug := "retry-reentry"
+	plan := seedPlan(t, c, slug, workflow.StatusRejected)
+	plan.Requirements = []workflow.Requirement{{ID: "req.retry.1", Title: "Retry failed requirement"}}
+	plan.Scenarios = []workflow.Scenario{{ID: "scen.retry.1", RequirementID: "req.retry.1"}}
+	_ = c.plans.save(context.Background(), plan)
+
+	published := false
+	c.orchestratorTriggerPublisher = func(_ context.Context, got *payloads.ScenarioOrchestrationTrigger) error {
+		published = true
+		if got.PlanSlug != slug {
+			t.Fatalf("published slug = %q, want %q", got.PlanSlug, slug)
+		}
+		if len(got.Requirements) != 1 || got.Requirements[0].ID != "req.retry.1" {
+			t.Fatalf("published requirements = %v, want req.retry.1", got.Requirements)
+		}
+		if len(got.ForceRequirementIDs) != 1 || got.ForceRequirementIDs[0] != "req.retry.1" {
+			t.Fatalf("ForceRequirementIDs = %v, want req.retry.1", got.ForceRequirementIDs)
+		}
+		return nil
+	}
+
+	w := postRetry(t, c, slug, map[string]any{
+		"scope":           "requirements",
+		"requirement_ids": []string{"req.retry.1"},
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+	if !published {
+		t.Fatal("expected retry re-entry to publish scenario orchestrator trigger")
+	}
+	got, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan missing after retry")
+	}
+	if got.EffectiveStatus() != workflow.StatusImplementing {
+		t.Fatalf("status = %s, want implementing", got.EffectiveStatus())
 	}
 }
 

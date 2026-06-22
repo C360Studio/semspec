@@ -2858,6 +2858,7 @@ func TestScopeScenariosToCurrentStory_FallsBackToLegacyUnlinkedScenarios(t *test
 //   - exec.RetryCount is incremented
 //   - exec.DAG and exec.SortedNodeIDs are cleared (full DAG reset)
 //   - exec.CurrentNodeIdx is reset to -1
+//   - the current Story reservation is walked back to Ready before re-dispatch
 //   - exec.terminated remains false (the exec continues, not terminates)
 //   - exec.LastReviewFeedback carries the reviewer's feedback forward
 //
@@ -2966,6 +2967,195 @@ func TestHandleReviewerComplete_Restructure_DeletesAndRecreatesBranch(t *testing
 	// We assert requirementsCompleted stayed 0 (no spurious double-complete).
 	if c.requirementsCompleted.Load() != 0 {
 		t.Errorf("requirementsCompleted = %d, want 0 — restructure is not a completion", c.requirementsCompleted.Load())
+	}
+}
+
+// TestHandleReviewerComplete_Restructure_ResetsExecutingStoryToReady pins
+// issue #260: a restructure retry must reset the current Story's reservation
+// before re-dispatch. Without this, the retry tries to claim Executing again,
+// plan-manager rejects Executing→Executing, and the executor misreads its own
+// stale reservation as M:N contention.
+func TestHandleReviewerComplete_Restructure_ResetsExecutingStoryToReady(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	const (
+		slug       = "plan-restructure"
+		reqID      = "req-restructure"
+		storyID    = "story.plan-restructure.1.1"
+		branchName = "semspec/requirement-req-restructure"
+	)
+
+	fake := newFakeClaimer(map[string]workflow.StoryStatus{
+		storyID: workflow.StoryStatusExecuting,
+	})
+	c.storyStatusClaimer = fake.claim
+	c.planLoader = func(_ context.Context, gotSlug string) (*workflow.Plan, error) {
+		if gotSlug != slug {
+			t.Fatalf("planLoader slug = %q, want %q", gotSlug, slug)
+		}
+		return &workflow.Plan{
+			Slug: slug,
+			Stories: []workflow.Story{
+				{
+					ID:             storyID,
+					Status:         workflow.StoryStatusExecuting,
+					RequirementIDs: []string{reqID},
+				},
+			},
+		}, nil
+	}
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.plan-restructure-req-restructure",
+		Slug:              slug,
+		RequirementID:     reqID,
+		storeKey:          workflow.RequirementExecutionKey(slug, reqID),
+		RequirementBranch: branchName,
+		RetryCount:        0,
+		MaxRetries:        3,
+		SortedStoryIDs:    []string{storyID},
+		CurrentStoryIdx:   0,
+		CurrentNodeIdx:    1,
+		VisitedNodes:      map[string]bool{"node-0": true},
+		DAG:               &TaskDAG{},
+		SortedNodeIDs:     []string{"node-0", "node-1"},
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-restructure-story-reset",
+		TaskID:       "task-restructure-story-reset",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageRequirementReview,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"verdict":"rejected","rejection_type":"restructure","feedback":"redo the Story shape"}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	if got := fake.statusOf(storyID); got != workflow.StoryStatusReady {
+		t.Fatalf("final story status = %q, want %q", got, workflow.StoryStatusReady)
+	}
+
+	fake.mu.Lock()
+	calls := append([]struct {
+		storyID string
+		target  workflow.StoryStatus
+	}(nil), fake.calls...)
+	fake.mu.Unlock()
+
+	wantCalls := []struct {
+		storyID string
+		target  workflow.StoryStatus
+	}{
+		{storyID, workflow.StoryStatusFailed},
+		{storyID, workflow.StoryStatusPending},
+		{storyID, workflow.StoryStatusReady},
+	}
+	if len(calls) != len(wantCalls) {
+		t.Fatalf("story status reset calls = %v, want %v", calls, wantCalls)
+	}
+	for i, want := range wantCalls {
+		if calls[i] != want {
+			t.Errorf("story status reset call[%d] = %v, want %v", i, calls[i], want)
+		}
+	}
+}
+
+// TestHandleReviewerComplete_Restructure_FailsClosedOnPlanLoadError pins the
+// fail-closed half of issue #260. When the plan cannot be loaded during a
+// restructure retry — e.g. a transient PLAN_STATES read that loadPlanFromKV
+// surfaces as (nil, nil) — resetCurrentStoryForRestructureLocked must NOT skip
+// the reset and let the retry proceed. Proceeding would wipe NodeResults, delete
+// the branch, and re-dispatch the still-Executing Story (Executing→Executing is
+// rejected), reopening the exact wedge the #260 fix exists to prevent. Instead
+// the retry must fail closed (markFailed) BEFORE any destructive state change.
+//
+// Negative control: revert resetCurrentStoryForRestructureLocked's plan-load
+// branch to `return storyReopenResult{}` and this test fails — terminated stays
+// false, NodeResults is wiped, and DeleteBranch is called.
+func TestHandleReviewerComplete_Restructure_FailsClosedOnPlanLoadError(t *testing.T) {
+	c := newTestComponent(t)
+	stub := &stubSandbox{}
+	c.sandbox = stub
+
+	const (
+		slug       = "plan-restructure"
+		reqID      = "req-restructure"
+		storyID    = "story.plan-restructure.1.1"
+		branchName = "semspec/requirement-req-restructure"
+	)
+
+	fake := newFakeClaimer(map[string]workflow.StoryStatus{
+		storyID: workflow.StoryStatusExecuting,
+	})
+	c.storyStatusClaimer = fake.claim
+	// Transient KV blip: loadPlanFromKV swallows NATS errors as (nil, nil), so the
+	// production loader can return a nil plan with no error mid-execution.
+	c.planLoader = func(_ context.Context, _ string) (*workflow.Plan, error) {
+		return nil, nil
+	}
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.plan-restructure-req-restructure",
+		Slug:              slug,
+		RequirementID:     reqID,
+		storeKey:          workflow.RequirementExecutionKey(slug, reqID),
+		RequirementBranch: branchName,
+		RetryCount:        0,
+		MaxRetries:        3,
+		SortedStoryIDs:    []string{storyID},
+		CurrentStoryIdx:   0,
+		CurrentNodeIdx:    1,
+		VisitedNodes:      map[string]bool{"node-0": true},
+		DAG:               &TaskDAG{},
+		SortedNodeIDs:     []string{"node-0", "node-1"},
+		NodeResults:       []NodeResult{{NodeID: "node-0"}},
+	}
+	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-restructure-fail-closed",
+		TaskID:       "task-restructure-fail-closed",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageRequirementReview,
+		Outcome:      agentic.OutcomeSuccess,
+		Result:       `{"verdict":"rejected","rejection_type":"restructure","feedback":"redo the Story shape"}`,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementReviewerCompleteLocked(context.Background(), event, exec)
+	exec.mu.Unlock()
+
+	// Failed closed: the requirement is terminated rather than re-dispatched.
+	if !exec.terminated {
+		t.Fatalf("exec.terminated = false, want true — restructure must fail closed on plan-load failure")
+	}
+	// The reset never ran, so the story-status claimer was never invoked and the
+	// Story is left exactly as it was (still Executing, not walked to Ready).
+	fake.mu.Lock()
+	gotCalls := len(fake.calls)
+	fake.mu.Unlock()
+	if gotCalls != 0 {
+		t.Errorf("story status claim calls = %d, want 0 — reset must not run on plan-load failure", gotCalls)
+	}
+	if got := fake.statusOf(storyID); got != workflow.StoryStatusExecuting {
+		t.Errorf("story status = %q, want %q — story must be left untouched", got, workflow.StoryStatusExecuting)
+	}
+	// The destructive restructure steps must NOT have run: the fail-closed gate
+	// fires before NodeResults is wiped and before the branch is deleted.
+	if len(exec.NodeResults) != 1 {
+		t.Errorf("NodeResults len = %d, want 1 — must not be wiped before the fail-closed gate", len(exec.NodeResults))
+	}
+	stub.mu.Lock()
+	deleted := len(stub.deletedBranchNames)
+	stub.mu.Unlock()
+	if deleted != 0 {
+		t.Errorf("DeleteBranch calls = %d, want 0 — branch must not be deleted on fail-closed restructure", deleted)
 	}
 }
 
