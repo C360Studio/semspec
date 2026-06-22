@@ -774,7 +774,8 @@
       "config": {
         "default_capability": "plan_review",
         "sandbox_url": "http://sandbox:8090",
-        "architecture_review_enabled": ${ARCHITECTURE_REVIEW_ENABLED:-false}
+        "architecture_review_enabled": ${ARCHITECTURE_REVIEW_ENABLED:-false},
+        "requirements_review_enabled": ${REQUIREMENTS_REVIEW_ENABLED:-false}
       }
     },
     "architecture-generator": {
@@ -782,7 +783,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "architecture"
+        "default_capability": "architecture",
+        "requirements_review_enabled": ${REQUIREMENTS_REVIEW_ENABLED:-false}
       }
     },
     "story-preparer": {

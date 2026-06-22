@@ -60,6 +60,22 @@ type Config struct {
 	// reviewer-off/preparer-on leaves architecture_generated unclaimed.
 	ArchitectureReviewEnabled bool `json:"architecture_review_enabled" schema:"type:bool,description:Enable the ADR-051 adversarial architecture review round (must match story-preparer),category:advanced,default:false"`
 
+	// RequirementsReviewEnabled gates the ADR-051 Slice 4 adversarial
+	// requirements review round (R-req). When true the plan-reviewer claims
+	// requirements_generated → reviewing_requirements, runs a deterministic
+	// preflight + a requirements-shaped LLM review, then advances to
+	// requirements_reviewed (approve) or back to approved (reject — re-run the
+	// requirement-generator). When false (default) no component claims
+	// reviewing_requirements and requirements_generated → generating_architecture
+	// directly, exactly as before this slice.
+	//
+	// CROSS-COMPONENT INVARIANT: architecture-generator carries the SAME flag and
+	// MUST agree with this one. Source both from the one
+	// REQUIREMENTS_REVIEW_ENABLED env var in semspec.json. A mismatch wedges the
+	// requirements phase (one of requirements_generated / requirements_reviewed
+	// ends up with no claimant).
+	RequirementsReviewEnabled bool `json:"requirements_review_enabled" schema:"type:bool,description:Enable the ADR-051 adversarial requirements review round (must match architecture-generator),category:advanced,default:false"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

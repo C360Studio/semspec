@@ -277,7 +277,21 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		if plan.Status != workflow.StatusRequirementsGenerated {
+		// ADR-051 Slice 4 dual-watch: claim the architecture phase from
+		// requirements_generated only when the requirements review is DISABLED
+		// (the original path); when ENABLED the plan-reviewer owns that state
+		// (claims reviewing_requirements) and the architect waits for the
+		// post-review requirements_reviewed. The flag mirrors plan-reviewer's;
+		// see Config. The two never race the requirements_generated CAS.
+		switch plan.Status {
+		case workflow.StatusRequirementsGenerated:
+			if c.config.RequirementsReviewEnabled {
+				continue
+			}
+		case workflow.StatusRequirementsReviewed:
+			// Only reachable when the review is enabled — the post-review claim
+			// point. Requirements passed the adversarial round.
+		default:
 			continue
 		}
 

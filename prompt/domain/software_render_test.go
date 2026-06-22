@@ -423,6 +423,36 @@ func TestRenderPlanReviewerPrompt_ArchRound(t *testing.T) {
 	}
 }
 
+// TestRenderPlanReviewerPrompt_ReqRound pins the ADR-051 Slice 4 requirements
+// round (Round 4): it fires at requirements_generated, before architecture and
+// scenarios exist, so it carries the requirements judgment-defect criteria
+// (goal coverage, over-bundling, acceptance criteria) and tells the reviewer NOT
+// to flag missing scenarios/architecture (wrong phase).
+func TestRenderPlanReviewerPrompt_ReqRound(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x","requirements":[]}`,
+		Round:       4,
+	})
+
+	mustContain := []string{
+		"Requirements Review",
+		"Architecture, stories, and scenarios DO NOT exist yet",
+		"Goal coverage",
+		"No over-bundling",
+		"Acceptance criteria present & testable",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(out, want) {
+			t.Errorf("req-round prompt missing pinned string %q\nGot:\n%s", want, out)
+		}
+	}
+	// Must NOT carry the arch round's header (wrong phase).
+	if strings.Contains(out, "Architecture Review") {
+		t.Errorf("req-round prompt should not carry the architecture-round criteria")
+	}
+}
+
 // TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity pins #204's R2 gate:
 // the round-2 reviewer must judge whether the requirements+scenarios cover the
 // breadth the plan's `constraints` demand, catching the "full-coverage goal

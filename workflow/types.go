@@ -79,6 +79,14 @@ const (
 	StatusGeneratingScenarios Status = "generating_scenarios"
 	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
 	StatusReviewingScenarios Status = "reviewing_scenarios"
+	// StatusReviewingRequirements indicates the plan-reviewer requirements round
+	// (ADR-051 Slice 4) has claimed requirements_generated for an adversarial
+	// review. On approval the plan advances to requirements_reviewed; on
+	// rejection it re-enters approved to re-run the requirement-generator. Gated
+	// by plan-reviewer config (requirements_review_enabled): when off no
+	// component claims this state and requirements_generated →
+	// generating_architecture directly, as before.
+	StatusReviewingRequirements Status = "reviewing_requirements"
 	// StatusReviewingArchitecture indicates the plan-reviewer architecture round
 	// (ADR-051 Slice 3) has claimed architecture_generated for an adversarial
 	// review. On approval the plan advances to architecture_reviewed; on
@@ -99,6 +107,14 @@ const (
 )
 
 const (
+	// StatusRequirementsReviewed indicates the adversarial requirements review
+	// (ADR-051 Slice 4) approved the requirements. Terminal for the
+	// requirements-review phase; the architecture-generator claims from here
+	// (instead of requirements_generated) when the review is enabled.
+	// Review-disabled plans never enter this state — requirements_generated →
+	// generating_architecture holds.
+	StatusRequirementsReviewed Status = "requirements_reviewed"
+
 	// StatusArchitectureGenerated indicates the architecture phase has completed.
 	// This is a terminal for the architecture phase (not in-progress).
 	StatusArchitectureGenerated Status = "architecture_generated"
@@ -190,6 +206,7 @@ func (s Status) IsValid() bool {
 		StatusExploring, StatusExplored,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusReviewingRequirements, StatusRequirementsReviewed,
 		StatusReviewingArchitecture, StatusArchitectureReviewed,
 		StatusPreparingStories, StatusStoriesGenerated:
 		return true
@@ -205,7 +222,7 @@ func (s Status) IsInProgress() bool {
 	case StatusExploring,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
-		StatusReviewingArchitecture,
+		StatusReviewingRequirements, StatusReviewingArchitecture,
 		StatusPreparingStories:
 		return true
 	default:
@@ -258,10 +275,29 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusGeneratingRequirements:
 		return target == StatusRequirementsGenerated || target == StatusRejected
 	case StatusRequirementsGenerated:
-		// requirements_generated → generating_architecture (architecture-generator claims)
+		// requirements_generated → generating_architecture (architecture-generator
+		//   claims when the requirements review is DISABLED — the original path)
+		// requirements_generated → reviewing_requirements (ADR-051 Slice 4:
+		//   plan-reviewer's requirements round claims when the review is ENABLED)
 		// requirements_generated → architecture_generated (skip path: already done or bypassed)
 		// requirements_generated → changed (change proposal deprecated requirements)
 		// requirements_generated → rejected (validation failure)
+		return target == StatusGeneratingArchitecture || target == StatusReviewingRequirements ||
+			target == StatusArchitectureGenerated ||
+			target == StatusChanged || target == StatusRejected
+	case StatusReviewingRequirements:
+		// reviewing_requirements → requirements_reviewed (review approved)
+		// reviewing_requirements → approved (review rejected — re-run the
+		//   requirement-generator, which claims from approved)
+		// reviewing_requirements → changed (change proposal deprecated requirements)
+		// reviewing_requirements → rejected (escalation)
+		return target == StatusRequirementsReviewed || target == StatusApproved ||
+			target == StatusChanged || target == StatusRejected
+	case StatusRequirementsReviewed:
+		// requirements_reviewed → generating_architecture (architecture-generator claims)
+		// requirements_reviewed → architecture_generated (skip path)
+		// requirements_reviewed → changed (change proposal deprecated requirements)
+		// requirements_reviewed → rejected (escalation)
 		return target == StatusGeneratingArchitecture || target == StatusArchitectureGenerated ||
 			target == StatusChanged || target == StatusRejected
 	case StatusGeneratingArchitecture:

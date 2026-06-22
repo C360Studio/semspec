@@ -37,6 +37,7 @@ const (
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationScenariosReviewed     = "plan.mutation.scenarios.reviewed"
 	mutationArchitectureReviewed  = "plan.mutation.architecture.reviewed"
+	mutationRequirementsReviewed  = "plan.mutation.requirements.reviewed"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 	mutationClaim                 = "plan.mutation.claim"
@@ -216,6 +217,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationScenariosReviewed, c.handleScenariosReviewedMutation},
 		{mutationArchitectureReviewed, c.handleArchitectureReviewedMutation},
+		{mutationRequirementsReviewed, c.handleRequirementsReviewedMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 		{mutationClaim, c.handleClaimMutation},
@@ -1236,6 +1238,26 @@ func (c *Component) handleClaimMutation(ctx context.Context, data []byte) Mutati
 	return MutationResponse{Success: true}
 }
 
+// refreshApprovedReviewMetadata overwrites a plan's review metadata with the
+// operative "approved" verdict when the plan advances past a review gate
+// (ADR-051 Slice 5). Without this, a prior round's needs_changes verdict,
+// findings, and reviewed_at persist on an advanced plan — the mavlink run
+// showed a plan frozen at R1 needs_changes after it had been approved
+// downstream, misleading the UI's phase derivation and any metadata consumer.
+// Stale findings are cleared (there are no outstanding violations on an
+// advancing plan) and reviewed_at is restamped. A non-empty summary overwrites
+// the prior one; passing "" preserves the existing (already-approving) summary.
+func refreshApprovedReviewMetadata(plan *workflow.Plan, summary string) {
+	plan.ReviewVerdict = "approved"
+	if summary != "" {
+		plan.ReviewSummary = summary
+	}
+	plan.ReviewFindings = nil
+	plan.ReviewFormattedFindings = ""
+	now := time.Now()
+	plan.ReviewedAt = &now
+}
+
 // handleReadyForExecutionMutation advances plan to ready_for_execution (from round 2 review).
 // handleScenariosReviewedMutation sets the plan to scenarios_reviewed.
 // Used when auto_approve=false after round-2 review — the plan waits for
@@ -1267,6 +1289,7 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → scenarios_reviewed", current)}
 	}
 	plan.Status = workflow.StatusScenariosReviewed
+	refreshApprovedReviewMetadata(plan, req.Summary) // ADR-051 Slice 5
 
 	if err := ps.save(ctx, plan); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
@@ -1310,16 +1333,57 @@ func (c *Component) handleArchitectureReviewedMutation(ctx context.Context, data
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → architecture_reviewed", current)}
 	}
 	plan.Status = workflow.StatusArchitectureReviewed
-	plan.ReviewVerdict = "approved"
-	if req.Summary != "" {
-		plan.ReviewSummary = req.Summary
-	}
+	refreshApprovedReviewMetadata(plan, req.Summary) // ADR-051 Slice 5
 
 	if err := ps.save(ctx, plan); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
 	c.logger.Info("Plan architecture reviewed via mutation, advancing to preparing_stories", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
+// handleRequirementsReviewedMutation advances the plan from
+// reviewing_requirements to requirements_reviewed after the ADR-051 Slice 4
+// adversarial requirements round approves. A machine gate between the
+// requirement-generator and the architect — it always advances (no auto_approve
+// fork). The architecture-generator claims generating_architecture from
+// requirements_reviewed. The operative approved verdict overwrites any stale
+// rejection metadata from a prior requirements revision (Slice 5).
+func (c *Component) handleRequirementsReviewedMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug    string `json:"slug"`
+		Summary string `json:"summary,omitempty"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	defer c.lockSlug(req.Slug)()
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusRequirementsReviewed) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → requirements_reviewed", current)}
+	}
+	plan.Status = workflow.StatusRequirementsReviewed
+	refreshApprovedReviewMetadata(plan, req.Summary) // ADR-051 Slice 5
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan requirements reviewed via mutation, advancing to generating_architecture", "slug", req.Slug)
 	return MutationResponse{Success: true}
 }
 
@@ -1349,6 +1413,13 @@ func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []
 	if !current.CanTransitionTo(workflow.StatusReadyForExecution) {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → ready_for_execution", current)}
 	}
+	// ADR-051 Slice 5: the auto-approve R2 path advances reviewing_scenarios →
+	// ready_for_execution directly (no scenarios.reviewed mutation), so this is
+	// the only place that clears a stale needs_changes verdict on the auto path.
+	// Set it before the transition, which persists the plan. Scoped to the
+	// mutation handler — recovery re-entry calls transitionToReadyForExecution
+	// directly and must NOT restamp approved.
+	refreshApprovedReviewMetadata(plan, "Plan approved; ready for execution.")
 	if err := c.transitionToReadyForExecution(ctx, plan); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("ready for execution: %v", err)}
 	}
@@ -1573,8 +1644,8 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 	if err := json.Unmarshal(data, &req); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
-	if req.Slug == "" || req.Round < 1 || req.Round > 3 {
-		return MutationResponse{Success: false, Error: "slug required and round must be 1, 2, or 3"}
+	if req.Slug == "" || req.Round < 1 || req.Round > 4 {
+		return MutationResponse{Success: false, Error: "slug required and round must be 1, 2, 3, or 4"}
 	}
 	if req.Verdict != "needs_changes" {
 		return MutationResponse{Success: false, Error: "revision handler only accepts verdict=needs_changes"}
@@ -1599,6 +1670,8 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 		expectedStatus = workflow.StatusReviewingScenarios
 	case 3:
 		expectedStatus = workflow.StatusReviewingArchitecture
+	case 4:
+		expectedStatus = workflow.StatusReviewingRequirements
 	}
 	if current != expectedStatus {
 		return MutationResponse{Success: false, Error: fmt.Sprintf(
@@ -1638,6 +1711,14 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 		// reviewing_architecture → requirements_generated is a valid transition
 		// (workflow/types.go).
 		targetStatus = reenterArchitecturePhase(plan)
+	case 4:
+		// ADR-051 Slice 4: a requirements rejection re-runs the
+		// requirement-generator only. reenterRequirementsPhase clears
+		// Requirements (and the downstream artifacts, all nil here anyway — the
+		// requirements round runs before they exist) and returns approved, which
+		// the requirement-generator watches. reviewing_requirements → approved is
+		// a valid transition (workflow/types.go).
+		targetStatus = reenterRequirementsPhase(plan)
 	}
 
 	if !current.CanTransitionTo(targetStatus) {
@@ -2830,6 +2911,20 @@ func reenterArchitecturePhase(plan *workflow.Plan) workflow.Status {
 	return workflow.StatusRequirementsGenerated
 }
 
+// reenterRequirementsPhase rolls a plan back to re-run the requirement-generator.
+// It clears Requirements and every downstream artifact that depended on them and
+// returns the approved re-entry status the requirement-generator watches. Shared
+// by the R2 requirements-finding cascade (determineR2ReentryPoint) and the
+// ADR-051 Slice 4 requirements-review rejection (handleRevisionMutation round 4),
+// so both roll back identically.
+func reenterRequirementsPhase(plan *workflow.Plan) workflow.Status {
+	plan.Requirements = nil
+	plan.Architecture = nil
+	plan.Stories = nil
+	plan.Scenarios = nil
+	return workflow.StatusApproved
+}
+
 func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON json.RawMessage) workflow.Status {
 	// Clear any stale revision carry-over up front; only the architecture
 	// re-entry branch below re-captures it (just before nil-ing Architecture).
@@ -2884,11 +2979,7 @@ func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON js
 
 	case phaseHit["requirements"]:
 		// Re-generate requirements (and downstream architecture / stories / scenarios).
-		plan.Requirements = nil
-		plan.Architecture = nil
-		plan.Stories = nil
-		plan.Scenarios = nil
-		return workflow.StatusApproved
+		return reenterRequirementsPhase(plan)
 
 	case phaseHit["architecture"]:
 		return reenterArchitecturePhase(plan)

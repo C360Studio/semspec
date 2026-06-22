@@ -318,22 +318,22 @@ func TestHandleRevisionMutation(t *testing.T) {
 				Verdict: "needs_changes",
 			},
 			wantSuccess:     false,
-			wantErrorSubstr: "round must be 1, 2, or 3",
+			wantErrorSubstr: "round must be 1, 2, 3, or 4",
 		},
 		{
-			// Round 3 is the ADR-051 architecture review; 4 is the new upper bound.
-			name: "invalid round 4",
+			// Round 3 = arch review, round 4 = requirements review; 5 is the new upper bound.
+			name: "invalid round 5",
 			setup: func(t *testing.T) (*Component, string) {
 				c := setupRevisionComponent(t, 3)
 				return c, ""
 			},
 			req: RevisionMutationRequest{
 				Slug:    "test",
-				Round:   4,
+				Round:   5,
 				Verdict: "needs_changes",
 			},
 			wantSuccess:     false,
-			wantErrorSubstr: "round must be 1, 2, or 3",
+			wantErrorSubstr: "round must be 1, 2, 3, or 4",
 		},
 		{
 			name: "plan not found",

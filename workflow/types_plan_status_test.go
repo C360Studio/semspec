@@ -38,6 +38,9 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		// ADR-051 Slice 3: architecture-review statuses
 		{StatusReviewingArchitecture, true},
 		{StatusArchitectureReviewed, true},
+		// ADR-051 Slice 4: requirements-review statuses
+		{StatusReviewingRequirements, true},
+		{StatusRequirementsReviewed, true},
 		// Invalid
 		{"", false},
 		{"unknown", false},
@@ -87,6 +90,16 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// or → reviewing_architecture (ADR-051 Slice 3, review enabled). Legacy
 		// direct paths to scenarios_* remain invalid.
 		{StatusArchitectureGenerated, StatusPreparingStories, true},
+		// ADR-051 Slice 4: requirements-review transitions
+		{StatusRequirementsGenerated, StatusReviewingRequirements, true},
+		{StatusRequirementsGenerated, StatusGeneratingArchitecture, true}, // review-disabled path
+		{StatusReviewingRequirements, StatusRequirementsReviewed, true},   // approved
+		{StatusReviewingRequirements, StatusApproved, true},               // rejected → re-run req-gen
+		{StatusReviewingRequirements, StatusRejected, true},
+		{StatusReviewingRequirements, StatusGeneratingArchitecture, false}, // must pass through requirements_reviewed
+		{StatusRequirementsReviewed, StatusGeneratingArchitecture, true},
+		{StatusRequirementsReviewed, StatusRejected, true},
+		{StatusRequirementsReviewed, StatusPreparingStories, false},
 		{StatusArchitectureGenerated, StatusReviewingArchitecture, true},
 		{StatusArchitectureGenerated, StatusGeneratingScenarios, false},
 		{StatusArchitectureGenerated, StatusScenariosGenerated, false},

@@ -292,7 +292,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			status := plan.EffectiveStatus()
 			if status != workflow.StatusReviewingDraft &&
 				status != workflow.StatusReviewingScenarios &&
-				status != workflow.StatusReviewingArchitecture {
+				status != workflow.StatusReviewingArchitecture &&
+				status != workflow.StatusReviewingRequirements {
 				c.logger.Warn("Plan not in reviewing state, discarding stale review result",
 					"slug", slug,
 					"current_status", status,

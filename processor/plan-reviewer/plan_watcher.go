@@ -39,6 +39,11 @@ const (
 	// precedes scenarios_generated) but is numbered 3 to avoid renumbering the two
 	// established rounds. Gated by Config.ArchitectureReviewEnabled.
 	roundArchitectureReview reviewRound = 3
+	// roundRequirementsReview is the ADR-051 Slice 4 adversarial requirements
+	// round. It fires at requirements_generated (earliest of the per-phase
+	// rounds) but is numbered 4 to avoid renumbering. Gated by
+	// Config.RequirementsReviewEnabled.
+	roundRequirementsReview reviewRound = 4
 )
 
 // watchPlanStates watches PLAN_STATES for plan transitions that require a review
@@ -85,6 +90,24 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 				continue
 			}
 			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingDraft, roundDraftReview)
+
+		case workflow.StatusRequirementsGenerated:
+			// ADR-051 Slice 4: the adversarial requirements round. Gated off by
+			// default — when disabled, the architecture-generator claims
+			// requirements_generated → generating_architecture directly (the
+			// pre-slice path) and nothing here runs. When enabled this MUST win
+			// the requirements_generated CAS over the architecture-generator,
+			// which carries the same flag and skips its requirements_generated
+			// claim when set, so the two do not race.
+			if !c.config.RequirementsReviewEnabled {
+				continue
+			}
+			if len(plan.Requirements) == 0 {
+				c.logger.Debug("Plan requirements_generated but no requirements inline, skipping KV trigger",
+					"slug", plan.Slug)
+				continue
+			}
+			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingRequirements, roundRequirementsReview)
 
 		case workflow.StatusArchitectureGenerated:
 			// ADR-051 Slice 3: the adversarial architecture round. Gated off by
@@ -165,6 +188,20 @@ func (c *Component) sendApprovalMutations(ctx context.Context, slug string, summ
 	timeout := 10 * time.Second
 
 	switch round {
+	case roundRequirementsReview:
+		// ADR-051 Slice 4: the requirements round is a machine gate between the
+		// requirement-generator and the architect — no auto_approve fork.
+		// Approval always advances reviewing_requirements → requirements_reviewed;
+		// the architecture-generator claims from there.
+		reviewedReq, _ := json.Marshal(map[string]string{
+			"slug":    slug,
+			"summary": summary,
+		})
+		if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.requirements.reviewed", reviewedReq, timeout, retryConfig); err != nil {
+			return fmt.Errorf("send requirements_reviewed mutation: %w", err)
+		}
+		c.logger.Info("Requirements review: sent requirements_reviewed mutation", "slug", slug)
+
 	case roundArchitectureReview:
 		// ADR-051 Slice 3: the architecture round is a machine gate between two
 		// generators (architect → Sarah), not a human checkpoint — there is no

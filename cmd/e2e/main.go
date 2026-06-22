@@ -158,6 +158,7 @@ func buildScenarioList(cfg *config.Config) []scenarios.Scenario {
 
 		// Mock pipeline — plan phase
 		scenarios.NewPlanPhaseScenario(cfg),                                   // plan-phase
+		scenarios.NewPlanPhaseScenario(cfg, scenarios.WithReqReview()),        // req-review (ADR-051 Slice 4)
 		scenarios.NewPlanPhaseScenario(cfg, scenarios.WithArchReview()),       // arch-review (ADR-051 Slice 3)
 		scenarios.NewHelloWorldScenario(cfg),                                  // plan-smoke
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)), // plan-reject
