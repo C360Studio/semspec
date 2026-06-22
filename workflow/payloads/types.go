@@ -394,6 +394,9 @@ var DeveloperRequestType = message.Type{
 	Version:  "v1",
 }
 
+// FileIntent* enumerate the developer-declared intent for each modified file,
+// reported in submit_work's file_intents array and validated by the terminal
+// developer-deliverable validator.
 const (
 	FileIntentModifiedExisting        = "modified_existing"
 	FileIntentOwnedDeliverable        = "owned_deliverable"

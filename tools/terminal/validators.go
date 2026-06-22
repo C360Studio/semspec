@@ -322,6 +322,15 @@ func ValidateDeveloperDeliverable(d map[string]any) error {
 		fileSet[path] = struct{}{}
 	}
 
+	return validateDeveloperFileIntents(d, fileSet, len(files))
+}
+
+// validateDeveloperFileIntents validates the file_intents array: exactly one
+// well-formed intent object per files_modified path (matching path, a valid
+// intent enum, and a non-empty rationale). Extracted from
+// ValidateDeveloperDeliverable to keep each function within the revive
+// statement-length limit.
+func validateDeveloperFileIntents(d map[string]any, fileSet map[string]struct{}, fileCount int) error {
 	intentsRaw, ok := d["file_intents"]
 	if !ok {
 		return fmt.Errorf("file_intents is required — provide one intent object per files_modified path")
@@ -330,7 +339,7 @@ func ValidateDeveloperDeliverable(d map[string]any) error {
 	if !ok {
 		return fmt.Errorf("file_intents must be an array of objects, got %T", intentsRaw)
 	}
-	if len(intents) != len(files) {
+	if len(intents) != fileCount {
 		return fmt.Errorf("file_intents must contain exactly one entry for each files_modified path")
 	}
 	intentSet := make(map[string]struct{}, len(intents))
