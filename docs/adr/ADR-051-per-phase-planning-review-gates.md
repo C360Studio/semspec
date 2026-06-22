@@ -1,6 +1,6 @@
 # ADR-051: Per-Phase Planning Review Gates — structural-early + semantic-where-proven
 
-**Status:** Proposed (2026-06-22)
+**Status:** Accepted — all slices implemented (2026-06-22)
 **Builds on:** ADR-029 (plan completeness review + retry), ADR-040 (OpenSpec-aligned
 planning pipeline), ADR-043 (architect emits implementation files), ADR-044
 (capability/story coverage), ADR-049 (component ownership topology)
@@ -132,12 +132,30 @@ A phase needs both layers only if it has a **mechanical** defect class
 1. **Arch structural-early — scope.include ownership** (proven by this run; bundled
    with this ADR). Extract `IsConcreteScopedFile` to `workflow` (single
    concreteness definition), add `workflow.UnownedScopedIncludeFiles`, wire into
-   `validateGeneratedArchitecture`.
-2. Requirements + stories structural-early (move `capability.*` / `story.*` +
-   scope.create ownership to their generators).
-3. R-arch semantic round.
-4. R-req semantic round.
-5. Cross-cutting: stale-metadata refresh.
+   `validateGeneratedArchitecture`. **DONE.**
+2. Requirements + stories structural-early. **2a (requirements) = NO-OP** (already
+   early-enforced at `handleRequirementsMutation`). **2b (stories cross-entity) =
+   DONE** (`workflow.ValidateStoriesAgainstPlan` wired into story-preparer
+   pre-publish).
+3. **R-arch semantic round. DONE** (3a state machine + 3b round wiring +
+   `arch-review` mock scenario).
+4. **R-req semantic round. DONE** (states + round wiring + architecture-generator
+   dual-watch + `req-review` mock scenario).
+5. **Cross-cutting: stale-metadata refresh. DONE** (`refreshApprovedReviewMetadata`
+   on every advance-past-review mutation).
+
+**Implementation note — the per-phase rounds are config-gated (default off) and
+race-free.** Each round's downstream claimant (story-preparer for R-arch,
+architecture-generator for R-req) carries the SAME enable flag as the
+plan-reviewer and skips its claim of the *generated* state when the round is on,
+so the reviewer wins that state's CAS uncontended and the claimant resumes from
+the post-review *reviewed* state. Source each flag from a single env var
+(`ARCHITECTURE_REVIEW_ENABLED`, `REQUIREMENTS_REVIEW_ENABLED`) so the two configs
+cannot drift. Both rounds reuse the proven `claimAndDispatchReview` →
+`preflight → LLM → NormalizeVerdict` shape; the deterministic preflight at a
+generated-but-pre-stories phase must NOT enforce scope.create ownership (gated on
+`len(plan.Stories) > 0`) — scope.create is draft-partial until
+`ensureScopeCreateCoversStories`.
 
 ## Validation (mock ladder — no paid runs)
 
