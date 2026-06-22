@@ -79,6 +79,14 @@ const (
 	StatusGeneratingScenarios Status = "generating_scenarios"
 	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
 	StatusReviewingScenarios Status = "reviewing_scenarios"
+	// StatusReviewingArchitecture indicates the plan-reviewer architecture round
+	// (ADR-051 Slice 3) has claimed architecture_generated for an adversarial
+	// review. On approval the plan advances to architecture_reviewed; on
+	// rejection it re-enters requirements_generated to re-run the architect.
+	// Gated by plan-reviewer config (architecture_review_enabled): when the gate
+	// is off no component claims this state and architecture_generated →
+	// preparing_stories directly, as before.
+	StatusReviewingArchitecture Status = "reviewing_architecture"
 	// StatusPreparingStories indicates story-preparer (Sarah) has claimed
 	// architecture_generated and is sharding requirements into Stories
 	// with task checklists (ADR-043 Move 3). Sarah's readiness gate runs
@@ -94,6 +102,13 @@ const (
 	// StatusArchitectureGenerated indicates the architecture phase has completed.
 	// This is a terminal for the architecture phase (not in-progress).
 	StatusArchitectureGenerated Status = "architecture_generated"
+
+	// StatusArchitectureReviewed indicates the adversarial architecture review
+	// (ADR-051 Slice 3) approved the architecture. Terminal for the
+	// architecture-review phase; story-preparer claims from here (instead of
+	// architecture_generated) when the review is enabled. Review-disabled plans
+	// never enter this state — architecture_generated → preparing_stories holds.
+	StatusArchitectureReviewed Status = "architecture_reviewed"
 
 	// StatusExplored indicates the analyst sub-phase has completed and the
 	// Plan has an Exploration document populated. The planner sub-phase
@@ -175,6 +190,7 @@ func (s Status) IsValid() bool {
 		StatusExploring, StatusExplored,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusReviewingArchitecture, StatusArchitectureReviewed,
 		StatusPreparingStories, StatusStoriesGenerated:
 		return true
 	default:
@@ -189,6 +205,7 @@ func (s Status) IsInProgress() bool {
 	case StatusExploring,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusReviewingArchitecture,
 		StatusPreparingStories:
 		return true
 	default:
@@ -252,13 +269,28 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// generating_architecture → rejected (fatal error)
 		return target == StatusArchitectureGenerated || target == StatusRejected
 	case StatusArchitectureGenerated:
-		// ADR-043 PR 4l — strict sequential: only story-preparer claims from
-		// here. The legacy direct path to scenarios_* was a back-compat hedge
-		// while Sarah was optional; PR 4l deleted Sarah's Enabled flag and
-		// removed Bob's architecture_generated watch, so that path is gone.
-		// architecture_generated → preparing_stories (story-preparer claims)
+		// architecture_generated → preparing_stories (story-preparer claims when
+		//   the architecture review is DISABLED — the original direct path)
+		// architecture_generated → reviewing_architecture (ADR-051 Slice 3:
+		//   plan-reviewer's architecture round claims when the review is ENABLED)
 		// architecture_generated → changed (change proposal deprecated requirements)
 		// architecture_generated → rejected (validation failure)
+		return target == StatusPreparingStories ||
+			target == StatusReviewingArchitecture ||
+			target == StatusChanged || target == StatusRejected
+	case StatusReviewingArchitecture:
+		// reviewing_architecture → architecture_reviewed (review approved)
+		// reviewing_architecture → requirements_generated (review rejected — re-run
+		//   the architect, mirroring R2's architecture phase-targeted re-entry)
+		// reviewing_architecture → changed (change proposal deprecated requirements)
+		// reviewing_architecture → rejected (escalation)
+		return target == StatusArchitectureReviewed ||
+			target == StatusRequirementsGenerated ||
+			target == StatusChanged || target == StatusRejected
+	case StatusArchitectureReviewed:
+		// architecture_reviewed → preparing_stories (story-preparer claims)
+		// architecture_reviewed → changed (change proposal deprecated requirements)
+		// architecture_reviewed → rejected (escalation)
 		return target == StatusPreparingStories ||
 			target == StatusChanged || target == StatusRejected
 	case StatusPreparingStories:
