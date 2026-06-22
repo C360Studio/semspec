@@ -103,6 +103,33 @@ func TestIsIgnorableBuildArtifact(t *testing.T) {
 	}
 }
 
+func TestIsNamedSourceScratch(t *testing.T) {
+	cases := map[string]bool{
+		"src/main/java/Dummy.java":                         true,
+		"src/test/java/org/acme/DummyTest.java":            true,
+		"pkg/dummy_test.go":                                true,
+		"pkg/scratch_test.go":                              true,
+		"web/src/dummy.test.ts":                            true,
+		"web/src/scratch.spec.tsx":                         true,
+		"scripts/temp.py":                                  true,
+		"cmd/probe.go":                                     true,
+		"src/FindClass.kt":                                 true,
+		"src/test/java/org/acme/RealDriverTest.java":       false,
+		"pkg/probe_driver.go":                              false,
+		"web/src/telemetryProbe.ts":                        false,
+		"web/src/useScratchpad.ts":                         false,
+		"README.md":                                        false,
+		"fixtures/dummy.json":                              false,
+		"src/main/java/org/acme/DummyImplementation.java":  false,
+		"src/main/java/org/acme/ScratchpadController.java": false,
+	}
+	for p, want := range cases {
+		if got := isNamedSourceScratch(p); got != want {
+			t.Errorf("isNamedSourceScratch(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 func TestFirstSegment(t *testing.T) {
 	cases := map[string]string{
 		"FindClass.java":     "", // root-level (no dir) → scratch, not a deliverable
@@ -189,6 +216,30 @@ func TestDecideOwnership(t *testing.T) {
 			porcelain:        "?? src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java",
 			owned:            ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
 			wantNamedScratch: []string{"src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java"},
+		},
+		{
+			name:             "Go dummy_test.go is dev-cleanup scratch, NOT a planning gap",
+			porcelain:        "?? pkg/driver/dummy_test.go",
+			owned:            ownedSetOf("internal/driver/driver.go"),
+			wantNamedScratch: []string{"pkg/driver/dummy_test.go"},
+		},
+		{
+			name:             "TypeScript scratch.spec.tsx is dev-cleanup scratch, NOT a planning gap",
+			porcelain:        "?? web/src/scratch.spec.tsx",
+			owned:            ownedSetOf("web/src/Driver.tsx"),
+			wantNamedScratch: []string{"web/src/scratch.spec.tsx"},
+		},
+		{
+			name:             "Python temp.py is dev-cleanup scratch, NOT a planning gap",
+			porcelain:        "?? scripts/temp.py",
+			owned:            ownedSetOf("src/driver/main.py"),
+			wantNamedScratch: []string{"scripts/temp.py"},
+		},
+		{
+			name:                  "legitimate source whose name contains probe still remains a planning gap",
+			porcelain:             "?? src/main/java/org/acme/probe/TelemetryProbe.java",
+			owned:                 ownedSetOf("src/main/java/org/acme/driver/Driver.java"),
+			wantNewOutOfTerritory: []string{"src/main/java/org/acme/probe/TelemetryProbe.java"},
 		},
 		{
 			name:                  "new unowned TEST outside territory is an ownership gap (hard fail)",

@@ -97,9 +97,10 @@ type ownershipVerdict struct {
 	// branch. Hard fail routed to DEV-RETRY: the developer must remove it.
 	RootScratch []string
 	// NamedSourceScratch are newly-created source/test files with high-signal
-	// throwaway basenames (Dummy.java, Scratch.java, FindClass.java) even when
-	// nested under a normal source tree. These are developer cleanup failures, not
-	// evidence that the architecture/story partition omitted a real deliverable.
+	// throwaway basenames (Dummy.java, dummy_test.go, scratch.spec.ts, temp.py)
+	// even when nested under a normal source tree. These are developer cleanup
+	// failures, not evidence that the architecture/story partition omitted a real
+	// deliverable.
 	NamedSourceScratch []string
 }
 
@@ -211,7 +212,8 @@ func isIgnorableBuildArtifact(p string) bool {
 // is never a deliverable, only dev scratch (e.g. a FindClass.java probe).
 var sourceFileExts = map[string]struct{}{
 	".java": {}, ".kt": {}, ".kts": {}, ".scala": {}, ".groovy": {},
-	".go": {}, ".py": {}, ".rb": {}, ".rs": {}, ".ts": {}, ".js": {},
+	".go": {}, ".py": {}, ".rb": {}, ".rs": {}, ".ts": {}, ".tsx": {},
+	".js": {}, ".jsx": {}, ".mjs": {}, ".cjs": {}, ".mts": {}, ".cts": {},
 	".c": {}, ".cc": {}, ".cpp": {}, ".cxx": {}, ".h": {}, ".hpp": {}, ".cs": {},
 }
 
@@ -225,13 +227,47 @@ func isNamedSourceScratch(p string) bool {
 	if !isSourceFile(p) {
 		return false
 	}
-	base := strings.TrimSuffix(path.Base(strings.ReplaceAll(p, "\\", "/")), path.Ext(p))
-	switch strings.ToLower(base) {
-	case "dummy", "dummytest", "scratch", "scratchtest", "findclass", "findclasstest":
+	base := path.Base(strings.ReplaceAll(p, "\\", "/"))
+	stem := strings.TrimSuffix(base, path.Ext(base))
+	lowerStem := strings.ToLower(stem)
+	if isScratchStem(lowerStem) {
+		return true
+	}
+
+	parts := strings.FieldsFunc(lowerStem, func(r rune) bool {
+		return r == '.' || r == '_' || r == '-'
+	})
+	if len(parts) > 1 && isScratchStem(parts[0]) && allScratchSuffixes(parts[1:]) {
+		return true
+	}
+
+	for _, suffix := range []string{"test", "tests", "spec", "specs"} {
+		if strings.HasSuffix(lowerStem, suffix) && isScratchStem(strings.TrimSuffix(lowerStem, suffix)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isScratchStem(stem string) bool {
+	switch stem {
+	case "dummy", "scratch", "temp", "tmp", "probe", "findclass":
 		return true
 	default:
 		return false
 	}
+}
+
+func allScratchSuffixes(parts []string) bool {
+	for _, part := range parts {
+		switch part {
+		case "test", "tests", "spec", "specs":
+			continue
+		default:
+			return false
+		}
+	}
+	return len(parts) > 0
 }
 
 // firstSegment returns the top-level path component, or "" for a root-level file
