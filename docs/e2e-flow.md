@@ -89,9 +89,17 @@ flowchart TD
     subgraph Design["Design artifacts"]
         Approved --> ReqGen["requirement-generator"]
         ReqGen --> ReqReady["requirements_generated"]
-        ReqReady --> ArchGen["architecture-generator"]
+        ReqReady -->|R-req disabled, default| ArchGen["architecture-generator"]
+        ReqReady -->|R-req enabled, ADR-051| RReq["plan-reviewer R-req<br/>reviewing_requirements"]
+        RReq -->|approved| ReqReviewed["requirements_reviewed"]
+        RReq -->|rejected| ReqGen
+        ReqReviewed --> ArchGen
         ArchGen --> ArchReady["architecture_generated"]
-        ArchReady --> StoryPrep["story-preparer"]
+        ArchReady -->|R-arch disabled, default| StoryPrep["story-preparer"]
+        ArchReady -->|R-arch enabled, ADR-051| RArch["plan-reviewer R-arch<br/>reviewing_architecture"]
+        RArch -->|approved| ArchReviewed["architecture_reviewed"]
+        RArch -->|rejected| ArchGen
+        ArchReviewed --> StoryPrep
         StoryPrep --> StoriesReady["stories_generated"]
         StoriesReady --> ScenarioGen["scenario-generator"]
         ScenarioGen --> ScenariosReady["scenarios_generated"]
@@ -159,11 +167,21 @@ stateDiagram-v2
     generating_requirements --> requirements_generated: requirements valid
     generating_requirements --> rejected: retry exhaustion
 
-    requirements_generated --> generating_architecture: architect claim
+    requirements_generated --> generating_architecture: architect claim (R-req disabled, default)
+    requirements_generated --> reviewing_requirements: R-req claim (ADR-051, requirements_review_enabled)
+    reviewing_requirements --> requirements_reviewed: R-req approved
+    reviewing_requirements --> approved: R-req rejected, re-run requirement-generator
+    reviewing_requirements --> rejected: R-req cap or fatal failure
+    requirements_reviewed --> generating_architecture: architect claim (R-req enabled)
     generating_architecture --> architecture_generated: architecture valid
     generating_architecture --> rejected: retry exhaustion
 
-    architecture_generated --> preparing_stories: story-preparer claim
+    architecture_generated --> preparing_stories: story-preparer claim (R-arch disabled, default)
+    architecture_generated --> reviewing_architecture: R-arch claim (ADR-051, architecture_review_enabled)
+    reviewing_architecture --> architecture_reviewed: R-arch approved
+    reviewing_architecture --> requirements_generated: R-arch rejected, re-run architect
+    reviewing_architecture --> rejected: R-arch cap or fatal failure
+    architecture_reviewed --> preparing_stories: story-preparer claim (R-arch enabled)
     preparing_stories --> stories_generated: stories valid and scheduled
     preparing_stories --> rejected: retry exhaustion
 
@@ -313,11 +331,38 @@ that sets `drafted`, not at this transition.)
 Retry or recovery: parse, validation, or manager feedback retries; exhaustion emits
 `generation.failed` and rejects the Plan.
 
+### 5a. Review Requirements (ADR-051, gated)
+
+Who: `plan-reviewer` round R-req. Gated by `requirements_review_enabled`
+(env `REQUIREMENTS_REVIEW_ENABLED`); default OFF.
+
+When: the Plan is `requirements_generated` and the gate is on. The plan-reviewer
+claims `reviewing_requirements`; the architecture-generator carries the same flag
+and skips its `requirements_generated` claim while the gate is on, so the two do
+not race the claim (dual-watch).
+
+What: a deterministic preflight (capability rules — architecture/stories/scenarios
+do not exist yet) plus an adversarial LLM review judging the requirements against
+the goal and constraints: goal coverage, over-bundling, testable
+`acceptance_criteria`, dependency-DAG validity, semantic duplication.
+
+Why: catch judgment-class requirement defects before the architect, stories, and
+scenarios are generated against a flawed decomposition — the rejection re-runs
+only the requirement-generator.
+
+Happy path: approval publishes `plan.mutation.requirements.reviewed`; the Plan
+advances `requirements_reviewed` and the architecture-generator claims from there.
+
+Retry or recovery: rejection sends `plan.mutation.revision` (round 4) →
+`reviewing_requirements` rolls back to `approved` (re-run the
+requirement-generator); the iteration cap rejects.
+
 ### 6. Generate Architecture
 
 Who: `architecture-generator`.
 
-When: the Plan is `requirements_generated`.
+When: the Plan is `requirements_generated` (R-req disabled, default) or
+`requirements_reviewed` (R-req enabled — claims from the post-review state).
 
 Where: `PLAN_STATES` and architecture loop trajectory.
 
@@ -332,11 +377,42 @@ Happy path: valid architecture is committed as `architecture_generated`.
 Retry or recovery: skipped architecture still advances; topology or clean-room replacement
 conflicts retry or route to targeted recovery instead of being deferred to QA.
 
+### 6a. Review Architecture (ADR-051, gated)
+
+Who: `plan-reviewer` round R-arch. Gated by `architecture_review_enabled`
+(env `ARCHITECTURE_REVIEW_ENABLED`); default OFF.
+
+When: the Plan is `architecture_generated` and the gate is on. The plan-reviewer
+claims `reviewing_architecture`; the story-preparer carries the same flag and
+skips its `architecture_generated` claim while the gate is on, so the two do not
+race the claim (dual-watch).
+
+What: a deterministic preflight (architecture rules; `component_stub_risk` and the
+`scope.create` ownership check stay at R2 because they need scenarios/stories
+respectively) plus an adversarial LLM review judging the architecture against the
+requirements: coherence and undeclared file overlap, file→component placement
+(#237), architecture-requirement alignment, upstream-resolution discipline, and
+harness-profile discipline.
+
+Why: catch facade/clean-room and boundary-placement defects before stories and
+scenarios are sharded against a flawed design — the rejection re-runs only the
+architect.
+
+Happy path: approval publishes `plan.mutation.architecture.reviewed`; the Plan
+advances `architecture_reviewed` and the story-preparer claims from there.
+
+Retry or recovery: rejection sends `plan.mutation.revision` (round 3) →
+`reviewing_architecture` rolls back to `requirements_generated` (re-run the
+architect, capturing the prior architecture for revision); the iteration cap
+rejects.
+
 ### 7. Prepare Stories
 
 Who: `story-preparer`.
 
-When: the Plan is `architecture_generated`, or recovery requests `preparing_stories`.
+When: the Plan is `architecture_generated` (R-arch disabled, default) or
+`architecture_reviewed` (R-arch enabled — claims from the post-review state), or
+recovery requests `preparing_stories`.
 
 Where: `PLAN_STATES`, Sarah loop trajectory, and `workflow/derive_story_scheduling.go`.
 
@@ -752,9 +828,35 @@ Typical cause: unclear goal, scope, or context.
 
 SemTeams note: preserve reviewer findings and make the next draft respond to them.
 
+### Requirements Review Revision (ADR-051, gated)
+
+Who initiates: `plan-reviewer` R-req (`requirements_review_enabled`).
+
+State effect: `reviewing_requirements -> approved` (re-run the requirement-generator);
+revision round 4. Cap exhaustion rejects.
+
+Typical cause: goal under-coverage, over-bundled requirements, or missing testable
+acceptance criteria.
+
+SemTeams note: the rejection re-runs only the requirements phase — architecture,
+stories, and scenarios have not been generated yet.
+
+### Architecture Review Revision (ADR-051, gated)
+
+Who initiates: `plan-reviewer` R-arch (`architecture_review_enabled`).
+
+State effect: `reviewing_architecture -> requirements_generated` (re-run the architect,
+capturing the prior architecture for revision); revision round 3. Cap exhaustion rejects.
+
+Typical cause: facade/clean-room boundaries, file→component misplacement, or missing
+upstream-resolution discipline.
+
+SemTeams note: the rejection re-runs only the architecture phase — stories and scenarios
+have not been generated yet.
+
 ### Scenario Or Story Revision
 
-Who initiates: `plan-reviewer` scenario gate.
+Who initiates: `plan-reviewer` scenario gate (R2).
 
 State effect: re-enters plan, requirements, architecture, stories, or scenarios.
 
@@ -884,9 +986,13 @@ event. It writes `PLAN_STATES`, `ENTITY_STATES`, and plan artifact files.
 Goal, Context, and Scope. It acts on `created`, `explored`, and revision drafts. It writes through
 Plan mutations and keeps trajectory in `AGENT_LOOPS`.
 
-`plan-reviewer`: gates draft and scenario/story quality before costly work. It owns review
-findings and approval or revision decisions. It acts on `drafted` and `scenarios_generated`. It
-writes `PLAN_STATES` and emits recovery when revision caps are exhausted.
+`plan-reviewer`: gates planning quality before costly work across up to four rounds. It owns
+review findings and approval or revision decisions. It always acts on `drafted` (R1) and
+`scenarios_generated` (R2), and — when the ADR-051 per-phase gates are enabled — also on
+`requirements_generated` (R-req, `requirements_review_enabled`) and `architecture_generated`
+(R-arch, `architecture_review_enabled`). It writes `PLAN_STATES` (emitting
+`plan.mutation.requirements.reviewed` / `plan.mutation.architecture.reviewed` on the per-phase
+rounds) and emits recovery when revision caps are exhausted.
 
 `requirement-generator`: converts approved scope into dependency-aware executable requirements. It
 owns requirement DAG, capability coverage, and file ownership intent. It acts on `approved` and
@@ -1049,7 +1155,8 @@ These are the main live code surfaces behind this document:
   UI-facing phase summaries.
 - `processor/plan-manager/execution_events.go` for requirement convergence and QA transitions.
 - `processor/planner/component.go` for analyst and draft generation.
-- `processor/plan-reviewer/plan_watcher.go` for draft and scenario/story review gates.
+- `processor/plan-reviewer/plan_watcher.go` for the draft (R1), requirements (R-req, gated),
+  architecture (R-arch, gated), and scenario/story (R2) review gates.
 - `processor/requirement-generator/plan_watcher.go`.
 - `processor/requirement-generator/component.go`.
 - `processor/architecture-generator/component.go`.

@@ -251,9 +251,16 @@ and sets status to `scenarios_generated` when all executable Stories are covered
 
 ### Step 8: Scenario and Story review
 
-The `plan-reviewer` watches for status `scenarios_generated` and performs a second review pass,
+The `plan-reviewer` watches for status `scenarios_generated` and performs this review pass (R2),
 validating the Scenarios, Stories, requirements, architecture, and contract obligations. On
 approval, status advances to `ready_for_execution`.
+
+The plan-reviewer can run up to four rounds in total: R1 (draft, above), and — when the ADR-051
+per-phase gates are enabled — R-req at `requirements_generated` and R-arch at
+`architecture_generated`, plus R2 here. The two per-phase rounds (`requirements_review_enabled` /
+`architecture_review_enabled`, default off) catch judgment-class defects (over-bundling, missing
+acceptance criteria, facade boundaries, upstream-resolution gaps) immediately after each artifact
+is generated and re-run only the offending phase, instead of deferring them to R2 or execution.
 
 ### Full flow summary
 
