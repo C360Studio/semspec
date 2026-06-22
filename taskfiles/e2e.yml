@@ -428,6 +428,17 @@ tasks:
           qa-integration) FIXTURE_SCENARIO="qa-unit" ;;
           stall-complete|stall-reject) FIXTURE_SCENARIO="stall-retry" ;;
         esac
+
+        # ADR-051 Slice 3: the arch-review scenario is the only one that runs
+        # with the adversarial architecture round enabled (it adds a third
+        # reviewer dispatch, so enabling it globally would shift every other
+        # scenario's reviewer fixture sequence). Both plan-reviewer and
+        # story-preparer read ARCHITECTURE_REVIEW_ENABLED from e2e-mock.json.
+        ARCH_REVIEW=false
+        case "{{.SCENARIO}}" in
+          arch-review) ARCH_REVIEW=true ;;
+        esac
+
         FIXTURE_DIR="test/e2e/fixtures/mock-responses/$FIXTURE_SCENARIO"
         if [ ! -d "$FIXTURE_DIR" ]; then
           echo "[ERROR] No mock LLM fixtures found at: $FIXTURE_DIR"
@@ -441,8 +452,8 @@ tasks:
           exit 1
         fi
 
-        echo "[E2E:MOCK] Starting infrastructure with mock LLM..."
-        MOCK_SCENARIO="$FIXTURE_SCENARIO" docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        echo "[E2E:MOCK] Starting infrastructure with mock LLM (arch_review=$ARCH_REVIEW)..."
+        ARCHITECTURE_REVIEW_ENABLED="$ARCH_REVIEW" MOCK_SCENARIO="$FIXTURE_SCENARIO" docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
       - |
         echo "[E2E:MOCK] Running {{.SCENARIO}} with mock LLM..."
         E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11535 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}

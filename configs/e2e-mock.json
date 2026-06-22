@@ -773,7 +773,8 @@
       "enabled": true,
       "config": {
         "default_capability": "plan_review",
-        "sandbox_url": "http://sandbox:8090"
+        "sandbox_url": "http://sandbox:8090",
+        "architecture_review_enabled": ${ARCHITECTURE_REVIEW_ENABLED:-false}
       }
     },
     "architecture-generator": {
@@ -791,7 +792,8 @@
       "enabled": true,
       "config": {
         "default_capability": "story_preparation",
-        "max_generation_retries": 2
+        "max_generation_retries": 2,
+        "architecture_review_enabled": ${ARCHITECTURE_REVIEW_ENABLED:-false}
       }
     },
     "project-manager": {

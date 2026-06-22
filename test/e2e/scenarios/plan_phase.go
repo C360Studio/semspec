@@ -25,22 +25,50 @@ type PlanPhaseScenario struct {
 	config *config.Config
 	http   *client.HTTPClient
 	fs     *client.FilesystemClient
+
+	// archReview turns this into the ADR-051 Slice 3 architecture-review
+	// variant. The e2e:mock task enables the round for the "arch-review"
+	// scenario; this flag adds the assertion that the round actually ran.
+	archReview bool
+}
+
+// PlanPhaseOption configures a PlanPhaseScenario variant.
+type PlanPhaseOption func(*PlanPhaseScenario)
+
+// WithArchReview selects the ADR-051 Slice 3 arch-review variant: the plan
+// must flow through reviewing_architecture → architecture_reviewed (with a
+// third, R-arch, reviewer dispatch) and still reach scenarios. The e2e:mock
+// task sets ARCHITECTURE_REVIEW_ENABLED=true for this scenario.
+func WithArchReview() PlanPhaseOption {
+	return func(s *PlanPhaseScenario) { s.archReview = true }
 }
 
 // NewPlanPhaseScenario creates a new plan phase scenario.
-func NewPlanPhaseScenario(cfg *config.Config) *PlanPhaseScenario {
-	return &PlanPhaseScenario{
+func NewPlanPhaseScenario(cfg *config.Config, opts ...PlanPhaseOption) *PlanPhaseScenario {
+	s := &PlanPhaseScenario{
 		config: cfg,
 		http:   client.NewHTTPClient(cfg.HTTPBaseURL),
 		fs:     client.NewFilesystemClient(cfg.WorkspacePath),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Name implements Scenario.
-func (s *PlanPhaseScenario) Name() string { return "plan-phase" }
+func (s *PlanPhaseScenario) Name() string {
+	if s.archReview {
+		return "arch-review"
+	}
+	return "plan-phase"
+}
 
 // Description implements Scenario.
 func (s *PlanPhaseScenario) Description() string {
+	if s.archReview {
+		return "ADR-051 arch-review: plan flows through reviewing_architecture → architecture_reviewed with a 3rd (R-arch) reviewer dispatch, then reaches scenarios"
+	}
 	return "Full plan phase: plan → requirements → scenarios → review → approved"
 }
 
@@ -71,6 +99,17 @@ func (s *PlanPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-requirements", s.stageVerifyRequirements, 15 * time.Second},
 		{"verify-scenarios", s.stageVerifyScenarios, 15 * time.Second},
 		{"verify-mock-stats", s.stageVerifyMockStats, 10 * time.Second},
+	}
+
+	if s.archReview {
+		// ADR-051 Slice 3: prove the architecture round actually dispatched
+		// (the rest of the pipeline reaching scenarios already proves it did
+		// not wedge the architecture_generated → preparing_stories handoff).
+		stages = append(stages, struct {
+			name    string
+			fn      func(context.Context, *Result) error
+			timeout time.Duration
+		}{"verify-arch-review-dispatched", s.stageVerifyArchReviewDispatched, 10 * time.Second})
 	}
 
 	if s.config.FastTimeouts {
@@ -260,8 +299,13 @@ func (s *PlanPhaseScenario) stageVerifyArchitecture(ctx context.Context, result 
 				continue
 			}
 			// architecture_generated or any later stage means architecture is done.
+			// The ADR-051 arch-review states (reviewing_architecture,
+			// architecture_reviewed) and the story phase sit between
+			// architecture_generated and scenarios; include them so the poll
+			// matches even if it samples the plan mid-review.
 			switch plan.Stage {
-			case "architecture_generated", "generating_scenarios", "scenarios_generated",
+			case "architecture_generated", "reviewing_architecture", "architecture_reviewed",
+				"preparing_stories", "stories_generated", "generating_scenarios", "scenarios_generated",
 				"reviewing_scenarios", "scenarios_reviewed", "ready_for_execution",
 				"implementing", "reviewing_rollup", "reviewing_qa", "complete":
 				if plan.Architecture == nil {
@@ -364,5 +408,45 @@ func (s *PlanPhaseScenario) stageVerifyMockStats(ctx context.Context, result *Re
 	}
 	result.SetDetail("mock_call_summary", strings.Join(summary, ", "))
 
+	return nil
+}
+
+// stageVerifyArchReviewDispatched asserts the ADR-051 Slice 3 architecture
+// review round actually ran. With the round enabled the reviewer is dispatched
+// three times — R1 (drafted) + R-arch (architecture_generated) + R2
+// (scenarios_generated). A count below 3 means R-arch was skipped, which is the
+// fingerprint of the story-preparer race regression (Sarah claiming
+// architecture_generated before the reviewer) — exactly what this scenario
+// guards. The pipeline having already reached scenarios proves the round did
+// not wedge the architecture_generated → preparing_stories handoff.
+func (s *PlanPhaseScenario) stageVerifyArchReviewDispatched(ctx context.Context, result *Result) error {
+	if s.config.MockLLMURL == "" {
+		return fmt.Errorf("arch-review scenario requires the mock LLM to count reviewer dispatches")
+	}
+
+	statsURL := s.config.MockLLMURL + "/stats"
+	req, err := http.NewRequestWithContext(ctx, "GET", statsURL, nil)
+	if err != nil {
+		return fmt.Errorf("create stats request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("fetch mock stats: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var mockStats struct {
+		CallsByModel map[string]int `json:"calls_by_model"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&mockStats); err != nil {
+		return fmt.Errorf("parse mock stats: %w", err)
+	}
+
+	const wantReviewerCalls = 3 // R1 + R-arch + R2
+	got := mockStats.CallsByModel["mock-reviewer"]
+	result.SetDetail("reviewer_call_count", got)
+	if got < wantReviewerCalls {
+		return fmt.Errorf("architecture review round did not dispatch: mock-reviewer called %d time(s), want >= %d (R1 + R-arch + R2 — a count of 2 means the R-arch round was skipped)", got, wantReviewerCalls)
+	}
 	return nil
 }
