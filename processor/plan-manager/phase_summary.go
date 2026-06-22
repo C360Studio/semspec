@@ -54,8 +54,11 @@ func buildPlanPhaseSummary(plan *workflow.Plan, stage string, activeLoops []Acti
 func classifyPlanPhase(plan *workflow.Plan, stage string, execution *ExecutionSummary) (phase, state, title, detail string) {
 	switch stage {
 	case "drafting", "exploring", "explored", "ready_for_approval", "reviewed", "needs_changes", "approved",
-		"generating_requirements", "requirements_generated", "generating_architecture",
-		"architecture_generated", "preparing_stories", "stories_generated",
+		"generating_requirements", "requirements_generated",
+		"reviewing_requirements", "requirements_reviewed",
+		"generating_architecture", "architecture_generated",
+		"reviewing_architecture", "architecture_reviewed",
+		"preparing_stories", "stories_generated",
 		"generating_scenarios", "reviewing_scenarios", "scenarios_generated",
 		"scenarios_reviewed":
 		return "planning", activeOrWaitingState(stage), titleForPlanningStage(stage), detailForPlanningStage(stage)
@@ -93,7 +96,8 @@ func classifyPlanPhase(plan *workflow.Plan, stage string, execution *ExecutionSu
 func activeOrWaitingState(stage string) string {
 	switch stage {
 	case "explored", "ready_for_approval", "reviewed", "needs_changes", "approved",
-		"requirements_generated", "architecture_generated", "stories_generated",
+		"requirements_generated", "requirements_reviewed",
+		"architecture_generated", "architecture_reviewed", "stories_generated",
 		"scenarios_generated", "scenarios_reviewed":
 		return "waiting"
 	default:
@@ -111,10 +115,18 @@ func titleForPlanningStage(stage string) string {
 		return "Generating requirements"
 	case "requirements_generated":
 		return "Requirements generated"
+	case "reviewing_requirements":
+		return "Reviewing requirements"
+	case "requirements_reviewed":
+		return "Requirements reviewed"
 	case "generating_architecture":
 		return "Generating architecture"
 	case "architecture_generated":
 		return "Architecture generated"
+	case "reviewing_architecture":
+		return "Reviewing architecture"
+	case "architecture_reviewed":
+		return "Architecture reviewed"
 	case "preparing_stories":
 		return "Preparing Stories"
 	case "stories_generated":
@@ -146,10 +158,18 @@ func detailForPlanningStage(stage string) string {
 		return "Decomposing the approved plan into requirements."
 	case "requirements_generated":
 		return "Requirements are ready for architecture generation."
+	case "reviewing_requirements":
+		return "Reviewing the requirements against the goal and constraints (ADR-051)."
+	case "requirements_reviewed":
+		return "Reviewed requirements are ready for architecture generation."
 	case "generating_architecture":
 		return "Generating architecture and component boundaries."
 	case "architecture_generated":
 		return "Architecture is ready for Story preparation."
+	case "reviewing_architecture":
+		return "Reviewing the architecture against the requirements (ADR-051)."
+	case "architecture_reviewed":
+		return "Reviewed architecture is ready for Story preparation."
 	case "preparing_stories":
 		return "Preparing BMAD Stories, ownership, and task checklists."
 	case "stories_generated":
