@@ -39,6 +39,55 @@ func TestDeterministicPreflightReview_HardStructuralErrorShortCircuits(t *testin
 	}
 }
 
+func TestDeterministicPreflightReview_ContractDeliverableUncoveredShortCircuits(t *testing.T) {
+	plan := &workflow.Plan{
+		Slug: "preflight-uncovered-contract-file",
+		Scope: workflow.Scope{
+			Create: []string{"src/main/java/RequiredDriver.java", "src/main/java/Helper.java"},
+		},
+		Contract: &workflow.ContractPacket{
+			Scope: workflow.ContractScopeSnapshot{
+				Create: []string{"src/main/java/RequiredDriver.java", "src/main/java/Helper.java"},
+			},
+		},
+		Architecture: &workflow.ArchitectureDocument{
+			ComponentBoundaries: []workflow.ComponentDef{
+				{
+					Name:                "driver",
+					ImplementationFiles: []string{"src/main/java/RequiredDriver.java", "src/main/java/Helper.java"},
+					Capabilities:        []string{"driver"},
+				},
+			},
+		},
+		Requirements: []workflow.Requirement{{ID: "req.driver", CapabilityName: "driver", Title: "Driver"}},
+		Stories: []workflow.Story{{
+			ID:             "story.driver",
+			RequirementIDs: []string{"req.driver"},
+			ComponentName:  "driver",
+			Title:          "Build driver",
+			Status:         workflow.StoryStatusReady,
+			FilesOwned:     []string{"src/main/java/Helper.java"},
+			Tasks:          []workflow.Task{{ID: "task.driver.test", StoryID: "story.driver", Description: "Write failing test"}},
+		}},
+	}
+
+	result := deterministicPreflightReview(plan)
+
+	if result == nil {
+		t.Fatal("expected deterministic preflight to reject uncovered root contract deliverable")
+	}
+	finding := firstFinding(result.Findings, "story.contract_scope_uncovered")
+	if finding == nil {
+		t.Fatalf("expected story.contract_scope_uncovered finding, got %+v", result.Findings)
+	}
+	if finding.TargetValue != "src/main/java/RequiredDriver.java" {
+		t.Fatalf("TargetValue = %q, want src/main/java/RequiredDriver.java", finding.TargetValue)
+	}
+	if result.Verdict != "needs_changes" {
+		t.Fatalf("verdict = %q, want needs_changes", result.Verdict)
+	}
+}
+
 func TestDeterministicPreflightReview_WarningOnlyDoesNotShortCircuit(t *testing.T) {
 	plan := &workflow.Plan{
 		Slug: "preflight-warning-only",

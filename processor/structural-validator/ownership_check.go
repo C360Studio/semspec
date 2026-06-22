@@ -96,6 +96,11 @@ type ownershipVerdict struct {
 	// path stages everything (`git add -A`) and it would silently pollute the
 	// branch. Hard fail routed to DEV-RETRY: the developer must remove it.
 	RootScratch []string
+	// NamedSourceScratch are newly-created source/test files with high-signal
+	// throwaway basenames (Dummy.java, Scratch.java, FindClass.java) even when
+	// nested under a normal source tree. These are developer cleanup failures, not
+	// evidence that the architecture/story partition omitted a real deliverable.
+	NamedSourceScratch []string
 }
 
 // clean reports whether there are no hard-fail violations (scratch artefacts,
@@ -106,7 +111,8 @@ func (v ownershipVerdict) clean() bool {
 		len(v.ModifiedDocUnowned) == 0 &&
 		len(v.NewUnownedOutOfTerritory) == 0 &&
 		len(v.NewTopologyControlled) == 0 &&
-		len(v.RootScratch) == 0
+		len(v.RootScratch) == 0 &&
+		len(v.NamedSourceScratch) == 0
 }
 
 // parsePorcelain parses `git status --porcelain=v1` output into entries. It is
@@ -215,6 +221,19 @@ func isSourceFile(p string) bool {
 	return ok
 }
 
+func isNamedSourceScratch(p string) bool {
+	if !isSourceFile(p) {
+		return false
+	}
+	base := strings.TrimSuffix(path.Base(strings.ReplaceAll(p, "\\", "/")), path.Ext(p))
+	switch strings.ToLower(base) {
+	case "dummy", "dummytest", "scratch", "scratchtest", "findclass", "findclasstest":
+		return true
+	default:
+		return false
+	}
+}
+
 // firstSegment returns the top-level path component, or "" for a root-level file
 // with no directory (e.g. "FindClass.java" → "", "src/main/java/X.java" → "src").
 func firstSegment(p string) string {
@@ -294,12 +313,6 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// A NEW unowned doc is hygiene-only (an undeclared coverage
 				// matrix / scratch note); advisory, surfaced to the reviewer.
 				v.NewUnowned = append(v.NewUnowned, norm)
-			case len(territory) == 0 || withinTerritory(norm, territory):
-				// No declared territory (manual / E2E dispatch with no story
-				// context — the production caller skips the gate entirely in this
-				// case, so this only guards direct callers), or an in-package
-				// class split: advisory, matching pre-ADR-049 behavior.
-				v.NewUnowned = append(v.NewUnowned, norm)
 			case firstSegment(norm) == "" && isSourceFile(norm):
 				// A new SOURCE file at the worktree ROOT (no package directory) — a
 				// dev's throwaway probe (FindClass.java). Never a deliverable (source
@@ -309,6 +322,18 @@ func decideOwnership(changes []porcelainEntry, owned map[string]struct{}) owners
 				// silently pollutes the branch. Hard fail routed to dev-retry so the
 				// developer removes it.
 				v.RootScratch = append(v.RootScratch, norm)
+			case isNamedSourceScratch(norm):
+				// High-signal throwaway source names are developer cleanup/stub
+				// failures even when created under src/main/java or src/test/java.
+				// Treating "Dummy.java" as a planning gap sends recovery to repair
+				// a plan that may be fine; the dev must remove the scratch instead.
+				v.NamedSourceScratch = append(v.NamedSourceScratch, norm)
+			case len(territory) == 0 || withinTerritory(norm, territory):
+				// No declared territory (manual / E2E dispatch with no story
+				// context — the production caller skips the gate entirely in this
+				// case, so this only guards direct callers), or an in-package
+				// class split: advisory, matching pre-ADR-049 behavior.
+				v.NewUnowned = append(v.NewUnowned, norm)
 			case firstSegment(norm) == "":
 				// A new NON-source file at the root (a stray note, an undeclared
 				// root config) — not a deliverable parallel stories converge on, and
@@ -410,7 +435,8 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 	// everything, so advisory scratch silently pollutes the branch).
 	containmentClean := len(verdict.JunkViolations) == 0 &&
 		len(verdict.ModifiedDocUnowned) == 0 &&
-		len(verdict.RootScratch) == 0
+		len(verdict.RootScratch) == 0 &&
+		len(verdict.NamedSourceScratch) == 0
 	containment := payloads.CheckResult{
 		Name:     checkName,
 		Passed:   containmentClean,
@@ -427,6 +453,9 @@ func (e *Executor) runFileOwnershipContainment(ctx context.Context, owned []stri
 		}
 		if len(verdict.RootScratch) > 0 {
 			fmt.Fprintf(&b, "Root-level source file(s) that are not deliverables must be removed before submit (a source file belongs in a package directory, not the worktree root — write throwaway probes to /tmp): %s. ", strings.Join(verdict.RootScratch, ", "))
+		}
+		if len(verdict.NamedSourceScratch) > 0 {
+			fmt.Fprintf(&b, "Throwaway source/test file(s) that are not deliverables must be removed before submit (write probes or placeholder classes to /tmp, not the worktree): %s. ", strings.Join(verdict.NamedSourceScratch, ", "))
 		}
 		if len(verdict.ModifiedDocUnowned) > 0 {
 			fmt.Fprintf(&b, "Modified shared documentation this story does not own: %s. A doc owned by no story (or by another story) is co-written by parallel stories and cannot be merged at assembly — only edit docs in your file scope; if a deliverable doc isn't yours, surface it as a planning gap. ", strings.Join(verdict.ModifiedDocUnowned, ", "))

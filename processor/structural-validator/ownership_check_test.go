@@ -130,6 +130,7 @@ func TestDecideOwnership(t *testing.T) {
 		wantNewOutOfTerritory []string // hard-fail: new source/test outside territory
 		wantNewTopology       []string // hard-fail: new topology-controlled project/build file
 		wantRootScratch       []string // hard-fail (dev-retry): root-level source scratch
+		wantNamedScratch      []string // hard-fail (dev-retry): obvious nested source scratch
 	}{
 		{
 			name:              "modified non-owned DOC (README wedge) hard-fails",
@@ -176,6 +177,18 @@ func TestDecideOwnership(t *testing.T) {
 			porcelain:             "?? src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java",
 			owned:                 ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
 			wantNewOutOfTerritory: []string{"src/main/java/org/sensorhub/impl/sensor/mavsdk/MavsdkDriver.java"},
+		},
+		{
+			name:             "nested Dummy.java is dev-cleanup scratch, NOT a planning gap",
+			porcelain:        "?? src/main/java/Dummy.java",
+			owned:            ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNamedScratch: []string{"src/main/java/Dummy.java"},
+		},
+		{
+			name:             "in-territory DummyTest.java is still dev-cleanup scratch",
+			porcelain:        "?? src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java",
+			owned:            ownedSetOf("src/main/java/org/sensorhub/driver/mavsdk/MavSdkCSDriver.java"),
+			wantNamedScratch: []string{"src/test/java/org/sensorhub/driver/mavsdk/DummyTest.java"},
 		},
 		{
 			name:                  "new unowned TEST outside territory is an ownership gap (hard fail)",
@@ -333,6 +346,9 @@ func TestDecideOwnership(t *testing.T) {
 			}
 			if !equalSets(v.RootScratch, tc.wantRootScratch) {
 				t.Errorf("rootScratch = %v, want %v", sortedCopy(v.RootScratch), sortedCopy(tc.wantRootScratch))
+			}
+			if !equalSets(v.NamedSourceScratch, tc.wantNamedScratch) {
+				t.Errorf("namedSourceScratch = %v, want %v", sortedCopy(v.NamedSourceScratch), sortedCopy(tc.wantNamedScratch))
 			}
 		})
 	}
@@ -500,6 +516,24 @@ func TestRunFileOwnershipContainment(t *testing.T) {
 		}
 		if !strings.Contains(gap.Stderr, "other/pkg/New.java") {
 			t.Errorf("expected offending path named in planning-gap, got %q", gap.Stderr)
+		}
+	})
+
+	t.Run("nested Dummy.java emits dev-cleanup containment failure, not planning-gap recovery", func(t *testing.T) {
+		runner := &fakeRunner{stdout: "?? src/main/java/Dummy.java\n M src/A.java\n"}
+		owned := workflow.NormalizeFilePaths([]string{"src/A.java"})
+		results := e.runFileOwnershipContainment(context.Background(), owned, "/wt", runner)
+		c := findResult(t, results, payloads.CheckFileOwnershipContainment)
+		if c.Passed || !c.Required {
+			t.Fatalf("expected required containment failure for Dummy.java scratch, got %+v", c)
+		}
+		if !strings.Contains(c.Stderr, "Dummy.java") || !strings.Contains(c.Stderr, "Throwaway source/test") {
+			t.Errorf("expected Dummy.java dev-cleanup message, got %q", c.Stderr)
+		}
+		for _, r := range results {
+			if r.Name == payloads.CheckFileOwnershipPlanningGap {
+				t.Fatalf("Dummy.java scratch must not emit planning-gap recovery row: %+v", r)
+			}
 		}
 	})
 
