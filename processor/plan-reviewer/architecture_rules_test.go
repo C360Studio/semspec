@@ -942,7 +942,7 @@ func TestScopedFileOwnershipFindings(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := scopedUnownedByTarget(scopedFileOwnershipFindings(tc.scope, tc.components))
+			got := scopedUnownedByTarget(scopedFileOwnershipFindings(tc.scope, tc.components, true))
 			if len(got) != len(tc.wantOrphan) {
 				t.Fatalf("got %d orphan findings %v, want %d %v", len(got), keysOf(got), len(tc.wantOrphan), tc.wantOrphan)
 			}
@@ -1003,4 +1003,64 @@ func TestScopedFileOwnership_IntegrationVerdictFlip(t *testing.T) {
 	if result.Verdict != "needs_changes" {
 		t.Errorf("expected verdict needs_changes, got %q", result.Verdict)
 	}
+}
+
+// TestScopedFileOwnership_ArchPhaseSkipsCreate pins the ADR-051 Slice 3 phase
+// gating: at the architecture-review round (no Stories yet) scope.create is
+// draft-partial, so its ownership is NOT checked (checkCreate=false) — only
+// scope.include is. Once Stories exist (R2) the create pass runs. Without this
+// the architecture round would false-reject every greenfield plan whose
+// scope.create has not yet been reconciled with component implementation_files
+// by ensureScopeCreateCoversStories.
+func TestScopedFileOwnership_ArchPhaseSkipsCreate(t *testing.T) {
+	comp := func(name string, files ...string) workflow.ComponentDef {
+		return workflow.ComponentDef{Name: name, ImplementationFiles: files, Capabilities: []string{"c"}}
+	}
+	scope := workflow.Scope{
+		Create:  []string{"src/Unreconciled.java"}, // owned by NO component yet (pre-stories)
+		Include: []string{"README.md"},             // owned by NO component → always an orphan
+	}
+	components := []workflow.ComponentDef{comp("c1", "src/Other.java")}
+
+	t.Run("arch phase (no stories) flags include only", func(t *testing.T) {
+		got := scopedUnownedByTarget(scopedFileOwnershipFindings(scope, components, false))
+		if _, ok := got["src/Unreconciled.java"]; ok {
+			t.Error("scope.create file must NOT be flagged before stories reconcile it (false positive)")
+		}
+		if _, ok := got["README.md"]; !ok {
+			t.Error("scope.include orphan must still be flagged at the architecture phase")
+		}
+	})
+
+	t.Run("stories present flags both", func(t *testing.T) {
+		got := scopedUnownedByTarget(scopedFileOwnershipFindings(scope, components, true))
+		if _, ok := got["src/Unreconciled.java"]; !ok {
+			t.Error("scope.create orphan must be flagged once stories exist")
+		}
+		if _, ok := got["README.md"]; !ok {
+			t.Error("scope.include orphan must be flagged")
+		}
+	})
+
+	t.Run("mergeArchitectureFindings gates create on plan.Stories", func(t *testing.T) {
+		plan := &workflow.Plan{
+			Slug:         "demo",
+			Scope:        scope,
+			Architecture: &workflow.ArchitectureDocument{ComponentBoundaries: components},
+		}
+		// No Stories → create pass skipped; the unowned create file must not fire.
+		pre := &workflow.PlanReviewResult{Verdict: "approved"}
+		mergeArchitectureFindings(plan, pre)
+		if _, ok := scopedUnownedByTarget(pre.Findings)["src/Unreconciled.java"]; ok {
+			t.Error("pre-stories mergeArchitectureFindings must skip the scope.create ownership check")
+		}
+
+		// Stories present → create pass runs.
+		plan.Stories = []workflow.Story{{ID: "story.demo.1.1"}}
+		post := &workflow.PlanReviewResult{Verdict: "approved"}
+		mergeArchitectureFindings(plan, post)
+		if _, ok := scopedUnownedByTarget(post.Findings)["src/Unreconciled.java"]; !ok {
+			t.Error("post-stories mergeArchitectureFindings must run the scope.create ownership check")
+		}
+	})
 }

@@ -95,7 +95,7 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 		result.Findings = append(result.Findings,
 			capabilityUnresolvedInArchitectureFindings(plan)...)
 		result.Findings = append(result.Findings,
-			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries)...)
+			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries, len(plan.Stories) > 0)...)
 		result.Findings = append(result.Findings,
 			topologyContractFindings(plan.Contract, plan.Architecture.ComponentBoundaries)...)
 	}
@@ -689,7 +689,17 @@ func sourceFileCount(paths []string) int {
 // rejects it) — it must ride as a companion file on the source component that
 // produces it (single owner ⇒ single writer), or on several source components
 // (⇒ the scheduler serializes them). Either outcome closes the wedge.
-func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.ComponentDef) []workflow.PlanReviewFinding {
+// checkCreate gates the scope.create ownership pass. scope.create is only
+// fully reconciled against component implementation_files once Sarah's Stories
+// are saved (ensureScopeCreateCoversStories augments scope.create from
+// Story.FilesOwned). Before that — at the ADR-051 architecture-review round,
+// which runs at architecture_generated before Stories exist — scope.create is
+// draft-partial and checking its ownership false-positives (ADR-051: create
+// stays at stories/R2; only scope.include is gated early, by the
+// architecture-generator's UnownedScopedIncludeFiles check). Callers pass
+// len(plan.Stories) > 0 so the create pass runs once and only once the data is
+// ready; scope.include is always safe to check.
+func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.ComponentDef, checkCreate bool) []workflow.PlanReviewFinding {
 	// Ownership universe: every file any component declares, regardless of the
 	// component's Name (an unnamed component is flagged elsewhere, but its files
 	// still count as owned — otherwise we'd emit spurious orphan findings).
@@ -742,8 +752,10 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 		})
 	}
 
-	for _, f := range scope.Create {
-		consider(f, "create")
+	if checkCreate {
+		for _, f := range scope.Create {
+			consider(f, "create")
+		}
 	}
 	for _, f := range scope.Include {
 		consider(f, "include")
