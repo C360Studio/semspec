@@ -15,15 +15,40 @@ structural completeness"*; ADR-040: *"Layer 1: structural pre-check … Layer 2:
 the semantic gate"*) was a two-layer review — deterministic structural rules plus
 an LLM semantic gate — at each planning phase. The implementation drifted:
 
-- The per-phase structural functions (`mergeCapabilityFindings`,
+- The plan-reviewer's deterministic rule functions (`mergeCapabilityFindings`,
   `mergeArchitectureFindings`, `mergeStoryFindings`, `mergeScenarioTagFindings`)
-  are called **only** from `mergeDeterministicFindings`, which runs **only** at R1
-  (drafted) and R2 (scenarios_generated). At R1 there is no downstream data, so in
-  practice **all 29 structural rules fire at one late point — R2**, after every
-  artifact (requirements → architecture → stories → scenarios) already exists.
+  run only at R1/R2. **Correction (verified during implementation — the original
+  draft overstated this as "all 29 rules fire late at R2"):** the single-writer
+  **mutation handlers** and the **architecture-generator** already enforce most of
+  these rules early, so R2 is largely a backstop, not the primary gate. Verified
+  per-phase coverage:
+  - **Requirements** — `handleRequirementsMutation` enforces capability-orphan,
+    requirement-orphan, requirement DAG, and file-ownership early (rejection
+    bounces to req-gen for retry). `capability.orphan.docs_only` is intentionally
+    dead — `FindDocsOnlyCapabilities` is a no-op since ADR-043 Move 4 removed
+    `Requirement.FilesOwned`; the concern moved to the architecture
+    (`component_implementation_files_doc_only`) and story
+    (`docs_only_files_owned`) layers. **No genuine requirements gap.**
+  - **Architecture** — `validateGeneratedArchitecture` enforces impl-files,
+    capability coverage, upstream, and harness early; **`scope.include` ownership
+    was the gap, closed by Slice 1.** `component_stub_risk` is intrinsically late
+    (needs scenarios as TDD forcing functions).
+  - **Stories** — `ValidateStories` (at `handleStoriesMutation`) enforces
+    per-story shape, docs-only `files_owned`, tasks, cross-story DAG, and
+    cross-story file-ownership early. **The 5 cross-entity rules that need plan
+    context — component resolution, requirement-id resolution,
+    files-owned-outside-component, contract-scope coverage, topology — are the
+    genuine remaining gap → Slice 2b.**
+  - **Scenarios** — R2 is their own phase; correct.
 - The LLM semantic review covers only **2 of 5** artifacts: draft (R1) and
-  scenarios (R2). Requirements get only an indirect mention in R2's
-  scenario-shaped prompt; **architecture and stories get no LLM review at all.**
+  scenarios (R2). **Architecture and requirements get no LLM review at all** — the
+  larger remaining value (Slices 3–4).
+
+Net: the structural-early work was never "relocate 29 late rules" — ~22 already
+fire early at the mutation handlers / arch-gen validator. The real structural gaps
+were **`scope.include` (Slice 1, done)** and **story cross-entity rules (Slice
+2b)**. Requirements (Slice 2a) is a no-op. Slices 3–4 (semantic gates) are the
+larger remaining value.
 
 Consequence, observed on the mavlink-hard gemini run (plan `2689024ccba9`): the
 architect orphaned two `scope.include` files (`build.gradle`, `README.md`). The
