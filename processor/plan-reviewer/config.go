@@ -44,6 +44,22 @@ type Config struct {
 	// empty output skips the section silently.
 	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox URL for project file tree snapshot,category:advanced"`
 
+	// ArchitectureReviewEnabled gates the ADR-051 Slice 3 adversarial
+	// architecture review round (R-arch). When true the plan-reviewer claims
+	// architecture_generated → reviewing_architecture, runs a deterministic
+	// preflight + an architecture-shaped LLM review, then advances to
+	// architecture_reviewed (approve) or back to requirements_generated
+	// (reject — re-run the architect). When false (default) no component claims
+	// reviewing_architecture and architecture_generated → preparing_stories
+	// directly, exactly as before this slice.
+	//
+	// CROSS-COMPONENT INVARIANT: story-preparer carries the SAME flag and MUST
+	// agree with this one. Source both from the one ARCHITECTURE_REVIEW_ENABLED
+	// env var in semspec.json. If they disagree the architecture phase wedges:
+	// reviewer-on/preparer-off leaves architecture_reviewed unclaimed, and
+	// reviewer-off/preparer-on leaves architecture_generated unclaimed.
+	ArchitectureReviewEnabled bool `json:"architecture_review_enabled" schema:"type:bool,description:Enable the ADR-051 adversarial architecture review round (must match story-preparer),category:advanced,default:false"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

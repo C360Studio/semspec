@@ -289,13 +289,27 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		//       dedup against the echo from path (A) below.
 		switch plan.Status {
 		case workflow.StatusArchitectureGenerated:
-			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusPreparingStories, c.logger) {
+			// ADR-051 Slice 3 (dual-watch claim point A): when the architecture
+			// review is ENABLED the plan-reviewer owns this state — it claims
+			// architecture_generated → reviewing_architecture. Sarah must NOT
+			// race it; she waits for the post-review architecture_reviewed echo
+			// (claim point B below). When the review is DISABLED (default), no
+			// reviewer claims this state and Sarah shards directly from here, as
+			// before the slice. The flag mirrors plan-reviewer's; see Config.
+			if c.config.ArchitectureReviewEnabled {
 				continue
 			}
-			// Track the claim so the corresponding preparing_stories echo
-			// the watcher sees next does NOT trigger a second dispatch.
-			c.markClaimedSlug(plan.Slug)
-			plan.Status = workflow.StatusPreparingStories
+			if !c.claimPreparingStories(ctx, &plan) {
+				continue
+			}
+		case workflow.StatusArchitectureReviewed:
+			// ADR-051 Slice 3 (dual-watch claim point B): only reachable when the
+			// architecture review is enabled — the architect's output passed the
+			// adversarial round. Sarah shards from here exactly as she would from
+			// architecture_generated in the review-disabled path.
+			if !c.claimPreparingStories(ctx, &plan) {
+				continue
+			}
 		case workflow.StatusPreparingStories:
 			// Was THIS watcher's claim the cause of this echo? If yes, the
 			// dispatch already happened in path (A) — drop the echo and
@@ -313,6 +327,23 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 
 		go c.processStoryPhase(ctx, &plan)
 	}
+}
+
+// claimPreparingStories atomically CAS-claims preparing_stories for the plan
+// and, on success, records the self-echo so the corresponding preparing_stories
+// KV-put does not trigger a second dispatch and mutates the in-memory plan so
+// the caller dispatches against the claimed status. Returns false when another
+// replica (or, for architecture_generated, the plan-reviewer's competing
+// reviewing_architecture claim) won the race. Shared by both ADR-051 dual-watch
+// claim points (architecture_generated when review-disabled, architecture_reviewed
+// when review-enabled).
+func (c *Component) claimPreparingStories(ctx context.Context, plan *workflow.Plan) bool {
+	if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusPreparingStories, c.logger) {
+		return false
+	}
+	c.markClaimedSlug(plan.Slug)
+	plan.Status = workflow.StatusPreparingStories
+	return true
 }
 
 // markClaimedSlug records that THIS watcher just produced a

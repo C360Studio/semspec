@@ -290,7 +290,9 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		var plan workflow.Plan
 		if json.Unmarshal([]byte(planJSON), &plan) == nil {
 			status := plan.EffectiveStatus()
-			if status != workflow.StatusReviewingDraft && status != workflow.StatusReviewingScenarios {
+			if status != workflow.StatusReviewingDraft &&
+				status != workflow.StatusReviewingScenarios &&
+				status != workflow.StatusReviewingArchitecture {
 				c.logger.Warn("Plan not in reviewing state, discarding stale review result",
 					"slug", slug,
 					"current_status", status,

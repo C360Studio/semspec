@@ -36,6 +36,7 @@ const (
 	mutationStoryStatus           = "plan.mutation.story.status"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationScenariosReviewed     = "plan.mutation.scenarios.reviewed"
+	mutationArchitectureReviewed  = "plan.mutation.architecture.reviewed"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 	mutationClaim                 = "plan.mutation.claim"
@@ -214,6 +215,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationStoryStatus, c.handleStoryStatusMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationScenariosReviewed, c.handleScenariosReviewedMutation},
+		{mutationArchitectureReviewed, c.handleArchitectureReviewedMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 		{mutationClaim, c.handleClaimMutation},
@@ -1274,6 +1276,53 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 	return MutationResponse{Success: true}
 }
 
+// handleArchitectureReviewedMutation advances the plan from
+// reviewing_architecture to architecture_reviewed after the ADR-051 Slice 3
+// adversarial architecture round approves. Unlike the round-1 and round-2
+// human checkpoints, this is a machine gate between the architect and Sarah —
+// it always advances (no auto_approve fork). story-preparer claims
+// preparing_stories from architecture_reviewed. The operative approved verdict
+// overwrites any stale rejection metadata from a prior architecture revision.
+func (c *Component) handleArchitectureReviewedMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug    string `json:"slug"`
+		Summary string `json:"summary,omitempty"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	defer c.lockSlug(req.Slug)()
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusArchitectureReviewed) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → architecture_reviewed", current)}
+	}
+	plan.Status = workflow.StatusArchitectureReviewed
+	plan.ReviewVerdict = "approved"
+	if req.Summary != "" {
+		plan.ReviewSummary = req.Summary
+	}
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan architecture reviewed via mutation, advancing to preparing_stories", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
 func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []byte) MutationResponse {
 	var req struct {
 		Slug    string `json:"slug"`
@@ -1524,8 +1573,8 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 	if err := json.Unmarshal(data, &req); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
-	if req.Slug == "" || req.Round < 1 || req.Round > 2 {
-		return MutationResponse{Success: false, Error: "slug required and round must be 1 or 2"}
+	if req.Slug == "" || req.Round < 1 || req.Round > 3 {
+		return MutationResponse{Success: false, Error: "slug required and round must be 1, 2, or 3"}
 	}
 	if req.Verdict != "needs_changes" {
 		return MutationResponse{Success: false, Error: "revision handler only accepts verdict=needs_changes"}
@@ -1545,8 +1594,11 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 	// Guard: plan must be in the reviewing state for the given round.
 	current := plan.EffectiveStatus()
 	expectedStatus := workflow.StatusReviewingDraft
-	if req.Round == 2 {
+	switch req.Round {
+	case 2:
 		expectedStatus = workflow.StatusReviewingScenarios
+	case 3:
+		expectedStatus = workflow.StatusReviewingArchitecture
 	}
 	if current != expectedStatus {
 		return MutationResponse{Success: false, Error: fmt.Sprintf(
@@ -1577,6 +1629,15 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 		targetStatus = workflow.StatusCreated
 	case 2:
 		targetStatus = c.determineR2ReentryPoint(plan, req.Findings)
+	case 3:
+		// ADR-051 Slice 3: an architecture rejection re-runs the architect only.
+		// reenterArchitecturePhase captures the prior architecture for revision
+		// and clears it so the architecture-generator (which watches
+		// requirements_generated) regenerates. Stories/Scenarios are nil here
+		// anyway — the architecture round runs before they exist.
+		// reviewing_architecture → requirements_generated is a valid transition
+		// (workflow/types.go).
+		targetStatus = reenterArchitecturePhase(plan)
 	}
 
 	if !current.CanTransitionTo(targetStatus) {
@@ -2747,6 +2808,28 @@ func reviseArchitectureState(plan *workflow.Plan, proposal *workflow.PlanDecisio
 // re-traversed the requirements path that didn't fail. With this case
 // in place, story-phase findings clear only Stories + Scenarios and
 // return to StatusArchitectureGenerated — Sarah's watcher claim point.
+// reenterArchitecturePhase rolls a plan back to re-run the architect. It
+// captures the prior architecture (so the architect revises rather than
+// rewrites from scratch — mirrors planner PreviousPlanJSON), clears
+// Architecture plus the downstream Stories/Scenarios that depended on it, and
+// returns the requirements_generated re-entry status that the
+// architecture-generator watches. Shared by the R2 architecture-finding
+// cascade (determineR2ReentryPoint) and the ADR-051 Slice 3 architecture-review
+// rejection (handleRevisionMutation round 3), so both roll back identically.
+func reenterArchitecturePhase(plan *workflow.Plan) workflow.Status {
+	if plan.Architecture != nil {
+		if b, err := json.Marshal(plan.Architecture); err == nil {
+			plan.PreviousArchitectureJSON = string(b)
+		}
+	} else {
+		plan.PreviousArchitectureJSON = ""
+	}
+	plan.Architecture = nil
+	plan.Stories = nil
+	plan.Scenarios = nil
+	return workflow.StatusRequirementsGenerated
+}
+
 func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON json.RawMessage) workflow.Status {
 	// Clear any stale revision carry-over up front; only the architecture
 	// re-entry branch below re-captures it (just before nil-ing Architecture).
@@ -2808,18 +2891,7 @@ func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON js
 		return workflow.StatusApproved
 
 	case phaseHit["architecture"]:
-		// Re-generate architecture (and downstream stories + scenarios).
-		// Capture the prior architecture so the architect revises it instead
-		// of rewriting from scratch (mirrors planner PreviousPlanJSON).
-		if plan.Architecture != nil {
-			if b, err := json.Marshal(plan.Architecture); err == nil {
-				plan.PreviousArchitectureJSON = string(b)
-			}
-		}
-		plan.Architecture = nil
-		plan.Stories = nil
-		plan.Scenarios = nil
-		return workflow.StatusRequirementsGenerated
+		return reenterArchitecturePhase(plan)
 
 	case phaseHit["stories"]:
 		// Re-run Sarah only; preserve Requirements + Architecture. Closes

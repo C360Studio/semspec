@@ -389,6 +389,40 @@ func TestRenderPlanReviewerPrompt_R1PhaseBoundaries(t *testing.T) {
 	}
 }
 
+// TestRenderPlanReviewerPrompt_ArchRound pins the ADR-051 Slice 3 architecture
+// round (Round 3): it fires at architecture_generated, before stories and
+// scenarios exist, so it must carry the architecture judgment-defect criteria
+// (placement #237, upstream-resolution discipline) AND tell the reviewer NOT to
+// flag missing scenarios/tests (wrong phase). It must NOT carry the R2
+// scenario-coverage criteria.
+func TestRenderPlanReviewerPrompt_ArchRound(t *testing.T) {
+	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
+		Slug:        "abc123",
+		PlanContent: `{"goal":"x","architecture":{}}`,
+		Round:       3,
+	})
+
+	mustContain := []string{
+		"Architecture Review",
+		"Stories and scenarios DO NOT exist yet",
+		"File→component placement coherence (#237)",
+		"Upstream resolution discipline",
+		"Integration-target harness profile discipline",
+	}
+	for _, want := range mustContain {
+		if !strings.Contains(out, want) {
+			t.Errorf("arch-round prompt missing pinned string %q\nGot:\n%s", want, out)
+		}
+	}
+
+	// The arch round runs before scenarios — it must NOT carry the R2
+	// scenario-coverage-fidelity criterion (that judges scenarios that don't
+	// exist yet at this phase).
+	if strings.Contains(out, "Constraint & scope-coverage fidelity") {
+		t.Errorf("arch-round prompt should NOT carry the R2 scenario coverage-fidelity criterion")
+	}
+}
+
 // TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity pins #204's R2 gate:
 // the round-2 reviewer must judge whether the requirements+scenarios cover the
 // breadth the plan's `constraints` demand, catching the "full-coverage goal
