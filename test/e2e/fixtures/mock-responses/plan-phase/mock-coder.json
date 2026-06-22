@@ -1,5 +1,20 @@
 {
   "response": "I have successfully implemented the /goodbye endpoint in api/app.py. The endpoint follows the same pattern as the /hello endpoint, returning a JSON response with a goodbye message. I also added tests in api/test_app.py to verify the endpoint behavior.",
   "tool_calls": [],
-  "files_modified": ["api/app.py", "api/test_app.py"]
+  "files_modified": [
+    "api/app.py",
+    "api/test_app.py"
+  ],
+  "file_intents": [
+    {
+      "path": "api/app.py",
+      "intent": "modified_existing",
+      "rationale": "Existing endpoint implementation file changed by the task."
+    },
+    {
+      "path": "api/test_app.py",
+      "intent": "companion_test",
+      "rationale": "Companion test file covering the changed implementation."
+    }
+  ]
 }

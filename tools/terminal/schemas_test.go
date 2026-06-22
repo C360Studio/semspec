@@ -20,9 +20,9 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations", "upstream_resolutions", "test_surface"}},
 		{"review", []string{"verdict", "feedback"}},
 		{"recovery", []string{"action", "diagnosis", "recovery_succeeded", "contract_impact", "refined_prompt", "scope_changes"}},
-		{"developer", []string{"summary", "files_modified"}},
+		{"developer", []string{"summary", "files_modified", "file_intents"}},
 		{"lesson", []string{"summary", "detail", "injection_form", "root_cause_role"}},
-		{"", []string{"summary", "files_modified"}}, // default
+		{"", []string{"summary", "files_modified", "file_intents"}}, // default
 	}
 
 	for _, tt := range tests {

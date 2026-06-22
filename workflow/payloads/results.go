@@ -258,6 +258,7 @@ type DeveloperResult struct {
 	TaskID        string          `json:"developer_task_id,omitempty"`
 	Status        string          `json:"status"`
 	FilesModified []string        `json:"files_modified,omitempty"`
+	FileIntents   []FileIntent    `json:"file_intents,omitempty"`
 	Output        json.RawMessage `json:"output,omitempty"`
 	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
 }

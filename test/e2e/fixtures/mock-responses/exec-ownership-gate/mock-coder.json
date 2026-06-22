@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Registered the feature through the shared core driver (src/core/driver.py).\", \"files_modified\": [\"src/core/driver.py\"]}"
+        "arguments": "{\"summary\":\"Registered the feature through the shared core driver (src/core/driver.py).\",\"files_modified\":[\"src/core/driver.py\"],\"file_intents\":[{\"path\":\"src/core/driver.py\",\"intent\":\"planning_gap_required_file\",\"rationale\":\"Shared core entry point is outside the story file scope and must surface as a planning gap.\"}]}"
       }
     }
   ],

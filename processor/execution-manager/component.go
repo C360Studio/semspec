@@ -908,6 +908,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", parseErr)
 	} else {
 		exec.FilesModified = result.FilesModified
+		exec.DeveloperFileIntents = result.FileIntents
 		exec.DeveloperOutput = result.Output
 		exec.DeveloperLLMRequestIDs = result.LLMRequestIDs
 	}
@@ -925,9 +926,9 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 		}
 		switch {
 		case parseErr != nil:
-			feedback = "Your previous attempt ended without calling submit_work. You must call submit_work with a summary and a non-empty files_modified array before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer." + scopeHint
+			feedback = "Your previous attempt ended without a valid submit_work call. You must call submit_work with a summary, a non-empty files_modified array, and one file_intents entry for every files_modified path before stopping. If you asked a question and did not get an answer, make reasonable assumptions from the plan and scenarios and continue — do not stop the loop waiting for an answer." + scopeHint
 		default:
-			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified." + scopeHint
+			feedback = "Your previous submit_work had an empty files_modified array. You must write at least one file before calling submit_work. Create the implementation and test files called for by the scenarios, then submit again with the list of files you created or modified and one file_intents entry for each path." + scopeHint
 		}
 		c.routeFixableRejection(ctx, exec, feedback)
 		return
@@ -1550,6 +1551,7 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	exec.TDDCycle++
 	exec.FilesModified = nil
 	exec.DeveloperOutput = nil
+	exec.DeveloperFileIntents = nil
 	exec.DeveloperLLMRequestIDs = nil
 	exec.ValidationPassed = false
 	exec.ValidationResults = nil
@@ -2049,6 +2051,7 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		ExecutionID:     uuid.New().String(),
 		Slug:            exec.Slug,
 		FilesModified:   exec.FilesModified,
+		FileIntents:     append([]payloads.FileIntent(nil), exec.DeveloperFileIntents...),
 		WorktreePath:    exec.WorktreePath,
 		TaskID:          exec.TaskID,
 		DeveloperLoopID: exec.DeveloperLoopID,

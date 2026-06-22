@@ -17,6 +17,18 @@ func TestSubmitWork_StopsLoop(t *testing.T) {
 		Arguments: map[string]any{
 			"summary":        "Implemented auth middleware",
 			"files_modified": []any{"auth.go", "auth_test.go"},
+			"file_intents": []any{
+				map[string]any{
+					"path":      "auth.go",
+					"intent":    "modified_existing",
+					"rationale": "Updated the middleware implementation requested by the task.",
+				},
+				map[string]any{
+					"path":      "auth_test.go",
+					"intent":    "companion_test",
+					"rationale": "Added tests covering the middleware behavior.",
+				},
+			},
 		},
 	})
 	if err != nil {

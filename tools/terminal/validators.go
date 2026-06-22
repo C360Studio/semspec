@@ -3,7 +3,9 @@ package terminal
 import (
 	"fmt"
 	"log/slog"
+	"strings"
 
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/prometheus/client_golang/prometheus"
@@ -126,7 +128,7 @@ func ExpectedFieldsHint(deliverableType string) string {
 	case "review":
 		return `Expected JSON: {"verdict": "approved", "feedback": "..."}`
 	default:
-		return `Expected JSON: {"summary": "...", "files_modified": ["file.go"]}`
+		return `Expected JSON: {"summary": "...", "files_modified": ["file.go"], "file_intents": [{"path": "file.go", "intent": "modified_existing", "rationale": "..."}]}`
 	}
 }
 
@@ -281,7 +283,8 @@ func ValidateReviewDeliverable(d map[string]any) error {
 }
 
 // ValidateDeveloperDeliverable validates a developer deliverable from submit_work.
-// Required: summary (non-empty) AND files_modified (non-empty array of non-empty strings).
+// Required: summary (non-empty), files_modified (non-empty array of non-empty strings),
+// and file_intents (one intent object per file).
 //
 // Small models occasionally call submit_work with an empty files_modified array,
 // claiming "done" without writing any code. That was silently accepted, sent to
@@ -303,16 +306,79 @@ func ValidateDeveloperDeliverable(d map[string]any) error {
 	if len(files) == 0 {
 		return fmt.Errorf("files_modified must not be empty — if you have nothing to submit, keep working; do not call submit_work until you have written at least one file")
 	}
+	fileSet := make(map[string]struct{}, len(files))
 	for i, f := range files {
 		path, ok := f.(string)
 		if !ok {
 			return fmt.Errorf("files_modified[%d] must be a string path, got %T", i, f)
 		}
+		path = strings.TrimSpace(path)
 		if path == "" {
 			return fmt.Errorf("files_modified[%d] must be a non-empty path", i)
 		}
+		if _, exists := fileSet[path]; exists {
+			return fmt.Errorf("files_modified[%d] duplicates path %q", i, path)
+		}
+		fileSet[path] = struct{}{}
+	}
+
+	intentsRaw, ok := d["file_intents"]
+	if !ok {
+		return fmt.Errorf("file_intents is required — provide one intent object per files_modified path")
+	}
+	intents, ok := intentsRaw.([]any)
+	if !ok {
+		return fmt.Errorf("file_intents must be an array of objects, got %T", intentsRaw)
+	}
+	if len(intents) != len(files) {
+		return fmt.Errorf("file_intents must contain exactly one entry for each files_modified path")
+	}
+	intentSet := make(map[string]struct{}, len(intents))
+	for i, raw := range intents {
+		obj, ok := raw.(map[string]any)
+		if !ok {
+			return fmt.Errorf("file_intents[%d] must be an object with path, intent, and rationale", i)
+		}
+		path, ok := obj["path"].(string)
+		if !ok || strings.TrimSpace(path) == "" {
+			return fmt.Errorf("file_intents[%d].path is required (non-empty string)", i)
+		}
+		path = strings.TrimSpace(path)
+		if _, exists := intentSet[path]; exists {
+			return fmt.Errorf("file_intents[%d] duplicates path %q", i, path)
+		}
+		if _, ok := fileSet[path]; !ok {
+			return fmt.Errorf("file_intents[%d].path %q must match a files_modified entry", i, path)
+		}
+		intent, ok := obj["intent"].(string)
+		if !ok || !validDeveloperFileIntent(intent) {
+			return fmt.Errorf("file_intents[%d].intent must be one of modified_existing, owned_deliverable, companion_test, planning_gap_required_file, scratch_or_probe", i)
+		}
+		rationale, ok := obj["rationale"].(string)
+		if !ok || strings.TrimSpace(rationale) == "" {
+			return fmt.Errorf("file_intents[%d].rationale is required (non-empty string)", i)
+		}
+		intentSet[path] = struct{}{}
+	}
+	for path := range fileSet {
+		if _, ok := intentSet[path]; !ok {
+			return fmt.Errorf("file_intents missing path %q from files_modified", path)
+		}
 	}
 	return nil
+}
+
+func validDeveloperFileIntent(intent string) bool {
+	switch intent {
+	case payloads.FileIntentModifiedExisting,
+		payloads.FileIntentOwnedDeliverable,
+		payloads.FileIntentCompanionTest,
+		payloads.FileIntentPlanningGapRequiredFile,
+		payloads.FileIntentScratchOrProbe:
+		return true
+	default:
+		return false
+	}
 }
 
 // ValidateArchitectDeliverable validates an architecture deliverable.

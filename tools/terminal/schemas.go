@@ -838,8 +838,38 @@ func developerSchema() map[string]any {
 				"items":       map[string]any{"type": "string"},
 				"description": "List of files created or modified",
 			},
+			"file_intents": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"path": map[string]any{
+							"type":        "string",
+							"description": "Workspace-relative path from files_modified",
+						},
+						"intent": map[string]any{
+							"type": "string",
+							"enum": []string{
+								"modified_existing",
+								"owned_deliverable",
+								"companion_test",
+								"planning_gap_required_file",
+								"scratch_or_probe",
+							},
+							"description": "Declared purpose of this file. Use scratch_or_probe for throwaway/probe files; use planning_gap_required_file when implementation requires a new source/test file outside the declared story scope.",
+						},
+						"rationale": map[string]any{
+							"type":        "string",
+							"description": "Brief reason this file belongs in the selected intent bucket.",
+						},
+					},
+					"required":             []string{"path", "intent", "rationale"},
+					"additionalProperties": false,
+				},
+				"description": "One entry per files_modified path declaring whether the change is an existing-file edit, owned deliverable, companion test, planning-gap required file, or scratch/probe.",
+			},
 		},
-		"required":             []string{"summary", "files_modified"},
+		"required":             []string{"summary", "files_modified", "file_intents"},
 		"additionalProperties": false,
 	}
 }

@@ -30,7 +30,7 @@ func softwareFragments() []*Fragment {
 		{ID: "sw.developer.system-base", Category: CategorySystemBase, Roles: []Role{RoleDeveloper}, Content: "You are a developer implementing code changes."},
 		{ID: "sw.developer.tool-directive", Category: CategoryToolDirective, Roles: []Role{RoleDeveloper}, Content: "CRITICAL: You MUST use bash to create or modify files."},
 		{ID: "sw.developer.role-context", Category: CategoryRoleContext, Roles: []Role{RoleDeveloper}, Content: "Gather context before writing code. Follow SOPs."},
-		{ID: "sw.developer.output-format", Category: CategoryOutputFormat, Roles: []Role{RoleDeveloper}, Content: `Output JSON: {"result": "...", "files_modified": [...]}`},
+		{ID: "sw.developer.output-format", Category: CategoryOutputFormat, Roles: []Role{RoleDeveloper}, Content: `Output JSON: {"summary": "...", "files_modified": [...], "file_intents": [...]}`},
 		{ID: "sw.developer.retry-directive", Category: CategoryToolDirective, Priority: 1, Roles: []Role{RoleDeveloper},
 			Condition: func(ctx *AssemblyContext) bool { return ctx.TaskContext != nil && ctx.TaskContext.Feedback != "" },
 			ContentFunc: func(ctx *AssemblyContext) string {

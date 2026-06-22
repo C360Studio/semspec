@@ -358,7 +358,8 @@ func buildLoopFailureFeedback(event *agentic.LoopCompletedEvent) string {
 				"You MUST call submit_work to terminate the loop. If your "+
 				"code in the worktree is correct, call submit_work now "+
 				"with summary, files_modified listing what you changed, "+
-				"and any output. If you are stuck or uncertain, call "+
+				"file_intents classifying each changed path, and any output. "+
+				"If you are stuck or uncertain, call "+
 				"submit_work with a partial summary that explicitly "+
 				"describes the obstacle — do not keep refining.",
 			event.Iterations, budget,

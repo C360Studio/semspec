@@ -394,12 +394,31 @@ var DeveloperRequestType = message.Type{
 	Version:  "v1",
 }
 
+const (
+	FileIntentModifiedExisting        = "modified_existing"
+	FileIntentOwnedDeliverable        = "owned_deliverable"
+	FileIntentCompanionTest           = "companion_test"
+	FileIntentPlanningGapRequiredFile = "planning_gap_required_file"
+	FileIntentScratchOrProbe          = "scratch_or_probe"
+)
+
+// FileIntent records the developer's declared purpose for a changed path.
+// Structural validation still derives the authoritative changed/new file set
+// from git status; this field carries intent so the validator does not infer
+// scratch vs deliverable vs planning gap from filenames.
+type FileIntent struct {
+	Path      string `json:"path"`
+	Intent    string `json:"intent"`
+	Rationale string `json:"rationale,omitempty"`
+}
+
 // ValidationRequest is the typed payload sent to the structural-validator component.
 // Purpose-built for the structural-validator component.
 type ValidationRequest struct {
-	ExecutionID   string   `json:"execution_id,omitempty"`
-	Slug          string   `json:"slug"`
-	FilesModified []string `json:"files_modified"`
+	ExecutionID   string       `json:"execution_id,omitempty"`
+	Slug          string       `json:"slug"`
+	FilesModified []string     `json:"files_modified"`
+	FileIntents   []FileIntent `json:"file_intents,omitempty"`
 
 	// WorktreePath overrides the default repo path for this validation run.
 	// When set, checks execute against this directory instead of the
