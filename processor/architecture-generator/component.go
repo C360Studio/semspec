@@ -277,7 +277,21 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		if plan.Status != workflow.StatusRequirementsGenerated {
+		// ADR-051 Slice 4 dual-watch: claim the architecture phase from
+		// requirements_generated only when the requirements review is DISABLED
+		// (the original path); when ENABLED the plan-reviewer owns that state
+		// (claims reviewing_requirements) and the architect waits for the
+		// post-review requirements_reviewed. The flag mirrors plan-reviewer's;
+		// see Config. The two never race the requirements_generated CAS.
+		switch plan.Status {
+		case workflow.StatusRequirementsGenerated:
+			if c.config.RequirementsReviewEnabled {
+				continue
+			}
+		case workflow.StatusRequirementsReviewed:
+			// Only reachable when the review is enabled — the post-review claim
+			// point. Requirements passed the adversarial round.
+		default:
 			continue
 		}
 
@@ -649,6 +663,20 @@ func (c *Component) validateGeneratedArchitecture(ctx context.Context, architect
 		} else if err := workflow.ValidateCapabilityCoverage(kvPlan.Exploration, architecture.ComponentBoundaries); err != nil {
 			failures = append(failures, failure{"capability_coverage",
 				fmt.Sprintf("architecture validation failed (capability coverage): %s", err.Error())})
+		}
+
+		// ADR-051: every concrete scope.include deliverable must be owned by a
+		// component at architecture time. scope.include is planner-authored and
+		// the architect must attach it (the build.gradle/README orphan class) —
+		// caught here in-loop, the architect revises BEFORE any stories or
+		// scenarios are generated against an orphaning architecture. scope.create
+		// ownership is deliberately NOT checked here: it is reconciled from
+		// Story.FilesOwned at the stories phase (ensureScopeCreateCoversStories),
+		// so it is draft-partial now and would false-positive.
+		if orphans := workflow.UnownedScopedIncludeFiles(kvPlan.Scope, architecture.ComponentBoundaries); len(orphans) > 0 {
+			failures = append(failures, failure{"scoped_include_unowned", fmt.Sprintf(
+				"architecture validation failed (scoped include unowned): scope.include deliverable(s) [%s] are owned by no component. Add each to the implementation_files of the source component that produces it (a README/doc may ride as a companion alongside source, but must have such an owner; if it is a read-only reference, move it to scope.do_not_touch).",
+				strings.Join(orphans, ", "))})
 		}
 	}
 	if err := workflow.ValidateUpstreamImports(architecture.UpstreamResolutions); err != nil {

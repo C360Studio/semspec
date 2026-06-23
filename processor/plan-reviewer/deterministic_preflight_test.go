@@ -7,10 +7,14 @@ import (
 )
 
 func TestDeterministicPreflightReview_HardStructuralErrorShortCircuits(t *testing.T) {
+	// scope.include orphan: fires regardless of pipeline phase (unlike
+	// scope.create, which is only checked once Stories reconcile it — see
+	// TestScopedFileOwnership_ArchPhaseSkipsCreate). Used here so the preflight
+	// short-circuit mechanism is exercised without a Stories dependency.
 	plan := &workflow.Plan{
 		Slug:        "preflight-hard-error",
 		Exploration: &workflow.Exploration{Capabilities: []workflow.Capability{{Name: "telemetry", Lifecycle: workflow.CapabilityNew, Description: "Telemetry."}}},
-		Scope:       workflow.Scope{Create: []string{"src/Telemetry.java"}},
+		Scope:       workflow.Scope{Include: []string{"src/Telemetry.java"}},
 		Architecture: &workflow.ArchitectureDocument{
 			ComponentBoundaries: []workflow.ComponentDef{
 				{Name: "telemetry", ImplementationFiles: []string{"src/Other.java"}, Capabilities: []string{"telemetry"}},
@@ -21,7 +25,7 @@ func TestDeterministicPreflightReview_HardStructuralErrorShortCircuits(t *testin
 	result := deterministicPreflightReview(plan)
 
 	if result == nil {
-		t.Fatal("expected deterministic preflight to reject unowned scope.create file")
+		t.Fatal("expected deterministic preflight to reject unowned scope.include file")
 	}
 	if result.Verdict != "needs_changes" {
 		t.Fatalf("verdict = %q, want needs_changes", result.Verdict)
@@ -110,8 +114,9 @@ func TestDeterministicPreflightReview_WarningOnlyDoesNotShortCircuit(t *testing.
 
 func TestMergeDeterministicFindings_PostLLMBackstopStillNormalizes(t *testing.T) {
 	plan := &workflow.Plan{
-		Slug:  "post-llm-backstop",
-		Scope: workflow.Scope{Create: []string{"src/Telemetry.java"}},
+		Slug: "post-llm-backstop",
+		// scope.include orphan — phase-independent (see the preflight test above).
+		Scope: workflow.Scope{Include: []string{"src/Telemetry.java"}},
 		Architecture: &workflow.ArchitectureDocument{
 			ComponentBoundaries: []workflow.ComponentDef{
 				{Name: "telemetry", ImplementationFiles: []string{"src/Other.java"}},

@@ -88,6 +88,16 @@ services:
       # stacks since "model not pulled" is meaningless against a fixture
       # server.
       - SEMSPEC_SKIP_OLLAMA_PROBE=1
+      # ADR-051 Slice 3 architecture-review round. Default off so every other
+      # mock scenario keeps the two-round reviewer sequence; the e2e:mock task
+      # flips this to true ONLY for the arch-review scenario (which enables the
+      # round and adds a third, R-arch, reviewer dispatch). Both plan-reviewer
+      # and story-preparer read it from configs/e2e-mock.json so they agree.
+      - ARCHITECTURE_REVIEW_ENABLED=${ARCHITECTURE_REVIEW_ENABLED:-false}
+      # ADR-051 Slice 4 requirements-review round (default off; the e2e:mock task
+      # flips it true ONLY for the req-review scenario). plan-reviewer and
+      # architecture-generator both read it from configs/e2e-mock.json so they agree.
+      - REQUIREMENTS_REVIEW_ENABLED=${REQUIREMENTS_REVIEW_ENABLED:-false}
     depends_on:
       nats:
         condition: service_healthy

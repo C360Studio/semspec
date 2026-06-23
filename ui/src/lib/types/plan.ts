@@ -45,8 +45,12 @@ export type PlanStage =
 	| 'rejected' // Plan rejected
 	| 'generating_requirements' // Requirement generator is running
 	| 'requirements_generated' // Requirements generated via auto-cascade
+	| 'reviewing_requirements' // Plan reviewer (R-req) evaluating requirements (ADR-051, gated)
+	| 'requirements_reviewed' // Requirements review approved (ADR-051, gated)
 	| 'generating_architecture' // Architecture generator is running
 	| 'architecture_generated' // Architecture generated
+	| 'reviewing_architecture' // Plan reviewer (R-arch) evaluating architecture (ADR-051, gated)
+	| 'architecture_reviewed' // Architecture review approved (ADR-051, gated)
 	| 'preparing_stories' // Story preparer is generating BMAD Stories
 	| 'stories_generated' // Stories generated and ready for scenario generation
 	| 'generating_scenarios' // Scenario generator is running
@@ -198,8 +202,12 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		'approved',
 		'generating_requirements',
 		'requirements_generated',
+		'reviewing_requirements',
+		'requirements_reviewed',
 		'generating_architecture',
 		'architecture_generated',
+		'reviewing_architecture',
+		'architecture_reviewed',
 		'preparing_stories',
 		'stories_generated',
 		'generating_scenarios',
@@ -274,8 +282,12 @@ export const STAGE_LABELS: Record<PlanStage, string> = {
 	rejected: 'Rejected',
 	generating_requirements: 'Generating Requirements',
 	requirements_generated: 'Requirements Generated',
+	reviewing_requirements: 'Reviewing Requirements',
+	requirements_reviewed: 'Requirements Reviewed',
 	generating_architecture: 'Generating Architecture',
 	architecture_generated: 'Architecture Generated',
+	reviewing_architecture: 'Reviewing Architecture',
+	architecture_reviewed: 'Architecture Reviewed',
 	preparing_stories: 'Preparing Stories',
 	stories_generated: 'Stories Generated',
 	generating_scenarios: 'Generating Scenarios',

@@ -358,7 +358,7 @@ func contractScopeDeliverables(scope workflow.ContractScopeSnapshot) []contractS
 	var obligations []contractScopeObligation
 	add := func(raw, origin string) {
 		p := workflow.NormalizeFilePath(raw)
-		if p == "" || !isConcreteScopedFile(p) {
+		if p == "" || !workflow.IsConcreteScopedFile(p) {
 			return
 		}
 		if _, ok := protected[p]; ok {
@@ -389,7 +389,7 @@ func scopedDeliverableSet(create, include, doNotTouch []string) map[string]struc
 	}
 	add := func(raw string) {
 		p := workflow.NormalizeFilePath(raw)
-		if p == "" || !isConcreteScopedFile(p) {
+		if p == "" || !workflow.IsConcreteScopedFile(p) {
 			return
 		}
 		if _, ok := protected[p]; ok {

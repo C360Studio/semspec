@@ -25,23 +25,73 @@ type PlanPhaseScenario struct {
 	config *config.Config
 	http   *client.HTTPClient
 	fs     *client.FilesystemClient
+
+	// archReview / reqReview turn this into the ADR-051 per-phase review
+	// variants. The e2e:mock task enables the matching round for the
+	// "arch-review" / "req-review" scenario; the flag adds the assertion that
+	// the round actually ran (one extra reviewer dispatch).
+	archReview bool
+	reqReview  bool
 }
 
+// PlanPhaseOption configures a PlanPhaseScenario variant.
+type PlanPhaseOption func(*PlanPhaseScenario)
+
+// WithArchReview selects the ADR-051 Slice 3 arch-review variant: the plan
+// must flow through reviewing_architecture → architecture_reviewed (with a
+// third, R-arch, reviewer dispatch) and still reach scenarios. The e2e:mock
+// task sets ARCHITECTURE_REVIEW_ENABLED=true for this scenario.
+func WithArchReview() PlanPhaseOption {
+	return func(s *PlanPhaseScenario) { s.archReview = true }
+}
+
+// WithReqReview selects the ADR-051 Slice 4 requirements-review variant: the
+// plan must flow through reviewing_requirements → requirements_reviewed (with a
+// third, R-req, reviewer dispatch) and still reach scenarios. The e2e:mock task
+// sets REQUIREMENTS_REVIEW_ENABLED=true for this scenario.
+func WithReqReview() PlanPhaseOption {
+	return func(s *PlanPhaseScenario) { s.reqReview = true }
+}
+
+// perPhaseReview reports whether a per-phase review round is enabled (either
+// variant adds exactly one extra reviewer dispatch).
+func (s *PlanPhaseScenario) perPhaseReview() bool { return s.archReview || s.reqReview }
+
 // NewPlanPhaseScenario creates a new plan phase scenario.
-func NewPlanPhaseScenario(cfg *config.Config) *PlanPhaseScenario {
-	return &PlanPhaseScenario{
+func NewPlanPhaseScenario(cfg *config.Config, opts ...PlanPhaseOption) *PlanPhaseScenario {
+	s := &PlanPhaseScenario{
 		config: cfg,
 		http:   client.NewHTTPClient(cfg.HTTPBaseURL),
 		fs:     client.NewFilesystemClient(cfg.WorkspacePath),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Name implements Scenario.
-func (s *PlanPhaseScenario) Name() string { return "plan-phase" }
+func (s *PlanPhaseScenario) Name() string {
+	switch {
+	case s.reqReview:
+		return "req-review"
+	case s.archReview:
+		return "arch-review"
+	default:
+		return "plan-phase"
+	}
+}
 
 // Description implements Scenario.
 func (s *PlanPhaseScenario) Description() string {
-	return "Full plan phase: plan → requirements → scenarios → review → approved"
+	switch {
+	case s.reqReview:
+		return "ADR-051 req-review: plan flows through reviewing_requirements → requirements_reviewed with a 3rd (R-req) reviewer dispatch, then reaches scenarios"
+	case s.archReview:
+		return "ADR-051 arch-review: plan flows through reviewing_architecture → architecture_reviewed with a 3rd (R-arch) reviewer dispatch, then reaches scenarios"
+	default:
+		return "Full plan phase: plan → requirements → scenarios → review → approved"
+	}
 }
 
 // Setup implements Scenario.
@@ -71,6 +121,17 @@ func (s *PlanPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-requirements", s.stageVerifyRequirements, 15 * time.Second},
 		{"verify-scenarios", s.stageVerifyScenarios, 15 * time.Second},
 		{"verify-mock-stats", s.stageVerifyMockStats, 10 * time.Second},
+	}
+
+	if s.perPhaseReview() {
+		// ADR-051: prove the per-phase review round actually dispatched (the
+		// rest of the pipeline reaching scenarios already proves it did not
+		// wedge the dual-watch handoff to the next phase's claimant).
+		stages = append(stages, struct {
+			name    string
+			fn      func(context.Context, *Result) error
+			timeout time.Duration
+		}{"verify-per-phase-review-dispatched", s.stageVerifyPerPhaseReviewDispatched, 10 * time.Second})
 	}
 
 	if s.config.FastTimeouts {
@@ -260,8 +321,13 @@ func (s *PlanPhaseScenario) stageVerifyArchitecture(ctx context.Context, result 
 				continue
 			}
 			// architecture_generated or any later stage means architecture is done.
+			// The ADR-051 arch-review states (reviewing_architecture,
+			// architecture_reviewed) and the story phase sit between
+			// architecture_generated and scenarios; include them so the poll
+			// matches even if it samples the plan mid-review.
 			switch plan.Stage {
-			case "architecture_generated", "generating_scenarios", "scenarios_generated",
+			case "architecture_generated", "reviewing_architecture", "architecture_reviewed",
+				"preparing_stories", "stories_generated", "generating_scenarios", "scenarios_generated",
 				"reviewing_scenarios", "scenarios_reviewed", "ready_for_execution",
 				"implementing", "reviewing_rollup", "reviewing_qa", "complete":
 				if plan.Architecture == nil {
@@ -364,5 +430,45 @@ func (s *PlanPhaseScenario) stageVerifyMockStats(ctx context.Context, result *Re
 	}
 	result.SetDetail("mock_call_summary", strings.Join(summary, ", "))
 
+	return nil
+}
+
+// stageVerifyPerPhaseReviewDispatched asserts the ADR-051 per-phase review round
+// (R-req or R-arch) actually ran. With a round enabled the reviewer is dispatched
+// three times — R1 (drafted) + the per-phase round + R2 (scenarios_generated). A
+// count below 3 means the per-phase round was skipped, which is the fingerprint
+// of the dual-watch race regression (the next phase's claimant — architect or
+// Sarah — claiming the generated state before the reviewer). The pipeline having
+// already reached scenarios proves the round did not wedge the handoff to the
+// next phase.
+func (s *PlanPhaseScenario) stageVerifyPerPhaseReviewDispatched(ctx context.Context, result *Result) error {
+	if s.config.MockLLMURL == "" {
+		return fmt.Errorf("per-phase review scenario requires the mock LLM to count reviewer dispatches")
+	}
+
+	statsURL := s.config.MockLLMURL + "/stats"
+	req, err := http.NewRequestWithContext(ctx, "GET", statsURL, nil)
+	if err != nil {
+		return fmt.Errorf("create stats request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("fetch mock stats: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var mockStats struct {
+		CallsByModel map[string]int `json:"calls_by_model"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&mockStats); err != nil {
+		return fmt.Errorf("parse mock stats: %w", err)
+	}
+
+	const wantReviewerCalls = 3 // R1 + the per-phase round + R2
+	got := mockStats.CallsByModel["mock-reviewer"]
+	result.SetDetail("reviewer_call_count", got)
+	if got < wantReviewerCalls {
+		return fmt.Errorf("per-phase review round did not dispatch: mock-reviewer called %d time(s), want >= %d (R1 + per-phase round + R2 — a count of 2 means the round was skipped, the dual-watch race fingerprint)", got, wantReviewerCalls)
+	}
 	return nil
 }

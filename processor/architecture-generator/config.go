@@ -18,6 +18,21 @@ type Config struct {
 	// "requirements_generated" status (KV twofer self-trigger).
 	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket to watch for requirements_generated plans,category:advanced,default:PLAN_STATES"`
 
+	// RequirementsReviewEnabled mirrors plan-reviewer's flag of the same name
+	// (ADR-051 Slice 4). When true, the plan-reviewer claims
+	// requirements_generated → reviewing_requirements, so the architect must NOT
+	// race it for that state — it instead claims generating_architecture from the
+	// post-review requirements_reviewed state. When false (default), no review
+	// runs and the architect claims from requirements_generated directly, as
+	// before.
+	//
+	// CROSS-COMPONENT INVARIANT: this MUST equal plan-reviewer's
+	// requirements_review_enabled. Source both from the one
+	// REQUIREMENTS_REVIEW_ENABLED env var in semspec.json. A mismatch wedges the
+	// requirements phase (one of requirements_generated / requirements_reviewed
+	// ends up with no claimant).
+	RequirementsReviewEnabled bool `json:"requirements_review_enabled" schema:"type:bool,description:Mirror of plan-reviewer requirements_review_enabled — claim generating_architecture from requirements_reviewed instead of requirements_generated,category:advanced,default:false"`
+
 	// MaxGenerationRetries is the maximum number of times to retry architecture
 	// generation when the agent loop fails or output cannot be parsed.
 	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on generation failure,category:basic,default:2"`

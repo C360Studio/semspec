@@ -12,7 +12,7 @@
 
 services:
   semsource:
-    image: ghcr.io/c360studio/semsource:latest
+    image: ghcr.io/c360studio/semsource:377e063
     depends_on:
       workspace-init:
         condition: service_completed_successfully
@@ -133,6 +133,11 @@ services:
       - SEMSPEC_SCENARIO_ORCH_TIMEOUT
       - SEMSPEC_RECOVERY_TIMEOUT_SECONDS
       - SEMSPEC_MAX_REQUIREMENT_RETRIES
+      # ADR-051 per-phase planning review gates (default off — config's own
+      # ${VAR:-false} applies when unset). Set both true to exercise the R-req
+      # and R-arch adversarial rounds on a paid run.
+      - REQUIREMENTS_REVIEW_ENABLED
+      - ARCHITECTURE_REVIEW_ENABLED
     depends_on:
       sandbox:
         condition: service_healthy

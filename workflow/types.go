@@ -79,6 +79,22 @@ const (
 	StatusGeneratingScenarios Status = "generating_scenarios"
 	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
 	StatusReviewingScenarios Status = "reviewing_scenarios"
+	// StatusReviewingRequirements indicates the plan-reviewer requirements round
+	// (ADR-051 Slice 4) has claimed requirements_generated for an adversarial
+	// review. On approval the plan advances to requirements_reviewed; on
+	// rejection it re-enters approved to re-run the requirement-generator. Gated
+	// by plan-reviewer config (requirements_review_enabled): when off no
+	// component claims this state and requirements_generated →
+	// generating_architecture directly, as before.
+	StatusReviewingRequirements Status = "reviewing_requirements"
+	// StatusReviewingArchitecture indicates the plan-reviewer architecture round
+	// (ADR-051 Slice 3) has claimed architecture_generated for an adversarial
+	// review. On approval the plan advances to architecture_reviewed; on
+	// rejection it re-enters requirements_generated to re-run the architect.
+	// Gated by plan-reviewer config (architecture_review_enabled): when the gate
+	// is off no component claims this state and architecture_generated →
+	// preparing_stories directly, as before.
+	StatusReviewingArchitecture Status = "reviewing_architecture"
 	// StatusPreparingStories indicates story-preparer (Sarah) has claimed
 	// architecture_generated and is sharding requirements into Stories
 	// with task checklists (ADR-043 Move 3). Sarah's readiness gate runs
@@ -91,9 +107,24 @@ const (
 )
 
 const (
+	// StatusRequirementsReviewed indicates the adversarial requirements review
+	// (ADR-051 Slice 4) approved the requirements. Terminal for the
+	// requirements-review phase; the architecture-generator claims from here
+	// (instead of requirements_generated) when the review is enabled.
+	// Review-disabled plans never enter this state — requirements_generated →
+	// generating_architecture holds.
+	StatusRequirementsReviewed Status = "requirements_reviewed"
+
 	// StatusArchitectureGenerated indicates the architecture phase has completed.
 	// This is a terminal for the architecture phase (not in-progress).
 	StatusArchitectureGenerated Status = "architecture_generated"
+
+	// StatusArchitectureReviewed indicates the adversarial architecture review
+	// (ADR-051 Slice 3) approved the architecture. Terminal for the
+	// architecture-review phase; story-preparer claims from here (instead of
+	// architecture_generated) when the review is enabled. Review-disabled plans
+	// never enter this state — architecture_generated → preparing_stories holds.
+	StatusArchitectureReviewed Status = "architecture_reviewed"
 
 	// StatusExplored indicates the analyst sub-phase has completed and the
 	// Plan has an Exploration document populated. The planner sub-phase
@@ -175,6 +206,8 @@ func (s Status) IsValid() bool {
 		StatusExploring, StatusExplored,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusReviewingRequirements, StatusRequirementsReviewed,
+		StatusReviewingArchitecture, StatusArchitectureReviewed,
 		StatusPreparingStories, StatusStoriesGenerated:
 		return true
 	default:
@@ -189,6 +222,7 @@ func (s Status) IsInProgress() bool {
 	case StatusExploring,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios,
+		StatusReviewingRequirements, StatusReviewingArchitecture,
 		StatusPreparingStories:
 		return true
 	default:
@@ -241,10 +275,29 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusGeneratingRequirements:
 		return target == StatusRequirementsGenerated || target == StatusRejected
 	case StatusRequirementsGenerated:
-		// requirements_generated → generating_architecture (architecture-generator claims)
+		// requirements_generated → generating_architecture (architecture-generator
+		//   claims when the requirements review is DISABLED — the original path)
+		// requirements_generated → reviewing_requirements (ADR-051 Slice 4:
+		//   plan-reviewer's requirements round claims when the review is ENABLED)
 		// requirements_generated → architecture_generated (skip path: already done or bypassed)
 		// requirements_generated → changed (change proposal deprecated requirements)
 		// requirements_generated → rejected (validation failure)
+		return target == StatusGeneratingArchitecture || target == StatusReviewingRequirements ||
+			target == StatusArchitectureGenerated ||
+			target == StatusChanged || target == StatusRejected
+	case StatusReviewingRequirements:
+		// reviewing_requirements → requirements_reviewed (review approved)
+		// reviewing_requirements → approved (review rejected — re-run the
+		//   requirement-generator, which claims from approved)
+		// reviewing_requirements → changed (change proposal deprecated requirements)
+		// reviewing_requirements → rejected (escalation)
+		return target == StatusRequirementsReviewed || target == StatusApproved ||
+			target == StatusChanged || target == StatusRejected
+	case StatusRequirementsReviewed:
+		// requirements_reviewed → generating_architecture (architecture-generator claims)
+		// requirements_reviewed → architecture_generated (skip path)
+		// requirements_reviewed → changed (change proposal deprecated requirements)
+		// requirements_reviewed → rejected (escalation)
 		return target == StatusGeneratingArchitecture || target == StatusArchitectureGenerated ||
 			target == StatusChanged || target == StatusRejected
 	case StatusGeneratingArchitecture:
@@ -252,13 +305,28 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// generating_architecture → rejected (fatal error)
 		return target == StatusArchitectureGenerated || target == StatusRejected
 	case StatusArchitectureGenerated:
-		// ADR-043 PR 4l — strict sequential: only story-preparer claims from
-		// here. The legacy direct path to scenarios_* was a back-compat hedge
-		// while Sarah was optional; PR 4l deleted Sarah's Enabled flag and
-		// removed Bob's architecture_generated watch, so that path is gone.
-		// architecture_generated → preparing_stories (story-preparer claims)
+		// architecture_generated → preparing_stories (story-preparer claims when
+		//   the architecture review is DISABLED — the original direct path)
+		// architecture_generated → reviewing_architecture (ADR-051 Slice 3:
+		//   plan-reviewer's architecture round claims when the review is ENABLED)
 		// architecture_generated → changed (change proposal deprecated requirements)
 		// architecture_generated → rejected (validation failure)
+		return target == StatusPreparingStories ||
+			target == StatusReviewingArchitecture ||
+			target == StatusChanged || target == StatusRejected
+	case StatusReviewingArchitecture:
+		// reviewing_architecture → architecture_reviewed (review approved)
+		// reviewing_architecture → requirements_generated (review rejected — re-run
+		//   the architect, mirroring R2's architecture phase-targeted re-entry)
+		// reviewing_architecture → changed (change proposal deprecated requirements)
+		// reviewing_architecture → rejected (escalation)
+		return target == StatusArchitectureReviewed ||
+			target == StatusRequirementsGenerated ||
+			target == StatusChanged || target == StatusRejected
+	case StatusArchitectureReviewed:
+		// architecture_reviewed → preparing_stories (story-preparer claims)
+		// architecture_reviewed → changed (change proposal deprecated requirements)
+		// architecture_reviewed → rejected (escalation)
 		return target == StatusPreparingStories ||
 			target == StatusChanged || target == StatusRejected
 	case StatusPreparingStories:

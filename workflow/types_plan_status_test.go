@@ -35,6 +35,12 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		// ADR-040: analyst sub-phase statuses
 		{StatusExploring, true},
 		{StatusExplored, true},
+		// ADR-051 Slice 3: architecture-review statuses
+		{StatusReviewingArchitecture, true},
+		{StatusArchitectureReviewed, true},
+		// ADR-051 Slice 4: requirements-review statuses
+		{StatusReviewingRequirements, true},
+		{StatusRequirementsReviewed, true},
 		// Invalid
 		{"", false},
 		{"unknown", false},
@@ -80,14 +86,35 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// requirements_generated -> rejected
 		{StatusRequirementsGenerated, StatusRejected, true},
 
-		// ADR-043 PR 4l — architecture_generated flows only into
-		// preparing_stories. The legacy direct paths to scenarios_* were
-		// the back-compat hedges for Sarah's deleted Enabled flag.
+		// architecture_generated → preparing_stories (review-disabled direct path)
+		// or → reviewing_architecture (ADR-051 Slice 3, review enabled). Legacy
+		// direct paths to scenarios_* remain invalid.
 		{StatusArchitectureGenerated, StatusPreparingStories, true},
+		// ADR-051 Slice 4: requirements-review transitions
+		{StatusRequirementsGenerated, StatusReviewingRequirements, true},
+		{StatusRequirementsGenerated, StatusGeneratingArchitecture, true}, // review-disabled path
+		{StatusReviewingRequirements, StatusRequirementsReviewed, true},   // approved
+		{StatusReviewingRequirements, StatusApproved, true},               // rejected → re-run req-gen
+		{StatusReviewingRequirements, StatusRejected, true},
+		{StatusReviewingRequirements, StatusGeneratingArchitecture, false}, // must pass through requirements_reviewed
+		{StatusRequirementsReviewed, StatusGeneratingArchitecture, true},
+		{StatusRequirementsReviewed, StatusRejected, true},
+		{StatusRequirementsReviewed, StatusPreparingStories, false},
+		{StatusArchitectureGenerated, StatusReviewingArchitecture, true},
 		{StatusArchitectureGenerated, StatusGeneratingScenarios, false},
 		{StatusArchitectureGenerated, StatusScenariosGenerated, false},
+		{StatusArchitectureGenerated, StatusArchitectureReviewed, false}, // must pass through reviewing_architecture
 		// architecture_generated -> rejected
 		{StatusArchitectureGenerated, StatusRejected, true},
+
+		// ADR-051 Slice 3: architecture review round transitions.
+		{StatusReviewingArchitecture, StatusArchitectureReviewed, true},  // approved
+		{StatusReviewingArchitecture, StatusRequirementsGenerated, true}, // rejected → re-architect
+		{StatusReviewingArchitecture, StatusRejected, true},
+		{StatusReviewingArchitecture, StatusPreparingStories, false}, // must pass through architecture_reviewed
+		{StatusArchitectureReviewed, StatusPreparingStories, true},
+		{StatusArchitectureReviewed, StatusRejected, true},
+		{StatusArchitectureReviewed, StatusScenariosGenerated, false},
 
 		// scenarios_generated -> reviewed (review happens after scenario generation)
 		{StatusScenariosGenerated, StatusReviewed, true},

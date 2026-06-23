@@ -34,6 +34,16 @@ type reviewRound int
 const (
 	roundDraftReview     reviewRound = 1
 	roundScenariosReview reviewRound = 2
+	// roundArchitectureReview is the ADR-051 Slice 3 adversarial architecture
+	// round. It fires earlier in the pipeline than round 2 (architecture_generated
+	// precedes scenarios_generated) but is numbered 3 to avoid renumbering the two
+	// established rounds. Gated by Config.ArchitectureReviewEnabled.
+	roundArchitectureReview reviewRound = 3
+	// roundRequirementsReview is the ADR-051 Slice 4 adversarial requirements
+	// round. It fires at requirements_generated (earliest of the per-phase
+	// rounds) but is numbered 4 to avoid renumbering. Gated by
+	// Config.RequirementsReviewEnabled.
+	roundRequirementsReview reviewRound = 4
 )
 
 // watchPlanStates watches PLAN_STATES for plan transitions that require a review
@@ -79,19 +89,42 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 					"slug", plan.Slug)
 				continue
 			}
-			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusReviewingDraft, c.logger) {
+			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingDraft, roundDraftReview)
+
+		case workflow.StatusRequirementsGenerated:
+			// ADR-051 Slice 4: the adversarial requirements round. Gated off by
+			// default — when disabled, the architecture-generator claims
+			// requirements_generated → generating_architecture directly (the
+			// pre-slice path) and nothing here runs. When enabled this MUST win
+			// the requirements_generated CAS over the architecture-generator,
+			// which carries the same flag and skips its requirements_generated
+			// claim when set, so the two do not race.
+			if !c.config.RequirementsReviewEnabled {
 				continue
 			}
-			// Serialise the plan as review content for the agent.
-			planContent, err := json.Marshal(plan)
-			if err != nil {
-				c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
+			if len(plan.Requirements) == 0 {
+				c.logger.Debug("Plan requirements_generated but no requirements inline, skipping KV trigger",
+					"slug", plan.Slug)
 				continue
 			}
-			if c.maybeSendDeterministicRevision(ctx, plan.Slug, roundDraftReview, &plan) {
+			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingRequirements, roundRequirementsReview)
+
+		case workflow.StatusArchitectureGenerated:
+			// ADR-051 Slice 3: the adversarial architecture round. Gated off by
+			// default — when disabled, story-preparer claims architecture_generated
+			// → preparing_stories directly (the pre-slice path) and nothing here
+			// runs. When enabled this MUST win the architecture_generated CAS over
+			// story-preparer; story-preparer carries the same flag and skips its
+			// architecture_generated claim when set, so the two do not race.
+			if !c.config.ArchitectureReviewEnabled {
 				continue
 			}
-			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundDraftReview, "")
+			if plan.Architecture == nil {
+				c.logger.Debug("Plan architecture_generated but architecture not set yet, skipping KV trigger",
+					"slug", plan.Slug)
+				continue
+			}
+			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingArchitecture, roundArchitectureReview)
 
 		case workflow.StatusScenariosGenerated:
 			if len(plan.Requirements) == 0 {
@@ -99,20 +132,31 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 					"slug", plan.Slug)
 				continue
 			}
-			if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusReviewingScenarios, c.logger) {
-				continue
-			}
-			planContent, err := json.Marshal(plan)
-			if err != nil {
-				c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
-				continue
-			}
-			if c.maybeSendDeterministicRevision(ctx, plan.Slug, roundScenariosReview, &plan) {
-				continue
-			}
-			go c.dispatchReviewer(ctx, plan.Slug, string(planContent), roundScenariosReview, "")
+			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingScenarios, roundScenariosReview)
 		}
 	}
+}
+
+// claimAndDispatchReview runs the shared review-round tail used by all three
+// review states: CAS-claim the reviewing state (returning if another replica or
+// — at architecture_generated — story-preparer won the race), serialise the
+// plan, run the deterministic preflight (which short-circuits to a revision when
+// a hard structural gate already fails), and otherwise dispatch the LLM
+// reviewer for the round. The per-state guards (goal set, architecture present,
+// requirements present, flag enabled) stay at the call sites.
+func (c *Component) claimAndDispatchReview(ctx context.Context, plan *workflow.Plan, reviewState workflow.Status, round reviewRound) {
+	if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, reviewState, c.logger) {
+		return
+	}
+	planContent, err := json.Marshal(plan)
+	if err != nil {
+		c.logger.Error("Failed to marshal plan for review", "slug", plan.Slug, "error", err)
+		return
+	}
+	if c.maybeSendDeterministicRevision(ctx, plan.Slug, round, plan) {
+		return
+	}
+	go c.dispatchReviewer(ctx, plan.Slug, string(planContent), round, "")
 }
 
 // maybeSendDeterministicRevision restores the hard-gate ordering intended by
@@ -144,6 +188,34 @@ func (c *Component) sendApprovalMutations(ctx context.Context, slug string, summ
 	timeout := 10 * time.Second
 
 	switch round {
+	case roundRequirementsReview:
+		// ADR-051 Slice 4: the requirements round is a machine gate between the
+		// requirement-generator and the architect — no auto_approve fork.
+		// Approval always advances reviewing_requirements → requirements_reviewed;
+		// the architecture-generator claims from there.
+		reviewedReq, _ := json.Marshal(map[string]string{
+			"slug":    slug,
+			"summary": summary,
+		})
+		if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.requirements.reviewed", reviewedReq, timeout, retryConfig); err != nil {
+			return fmt.Errorf("send requirements_reviewed mutation: %w", err)
+		}
+		c.logger.Info("Requirements review: sent requirements_reviewed mutation", "slug", slug)
+
+	case roundArchitectureReview:
+		// ADR-051 Slice 3: the architecture round is a machine gate between two
+		// generators (architect → Sarah), not a human checkpoint — there is no
+		// auto_approve fork here. Approval always advances reviewing_architecture
+		// → architecture_reviewed; story-preparer claims from there.
+		reviewedReq, _ := json.Marshal(map[string]string{
+			"slug":    slug,
+			"summary": summary,
+		})
+		if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.architecture.reviewed", reviewedReq, timeout, retryConfig); err != nil {
+			return fmt.Errorf("send architecture_reviewed mutation: %w", err)
+		}
+		c.logger.Info("Architecture review: sent architecture_reviewed mutation", "slug", slug)
+
 	case roundDraftReview:
 		reviewedReq, _ := json.Marshal(map[string]string{
 			"slug":    slug,

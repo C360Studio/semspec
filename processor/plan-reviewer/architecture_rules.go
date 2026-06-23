@@ -95,7 +95,7 @@ func mergeArchitectureFindings(plan *workflow.Plan, result *workflow.PlanReviewR
 		result.Findings = append(result.Findings,
 			capabilityUnresolvedInArchitectureFindings(plan)...)
 		result.Findings = append(result.Findings,
-			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries)...)
+			scopedFileOwnershipFindings(plan.Scope, plan.Architecture.ComponentBoundaries, len(plan.Stories) > 0)...)
 		result.Findings = append(result.Findings,
 			topologyContractFindings(plan.Contract, plan.Architecture.ComponentBoundaries)...)
 	}
@@ -689,7 +689,17 @@ func sourceFileCount(paths []string) int {
 // rejects it) — it must ride as a companion file on the source component that
 // produces it (single owner ⇒ single writer), or on several source components
 // (⇒ the scheduler serializes them). Either outcome closes the wedge.
-func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.ComponentDef) []workflow.PlanReviewFinding {
+// checkCreate gates the scope.create ownership pass. scope.create is only
+// fully reconciled against component implementation_files once Sarah's Stories
+// are saved (ensureScopeCreateCoversStories augments scope.create from
+// Story.FilesOwned). Before that — at the ADR-051 architecture-review round,
+// which runs at architecture_generated before Stories exist — scope.create is
+// draft-partial and checking its ownership false-positives (ADR-051: create
+// stays at stories/R2; only scope.include is gated early, by the
+// architecture-generator's UnownedScopedIncludeFiles check). Callers pass
+// len(plan.Stories) > 0 so the create pass runs once and only once the data is
+// ready; scope.include is always safe to check.
+func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.ComponentDef, checkCreate bool) []workflow.PlanReviewFinding {
 	// Ownership universe: every file any component declares, regardless of the
 	// component's Name (an unnamed component is flagged elsewhere, but its files
 	// still count as owned — otherwise we'd emit spurious orphan findings).
@@ -713,7 +723,7 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 
 	consider := func(raw, origin string) {
 		f := workflow.NormalizeFilePath(raw)
-		if f == "" || !isConcreteScopedFile(f) {
+		if f == "" || !workflow.IsConcreteScopedFile(f) {
 			return
 		}
 		if _, dup := seen[f]; dup {
@@ -742,8 +752,10 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 		})
 	}
 
-	for _, f := range scope.Create {
-		consider(f, "create")
+	if checkCreate {
+		for _, f := range scope.Create {
+			consider(f, "create")
+		}
 	}
 	for _, f := range scope.Include {
 		consider(f, "include")
@@ -751,33 +763,10 @@ func scopedFileOwnershipFindings(scope workflow.Scope, components []workflow.Com
 	return findings
 }
 
-// wellKnownExtensionlessDeliverables are root-level deliverable files that carry
-// no extension but are real owned artifacts a parallel story can collide on the
-// same way README did. Without this set isConcreteScopedFile would exempt them
-// (path.Ext == "") and Gate 1 would miss a Dockerfile/Makefile co-write.
-var wellKnownExtensionlessDeliverables = map[string]bool{
-	"Dockerfile":  true,
-	"Makefile":    true,
-	"Jenkinsfile": true,
-	"Vagrantfile": true,
-	"Procfile":    true,
-}
-
-// isConcreteScopedFile reports whether a normalized scoped path is a single
-// literal file (not a directory entry or glob). It must either carry a file
-// extension or be a well-known extensionless deliverable, and contain no glob
-// metacharacters. Directory entries ("src") and patterns ("src/**/*.java")
-// return false — a component owns concrete files, not dirs or patterns, so
-// requiring those to be "owned" would false-positive.
-func isConcreteScopedFile(p string) bool {
-	if strings.ContainsAny(p, "*?[") {
-		return false
-	}
-	if path.Ext(p) != "" {
-		return true
-	}
-	return wellKnownExtensionlessDeliverables[path.Base(p)]
-}
+// IsConcreteScopedFile and the well-known-deliverable set moved to the workflow
+// package (workflow/file_ownership.go) so these SOP rules and the
+// architecture-generator's ADR-051 early ownership gate share ONE concreteness
+// definition and the well-known set cannot drift between callers.
 
 // topologyContractFindings rejects architecture component files that introduce
 // new build/workspace/package root manifests outside the authoritative contract.

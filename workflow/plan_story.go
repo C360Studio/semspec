@@ -194,6 +194,89 @@ func ValidateStories(stories []Story) error {
 	return nil
 }
 
+// ValidateStoriesAgainstPlan runs the cross-entity story rules that need plan
+// context (architecture + requirements) — the checks ValidateStory cannot make
+// from a Story in isolation:
+//   - story.requirement_orphan: every RequirementIDs entry resolves to a plan Requirement.
+//   - story.unresolved_component: ComponentName resolves to an architecture component.
+//   - story.files_owned_outside_component: every FilesOwned path is within the
+//     anchored component's implementation_files or its deterministic
+//     companion-test expansion (no brownfield ownership-widening).
+//
+// ADR-051 Slice 2b: story-preparer runs this pre-publish (alongside
+// ValidateStories) so a story that names a non-existent component/requirement or
+// widens ownership is bounced back to Sarah for regeneration BEFORE the scenario
+// phase runs against it — instead of surfacing only at the late R2 plan-reviewer
+// pass (mergeStoryFindings, which stays the backstop). Ownership uses the same
+// ExpandFileScopeWithCompanionTests expansion as the R2 rule so the early gate
+// and the backstop agree.
+//
+// Permissive when a cross-referenced layer is absent (no architecture →
+// component/ownership checks skip; no requirements → requirement-id check skips)
+// and on pending-status stories (Sarah explicitly mid-flight), matching the R2
+// rule.
+//
+// Precondition: run AFTER ValidateStories. Per-story shape (including non-empty
+// ComponentName) is the caller's responsibility; the component/ownership checks
+// here skip a story whose ComponentName is empty (matching the R2 rule), so
+// wiring this in isolation without ValidateStories first would silently lose
+// them. Returns the first violation; nil when the stories are coherent.
+func ValidateStoriesAgainstPlan(plan *Plan, stories []Story) error {
+	if plan == nil || len(stories) == 0 {
+		return nil
+	}
+
+	componentFiles := map[string]map[string]struct{}{}
+	if plan.Architecture != nil {
+		for _, c := range plan.Architecture.ComponentBoundaries {
+			owned := make(map[string]struct{})
+			for _, f := range ExpandFileScopeWithCompanionTests(c.ImplementationFiles) {
+				if nf := NormalizeFilePath(f); nf != "" {
+					owned[nf] = struct{}{}
+				}
+			}
+			componentFiles[c.Name] = owned
+		}
+	}
+
+	reqIDs := make(map[string]struct{}, len(plan.Requirements))
+	for _, r := range plan.Requirements {
+		reqIDs[r.ID] = struct{}{}
+	}
+
+	for _, s := range stories {
+		if s.Status == StoryStatusPending {
+			continue
+		}
+		if len(reqIDs) > 0 {
+			for _, rid := range s.RequirementIDs {
+				if _, ok := reqIDs[rid]; !ok {
+					return fmt.Errorf("%w: story %q references requirement %q which does not exist in the plan (story.requirement_orphan)",
+						ErrInvalidStoryStructure, s.ID, rid)
+				}
+			}
+		}
+		if len(componentFiles) > 0 && s.ComponentName != "" {
+			owned, ok := componentFiles[s.ComponentName]
+			if !ok {
+				return fmt.Errorf("%w: story %q anchors to component %q which is not declared in the architecture (story.unresolved_component)",
+					ErrInvalidStoryStructure, s.ID, s.ComponentName)
+			}
+			for _, raw := range s.FilesOwned {
+				f := NormalizeFilePath(raw)
+				if f == "" {
+					continue
+				}
+				if _, in := owned[f]; !in {
+					return fmt.Errorf("%w: story %q anchors to component %q but files_owned includes %q, which is not in that component's implementation_files or companion-test expansion (story.files_owned_outside_component) — do not widen ownership beyond the architecture component",
+						ErrInvalidStoryStructure, s.ID, s.ComponentName, f)
+				}
+			}
+		}
+	}
+	return nil
+}
+
 // ValidateStoryFileOwnership ensures that when two Stories share at least one
 // file in FilesOwned, the DependsOn DAG sequences one before the other so the
 // scenario-orchestrator's parallel dispatch (config max_concurrent=5) does NOT
