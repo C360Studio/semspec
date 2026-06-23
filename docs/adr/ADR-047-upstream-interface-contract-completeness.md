@@ -1,6 +1,26 @@
 # ADR-047: Upstream Interface-Contract Completeness (Method-Signature Resolution for source_build Deps)
 
-**Status:** Proposed (2026-06-13)
+**Status:** **WITHDRAWN (2026-06-23)** — never accepted past Proposed. The completeness gate
+(`upstreamSourceBuildContractFindings`) was the interim Option-A stopgap; the 2026-06-23
+`gemini WITH_EPIC mavlink-hard` run is the evidence the ADR was waiting for, and it confirmed the
+architect plateaus on `source_build` method resolution *even with the gate forcing it* (read the
+source, named the class, emitted zero method entries, 3 rounds → unconvergeable reject). Rather than
+build Option B (a dedicated resolver phase — still an LLM doing the same read, no reason to beat the
+architect), we **removed the requirement from the architect and moved method-contract resolution to
+the developer** (the BMAD/OpenSpec division of labour: the architect names the dependency + verified
+coordinate + paste-ready import; the dev reads `/sources/`/the jar for the exact method signatures at
+implementation time). `ValidateUpstreamImports` (the symbol-level import gate, #134) is retained — a
+verified import is cheap to resolve and prevents the package-guessing wedge, a separate problem. The
+gate, its tests, and the architect prompt's method-enumeration demand are deleted; the developer
+prompt now directs proactive `/sources/` contract resolution so the move does not re-arm the
+3.5M-token compile-error thrash this ADR originally targeted.
+
+**Superseded by:** the developer-side resolution model (this withdrawal). ADR-046's resolver-phase
+fork is moot under it — there is no LLM resolution *step* to place.
+
+---
+
+**Original status:** Proposed (2026-06-13)
 **Update (ADR-049, 2026-06-14):** the sibling rule
 `architecture.component_overloaded_capabilities` referenced below was retired by
 [ADR-049](ADR-049-component-ownership-topology.md) in favour of the
