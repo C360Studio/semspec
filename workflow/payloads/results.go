@@ -253,10 +253,14 @@ func registerValidationResult(reg *payloadregistry.Registry) error {
 
 // DeveloperResult is the output from the developer agent callback.
 type DeveloperResult struct {
-	RequestID     string          `json:"request_id,omitempty"`
-	Slug          string          `json:"slug"`
-	TaskID        string          `json:"developer_task_id,omitempty"`
-	Status        string          `json:"status"`
+	RequestID string `json:"request_id,omitempty"`
+	Slug      string `json:"slug"`
+	TaskID    string `json:"developer_task_id,omitempty"`
+	Status    string `json:"status"`
+	// Summary is the model-authored "summary of work completed" from the
+	// developer submit_work schema. Captured so the schema↔struct parity guard
+	// holds — the model emits it; without a struct home it was silently dropped.
+	Summary       string          `json:"summary,omitempty"`
 	FilesModified []string        `json:"files_modified,omitempty"`
 	FileIntents   []FileIntent    `json:"file_intents,omitempty"`
 	Output        json.RawMessage `json:"output,omitempty"`
