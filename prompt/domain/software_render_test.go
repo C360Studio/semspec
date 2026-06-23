@@ -408,6 +408,15 @@ func TestRenderPlanReviewerPrompt_ArchRound(t *testing.T) {
 		"File→component placement coherence (#237)",
 		"Upstream resolution discipline",
 		"Integration-target harness profile discipline",
+		// File-ownership at R-arch must mirror the deterministic gate
+		// (scopedFileOwnershipFindings, checkCreate=len(Stories)>0): only
+		// scope.include is checked here; scope.create is deferred to R2, and
+		// companion tests are auto-owned. Guards the 2026-06-23 regression where
+		// the reviewer false-rejected FooTest.java (companion of an owned
+		// Foo.java) as unowned — a phase-gate + companion-expansion mismatch.
+		"scope.include ONLY",
+		"companion tests are AUTO-OWNED",
+		"Do NOT check scope.create ownership here",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(out, want) {
@@ -420,6 +429,15 @@ func TestRenderPlanReviewerPrompt_ArchRound(t *testing.T) {
 	// exist yet at this phase).
 	if strings.Contains(out, "Constraint & scope-coverage fidelity") {
 		t.Errorf("arch-round prompt should NOT carry the R2 scenario coverage-fidelity criterion")
+	}
+
+	// Regression guard: the blanket "every deliverable file must be owned"
+	// phrasing swept scope.create test files (which don't have owning entries
+	// yet at this phase) into the ownership check and false-rejected companion
+	// tests. The criterion must scope ownership to scope.include, never re-add
+	// the blanket form.
+	if strings.Contains(out, "Every deliverable file must be owned") {
+		t.Errorf("arch-round prompt re-introduced the blanket deliverable-file-ownership check — it false-rejects scope.create companion tests; scope ownership to scope.include only (2026-06-23 regression)")
 	}
 }
 
