@@ -123,10 +123,11 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 // components per Story. Legacy LLM outputs that still emit files_owned
 // have the field silently ignored at unmarshal.
 type requirementItem struct {
-	Title          string   `json:"title"`
-	Description    string   `json:"description"`
-	DependsOn      []string `json:"depends_on,omitempty"`      // titles of prerequisite requirements (resolved to IDs at build time)
-	CapabilityName string   `json:"capability_name,omitempty"` // ADR-040 Move 2: links to Plan.Exploration.Capabilities[].Name
+	Title              string   `json:"title"`
+	Description        string   `json:"description"`
+	DependsOn          []string `json:"depends_on,omitempty"`          // titles of prerequisite requirements (resolved to IDs at build time)
+	CapabilityName     string   `json:"capability_name,omitempty"`     // ADR-040 Move 2: links to Plan.Exploration.Capabilities[].Name
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"` // #267: testable conditions the R-req gate requires; carried onto workflow.Requirement at build time
 }
 
 // pendingDispatch records metadata for an in-flight requirement-generation dispatch.
@@ -759,14 +760,15 @@ func buildRequirementsFromItems(slug string, trigger *payloads.RequirementGenera
 		id := fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1)
 		titleToID[item.Title] = id // new wins; downstream validators catch dup-title cases
 		out = append(out, workflow.Requirement{
-			ID:             id,
-			PlanID:         planID,
-			Title:          item.Title,
-			Description:    item.Description,
-			Status:         workflow.RequirementStatusActive,
-			CapabilityName: item.CapabilityName, // ADR-040 Move 2
-			CreatedAt:      now,
-			UpdatedAt:      now,
+			ID:                 id,
+			PlanID:             planID,
+			Title:              item.Title,
+			Description:        item.Description,
+			Status:             workflow.RequirementStatusActive,
+			CapabilityName:     item.CapabilityName,     // ADR-040 Move 2
+			AcceptanceCriteria: item.AcceptanceCriteria, // #267: carry testable criteria onto the requirement for the R-req gate
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		})
 	}
 	for i, item := range items {

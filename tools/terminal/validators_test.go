@@ -827,3 +827,79 @@ func TestValidateIntegrationUpstreamPairing(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateRequirementsDeliverable pins the #267 contract: every requirement
+// MUST carry a non-empty acceptance_criteria array. The ADR-051 requirements
+// review (R-req) demands the field; enforcing it at this deterministic boundary
+// is what makes the gate convergeable — without it a real-LLM plan with
+// missing acceptance_criteria loops R-req to revision-cap exhaustion (the field
+// has no producer slot to populate) and the whole plan dead-rejects.
+func TestValidateRequirementsDeliverable(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     map[string]any
+		wantError string // substring; empty means should succeed
+	}{
+		{
+			name: "valid with acceptance_criteria",
+			input: map[string]any{
+				"requirements": []any{
+					map[string]any{
+						"title":               "Hello endpoint returns JSON greeting",
+						"description":         "The /hello endpoint returns a JSON greeting.",
+						"acceptance_criteria": []any{"GET /hello returns HTTP 200", "body has a 'message' field"},
+					},
+				},
+			},
+		},
+		{
+			name: "missing acceptance_criteria",
+			input: map[string]any{
+				"requirements": []any{
+					map[string]any{"title": "x", "description": "y"},
+				},
+			},
+			wantError: "acceptance_criteria is required",
+		},
+		{
+			name: "empty acceptance_criteria array",
+			input: map[string]any{
+				"requirements": []any{
+					map[string]any{"title": "x", "description": "y", "acceptance_criteria": []any{}},
+				},
+			},
+			wantError: "acceptance_criteria is required",
+		},
+		{
+			name: "missing title",
+			input: map[string]any{
+				"requirements": []any{
+					map[string]any{"description": "y", "acceptance_criteria": []any{"c"}},
+				},
+			},
+			wantError: "title is required",
+		},
+		{
+			name:      "empty requirements array",
+			input:     map[string]any{"requirements": []any{}},
+			wantError: "requirements is required",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateRequirementsDeliverable(tc.input)
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatalf("want success, got error %q", err.Error())
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("want error containing %q, got nil", tc.wantError)
+			}
+			if !strings.Contains(err.Error(), tc.wantError) {
+				t.Errorf("error %q missing substring %q", err.Error(), tc.wantError)
+			}
+		})
+	}
+}

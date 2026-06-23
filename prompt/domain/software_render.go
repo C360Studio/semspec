@@ -76,7 +76,7 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 		sb.WriteString("\nRules:\n")
 		sb.WriteString("- ONE Requirement per capability — no merging two capabilities into one Requirement, no splitting one capability across multiple Requirements.\n")
 		sb.WriteString("- `capability_name` is REQUIRED on every Requirement; it MUST exactly match one of the capability names above.\n")
-		sb.WriteString("- Each Requirement carries INTENT + acceptance criteria — what the system MUST do. Implementation file paths are NOT your concern (the architect declares files per component, and the product owner assigns files to stories downstream). Do NOT emit files_owned; the field has been removed from your schema.\n")
+		sb.WriteString("- Each Requirement carries INTENT (title + description) AND `acceptance_criteria` — a NON-EMPTY array of concrete, verifiable conditions a test could assert (observable outcomes, not a restatement of the title or vague prose like \"works correctly\"). The downstream review (R-req) REJECTS any requirement with empty or prose-only acceptance_criteria, so emit at least one testable condition per requirement. Implementation file paths are NOT your concern (the architect declares files per component, and the product owner assigns files to stories downstream). Do NOT emit files_owned; the field has been removed from your schema.\n")
 		sb.WriteString("- Use SHALL or MUST in the Requirement title and description (RFC 2119 normative language).\n")
 		sb.WriteString("- Documentation content (READMEs, coverage matrices, tradeoff write-ups) is NOT a standalone Requirement. It attaches as scenarios under the implementation Requirement that produces the documented behavior.\n")
 		sb.WriteString("- Capability `depends_on` relationships translate to Requirement `depends_on` automatically — set the Requirement's `depends_on` to the requirement IDs of the capabilities it depends on (preserve the DAG).\n\n")
@@ -107,7 +107,7 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 		}
 		sb.WriteString("\nGenerate ONLY replacement requirements for the rejected IDs above.\n")
 	} else {
-		sb.WriteString("Extract testable requirements from the above plan. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
+		sb.WriteString("Extract testable requirements from the above plan. Each requirement should represent a distinct behavioral intent that can be independently verified, and MUST carry a non-empty `acceptance_criteria` array of concrete, observable conditions a test could assert (not a restatement of the title). The downstream review rejects requirements with empty or prose-only acceptance_criteria.\n")
 	}
 
 	if rg.PreviousError != "" {

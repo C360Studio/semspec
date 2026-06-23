@@ -1708,6 +1708,16 @@ type Requirement struct {
 	PlanID      string `json:"plan_id"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
+	// AcceptanceCriteria are concrete, verifiable conditions a test could
+	// assert — the testable contract the downstream scenario-generator binds
+	// to. ADR-051's requirements review round (R-req) rejects any requirement
+	// whose acceptance_criteria is empty or prose-only, so the generator MUST
+	// emit at least one observable condition per requirement. omitempty so
+	// legacy plans persisted before this field don't render an empty array
+	// into the reviewer's design-time view. Added for #267 — the R-req gate
+	// demanded this field before any producer could emit it, wedging every
+	// real-LLM plan at the requirements phase.
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
 	// Status is a runtime/execution-time field. omitempty so freshly-generated
 	// requirements (Status == "") don't poison the plan-reviewer's design-
 	// time review with empty-string asymmetry across requirements. Caught

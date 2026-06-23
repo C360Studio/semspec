@@ -278,7 +278,7 @@ func TestSubmitWork_NonPlanDeliverableSkipsScopeCheck(t *testing.T) {
 		Name: "submit_work",
 		Arguments: map[string]any{
 			"requirements": []any{
-				map[string]any{"title": "x", "description": "y"},
+				map[string]any{"title": "x", "description": "y", "acceptance_criteria": []any{"x returns y"}},
 			},
 		},
 		Metadata: map[string]any{

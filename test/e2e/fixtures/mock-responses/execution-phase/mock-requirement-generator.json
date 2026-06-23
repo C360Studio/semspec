@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"requirements\":[{\"title\":\"Goodbye endpoint returns JSON farewell\",\"description\":\"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string. The response must have Content-Type application/json and return HTTP 200.\",\"capability_name\":\"goodbye-endpoint\"}]}"
+        "arguments": "{\"requirements\":[{\"title\":\"Goodbye endpoint returns JSON farewell\",\"description\":\"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string. The response must have Content-Type application/json and return HTTP 200.\",\"capability_name\":\"goodbye-endpoint\",\"acceptance_criteria\":[\"GET /goodbye returns HTTP 200 with Content-Type application/json\",\"the JSON response body has a 'message' field whose value is a farewell string\"]}]}"
       }
     }
   ],
