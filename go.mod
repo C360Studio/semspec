@@ -6,12 +6,10 @@ require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/c360studio/semstreams v1.0.0-beta.107
-	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-shiori/go-readability v0.0.0-20251205110129-5db1dc9836f0
 	github.com/google/uuid v1.6.0
 	github.com/nats-io/nats.go v1.48.0
 	github.com/prometheus/client_golang v1.23.2
-	github.com/smacker/go-tree-sitter v0.0.0-20240827094217-dd81d9e9be82
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/net v0.53.0
