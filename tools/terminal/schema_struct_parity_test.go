@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // TestArchitectureSchemaStructParity is the guard against the recurring class of
@@ -76,6 +77,24 @@ func TestExplorationSchemaStructParity(t *testing.T) {
 	// depends_on/surfaces are all model-emitted; no system-owned exceptions.
 	assertSchemaStructParity(t, "Capability",
 		reflect.TypeOf(workflow.Capability{}), itemsProps(t, props, "capabilities"))
+}
+
+// TestDeveloperSchemaStructParity guards the developer deliverable. Like Plan,
+// payloads.DeveloperResult is a durable result type carrying system-owned fields
+// (request_id, slug, developer_task_id, status, output, llm_request_ids) the
+// model never emits — so the top level is a one-directional subset check. The
+// model-authored `summary` field had no struct home until #267-followup added
+// DeveloperResult.Summary; this test fails if it regresses to being dropped.
+func TestDeveloperSchemaStructParity(t *testing.T) {
+	schema := schemaForDeliverable("developer")
+	props := schemaProps(t, schema)
+
+	assertSchemaPropsSubsetOfStruct(t, "DeveloperResult",
+		reflect.TypeOf(payloads.DeveloperResult{}), props)
+
+	// file_intents[].items ↔ payloads.FileIntent — full parity (model-authored).
+	assertSchemaStructParity(t, "FileIntent",
+		reflect.TypeOf(payloads.FileIntent{}), itemsProps(t, props, "file_intents"))
 }
 
 // TestPlanSchemaStructParity guards the planner sub-phase deliverable. Unlike
