@@ -10,9 +10,13 @@ import (
 	"net/http"
 	"strings"
 	"time"
-
-	codeAst "github.com/c360studio/semspec/processor/ast"
 )
+
+// codeLanguagePredicate is the graph triple predicate semsource emits for a
+// code artifact's language. Inlined here (was processor/ast.CodeLanguage) so the
+// e2e client doesn't drag the legacy in-repo AST package — AST indexing is
+// semsource's job, not semspec's.
+const codeLanguagePredicate = "code.artifact.language"
 
 // HTTPClient provides HTTP operations for e2e tests.
 // It communicates with semspec via the HTTP gateway.
@@ -369,7 +373,7 @@ func countLanguageEntities(entries []LogEntry, language string) int {
 			triple, _ := t.(map[string]any)
 			pred, _ := triple["predicate"].(string)
 			obj, _ := triple["object"].(string)
-			if pred == codeAst.CodeLanguage && obj == language {
+			if pred == codeLanguagePredicate && obj == language {
 				count++
 				break
 			}
@@ -445,7 +449,7 @@ func countLanguageEntitiesAfterSequence(entries []LogEntry, language string, bas
 			triple, _ := t.(map[string]any)
 			pred, _ := triple["predicate"].(string)
 			obj, _ := triple["object"].(string)
-			if pred == codeAst.CodeLanguage && obj == language {
+			if pred == codeLanguagePredicate && obj == language {
 				count++
 				break
 			}
