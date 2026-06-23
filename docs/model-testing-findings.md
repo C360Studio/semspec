@@ -18,10 +18,10 @@ and [project-setup.md](./project-setup.md) §E2E.
 
 Each model section reports against a 4-stage rubric:
 
-1. **Plan phase** — planner → plan-reviewer(R1) → req-gen → [plan-reviewer(R-req)]
-   → arch-gen → [plan-reviewer(R-arch)] → story-prep → scenario-gen →
-   plan-reviewer(R2) → ready_for_execution. The bracketed R-req/R-arch rounds are
-   the ADR-051 per-phase gates (default off). Currently the cleanest stage on most
+1. **Plan phase** — planner → plan-reviewer(R1) → req-gen → plan-reviewer(R-req)
+   → arch-gen → plan-reviewer(R-arch) → story-prep → scenario-gen →
+   plan-reviewer(R2) → ready_for_execution. The R-req/R-arch rounds are the
+   mandatory ADR-051 per-phase reviews. Currently the cleanest stage on most
    providers; budgeted ~30-90s for @easy.
 2. **Execution phase** — TDD per requirement: developer → validator → reviewer.
    The hard part. Wedges live here.

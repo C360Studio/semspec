@@ -231,9 +231,9 @@ defined in `workflow/types.go`. The happy path:
 ```
 created → drafting → drafted → reviewing_draft → reviewed → approved
        → generating_requirements → requirements_generated
-       → [reviewing_requirements → requirements_reviewed]   (ADR-051, gated)
+       → reviewing_requirements → requirements_reviewed       (ADR-051 R-req)
        → generating_architecture → architecture_generated
-       → [reviewing_architecture → architecture_reviewed]   (ADR-051, gated)
+       → reviewing_architecture → architecture_reviewed       (ADR-051 R-arch)
        → preparing_stories → stories_generated
        → generating_scenarios → scenarios_generated
        → reviewing_scenarios → scenarios_reviewed → ready_for_execution
@@ -244,19 +244,18 @@ created → drafting → drafted → reviewing_draft → reviewed → approved
 ```
 
 Requirements precede architecture (the architect designs against the
-requirements). The two bracketed review rounds are the ADR-051 per-phase
-adversarial gates — present only when `requirements_review_enabled` /
-`architecture_review_enabled` are set (default off); otherwise the plan flows
-`requirements_generated → generating_architecture` and `architecture_generated →
-preparing_stories` directly.
+requirements). R-req and R-arch are the ADR-051 per-phase adversarial reviews —
+mandatory pipeline stages like the draft (R1) and scenario (R2) reviews. The
+plan-reviewer is the sole claimant of each `*_generated` state; the next
+generator claims the post-review `*_reviewed` state.
 
 Other reachable statuses:
 
 | Status | Meaning |
 |--------|---------|
 | `revision_needed` | Plan-reviewer rejected; planner retries (max 3) |
-| `reviewing_requirements` / `requirements_reviewed` | ADR-051 R-req gate (when `requirements_review_enabled`) |
-| `reviewing_architecture` / `architecture_reviewed` | ADR-051 R-arch gate (when `architecture_review_enabled`) |
+| `reviewing_requirements` / `requirements_reviewed` | ADR-051 R-req round (requirements review) |
+| `reviewing_architecture` / `architecture_reviewed` | ADR-051 R-arch round (architecture review) |
 | `awaiting_review` | Human gate (auto-approve disabled) |
 | `changed` | Plan was edited mid-flight; re-evaluation pending |
 | `rejected` | Reviewer or QA rejected; PlanDecisions describe the issues |

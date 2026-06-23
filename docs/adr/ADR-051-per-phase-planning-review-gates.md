@@ -137,25 +137,28 @@ A phase needs both layers only if it has a **mechanical** defect class
    early-enforced at `handleRequirementsMutation`). **2b (stories cross-entity) =
    DONE** (`workflow.ValidateStoriesAgainstPlan` wired into story-preparer
    pre-publish).
-3. **R-arch semantic round. DONE** (3a state machine + 3b round wiring +
-   `arch-review` mock scenario).
-4. **R-req semantic round. DONE** (states + round wiring + architecture-generator
-   dual-watch + `req-review` mock scenario).
+3. **R-arch semantic round. DONE** (states + round wiring; plan-reviewer is the
+   sole claimant of `architecture_generated`, story-preparer claims
+   `architecture_reviewed`).
+4. **R-req semantic round. DONE** (states + round wiring; plan-reviewer is the
+   sole claimant of `requirements_generated`, architecture-generator claims
+   `requirements_reviewed`).
 5. **Cross-cutting: stale-metadata refresh. DONE** (`refreshApprovedReviewMetadata`
    on every advance-past-review mutation).
+6. **Made the per-phase reviews mandatory. DONE** (removed the config flags /
+   env vars / dual-watch — R-req and R-arch are unconditional pipeline stages).
 
-**Implementation note — the per-phase rounds are config-gated (default off) and
-race-free.** Each round's downstream claimant (story-preparer for R-arch,
-architecture-generator for R-req) carries the SAME enable flag as the
-plan-reviewer and skips its claim of the *generated* state when the round is on,
-so the reviewer wins that state's CAS uncontended and the claimant resumes from
-the post-review *reviewed* state. Source each flag from a single env var
-(`ARCHITECTURE_REVIEW_ENABLED`, `REQUIREMENTS_REVIEW_ENABLED`) so the two configs
-cannot drift. Both rounds reuse the proven `claimAndDispatchReview` →
-`preflight → LLM → NormalizeVerdict` shape; the deterministic preflight at a
-generated-but-pre-stories phase must NOT enforce scope.create ownership (gated on
-`len(plan.Stories) > 0`) — scope.create is draft-partial until
-`ensureScopeCreateCoversStories`.
+**Implementation note — the per-phase rounds are MANDATORY pipeline stages, like
+R1 and R2 (no flag, no toggle).** Each `*_generated` state has exactly one
+claimant — the plan-reviewer — which claims it into the `reviewing_*` state; the
+downstream generator (architecture-generator for R-req, story-preparer for
+R-arch) claims the post-review `*_reviewed` state instead of the `*_generated`
+state. Single claimant per state means there is no race and no dual-watch — the
+earlier flag-gated/dual-watch design was removed. Both rounds reuse the proven
+`claimAndDispatchReview` → `preflight → LLM → NormalizeVerdict` shape; the
+deterministic preflight at a generated-but-pre-stories phase must NOT enforce
+scope.create ownership (gated on `len(plan.Stories) > 0`) — scope.create is
+draft-partial until `ensureScopeCreateCoversStories`.
 
 ## Validation (mock ladder — no paid runs)
 

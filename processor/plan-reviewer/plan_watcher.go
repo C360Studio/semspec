@@ -34,15 +34,14 @@ type reviewRound int
 const (
 	roundDraftReview     reviewRound = 1
 	roundScenariosReview reviewRound = 2
-	// roundArchitectureReview is the ADR-051 Slice 3 adversarial architecture
-	// round. It fires earlier in the pipeline than round 2 (architecture_generated
-	// precedes scenarios_generated) but is numbered 3 to avoid renumbering the two
-	// established rounds. Gated by Config.ArchitectureReviewEnabled.
+	// roundArchitectureReview is the ADR-051 adversarial architecture round, a
+	// mandatory pipeline stage. It fires earlier than round 2
+	// (architecture_generated precedes scenarios_generated) but is numbered 3 to
+	// avoid renumbering the two established rounds.
 	roundArchitectureReview reviewRound = 3
-	// roundRequirementsReview is the ADR-051 Slice 4 adversarial requirements
-	// round. It fires at requirements_generated (earliest of the per-phase
-	// rounds) but is numbered 4 to avoid renumbering. Gated by
-	// Config.RequirementsReviewEnabled.
+	// roundRequirementsReview is the ADR-051 adversarial requirements round, a
+	// mandatory pipeline stage. It fires at requirements_generated (earliest of
+	// the rounds) but is numbered 4 to avoid renumbering.
 	roundRequirementsReview reviewRound = 4
 )
 
@@ -92,16 +91,9 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingDraft, roundDraftReview)
 
 		case workflow.StatusRequirementsGenerated:
-			// ADR-051 Slice 4: the adversarial requirements round. Gated off by
-			// default — when disabled, the architecture-generator claims
-			// requirements_generated → generating_architecture directly (the
-			// pre-slice path) and nothing here runs. When enabled this MUST win
-			// the requirements_generated CAS over the architecture-generator,
-			// which carries the same flag and skips its requirements_generated
-			// claim when set, so the two do not race.
-			if !c.config.RequirementsReviewEnabled {
-				continue
-			}
+			// ADR-051 R-req: a mandatory pipeline stage (like R1/R2). The
+			// plan-reviewer is the sole claimant of requirements_generated; the
+			// architecture-generator claims the post-review requirements_reviewed.
 			if len(plan.Requirements) == 0 {
 				c.logger.Debug("Plan requirements_generated but no requirements inline, skipping KV trigger",
 					"slug", plan.Slug)
@@ -110,15 +102,9 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 			c.claimAndDispatchReview(ctx, &plan, workflow.StatusReviewingRequirements, roundRequirementsReview)
 
 		case workflow.StatusArchitectureGenerated:
-			// ADR-051 Slice 3: the adversarial architecture round. Gated off by
-			// default — when disabled, story-preparer claims architecture_generated
-			// → preparing_stories directly (the pre-slice path) and nothing here
-			// runs. When enabled this MUST win the architecture_generated CAS over
-			// story-preparer; story-preparer carries the same flag and skips its
-			// architecture_generated claim when set, so the two do not race.
-			if !c.config.ArchitectureReviewEnabled {
-				continue
-			}
+			// ADR-051 R-arch: a mandatory pipeline stage. The plan-reviewer is the
+			// sole claimant of architecture_generated; the story-preparer claims
+			// the post-review architecture_reviewed.
 			if plan.Architecture == nil {
 				c.logger.Debug("Plan architecture_generated but architecture not set yet, skipping KV trigger",
 					"slug", plan.Slug)

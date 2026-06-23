@@ -246,8 +246,9 @@ func (c *Component) Stop(_ time.Duration) error {
 // KV watcher
 // ---------------------------------------------------------------------------
 
-// watchPlanStates watches PLAN_STATES for plans reaching requirements_generated.
-// The KV value carries plan inline — no follow-up query needed.
+// watchPlanStates watches PLAN_STATES for plans reaching requirements_reviewed
+// (the post-R-req claim point). The KV value carries plan inline — no follow-up
+// query needed.
 func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream) {
 	bucket, err := workflow.WaitForKVBucket(ctx, js, c.config.PlanStateBucket)
 	if err != nil {
@@ -277,21 +278,10 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		// ADR-051 Slice 4 dual-watch: claim the architecture phase from
-		// requirements_generated only when the requirements review is DISABLED
-		// (the original path); when ENABLED the plan-reviewer owns that state
-		// (claims reviewing_requirements) and the architect waits for the
-		// post-review requirements_reviewed. The flag mirrors plan-reviewer's;
-		// see Config. The two never race the requirements_generated CAS.
-		switch plan.Status {
-		case workflow.StatusRequirementsGenerated:
-			if c.config.RequirementsReviewEnabled {
-				continue
-			}
-		case workflow.StatusRequirementsReviewed:
-			// Only reachable when the review is enabled — the post-review claim
-			// point. Requirements passed the adversarial round.
-		default:
+		// ADR-051: the requirements review (R-req) is a mandatory pipeline stage,
+		// so the architect claims from the post-review requirements_reviewed
+		// state — the plan-reviewer is the sole claimant of requirements_generated.
+		if plan.Status != workflow.StatusRequirementsReviewed {
 			continue
 		}
 

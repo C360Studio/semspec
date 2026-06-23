@@ -804,8 +804,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "default_capability": "architecture",
-        "requirements_review_enabled": ${REQUIREMENTS_REVIEW_ENABLED:-false}
+        "default_capability": "architecture"
       }
     },
     "story-preparer": {
@@ -815,8 +814,7 @@
       "enabled": true,
       "config": {
         "default_capability": "planning",
-        "max_generation_retries": 2,
-        "architecture_review_enabled": ${ARCHITECTURE_REVIEW_ENABLED:-false}
+        "max_generation_retries": 2
       }
     },
     "plan-manager": {
@@ -840,9 +838,7 @@
       "config": {
         "default_capability": "plan_review",
         "auto_approve": false,
-        "sandbox_url": "http://sandbox:8090",
-        "requirements_review_enabled": ${REQUIREMENTS_REVIEW_ENABLED:-false},
-        "architecture_review_enabled": ${ARCHITECTURE_REVIEW_ENABLED:-false}
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "project-manager": {

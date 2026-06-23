@@ -94,7 +94,7 @@ state management layer. Components own their entity lifecycle.
 | `scenario-generator` | `processor/scenario-generator/` | Generates scenarios for requirements |
 | `planner` | `processor/planner/` | Watches PLAN_STATES; generates Goal/Context/Scope via LLM |
 | `plan-manager` | `processor/plan-manager/` | Single writer for plans, requirements, scenarios |
-| `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; standards-aware validation. Up to 4 rounds: R1 draft (`drafted`), R-req requirements (`requirements_generated`, ADR-051 gated), R-arch architecture (`architecture_generated`, ADR-051 gated), R2 scenarios/stories (`scenarios_generated`) |
+| `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; standards-aware validation. 4 mandatory rounds (ADR-051): R1 draft (`drafted`), R-req requirements (`requirements_generated`), R-arch architecture (`architecture_generated`), R2 scenarios/stories (`scenarios_generated`) |
 | `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
 | `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
 | `execution-manager` | `processor/execution-manager/` | TDD pipeline: developer → validator → reviewer |
@@ -163,12 +163,10 @@ Configuration supports env var expansion: `"${LLM_API_URL:-http://localhost:1143
 | `GRAPH_SOURCES` | JSON array of external graph sources for federated knowledge graph |
 | `SEMSOURCE_URL` | Legacy single semsource URL (used when `GRAPH_SOURCES` is not set) |
 | `SANDBOX_URL` | Sandbox container URL; without it agents operate directly on host |
-| `REQUIREMENTS_REVIEW_ENABLED` | ADR-051: enable the adversarial requirements review round (R-req). Default `false`. Read by BOTH plan-reviewer and architecture-generator — they MUST agree, so source from this one var. |
-| `ARCHITECTURE_REVIEW_ENABLED` | ADR-051: enable the adversarial architecture review round (R-arch). Default `false`. Read by BOTH plan-reviewer and story-preparer — they MUST agree, so source from this one var. |
 
 Key config flag: `task-generator.reactive_mode` (default `true`) — skip static task generation and advance plan to `ready_for_execution`; `scenario-orchestrator` then dispatches pending requirements for reactive execution.
 
-ADR-051 per-phase planning review (default off): when `REQUIREMENTS_REVIEW_ENABLED` / `ARCHITECTURE_REVIEW_ENABLED` are set, plan-reviewer runs an adversarial LLM gate at `requirements_generated` (R-req) and/or `architecture_generated` (R-arch) before the next phase consumes the artifact. Each flag's downstream claimant (architecture-generator for R-req, story-preparer for R-arch) carries the same flag and skips its claim of the *generated* state, so the reviewer wins that state's claim uncontended (dual-watch, race-free).
+ADR-051 per-phase planning review: the plan-reviewer runs four MANDATORY adversarial rounds — R1 (`drafted`), R-req (`requirements_generated`), R-arch (`architecture_generated`), R2 (`scenarios_generated`). Not optional, no flags — each `*_generated` state has the plan-reviewer as its sole claimant, and the next generator (architecture-generator for R-req, story-preparer for R-arch) claims the post-review `*_reviewed` state.
 
 ## Graph-First Architecture
 

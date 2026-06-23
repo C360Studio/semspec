@@ -241,10 +241,8 @@ func (c *Component) Stop(_ time.Duration) error {
 // KV watcher
 // ---------------------------------------------------------------------------
 
-// watchPlanStates watches PLAN_STATES for plans reaching architecture_generated.
-// When Config.Enabled is false the loop runs but the per-entry filter
-// short-circuits — keeps the dormant component low-cost without changing the
-// startup contract.
+// watchPlanStates watches PLAN_STATES for plans reaching architecture_reviewed
+// (the post-R-arch claim point) and preparing_stories (recovery back-transition).
 func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream) {
 	bucket, err := workflow.WaitForKVBucket(ctx, js, c.config.PlanStateBucket)
 	if err != nil {
@@ -275,8 +273,8 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 			continue
 		}
 		// Two claim points for Sarah's dispatch:
-		//   (A) architecture_generated → preparing_stories: forward flow
-		//       on a freshly architected plan. ClaimPlanStatus does an
+		//   (A) architecture_reviewed → preparing_stories: forward flow after the
+		//       architecture review (R-arch) approves. ClaimPlanStatus does an
 		//       atomic CAS via plan-manager so only one replica wins.
 		//   (B) preparing_stories already set: back-transition driven by
 		//       plan-manager when a story_reprepare PlanDecision is
@@ -288,25 +286,11 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		//       transition is already done; we just need to dispatch and
 		//       dedup against the echo from path (A) below.
 		switch plan.Status {
-		case workflow.StatusArchitectureGenerated:
-			// ADR-051 Slice 3 (dual-watch claim point A): when the architecture
-			// review is ENABLED the plan-reviewer owns this state — it claims
-			// architecture_generated → reviewing_architecture. Sarah must NOT
-			// race it; she waits for the post-review architecture_reviewed echo
-			// (claim point B below). When the review is DISABLED (default), no
-			// reviewer claims this state and Sarah shards directly from here, as
-			// before the slice. The flag mirrors plan-reviewer's; see Config.
-			if c.config.ArchitectureReviewEnabled {
-				continue
-			}
-			if !c.claimPreparingStories(ctx, &plan) {
-				continue
-			}
 		case workflow.StatusArchitectureReviewed:
-			// ADR-051 Slice 3 (dual-watch claim point B): only reachable when the
-			// architecture review is enabled — the architect's output passed the
-			// adversarial round. Sarah shards from here exactly as she would from
-			// architecture_generated in the review-disabled path.
+			// ADR-051: the architecture review (R-arch) is a mandatory pipeline
+			// stage, so Sarah shards from the post-review architecture_reviewed
+			// state — the plan-reviewer is the sole claimant of
+			// architecture_generated (it claims reviewing_architecture there).
 			if !c.claimPreparingStories(ctx, &plan) {
 				continue
 			}
@@ -333,10 +317,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 // and, on success, records the self-echo so the corresponding preparing_stories
 // KV-put does not trigger a second dispatch and mutates the in-memory plan so
 // the caller dispatches against the claimed status. Returns false when another
-// replica (or, for architecture_generated, the plan-reviewer's competing
-// reviewing_architecture claim) won the race. Shared by both ADR-051 dual-watch
-// claim points (architecture_generated when review-disabled, architecture_reviewed
-// when review-enabled).
+// replica won the architecture_reviewed → preparing_stories CAS.
 func (c *Component) claimPreparingStories(ctx context.Context, plan *workflow.Plan) bool {
 	if !workflow.ClaimPlanStatus(ctx, c.natsClient, plan.Slug, workflow.StatusPreparingStories, c.logger) {
 		return false
