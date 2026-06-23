@@ -80,20 +80,16 @@ const (
 	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
 	StatusReviewingScenarios Status = "reviewing_scenarios"
 	// StatusReviewingRequirements indicates the plan-reviewer requirements round
-	// (ADR-051 Slice 4) has claimed requirements_generated for an adversarial
-	// review. On approval the plan advances to requirements_reviewed; on
-	// rejection it re-enters approved to re-run the requirement-generator. Gated
-	// by plan-reviewer config (requirements_review_enabled): when off no
-	// component claims this state and requirements_generated →
-	// generating_architecture directly, as before.
+	// (ADR-051 R-req) has claimed requirements_generated for an adversarial
+	// review — a mandatory pipeline stage. On approval the plan advances to
+	// requirements_reviewed (the architecture-generator's claim point); on
+	// rejection it re-enters approved to re-run the requirement-generator.
 	StatusReviewingRequirements Status = "reviewing_requirements"
 	// StatusReviewingArchitecture indicates the plan-reviewer architecture round
-	// (ADR-051 Slice 3) has claimed architecture_generated for an adversarial
-	// review. On approval the plan advances to architecture_reviewed; on
-	// rejection it re-enters requirements_generated to re-run the architect.
-	// Gated by plan-reviewer config (architecture_review_enabled): when the gate
-	// is off no component claims this state and architecture_generated →
-	// preparing_stories directly, as before.
+	// (ADR-051 R-arch) has claimed architecture_generated for an adversarial
+	// review — a mandatory pipeline stage. On approval the plan advances to
+	// architecture_reviewed (the story-preparer's claim point); on rejection it
+	// re-enters requirements_generated to re-run the architect.
 	StatusReviewingArchitecture Status = "reviewing_architecture"
 	// StatusPreparingStories indicates story-preparer (Sarah) has claimed
 	// architecture_generated and is sharding requirements into Stories
@@ -108,11 +104,8 @@ const (
 
 const (
 	// StatusRequirementsReviewed indicates the adversarial requirements review
-	// (ADR-051 Slice 4) approved the requirements. Terminal for the
-	// requirements-review phase; the architecture-generator claims from here
-	// (instead of requirements_generated) when the review is enabled.
-	// Review-disabled plans never enter this state — requirements_generated →
-	// generating_architecture holds.
+	// (ADR-051 R-req) approved the requirements. Terminal for the
+	// requirements-review phase; the architecture-generator's sole claim point.
 	StatusRequirementsReviewed Status = "requirements_reviewed"
 
 	// StatusArchitectureGenerated indicates the architecture phase has completed.
@@ -120,10 +113,8 @@ const (
 	StatusArchitectureGenerated Status = "architecture_generated"
 
 	// StatusArchitectureReviewed indicates the adversarial architecture review
-	// (ADR-051 Slice 3) approved the architecture. Terminal for the
-	// architecture-review phase; story-preparer claims from here (instead of
-	// architecture_generated) when the review is enabled. Review-disabled plans
-	// never enter this state — architecture_generated → preparing_stories holds.
+	// (ADR-051 R-arch) approved the architecture. Terminal for the
+	// architecture-review phase; the story-preparer's sole claim point.
 	StatusArchitectureReviewed Status = "architecture_reviewed"
 
 	// StatusExplored indicates the analyst sub-phase has completed and the

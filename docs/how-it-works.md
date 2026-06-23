@@ -255,12 +255,11 @@ The `plan-reviewer` watches for status `scenarios_generated` and performs this r
 validating the Scenarios, Stories, requirements, architecture, and contract obligations. On
 approval, status advances to `ready_for_execution`.
 
-The plan-reviewer can run up to four rounds in total: R1 (draft, above), and — when the ADR-051
-per-phase gates are enabled — R-req at `requirements_generated` and R-arch at
-`architecture_generated`, plus R2 here. The two per-phase rounds (`requirements_review_enabled` /
-`architecture_review_enabled`, default off) catch judgment-class defects (over-bundling, missing
-acceptance criteria, facade boundaries, upstream-resolution gaps) immediately after each artifact
-is generated and re-run only the offending phase, instead of deferring them to R2 or execution.
+The plan-reviewer runs four mandatory rounds (ADR-051): R1 (draft, above), R-req at
+`requirements_generated`, R-arch at `architecture_generated`, and R2 here. The two per-phase
+rounds catch judgment-class defects (over-bundling, missing acceptance criteria, facade
+boundaries, upstream-resolution gaps) immediately after each artifact is generated and re-run only
+the offending phase, instead of deferring them to R2 or execution.
 
 ### Full flow summary
 
