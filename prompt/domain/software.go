@@ -455,6 +455,25 @@ qa-reviewer judges coverage against this declared surface.`)
 			},
 		},
 		{
+			// Dev-only. The architect names each upstream symbol + its verified
+			// import but NOT the method contract — ADR-047 (the architect-side
+			// completeness gate) was withdrawn 2026-06-23 and method-signature
+			// resolution moved to the developer. This directs the dev to resolve
+			// the exact signatures from /sources/ proactively, in one upfront
+			// read, so the move does not re-arm the compile-error discovery
+			// thrash (the ~3.5M-token ICommandStatus loop) the old gate targeted.
+			ID:       "software.developer.upstream-contract-resolution",
+			Category: prompt.CategoryDomainContext,
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && len(ctx.TaskContext.UpstreamResolutions) > 0
+			},
+			ContentFunc: func(*prompt.AssemblyContext) string {
+				return "## Resolving upstream method contracts\n\n" +
+					"The resolutions above pin each dependency's coordinate and the import for its primary symbol — WHAT to use and HOW to import it — but NOT the full method contract. When you extend or call one of these upstream classes/interfaces, read its source under /sources/<namespace>/ (bash: cat/grep the .java/.kt/.py file; or `javap`/`unzip` the jar under ~/.m2) to get the exact signatures — constructors, the abstract methods a subclass MUST implement, parameter/return types, and lifecycle order — BEFORE you write code against them. Resolve the contract in ONE upfront read; do not reverse-engineer it one failed compile at a time.\n"
+			},
+		},
+		{
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
@@ -1445,7 +1464,7 @@ ON FIRST ITERATION, before any reasoning about technology choices:
 
 3. bash('cat <workspace>/.semspec/project.json') and bash('cat <workspace>/.semspec/standards.json') — the operator's declared stack and quality gates. The quality_gates field names the build command (e.g. "./gradlew test"), which is authoritative about the build tool the project actually uses.
 
-4. For EACH external library, API, or framework named in the requirement: web_search to find the canonical documentation URL, then http_request (or bash on /sources/ when available, see step 5) to fetch the specific page that proves the integration surface. Save long fetches to /tmp via bash if you need to grep them later. The point of fetching is NOT to skim and move on — it is to extract the concrete coordinate (Maven groupId:artifactId:version, npm name@version, github URL@tag) AND the specific symbols (class names, method signatures, lifecycle methods, config fields) the developer will need. Both go into upstream_resolutions[] (step 6).
+4. For EACH external library, API, or framework named in the requirement: web_search to find the canonical documentation URL, then http_request (or bash on /sources/ when available, see step 5) to fetch the specific page that proves the integration surface. Save long fetches to /tmp via bash if you need to grep them later. The point of fetching is NOT to skim and move on — it is to extract the concrete coordinate (Maven groupId:artifactId:version, npm name@version, github URL@tag) AND the PRIMARY symbols the developer integrates against (the class/interface the project extends, the entry-point function/type) with their fully-qualified, paste-ready imports. You do NOT enumerate every method signature, lifecycle method, or config field — naming the symbol and its verified import is enough; the developer resolves the exact method contract by reading /sources/ (or the jar) at implementation time. Both the coordinate and the named symbols go into upstream_resolutions[] (step 6).
 
 5. /sources/ shortcut (only if the operator configured semsource): bash('ls /sources/ 2>/dev/null') to detect. If populated, the namespaces there are pre-cloned upstream repos — bash-readable for pom.xml, build.gradle, raw source, etc., faster than http_request when the upstream surface is large. Without /sources/, step 4 is the only path.
 
@@ -1466,7 +1485,7 @@ BEFORE submit_work:
    - role: classify how the dep is consumed at test time. "build_dep" = compile-time only (annotation processor, codegen). "runtime_dep" = library/framework called in-process (most cases — the dev imports the JAR/module and tests its methods directly). "integration_target" = a separate process the dev's code talks to over a wire protocol (daemon, broker, database, gRPC service). When you cannot tell, default to "runtime_dep".
    - **name-matching invariant (Rule 7a-a)**: every integrations[].name that appears in the architecture MUST appear verbatim as an upstream_resolutions[].name. The strings are compared exact-match — "MAVLink Network" in integrations and "Raw MAVLink Endpoint" in resolutions is a violation; rename ONE side so they agree. The reverse is also true: every upstream_resolutions[] entry with role="integration_target" MUST have a matching integrations[] entry of the same name. Mismatched names = automatic rejection by the structural validator (introduced 2026-06-01 after mavlink-hard smoke 5 showed gemini-pro repeatedly producing mismatched names).
    - integration_target rule: when any resolution uses role == "integration_target", select at least one entry in architecture.harness_profiles[] whose catalog profile covers that target. Use ONLY profile_id values from the "Available test environments" section. Do NOT author images, ports, env, startup order, or readiness here; the catalog owns those details.
-   This is the load-bearing rule for upstream-strengthening: the dev no longer needs a research sub-agent because YOU pre-resolved API surfaces and selected a system-owned test harness profile. Take-23 (2026-05-13) wedged at iter=80 with 35 external file reads + 0 worktree writes specifically because architect named OSH classes without resolving their constructor + lifecycle into the deliverable; the dev had to discover them mid-cycle. Take-29 (2026-05-15) hit 9/9 green on hard but with fabricated stub JARs because no integration_target was declared and the reviewer had no anchor to reject mock-based tests.
+   This is the load-bearing rule: YOU pin the coordinate + a verified paste-ready import + a system-owned test harness profile, so the dev knows WHICH artifact to put on the build, WHAT symbol to import, and HOW it is tested. You do NOT enumerate the symbol's method contract — the dev reads /sources/ (or javaps the jar) for the exact signatures at implementation time. Take-29 (2026-05-15) hit 9/9 green on hard but with fabricated stub JARs because no integration_target was declared and the reviewer had no anchor to reject mock-based tests — that anchor (coordinate + import + harness) is what this rule protects.
 
 7. For EVERY component in component_boundaries that depends on an external library: populate component_boundaries[].upstream_refs with the names of the matching upstream_resolutions entries. Bidirectional with upstream_resolutions[].used_by — both sides must agree.
 
@@ -1479,7 +1498,7 @@ BEFORE submit_work:
 
 9. Every entry in decisions[].rationale MUST cite at least one reference: workspace file path, /sources/<namespace>/<path>, or URL. A rationale without a citation is a guess; resubmit with the missing read.
 
-Do NOT instruct the developer to "explore the upstream codebase" or "research the patterns" — that pattern exhausts the developer's iteration budget on re-discovery. Your job is to cite specific files and URLs and PRE-RESOLVE upstream surfaces into upstream_resolutions[]; the developer's job is to use the resolutions you produced.`,
+Your job is to NAME each dependency precisely — a verified coordinate, the paste-ready import for each symbol the project integrates against, a citation, and a harness profile for integration targets — so the developer knows WHAT to extend and HOW to import it. You do NOT enumerate the method contract (constructors, abstract methods, lifecycle, config types); the developer resolves those by reading /sources/ (or javaping the jar) at implementation time. Do not pad the apis[] with fabricated signatures to look complete — a verified import + citation is the bar; an unverified guess is worse than an honest single entry.`,
 		},
 		{
 			// User-message renderer for architect. Replaces
