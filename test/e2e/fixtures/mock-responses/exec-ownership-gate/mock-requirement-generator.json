@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"requirements\": [{\"title\": \"Feature A endpoint\", \"description\": \"Implement feature A under src/a/feature_a.py, registered through the core driver.\"}, {\"title\": \"Feature B endpoint\", \"description\": \"Implement feature B under src/b/feature_b.py, registered through the core driver.\", \"depends_on\": [\"Feature A endpoint\"]}]}"
+        "arguments": "{\"requirements\":[{\"title\":\"Feature A endpoint\",\"description\":\"Implement feature A under src/a/feature_a.py, registered through the core driver.\",\"acceptance_criteria\":[\"the behavior specified by \\\"Feature A endpoint\\\" is implemented and returns the described result\",\"an automated test asserts \\\"Feature A endpoint\\\"\"]},{\"title\":\"Feature B endpoint\",\"description\":\"Implement feature B under src/b/feature_b.py, registered through the core driver.\",\"depends_on\":[\"Feature A endpoint\"],\"acceptance_criteria\":[\"the behavior specified by \\\"Feature B endpoint\\\" is implemented and returns the described result\",\"an automated test asserts \\\"Feature B endpoint\\\"\"]}]}"
       }
     }
   ],

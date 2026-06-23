@@ -120,7 +120,7 @@ func ExpectedFieldsHint(deliverableType string) string {
 	case "plan":
 		return `Expected JSON: {"goal": "...", "context": "...", "scope": {"include": [...]}}`
 	case "requirements":
-		return `Expected JSON: {"requirements": [{"title": "...", "description": "..."}]}`
+		return `Expected JSON: {"requirements": [{"title": "...", "description": "...", "acceptance_criteria": ["concrete testable condition", "..."]}]}`
 	case "scenarios":
 		return `Expected JSON: {"scenarios": [{"title": "...", "given": "...", "when": "...", "then": ["..."]}]}`
 	case "architecture":
@@ -164,6 +164,16 @@ func ValidateRequirementsDeliverable(d map[string]any) error {
 		desc, _ := req["description"].(string)
 		if desc == "" {
 			return fmt.Errorf("requirements[%d].description is required", i)
+		}
+		// #267: acceptance_criteria is the testable contract the ADR-051
+		// requirements review (R-req) demands. Enforce it at the deterministic
+		// boundary so a missing field fails fast in-loop with an actionable
+		// directive, instead of surviving submit_work only to loop the R-req
+		// gate to revision-cap exhaustion (which has no field to populate and
+		// can never converge).
+		ac, _ := req["acceptance_criteria"].([]any)
+		if len(ac) == 0 {
+			return fmt.Errorf("requirements[%d].acceptance_criteria is required — provide a non-empty array of concrete, testable conditions (observable outcomes a test could assert, not a restatement of the title)", i)
 		}
 	}
 	return nil

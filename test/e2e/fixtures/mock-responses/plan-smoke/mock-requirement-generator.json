@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"requirements\": [{\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing 'Goodbye, World!'. The response must have Content-Type application/json and return HTTP 200. Include unit tests.\", \"capability_name\": \"goodbye-endpoint\"}, {\"title\": \"UI displays goodbye message from new endpoint\", \"description\": \"The JavaScript UI must fetch the /goodbye endpoint and display the returned message in the page.\", \"capability_name\": \"goodbye-ui-integration\", \"depends_on\": [\"Goodbye endpoint returns JSON farewell\"]}]}"
+        "arguments": "{\"requirements\": [{\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing 'Goodbye, World!'. The response must have Content-Type application/json and return HTTP 200. Include unit tests.\", \"capability_name\": \"goodbye-endpoint\", \"acceptance_criteria\": [\"GET /goodbye returns HTTP 200 with Content-Type application/json\", \"the JSON response body's 'message' field equals 'Goodbye, World!'\"]}, {\"title\": \"UI displays goodbye message from new endpoint\", \"description\": \"The JavaScript UI must fetch the /goodbye endpoint and display the returned message in the page.\", \"capability_name\": \"goodbye-ui-integration\", \"depends_on\": [\"Goodbye endpoint returns JSON farewell\"], \"acceptance_criteria\": [\"the UI fetches /goodbye on load\", \"the returned message text is displayed in the page\"]}]}"
       }
     }
   ],
