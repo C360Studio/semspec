@@ -268,6 +268,42 @@ func ValidateReviewDeliverable(d map[string]any) error {
 			fireReviewMissingRejectionType(verdict, "fixable")
 		}
 	}
+	// Enforce the structured remediation directive on every error-severity
+	// violation. action/target_field/target_value are what the regen agents
+	// EXECUTE (formatActionDirective → the reviewFindingsActionDirective
+	// meta-rule appended to every requirement/planner/architect/scenario/story
+	// regen prompt). The reviewer prompt (software.go) already MANDATES them on
+	// error violations, but the emission schema only binds on strict-mode
+	// providers — so without this check, gemini/anthropic silently drop the
+	// directive and regen falls back to the ambiguous prose the take-24 fix
+	// existed to eliminate. This is the reviewer validating its OWN output, so a
+	// miss is a within-loop retry (self-correcting), NOT the #267 cross-party
+	// unconvergeable case. No safe auto-fill exists for a remediation direction,
+	// so we surface the error rather than defaulting.
+	if fRaw, ok := d["findings"].([]any); ok {
+		validVerbs := map[string]bool{"add": true, "remove": true, "rename": true, "replace": true, "move": true}
+		for i, item := range fRaw {
+			f, ok := item.(map[string]any)
+			if !ok {
+				continue // finding shape is validated where it's parsed; not this gate's concern
+			}
+			sev, _ := f["severity"].(string)
+			status, _ := f["status"].(string)
+			if sev != "error" || status != "violation" {
+				continue
+			}
+			action, _ := f["action"].(string)
+			if !validVerbs[action] {
+				return fmt.Errorf("findings[%d]: action is required on every error-severity violation and must be one of add/remove/rename/replace/move (got %q) — the regen agent executes this as the remediation directive", i, action)
+			}
+			if tf, _ := f["target_field"].(string); tf == "" {
+				return fmt.Errorf("findings[%d]: target_field is required when action is set — name the SINGLE plan field to mutate (e.g. scope.create, requirements[<id>].acceptance_criteria)", i)
+			}
+			if tv, _ := f["target_value"].(string); tv == "" {
+				return fmt.Errorf("findings[%d]: target_value is required when action is set — the value to add/remove/rename (for remove, the entry to drop)", i)
+			}
+		}
+	}
 	// Validate scenario_verdicts items when present — each must be an object
 	// with scenario_id (string) and passed (bool). Gemini sends bare numbers
 	// without this guard, causing post-loop parse failures.

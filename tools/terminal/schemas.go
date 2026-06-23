@@ -718,8 +718,21 @@ func reviewSchema() map[string]any {
 						"issue":      map[string]any{"type": []any{"string", "null"}, "description": "Concrete issue description. Set null on compliant findings."},
 						"suggestion": map[string]any{"type": []any{"string", "null"}, "description": "Proposed fix. Set null on compliant findings."},
 						"evidence":   map[string]any{"type": []any{"string", "null"}, "description": "File/line reference grounding the finding. Set null when evidence is implicit."},
+						"action": map[string]any{
+							"type":        []any{"string", "null"},
+							"description": "Imperative remediation verb. REQUIRED on every error-severity violation (verdict=needs_changes): the downstream regen agent executes this directive to avoid picking the wrong mutation direction. Set null on compliant/info findings and on warnings where no direction is committed.",
+							"enum":        []any{"add", "remove", "rename", "replace", "move", nil},
+						},
+						"target_field": map[string]any{
+							"type":        []any{"string", "null"},
+							"description": "The SINGLE plan field the action mutates, e.g. \"scope.create\", \"scope.include\", \"requirements[<id>].acceptance_criteria\", \"architecture.decisions\", \"scenario.<id>.given\". REQUIRED whenever action is set; name exactly ONE field (no \"ensure consistency between A and B\"). Set null when action is null.",
+						},
+						"target_value": map[string]any{
+							"type":        []any{"string", "null"},
+							"description": "The value being added/removed/renamed. For \"add\" the new entry; for \"remove\" the entry to drop; for \"rename\"/\"replace\" the form \"old → new\". REQUIRED whenever action is set. Set null when action is null.",
+						},
 					},
-					"required":             []string{"sop_id", "sop_title", "severity", "status", "category", "phase", "target_id", "issue", "suggestion", "evidence"},
+					"required":             []string{"sop_id", "sop_title", "severity", "status", "category", "phase", "target_id", "issue", "suggestion", "evidence", "action", "target_field", "target_value"},
 					"additionalProperties": false,
 				},
 			},

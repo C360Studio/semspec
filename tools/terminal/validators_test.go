@@ -519,6 +519,86 @@ func TestValidateArchitectDeliverable(t *testing.T) {
 //
 // "fixable" is the safer default because it retries the developer rather
 // than terminating the requirement.
+// TestValidateReviewDeliverable_RequiresDirectiveOnErrorViolation pins the
+// structural enforcement of the take-24 remediation directive: every
+// error-severity violation finding must carry action/target_field/target_value
+// (the triple the regen agents EXECUTE). Scoped to error+violation only —
+// info/compliant/warning findings legitimately omit the directive. This is the
+// reviewer validating its own output, so a miss is a within-loop retry.
+func TestValidateReviewDeliverable_RequiresDirectiveOnErrorViolation(t *testing.T) {
+	finding := func(extra map[string]any) map[string]any {
+		f := map[string]any{"severity": "error", "status": "violation"}
+		for k, v := range extra {
+			f[k] = v
+		}
+		return f
+	}
+	base := func(findings ...any) map[string]any {
+		return map[string]any{"verdict": "needs_changes", "feedback": "fix it", "findings": findings}
+	}
+	tests := []struct {
+		name      string
+		input     map[string]any
+		wantError string
+	}{
+		{
+			name: "error violation with full directive — passes",
+			input: base(finding(map[string]any{
+				"action": "add", "target_field": "scope.create", "target_value": "Foo.java",
+			})),
+		},
+		{
+			name:      "error violation missing action",
+			input:     base(finding(map[string]any{"target_field": "scope.create", "target_value": "Foo.java"})),
+			wantError: "action is required",
+		},
+		{
+			name:      "error violation invalid action verb",
+			input:     base(finding(map[string]any{"action": "frobnicate", "target_field": "scope.create", "target_value": "Foo.java"})),
+			wantError: "must be one of",
+		},
+		{
+			name:      "error violation missing target_field",
+			input:     base(finding(map[string]any{"action": "add", "target_value": "Foo.java"})),
+			wantError: "target_field is required",
+		},
+		{
+			name:      "error violation missing target_value",
+			input:     base(finding(map[string]any{"action": "add", "target_field": "scope.create"})),
+			wantError: "target_value is required",
+		},
+		{
+			name:  "info compliant finding needs no directive",
+			input: base(map[string]any{"severity": "info", "status": "compliant"}),
+		},
+		{
+			name:  "warning violation needs no directive",
+			input: base(map[string]any{"severity": "warning", "status": "violation"}),
+		},
+		{
+			name:  "approved with empty findings — passes",
+			input: map[string]any{"verdict": "approved", "findings": []any{}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateReviewDeliverable(tt.input)
+			if tt.wantError == "" {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantError)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Errorf("error %q missing %q", err.Error(), tt.wantError)
+			}
+		})
+	}
+}
+
 func TestValidateReviewDeliverable_AutoFillsRejectionType(t *testing.T) {
 	tests := []struct {
 		name              string
