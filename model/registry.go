@@ -3,11 +3,9 @@ package model
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 	"sync"
-	"time"
 )
 
 // Registry manages model selection based on capabilities.
@@ -72,30 +70,19 @@ type EndpointConfig struct {
 	// to enforce serial inference.
 	MaxConcurrent int `json:"max_concurrent,omitempty"`
 
-	// RequestTimeout is the per-request HTTP timeout for this endpoint.
-	// Go duration string (e.g., "300s", "5m"). Empty or "0" means no
-	// per-endpoint timeout — the caller's context deadline governs duration.
-	// Use this as a safety cap for cloud endpoints; leave unset for slow
-	// local LLMs that may take hours per response.
+	// RequestTimeout is the per-request LLM timeout for this endpoint as a Go
+	// duration string (e.g., "300s", "5m"). Empty or "0" means the caller's
+	// context deadline governs duration.
+	//
+	// ENFORCEMENT lives in semstreams' agentic-model component, which applies
+	// the precedence req → endpoint.request_timeout → capability → default via
+	// model.ResolveCapabilityTimeout and wraps each model call in
+	// context.WithTimeout (see processor/agentic-model/component.go:resolveTimeout).
+	// This field is the config surface that flows there; semspec does NOT parse
+	// or apply it locally — a prior GetRequestTimeout() helper here was dead
+	// code (removed 2026-06-24) that duplicated, and risked diverging from,
+	// that enforcement.
 	RequestTimeout string `json:"request_timeout,omitempty"`
-}
-
-// GetRequestTimeout parses RequestTimeout as a Go duration.
-// Returns 0 if the field is empty, "0", or unparseable.
-func (e *EndpointConfig) GetRequestTimeout() time.Duration {
-	if e.RequestTimeout == "" || e.RequestTimeout == "0" {
-		return 0
-	}
-	d, err := time.ParseDuration(e.RequestTimeout)
-	if err != nil {
-		slog.Warn("Invalid request_timeout in endpoint config, ignoring",
-			"model", e.Model, "value", e.RequestTimeout, "error", err)
-		return 0
-	}
-	if d <= 0 {
-		return 0
-	}
-	return d
 }
 
 // DefaultsConfig holds default model settings.

@@ -214,7 +214,10 @@ type Component struct {
 
 	// pendingRecoveryDecisionChecker is a test seam for the awaiting-recovery
 	// timeout path. Production uses PLAN_STATES via hasPendingRecoveryDecision.
-	pendingRecoveryDecisionChecker func(ctx context.Context, slug, requirementID string) bool
+	// Returns (pending, readErr): a non-nil readErr means infrastructure was
+	// unreachable (the check could not be made), which the timeout path treats
+	// as "extend, don't terminal-fail" rather than "no pending decision".
+	pendingRecoveryDecisionChecker func(ctx context.Context, slug, requirementID string) (bool, error)
 }
 
 // NewComponent creates a new requirement-executor from raw JSON config.

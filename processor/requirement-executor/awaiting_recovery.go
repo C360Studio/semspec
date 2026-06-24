@@ -18,6 +18,7 @@ package requirementexecutor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -31,6 +32,16 @@ import (
 // req-executor process so events redeliver after a crash; consumer is
 // shared with restarts.
 const planDecisionAcceptedConsumer = "requirement-executor-plan-decision-accepted"
+
+// maxRecoveryInfraRetries bounds how many CONSECUTIVE awaiting-recovery
+// deadline expiries may be absorbed while the pending-PlanDecision check
+// cannot reach NATS/KV (infrastructure unreachable — e.g. a network blip or
+// power outage). Each such expiry extends the deadline by one recoveryTimeout
+// instead of terminal-failing, so a TRANSIENT outage no longer dead-ends a
+// plan (AutoRejectOnExhaustion). A SUSTAINED outage still terminates once the
+// cap is hit, bounding total grace at maxRecoveryInfraRetries × recoveryTimeout.
+// Reset to 0 on any successful read so only a continuous outage trips it.
+const maxRecoveryInfraRetries = 6
 
 // recoveryDeferEnabled reports whether the ADR-037 race-closure path is
 // active. Centralizing the gate keeps the call sites tidy and the
@@ -132,7 +143,57 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 	if !exec.awaitingRecovery {
 		return
 	}
-	if c.hasPendingRecoveryDecision(context.Background(), exec.Slug, exec.RequirementID) {
+
+	pending, readErr := c.hasPendingRecoveryDecision(context.Background(), exec.Slug, exec.RequirementID)
+
+	// Infrastructure unreachable (NATS/KV read failed): we cannot conclude
+	// that recovery gave up — the recovery agent's own LLM/NATS calls were
+	// equally cut off. Terminal-failing here turns a transient network blip
+	// into an irreversible AutoRejectOnExhaustion (caught 2026-06-23: a power
+	// outage mid-run dead-ended a plan). Extend instead, bounded by
+	// maxRecoveryInfraRetries so a permanent outage still terminates.
+	if readErr != nil {
+		exec.recoveryInfraRetries++
+		if exec.recoveryInfraRetries > maxRecoveryInfraRetries {
+			c.logger.Warn("Recovery deadline expired and infrastructure still unreachable after retry cap; terminal-failing",
+				"entity_id", exec.EntityID,
+				"slug", exec.Slug,
+				"requirement_id", exec.RequirementID,
+				"reason", exec.recoveryReason,
+				"timeout", timeout,
+				"infra_retries", exec.recoveryInfraRetries,
+				"max_infra_retries", maxRecoveryInfraRetries,
+				"read_error", readErr,
+			)
+			exec.awaitingRecovery = false
+			exec.recoveryTimer = nil
+			c.markFailedLocked(context.Background(), exec, exec.recoveryReason)
+			return
+		}
+		nextTimeout := c.recoveryTimeout()
+		timer := time.AfterFunc(nextTimeout, func() {
+			c.handleRecoveryTimeout(exec, nextTimeout)
+		})
+		exec.recoveryTimer = &timeoutHandle{stop: func() { timer.Stop() }}
+		c.logger.Warn("Recovery deadline expired but infrastructure is unreachable; extending awaiting-recovery instead of terminal-failing",
+			"entity_id", exec.EntityID,
+			"slug", exec.Slug,
+			"requirement_id", exec.RequirementID,
+			"reason", exec.recoveryReason,
+			"expired_timeout", timeout,
+			"next_timeout", nextTimeout,
+			"infra_retries", exec.recoveryInfraRetries,
+			"max_infra_retries", maxRecoveryInfraRetries,
+			"read_error", readErr,
+		)
+		return
+	}
+
+	// Read succeeded — infra is reachable, so reset the transient-outage
+	// counter. A subsequent outage starts the budget fresh.
+	exec.recoveryInfraRetries = 0
+
+	if pending {
 		nextTimeout := c.recoveryTimeout()
 		timer := time.AfterFunc(nextTimeout, func() {
 			c.handleRecoveryTimeout(exec, nextTimeout)
@@ -160,30 +221,48 @@ func (c *Component) handleRecoveryTimeout(exec *requirementExecution, timeout ti
 	c.markFailedLocked(context.Background(), exec, exec.recoveryReason)
 }
 
-func (c *Component) hasPendingRecoveryDecision(ctx context.Context, slug, requirementID string) bool {
+// hasPendingRecoveryDecision reports whether a recoverable PlanDecision is
+// still pending for this requirement. The second return value is a non-nil
+// readErr ONLY when the infrastructure could not be reached to make the
+// determination (NATS/KV unavailable) — a transient condition the caller
+// extends through rather than terminal-failing on. A clean (false, nil) means
+// the read succeeded and there is genuinely no pending decision (terminal-fail
+// is legitimate). A missing plan key (jetstream.ErrKeyNotFound) and an
+// unparseable plan are NOT infra failures — extending could not help — so they
+// return (false, nil).
+func (c *Component) hasPendingRecoveryDecision(ctx context.Context, slug, requirementID string) (bool, error) {
 	if c.pendingRecoveryDecisionChecker != nil {
 		return c.pendingRecoveryDecisionChecker(ctx, slug, requirementID)
 	}
 	if c.natsClient == nil {
-		return false
+		return false, nil
 	}
 	js, err := c.natsClient.JetStream()
 	if err != nil {
 		c.logger.Debug("Recovery timeout: JetStream unavailable while checking pending PlanDecisions",
 			"slug", slug, "requirement_id", requirementID, "error", err)
-		return false
+		return false, fmt.Errorf("jetstream unavailable: %w", err)
 	}
 	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
 	if err != nil {
 		c.logger.Debug("Recovery timeout: PLAN_STATES unavailable while checking pending PlanDecisions",
 			"slug", slug, "requirement_id", requirementID, "error", err)
-		return false
+		return false, fmt.Errorf("PLAN_STATES unavailable: %w", err)
 	}
 	entry, err := bucket.Get(ctx, slug)
 	if err != nil {
-		c.logger.Debug("Recovery timeout: plan unavailable while checking pending PlanDecisions",
+		// A genuinely absent plan key is not a transient infra failure —
+		// extending the deadline could not bring it back. Only an
+		// unreachable-store error (anything other than key-not-found) is
+		// transient.
+		if errors.Is(err, jetstream.ErrKeyNotFound) {
+			c.logger.Debug("Recovery timeout: plan key not found while checking pending PlanDecisions",
+				"slug", slug, "requirement_id", requirementID)
+			return false, nil
+		}
+		c.logger.Debug("Recovery timeout: plan store unreachable while checking pending PlanDecisions",
 			"slug", slug, "requirement_id", requirementID, "error", err)
-		return false
+		return false, fmt.Errorf("plan store unreachable: %w", err)
 	}
 	var plan struct {
 		PlanDecisions []workflow.PlanDecision `json:"plan_decisions"`
@@ -191,14 +270,14 @@ func (c *Component) hasPendingRecoveryDecision(ctx context.Context, slug, requir
 	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
 		c.logger.Debug("Recovery timeout: plan JSON unmarshal failed while checking pending PlanDecisions",
 			"slug", slug, "requirement_id", requirementID, "error", err)
-		return false
+		return false, nil
 	}
 	for _, dec := range plan.PlanDecisions {
 		if isPendingRecoveryDecisionForRequirement(dec, requirementID) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func isPendingRecoveryDecisionForRequirement(dec workflow.PlanDecision, requirementID string) bool {

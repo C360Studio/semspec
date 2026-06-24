@@ -202,6 +202,14 @@ type requirementExecution struct {
 	// restarts are out-of-band — they fire AFTER the normal retry budget is
 	// already exhausted.
 	recoveryRestarts int
+
+	// recoveryInfraRetries counts CONSECUTIVE awaiting-recovery deadline
+	// expiries where the pending-PlanDecision check could not reach NATS/KV
+	// (infrastructure unreachable — e.g. a network blip). The deadline timer
+	// extends instead of terminal-failing in that case, but is bounded by
+	// maxRecoveryInfraRetries so a PERMANENT outage still terminates. Reset to
+	// 0 on any successful read so only a sustained outage trips the cap.
+	recoveryInfraRetries int
 }
 
 // ScenarioVerdict carries a per-scenario pass/fail from the requirement reviewer.
