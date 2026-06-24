@@ -2900,6 +2900,11 @@ export interface components {
                     verdict?: string;
                 }[];
             } | null;
+            pending_architecture_revision?: {
+                proposal_id?: string;
+                requirement_ids?: string[];
+                story_ids?: string[];
+            } | null;
             plan_decisions?: {
                 affected_requirement_ids: string[];
                 affected_story_ids?: string[];
@@ -2976,6 +2981,7 @@ export interface components {
                 verdict: string;
             } | null;
             requirements?: {
+                acceptance_criteria?: string[];
                 capability_name?: string;
                 /** Format: date-time */
                 created_at: string;
@@ -3238,6 +3244,11 @@ export interface components {
                     verdict?: string;
                 }[];
             } | null;
+            pending_architecture_revision?: {
+                proposal_id?: string;
+                requirement_ids?: string[];
+                story_ids?: string[];
+            } | null;
             phase_summary?: {
                 active_loop_count: number;
                 detail?: string;
@@ -3366,6 +3377,7 @@ export interface components {
                 verdict: string;
             } | null;
             requirements?: {
+                acceptance_criteria?: string[];
                 capability_name?: string;
                 /** Format: date-time */
                 created_at: string;
