@@ -454,6 +454,7 @@ func buildRequirementGeneratorPromptContext(trigger *payloads.RequirementGenerat
 		Title:                 trigger.Title,
 		Goal:                  trigger.Goal,
 		Context:               trigger.Context,
+		Constraints:           trigger.Constraints,
 		ReplaceRequirementIDs: trigger.ReplaceRequirementIDs,
 		RejectionReasons:      trigger.RejectionReasons,
 		PreviousError:         previousError,
@@ -835,6 +836,7 @@ func (c *Component) recoverDispatchFromKV(ctx context.Context, slug string) (*pe
 			Title:                plan.Title,
 			Goal:                 plan.Goal,
 			Context:              plan.Context,
+			Constraints:          plan.Constraints,
 			Scope:                &plan.Scope,
 			ExistingRequirements: plan.Requirements,
 			// ReplaceRequirementIDs left empty — full regen on restart is safe

@@ -29,6 +29,14 @@ type RequirementGeneratorRequest struct {
 	Context string          `json:"context,omitempty"`
 	Scope   *workflow.Scope `json:"scope,omitempty"` // pointer so omitempty works on struct types
 
+	// Constraints are the plan's hard must/must-not coverage obligations
+	// (plan.Constraints, the #204 array lifted verbatim from the brief). The
+	// R-req/R2 reviewer criteria judge requirements against these, so the
+	// requirement-generator MUST receive them to satisfy coverage mandates —
+	// without this it was rejected for not covering text it never saw (the
+	// constraint-plumbing gap the planning-gate audit found).
+	Constraints []string `json:"constraints,omitempty"`
+
 	// ExistingRequirements carries approved requirements for partial regen context.
 	// The generator preserves these and only regenerates the IDs in ReplaceRequirementIDs.
 	ExistingRequirements []workflow.Requirement `json:"existing_requirements,omitempty"`
