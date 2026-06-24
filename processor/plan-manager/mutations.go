@@ -1635,6 +1635,109 @@ func formatReviewFindings(findingsJSON json.RawMessage, summary, verdict string)
 	return summary
 }
 
+// roundPhases maps a review round to the plan phase(s) whose findings that
+// round legitimately owns. mergeReviewFindings uses it to drop cross-phase
+// residue when carrying findings forward — a leaked prior-phase finding (e.g.
+// an R1 draft "plan" finding that the R1→approved advance fails to clear) must
+// not accumulate into a later phase and instruct a generator to remediate a
+// violation outside its authority. Returns nil for an unknown round (no
+// filter) — callers MUST pre-validate round ∈ [1,4] (handleRevisionMutation
+// guards this) so the unscoped-carry branch is never reached on the live path.
+func roundPhases(round int) map[string]struct{} {
+	switch round {
+	case 1: // draft review
+		return map[string]struct{}{"plan": {}}
+	case 2: // scenarios review (covers stories too)
+		return map[string]struct{}{"scenarios": {}, "stories": {}}
+	case 3: // architecture review
+		return map[string]struct{}{"architecture": {}}
+	case 4: // requirements review
+		return map[string]struct{}{"requirements": {}}
+	}
+	return nil
+}
+
+// mergeReviewFindings accumulates review findings ACROSS revision rounds within
+// a single review phase, so the regenerating agent (architect / req-gen) sees
+// the CUMULATIVE constraint set rather than only the latest round's. Without
+// this the generator oscillates — it fixes the newest finding and blindly
+// regresses an older one. That whack-a-mole is structural by design: the
+// deterministic preflight short-circuits the paid LLM reviewer (we do NOT want
+// to burn a semantic review when a cheap structural gate already failed), so
+// each round only ever surfaces ONE layer's findings (gen ADR-043 validator →
+// reviewer preflight → reviewer LLM). Carrying them forward is what lets the
+// architect satisfy every gate at once and converge within the revision cap
+// (caught: a mavlink-hard R-arch round exhausted 3/3 cycling scope-ownership →
+// component-placement → upstream-coordinate, never seeing them together).
+//
+// Carried findings already resolved are harmless: the architect revises its
+// PreviousArchitectureJSON, so a re-stated prior violation reads as "keep this
+// fixed," which is precisely what prevents the regression.
+//
+// Phase scoping is enforced HERE, not by relying on every advance path to clear
+// findings (the R1→approved path does not — verified). Only PRIOR findings
+// whose Phase belongs to this round (roundPhases) carry forward; current-round
+// findings (incoming) are always kept regardless of phase. So a bled cross-
+// phase finding is both excluded from the merge and overwritten off the plan.
+//
+// Dedup ignores the volatile LLM free-text (Evidence, Suggestion) so the same
+// logical finding re-emitted with drifted evidence collapses to one — otherwise
+// the cumulative list grows across rounds. On unparseable incoming it preserves
+// the existing accumulated set (does NOT honor the corrupt value).
+func mergeReviewFindings(existing, incoming json.RawMessage, round int) json.RawMessage {
+	var next []workflow.PlanReviewFinding
+	if err := json.Unmarshal(incoming, &next); err != nil {
+		return existing
+	}
+	var prior []workflow.PlanReviewFinding
+	_ = json.Unmarshal(existing, &prior) // nil / unparseable existing → no carry-forward
+
+	phases := roundPhases(round)
+	// Identity = the finding with the LLM-authored free-text zeroed
+	// (PlanReviewFinding is all-string, hence comparable). Evidence, Suggestion,
+	// AND Issue all render as their own directive lines, so a reviewer that
+	// rewords any of them round-to-round would otherwise grow the cumulative
+	// list with a logical duplicate. The structured discriminators that remain
+	// (SOPID, Phase, Severity, Status, Category, TargetID, Action, TargetField,
+	// TargetValue) identify the finding — including per-entity completeness
+	// findings via TargetID — so distinct findings are not over-merged.
+	keyOf := func(f workflow.PlanReviewFinding) workflow.PlanReviewFinding {
+		f.Evidence = ""
+		f.Suggestion = ""
+		f.Issue = ""
+		return f
+	}
+	seen := make(map[workflow.PlanReviewFinding]struct{}, len(prior)+len(next))
+	merged := make([]workflow.PlanReviewFinding, 0, len(prior)+len(next))
+	for _, f := range prior {
+		if phases != nil {
+			if _, ok := phases[f.Phase]; !ok {
+				continue // cross-phase residue — drop it
+			}
+		}
+		k := keyOf(f)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		merged = append(merged, f)
+	}
+	for _, f := range next { // current round: always kept
+		k := keyOf(f)
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		merged = append(merged, f)
+	}
+
+	out, err := json.Marshal(merged)
+	if err != nil {
+		return incoming
+	}
+	return out
+}
+
 // handleRevisionMutation processes a review rejection and either retries or escalates.
 // Round 1 (draft review): loops back to StatusCreated so the planner re-drafts.
 // Round 2 (scenarios review): loops back to StatusApproved, clearing Requirements/Scenarios
@@ -1678,12 +1781,17 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 			"revision round %d requires status %s, got %s", req.Round, expectedStatus, current)}
 	}
 
-	// Store review data and increment iteration.
+	// Store review data and increment iteration. Findings ACCUMULATE across
+	// rounds within this phase (mergeReviewFindings) so the regenerating agent
+	// sees the cumulative constraint set, not just the latest round's —
+	// otherwise it fixes the newest finding and regresses an older one. Cleared
+	// on phase advance by refreshApprovedReviewMetadata.
 	plan.ReviewIteration++
-	plan.ReviewFindings = req.Findings
+	merged := mergeReviewFindings(plan.ReviewFindings, req.Findings, req.Round)
+	plan.ReviewFindings = merged
 	plan.ReviewSummary = req.Summary
 	plan.ReviewVerdict = req.Verdict
-	plan.ReviewFormattedFindings = formatReviewFindings(req.Findings, req.Summary, req.Verdict)
+	plan.ReviewFormattedFindings = formatReviewFindings(merged, req.Summary, req.Verdict)
 
 	maxIterations := c.config.MaxReviewIterations
 	if maxIterations <= 0 {
@@ -1701,6 +1809,11 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 	case 1:
 		targetStatus = workflow.StatusCreated
 	case 2:
+		// Route on the LATEST round's findings (req.Findings), NOT the merged
+		// cumulative set: re-entry depth must reflect what THIS round flagged,
+		// and routing on the accumulated set could cascade a stale earlier-round
+		// finding all the way back to StatusCreated. Storage above is cumulative;
+		// routing here is intentionally freshest-only.
 		targetStatus = c.determineR2ReentryPoint(plan, req.Findings)
 	case 3:
 		// ADR-051 Slice 3: an architecture rejection re-runs the architect only.
