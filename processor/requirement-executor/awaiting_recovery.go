@@ -22,8 +22,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	ssmodel "github.com/c360studio/semstreams/model"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -50,12 +52,59 @@ func (c *Component) recoveryDeferEnabled() bool {
 	return c.config.DeferTerminalOnRecovery
 }
 
-// recoveryTimeout returns the configured awaiting-recovery deadline.
+// recoveryDispatchSlack is the headroom added on top of the recovery agent's
+// per-call LLM cap when computing the minimum safe awaiting-recovery deadline.
+// The deadline must cover not just the diagnosis LLM call but also recovery
+// dispatch + the proposed-PlanDecision emit that flips
+// hasPendingRecoveryDecision to true (after which the deadline auto-extends).
+const recoveryDispatchSlack = 5 * time.Minute
+
+// recoveryTimeout returns the effective awaiting-recovery deadline. It is the
+// configured value, AUTO-CLAMPED up to recoveryCapFloor() so the deadline can
+// never be shorter than the recovery agent's own per-call LLM cap (#287
+// inversion): a 600s deadline against a gemini-pro recovery model whose
+// request_timeout is 900s would terminal-fail a requirement whose recovery
+// diagnosis was still in flight, dead-ending the whole plan. The clamp makes
+// that impossible regardless of how the deadline is configured.
 func (c *Component) recoveryTimeout() time.Duration {
+	base := time.Duration(c.config.RecoveryTimeoutSeconds) * time.Second
 	if c.config.RecoveryTimeoutSeconds <= 0 {
-		return 60 * time.Second
+		base = 60 * time.Second
 	}
-	return time.Duration(c.config.RecoveryTimeoutSeconds) * time.Second
+	if floor := c.recoveryCapFloor(); floor > base {
+		c.logger.Warn("Awaiting-recovery deadline is shorter than the recovery agent's per-call LLM cap; clamping up to avoid spuriously terminal-failing an in-flight recovery (#287)",
+			"configured", base,
+			"clamped_to", floor,
+		)
+		return floor
+	}
+	return base
+}
+
+// recoveryCapFloor returns the minimum safe awaiting-recovery deadline: the
+// largest per-call LLM timeout across the recovery capabilities this executor
+// can invoke (execution-wedge and coordinator recovery), plus dispatch/emit
+// slack. Returns 0 when there is no registry or no per-call cap is configured —
+// in that case the configured deadline governs unchanged.
+func (c *Component) recoveryCapFloor() time.Duration {
+	if c.modelRegistry == nil {
+		return 0
+	}
+	var maxCap time.Duration
+	for _, capName := range []model.Capability{
+		model.CapabilityExecutionWedgeRecovery,
+		model.CapabilityCoordinatorRecovery,
+	} {
+		// Precedence: endpoint.request_timeout → capability.timeout. A 0
+		// default means "no cap configured for this capability".
+		if d := ssmodel.ResolveCapabilityTimeout(c.modelRegistry, string(capName), 0, c.logger); d > maxCap {
+			maxCap = d
+		}
+	}
+	if maxCap <= 0 {
+		return 0
+	}
+	return maxCap + recoveryDispatchSlack
 }
 
 // maxRecoveryRestarts returns the configured upper bound on resume

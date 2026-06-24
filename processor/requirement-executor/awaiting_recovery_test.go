@@ -7,11 +7,40 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
+	ssmodel "github.com/c360studio/semstreams/model"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 )
+
+// fakeRecoveryRegistry is a minimal ssmodel.RegistryReader that resolves a
+// fixed capability→endpoint map — just enough to drive recoveryCapFloor's
+// clamp without standing up a real registry.
+type fakeRecoveryRegistry struct {
+	caps      map[string]string                  // capability -> endpoint name
+	endpoints map[string]*ssmodel.EndpointConfig // endpoint name -> config
+}
+
+func (f *fakeRecoveryRegistry) Resolve(capability string) string { return f.caps[capability] }
+func (f *fakeRecoveryRegistry) GetEndpoint(name string) *ssmodel.EndpointConfig {
+	return f.endpoints[name]
+}
+func (f *fakeRecoveryRegistry) GetCapability(string) *ssmodel.CapabilityConfig { return nil }
+func (f *fakeRecoveryRegistry) GetFallbackChain(string) []string               { return nil }
+func (f *fakeRecoveryRegistry) GetMaxTokens(string) int                        { return 0 }
+func (f *fakeRecoveryRegistry) GetDefault() string                             { return "" }
+func (f *fakeRecoveryRegistry) ListCapabilities() []string                     { return nil }
+func (f *fakeRecoveryRegistry) ListEndpoints() []string                        { return nil }
+func (f *fakeRecoveryRegistry) ResolveSummarization() string                   { return "" }
+
+func geminiProRecoveryRegistry() *fakeRecoveryRegistry {
+	return &fakeRecoveryRegistry{
+		caps:      map[string]string{string(model.CapabilityExecutionWedgeRecovery): "gemini-pro"},
+		endpoints: map[string]*ssmodel.EndpointConfig{"gemini-pro": {RequestTimeout: "900s"}},
+	}
+}
 
 // newTestComponentWithRecoveryDefer mirrors newTestComponent but enables
 // the ADR-037 race-closure path so the deferToAwaitingRecoveryLocked
@@ -281,6 +310,41 @@ func TestRecoveryTimeout_ResetsInfraCounterOnSuccessfulRead(t *testing.T) {
 	}
 	if c.requirementsFailed.Load() != 1 {
 		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+}
+
+// #287 inversion guard: a configured deadline shorter than the recovery
+// model's per-call LLM cap (gemini-pro 900s) must be auto-clamped UP, so a
+// slow-but-valid recovery diagnosis is never spuriously terminal-failed.
+func TestRecoveryTimeout_ClampsUpToRecoveryModelCap(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 600*time.Second, 1) // configured 10m — below the 900s cap
+	c.modelRegistry = geminiProRecoveryRegistry()
+
+	got := c.recoveryTimeout()
+	want := 900*time.Second + recoveryDispatchSlack // 15m cap + 5m slack = 20m
+	if got != want {
+		t.Errorf("recoveryTimeout() = %v, want clamped %v (deadline must exceed the recovery model's 900s per-call cap)", got, want)
+	}
+}
+
+// No clamp when the configured deadline already exceeds the floor.
+func TestRecoveryTimeout_NoClampWhenConfiguredExceedsFloor(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 1800*time.Second, 1) // 30m > floor 20m
+	c.modelRegistry = geminiProRecoveryRegistry()
+
+	if got := c.recoveryTimeout(); got != 1800*time.Second {
+		t.Errorf("recoveryTimeout() = %v, want configured 1800s (already above floor)", got)
+	}
+}
+
+// No registry → no floor → the configured deadline governs unchanged
+// (backward-compatible with deployments that don't wire a model registry).
+func TestRecoveryTimeout_NoRegistryUsesConfigured(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 600*time.Second, 1)
+	c.modelRegistry = nil
+
+	if got := c.recoveryTimeout(); got != 600*time.Second {
+		t.Errorf("recoveryTimeout() = %v, want configured 600s when no registry", got)
 	}
 }
 
