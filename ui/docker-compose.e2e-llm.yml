@@ -49,6 +49,35 @@ services:
         limits:
           cpus: "1"
 
+  # Initialize ownership on the external build-cache volumes before the sandbox
+  # starts. Fresh Docker volumes are root-owned, but the sandbox runs as
+  # uid/gid 1000 (SANDBOX_UID/GID) — without this it cannot write its caches.
+  # The chown is non-recursive (just the mountpoint): this is safe ONLY because
+  # every writer into these trees runs as uid 1000 (the sandbox user; npm
+  # globals live in /usr, not ~/.npm), so files written later are already
+  # 1000-owned and never need re-chowning — which keeps startup instant even on
+  # a multi-GB warmed volume. (semembed-cache-init uses `chown -R` because its
+  # cache is small; do not copy that here.) Purely generic — no per-stack logic,
+  # so nothing gradle/Java-shaped is imposed on a non-Java run.
+  sandbox-cache-init:
+    image: alpine:3.19
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        for d in /v/gomod /v/xdg /v/gradle /v/gradle-wrapper /v/m2 /v/npm; do
+          mkdir -p "$$d" && chown 1000:1000 "$$d"
+        done
+    volumes:
+      - sandbox-cache-gomod:/v/gomod
+      - sandbox-cache-xdg:/v/xdg
+      - sandbox-cache-gradle:/v/gradle
+      - sandbox-cache-gradle-wrapper:/v/gradle-wrapper
+      - sandbox-cache-m2:/v/m2
+      - sandbox-cache-npm:/v/npm
+    restart: "no"
+
   sandbox:
     build:
       context: ..
@@ -85,11 +114,35 @@ services:
     depends_on:
       workspace-init:
         condition: service_completed_successfully
+      sandbox-cache-init:
+        condition: service_completed_successfully
     volumes:
       # Shared WORKSPACE_HOST_PATH — same bind mount semspec and semsource use.
       # Single host path = single workspace view, no risk of drift between
       # services (caught take-18 2026-05-13 with separate bind mounts).
       - ${WORKSPACE_HOST_PATH:-/tmp/semspec-ui-workspace}:/workspace
+      # Persistent per-ecosystem build/dependency caches. A fresh container
+      # otherwise re-downloads and recompiles everything from cold on the first
+      # build of every run — for the heavy osh/mavlink Java tree that cold build
+      # exceeds the sandbox /exec timeout and wedges the dev loop (#291). These
+      # are EXTERNAL volumes (survive `down -v`, like semembed-cache) so the
+      # warm cache carries across runs. Treatment is uniform across stacks — no
+      # ecosystem is privileged; each tool's standard cache dir is persisted, and
+      # a non-Java repo simply never writes to the gradle/m2 volumes.
+      #
+      # Deliberately the cache SUBDIRS, not whole ~/.gradle or ~/.m2: the sandbox
+      # writes ~/.gradle/init.d/10-osh-source-substitution.gradle at startup
+      # (auto-applied to every gradle build), so persisting all of ~/.gradle
+      # would leak that OSH-specific init script onto unrelated runs. Mounting
+      # only caches/ + wrapper/ keeps init.d (and gradle.properties / any
+      # ~/.m2/settings.xml) image-controlled and ephemeral. Ownership set by
+      # sandbox-cache-init.
+      - sandbox-cache-gomod:/go/pkg/mod
+      - sandbox-cache-xdg:/home/sandbox/.cache
+      - sandbox-cache-gradle:/home/sandbox/.gradle/caches
+      - sandbox-cache-gradle-wrapper:/home/sandbox/.gradle/wrapper
+      - sandbox-cache-m2:/home/sandbox/.m2/repository
+      - sandbox-cache-npm:/home/sandbox/.npm
     deploy:
       resources:
         limits:
@@ -142,3 +195,22 @@ services:
       --config /app/configs/${E2E_CONFIG:-semspec.json}
       --repo /workspace
       --log-level ${LOG_LEVEL:-info}
+
+# Per-ecosystem sandbox build/dependency caches. external:true so the normal
+# e2e `down -v` cleanup does NOT wipe them — the warm cache persists across runs
+# (created by taskfiles/e2e.yml ensure-model-caches; full reset via the deep
+# clean / `docker volume rm sandbox-cache-*`). To force a cold run for fidelity,
+# remove these volumes first.
+volumes:
+  sandbox-cache-gomod: # Go module cache (/go/pkg/mod)
+    external: true
+  sandbox-cache-xdg: # XDG cache: Go build cache + pip (~/.cache)
+    external: true
+  sandbox-cache-gradle: # Gradle deps + build cache (~/.gradle/caches)
+    external: true
+  sandbox-cache-gradle-wrapper: # Gradle wrapper distributions (~/.gradle/wrapper)
+    external: true
+  sandbox-cache-m2: # Maven local repository (~/.m2/repository)
+    external: true
+  sandbox-cache-npm: # npm cache (~/.npm)
+    external: true

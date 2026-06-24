@@ -31,9 +31,17 @@ tasks:
 
   ensure-model-caches:
     internal: true
-    desc: Ensure external Docker model cache volumes exist
+    desc: Ensure external Docker model + sandbox build-cache volumes exist
     cmds:
       - docker volume create semembed-cache >/dev/null
+      # Sandbox per-ecosystem build/dependency caches (#291). external so
+      # `down -v` keeps them warm across runs; idempotent create.
+      - docker volume create sandbox-cache-gomod >/dev/null
+      - docker volume create sandbox-cache-xdg >/dev/null
+      - docker volume create sandbox-cache-gradle >/dev/null
+      - docker volume create sandbox-cache-gradle-wrapper >/dev/null
+      - docker volume create sandbox-cache-m2 >/dev/null
+      - docker volume create sandbox-cache-npm >/dev/null
 
   check-ports:
     internal: true
@@ -113,11 +121,19 @@ tasks:
       - echo "[OK] Docker environment cleaned"
 
   clean-model-caches:
-    desc: Remove shared model cache volumes used by E2E graph services
+    desc: Remove shared model + sandbox build-cache volumes used by E2E (forces a cold next run)
     cmds:
-      - echo "[CLEAN-MODEL-CACHES] Removing shared model cache volumes..."
+      - echo "[CLEAN-MODEL-CACHES] Removing shared model + sandbox build-cache volumes..."
       - docker volume rm semembed-cache 2>/dev/null || true
-      - echo "[OK] Model caches removed"
+      - task: clean-sandbox-caches
+      - echo "[OK] Model + sandbox caches removed"
+
+  clean-sandbox-caches:
+    desc: Remove ONLY the sandbox build/dependency caches (#291) — forces a cold build next run for fidelity, without re-downloading the semembed model
+    cmds:
+      - echo "[CLEAN-SANDBOX-CACHES] Removing sandbox build-cache volumes (next run builds cold)..."
+      - docker volume rm sandbox-cache-gomod sandbox-cache-xdg sandbox-cache-gradle sandbox-cache-gradle-wrapper sandbox-cache-m2 sandbox-cache-npm 2>/dev/null || true
+      - echo "[OK] Sandbox caches removed"
 
   clean-workspace:
     internal: true
