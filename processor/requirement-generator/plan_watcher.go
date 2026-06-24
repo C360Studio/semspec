@@ -94,10 +94,11 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 // trigger: only deprecated requirements are regenerated, active ones preserved.
 func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Plan) {
 	trigger := &payloads.RequirementGeneratorRequest{
-		Slug:    plan.Slug,
-		Title:   plan.Title,
-		Goal:    plan.Goal,
-		Context: plan.Context,
+		Slug:        plan.Slug,
+		Title:       plan.Title,
+		Goal:        plan.Goal,
+		Context:     plan.Context,
+		Constraints: plan.Constraints,
 	}
 	if len(plan.Scope.Include) > 0 || len(plan.Scope.Create) > 0 || len(plan.Scope.Exclude) > 0 || len(plan.Scope.DoNotTouch) > 0 {
 		scope := plan.Scope

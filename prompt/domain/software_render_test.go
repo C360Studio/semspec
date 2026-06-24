@@ -182,6 +182,37 @@ func TestRenderRequirementGeneratorPrompt_FreshGeneration(t *testing.T) {
 	}
 }
 
+// TestRenderRequirementGeneratorPrompt_Constraints pins the constraint-plumbing
+// fix: plan.Constraints reaches the requirement-generator prompt as mandatory
+// coverage obligations, with the complete-coverage directive. Guards the
+// 2026-06-23 churn where R-req/R2 rejected Requirement 4 for a partial "such as"
+// plugin list — the generator never received the "full coverage" constraint, so
+// it was rejected for not covering text it couldn't see. Empty constraints emit
+// nothing (back-compat).
+func TestRenderRequirementGeneratorPrompt_Constraints(t *testing.T) {
+	got := renderRequirementGeneratorPrompt(&prompt.RequirementGeneratorContext{
+		Title:       "MAVSDK driver",
+		Goal:        "Expose MAVSDK plugins as CS API streams.",
+		Constraints: []string{"The implementation must provide full Connected Systems API coverage for all MAVSDK plugins."},
+	})
+	for _, want := range []string{
+		"## Mandatory Coverage Constraints",
+		"full Connected Systems API coverage for all MAVSDK plugins",
+		"expose ALL typed plugins", // the complete-coverage-by-reference directive
+		"NOT a partial illustrative list",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("constraints prompt missing %q\n--- got ---\n%s", want, got)
+		}
+	}
+
+	// Back-compat: no constraints → no section.
+	none := renderRequirementGeneratorPrompt(&prompt.RequirementGeneratorContext{Title: "x", Goal: "y"})
+	if strings.Contains(none, "Mandatory Coverage Constraints") {
+		t.Errorf("empty constraints must not emit the section")
+	}
+}
+
 func TestRenderRequirementGeneratorPrompt_PartialRegen(t *testing.T) {
 	got := renderRequirementGeneratorPrompt(&prompt.RequirementGeneratorContext{
 		Title: "Add /goodbye endpoint",

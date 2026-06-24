@@ -49,6 +49,14 @@ func renderRequirementGeneratorPrompt(rg *prompt.RequirementGeneratorContext) st
 	if len(rg.ScopeDoNotTouch) > 0 {
 		fmt.Fprintf(&sb, "**Do Not Touch**: %s\n\n", strings.Join(rg.ScopeDoNotTouch, ", "))
 	}
+	if len(rg.Constraints) > 0 {
+		sb.WriteString("## Mandatory Coverage Constraints\n\n")
+		sb.WriteString("These are HARD must/must-not obligations from the brief. The downstream review (R-req/R2) rejects a requirements set that does not satisfy every coverage mandate below, so your requirements MUST reflect them. When a constraint mandates COMPLETE coverage of a surface (e.g. \"full coverage for ALL plugins/methods/endpoints of X\"), the covering requirement must mandate the COMPLETE set by reference — write \"expose ALL typed plugins of <X>\" (intent-level, complete), NOT a partial illustrative list (\"such as actions, missions, camera\"), which the reviewer reads as under-coverage. You do NOT enumerate the upstream members yourself (you have no upstream access and that is the architect's/coverage-matrix's job) — you state the complete-coverage intent so nothing downstream narrows it.\n\n")
+		for _, c := range rg.Constraints {
+			fmt.Fprintf(&sb, "- %s\n", c)
+		}
+		sb.WriteString("\n")
+	}
 
 	// ADR-040 Move 2: when the analyst sub-phase ran, render the capability
 	// list so John produces 1 Requirement per Capability with capability_name

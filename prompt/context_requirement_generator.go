@@ -11,6 +11,12 @@ type RequirementGeneratorContext struct {
 	Goal    string
 	Context string
 
+	// Constraints are the plan's hard must/must-not coverage obligations
+	// (plan.Constraints). The R-req/R2 reviewer judges requirement coverage
+	// against these, so the generator must see them to mandate complete
+	// coverage ("all typed plugins") rather than a partial "such as" list.
+	Constraints []string
+
 	// ScopeInclude lists files/directories the plan is allowed to modify.
 	ScopeInclude []string
 	// ScopeCreate lists files the plan intends to create.
