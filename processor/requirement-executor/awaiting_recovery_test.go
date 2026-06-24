@@ -3,6 +3,7 @@ package requirementexecutor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -166,8 +167,8 @@ func TestRecoveryTimeout_ExtendsWhenPlanDecisionStillPending(t *testing.T) {
 	exec.awaitingRecovery = true
 	exec.recoveryReason = "architecture recovery proposed"
 	c.activeExecs.Set(exec.EntityID, exec)
-	c.pendingRecoveryDecisionChecker = func(_ context.Context, slug, requirementID string) bool {
-		return slug == "plan-pending" && requirementID == "req-pending"
+	c.pendingRecoveryDecisionChecker = func(_ context.Context, slug, requirementID string) (bool, error) {
+		return slug == "plan-pending" && requirementID == "req-pending", nil
 	}
 
 	c.handleRecoveryTimeout(exec, 50*time.Millisecond)
@@ -187,6 +188,99 @@ func TestRecoveryTimeout_ExtendsWhenPlanDecisionStillPending(t *testing.T) {
 	exec.recoveryTimer = nil
 	if c.requirementsFailed.Load() != 0 {
 		t.Fatalf("requirementsFailed = %d, want 0", c.requirementsFailed.Load())
+	}
+}
+
+// Network-blip fail-closed: when the pending-decision check cannot reach
+// NATS/KV (infra unreachable), the deadline must EXTEND, not terminal-fail.
+// Regression for the 2026-06-23 power-outage dead-end: a transient outage
+// during the awaiting-recovery window must not trigger AutoRejectOnExhaustion.
+func TestRecoveryTimeout_ExtendsWhenInfraUnreachable(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+	exec := newAwaitingExec("plan-infra", "req-infra")
+	exec.awaitingRecovery = true
+	exec.recoveryReason = "tdd budget exhausted"
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.pendingRecoveryDecisionChecker = func(_ context.Context, _, _ string) (bool, error) {
+		return false, errors.New("nats unreachable")
+	}
+
+	c.handleRecoveryTimeout(exec, 50*time.Millisecond)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if exec.terminated {
+		t.Fatal("exec must NOT terminal-fail when infra is unreachable — transient blip would dead-end the plan")
+	}
+	if !exec.awaitingRecovery {
+		t.Fatal("exec should remain awaiting recovery through a transient outage")
+	}
+	if exec.recoveryTimer == nil {
+		t.Fatal("recovery timer should be re-armed to retry after the outage")
+	}
+	if exec.recoveryInfraRetries != 1 {
+		t.Fatalf("recoveryInfraRetries = %d, want 1", exec.recoveryInfraRetries)
+	}
+	exec.recoveryTimer.stop()
+	exec.recoveryTimer = nil
+	if c.requirementsFailed.Load() != 0 {
+		t.Fatalf("requirementsFailed = %d, want 0", c.requirementsFailed.Load())
+	}
+}
+
+// Bounded grace: a SUSTAINED outage (infra unreachable for more than
+// maxRecoveryInfraRetries consecutive deadline expiries) must still terminate
+// so a permanent failure doesn't extend forever.
+func TestRecoveryTimeout_TerminalFailsAfterInfraRetryCap(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+	exec := newAwaitingExec("plan-infra-cap", "req-infra-cap")
+	exec.awaitingRecovery = true
+	exec.recoveryReason = "tdd budget exhausted"
+	// Already at the cap; the next infra-unreachable expiry must terminate.
+	exec.recoveryInfraRetries = maxRecoveryInfraRetries
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.pendingRecoveryDecisionChecker = func(_ context.Context, _, _ string) (bool, error) {
+		return false, errors.New("nats still unreachable")
+	}
+
+	c.handleRecoveryTimeout(exec, 50*time.Millisecond)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if !exec.terminated {
+		t.Fatal("exec should terminal-fail once the infra-retry cap is exceeded")
+	}
+	if exec.awaitingRecovery {
+		t.Error("exec.awaitingRecovery should be cleared after cap-driven terminal-fail")
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+}
+
+// A successful read showing no pending decision resets the transient-outage
+// counter AND terminal-fails (the legitimate "recovery genuinely gave up"
+// path) — ensuring a prior blip's retries don't linger.
+func TestRecoveryTimeout_ResetsInfraCounterOnSuccessfulRead(t *testing.T) {
+	c := newTestComponentWithRecoveryDefer(t, 60*time.Second, 1)
+	exec := newAwaitingExec("plan-reset", "req-reset")
+	exec.awaitingRecovery = true
+	exec.recoveryReason = "tdd budget exhausted"
+	exec.recoveryInfraRetries = 3 // carried over from an earlier blip
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.pendingRecoveryDecisionChecker = func(_ context.Context, _, _ string) (bool, error) {
+		return false, nil // read OK, genuinely nothing pending
+	}
+
+	c.handleRecoveryTimeout(exec, 50*time.Millisecond)
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	if !exec.terminated {
+		t.Fatal("exec should terminal-fail on a clean read with no pending decision")
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 }
 
