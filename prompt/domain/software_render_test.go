@@ -458,7 +458,7 @@ func TestRenderPlanReviewerPrompt_ArchRound(t *testing.T) {
 	// The arch round runs before scenarios — it must NOT carry the R2
 	// scenario-coverage-fidelity criterion (that judges scenarios that don't
 	// exist yet at this phase).
-	if strings.Contains(out, "Constraint & scope-coverage fidelity") {
+	if strings.Contains(out, "Constraint coverage-INTENT fidelity") {
 		t.Errorf("arch-round prompt should NOT carry the R2 scenario coverage-fidelity criterion")
 	}
 
@@ -502,22 +502,53 @@ func TestRenderPlanReviewerPrompt_ReqRound(t *testing.T) {
 	}
 }
 
-// TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity pins #204's R2 gate:
-// the round-2 reviewer must judge whether the requirements+scenarios cover the
-// breadth the plan's `constraints` demand, catching the "full-coverage goal
-// decomposed into a thin scenario slice" under-scoping the 2026-06-16 run hit.
+// TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity pins #204's R2 gate
+// as reframed 2026-06-23: a complete-coverage constraint is satisfied at the
+// PLANNING phase by INTENT (mandate the full set by reference) + a VERIFICATION
+// OBLIGATION (a completeness test), NOT by enumerating one entry/file per member
+// of an upstream surface — which is an implementation-time fact (the coverage
+// matrix the dev generates). Demanding planning-time enumeration was the
+// 2026-06-23 wedge (architecture rejected for not pre-creating a file per
+// controlstream). The criterion MUST stay domain-NEUTRAL.
 func TestRenderPlanReviewerPrompt_R2ConstraintCoverageFidelity(t *testing.T) {
 	out := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{
 		Slug:        "abc123",
-		PlanContent: `{"goal":"x","constraints":["full Connected Systems API coverage"]}`,
+		PlanContent: `{"goal":"x","constraints":["full coverage of the dependency's members"]}`,
 		Round:       2,
 	})
-	if !strings.Contains(out, "Constraint & scope-coverage fidelity") {
-		t.Errorf("R2 prompt missing the #204 constraint/scope coverage-fidelity criterion\nGot:\n%s", out)
+	for _, want := range []string{
+		"Constraint coverage-INTENT fidelity",
+		"VERIFICATION OBLIGATION",
+		"BY REFERENCE",
+		"do NOT demand the requirements, scenarios, or scope.create enumerate", // the no-planning-enumeration directive
+		"completeness test",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("R2 coverage-intent criterion missing %q\nGot:\n%s", want, out)
+		}
 	}
+
+	// DOMAIN-NEUTRALITY GUARD (the 2026-06-23 caveat): the 1a criterion must not
+	// bake in the mavlink/OSH/Java fixture vocabulary. Scope the check to the 1a
+	// criterion text only (other R2 criteria, e.g. #237 placement, legitimately
+	// use domain words in illustrative examples).
+	start := strings.Index(out, "1a. **Constraint coverage-INTENT")
+	if start < 0 {
+		t.Fatal("could not locate the 1a criterion to domain-check")
+	}
+	crit1a := out[start:]
+	if end := strings.Index(crit1a, "\n2. "); end > 0 {
+		crit1a = crit1a[:end]
+	}
+	for _, banned := range []string{"plugin", "MAVSDK", "Connected Systems", "controlstream", "telemetry", "camera", "gimbal", "OSH", "OGC"} {
+		if strings.Contains(crit1a, banned) {
+			t.Errorf("1a criterion leaked domain-specific term %q — keep it domain-neutral", banned)
+		}
+	}
+
 	// R1 must NOT carry it (R1 is pre-requirements/scenarios — nothing to judge yet).
 	r1 := renderPlanReviewerPrompt(&prompt.PlanReviewerPromptContext{Slug: "abc123", PlanContent: `{"goal":"x"}`, Round: 1})
-	if strings.Contains(r1, "Constraint & scope-coverage fidelity") {
+	if strings.Contains(r1, "Constraint coverage-INTENT fidelity") {
 		t.Errorf("R1 prompt should NOT carry the R2 coverage-fidelity criterion")
 	}
 }
