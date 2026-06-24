@@ -499,4 +499,3 @@ func TestRegistryGetToolCapableEndpoints_NoneToolCapable(t *testing.T) {
 		t.Errorf("expected 0 tool-capable endpoints, got %d: %v", len(got), got)
 	}
 }
-
