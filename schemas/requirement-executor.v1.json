@@ -47,10 +47,10 @@
     },
     "recovery_timeout_seconds": {
       "type": "number",
-      "description": "Seconds to wait in phaseAwaitingRecovery before terminal-failing",
+      "description": "Seconds to wait in phaseAwaitingRecovery before terminal-failing (auto-clamped up to the recovery model's per-call cap + slack)",
       "default": 60,
       "minimum": 5,
-      "maximum": 600,
+      "maximum": 3600,
       "category": "advanced"
     },
     "require_commit_observation": {

@@ -61,11 +61,15 @@ type Config struct {
 	// production gemini @hard runs set this true alongside auto-accept.
 	DeferTerminalOnRecovery bool `json:"defer_terminal_on_recovery" schema:"type:boolean,description:Defer terminal markFailed when recovery is in flight (ADR-037 stage-2 race closure),category:advanced,default:false"`
 
-	// RecoveryTimeoutSeconds bounds the phaseAwaitingRecovery wait. Real-LLM
-	// recovery diagnosis on gemini-pro lands in 10-20s, so 60s gives a
-	// comfortable margin without blocking too long when recovery silently
-	// fails. Only used when DeferTerminalOnRecovery is true.
-	RecoveryTimeoutSeconds int `json:"recovery_timeout_seconds" schema:"type:int,description:Seconds to wait in phaseAwaitingRecovery before terminal-failing,category:advanced,default:60,min:5,max:600"`
+	// RecoveryTimeoutSeconds bounds the phaseAwaitingRecovery wait. Typical
+	// real-LLM recovery diagnosis lands in 10-20s, but a single diagnosis call
+	// is capped by the recovery model's request_timeout (gemini-pro: 900s), so
+	// the deadline MUST be at least that cap + dispatch/emit slack or a slow
+	// diagnosis terminal-fails an in-flight recovery (#287). recoveryTimeout()
+	// auto-clamps this up to recoveryCapFloor() so a too-small value here can't
+	// cause that; the max bound is sized to hold the clamped floor. Only used
+	// when DeferTerminalOnRecovery is true.
+	RecoveryTimeoutSeconds int `json:"recovery_timeout_seconds" schema:"type:int,description:Seconds to wait in phaseAwaitingRecovery before terminal-failing (auto-clamped up to the recovery model's per-call cap + slack),category:advanced,default:60,min:5,max:3600"`
 
 	// PlanDecisionAcceptedSubject is the JetStream subject on which
 	// plan-decision-handler publishes accepted-PlanDecision events. Must
