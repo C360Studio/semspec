@@ -1295,8 +1295,48 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
+	// #295: a scenarios review that re-runs because a recovery (story_reprepare /
+	// architecture_revise / scope_incomplete) re-planned the stories is NOT
+	// initial human gating — the plan already cleared the ready_for_execution
+	// gate before the recovery. Awaiting a human approval here wedges any
+	// unattended run (and an attended one that's already left the approval UI):
+	// the plan sits at scenarios_reviewed forever (caught on a mavlink-hard run
+	// where a story_reprepare re-review wedged ~37min until a manual /promote).
+	// Auto-advance instead so recovery RESUMES execution rather than re-imposing
+	// the gate. The first (initial) R2 has no accepted recovery decision, so its
+	// await-for-approval behavior is unchanged.
+	if planHasAcceptedRecoveryDecision(plan) {
+		if err := c.transitionToReadyForExecution(ctx, plan); err != nil {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("auto-advance recovery re-review: %v", err)}
+		}
+		c.logger.Info("Recovery re-review: auto-advanced scenarios_reviewed → ready_for_execution (#295)", "slug", req.Slug)
+		return MutationResponse{Success: true}
+	}
+
 	c.logger.Info("Plan scenarios reviewed via mutation (awaiting human approval)", "slug", req.Slug)
 	return MutationResponse{Success: true}
+}
+
+// planHasAcceptedRecoveryDecision reports whether the plan carries an ACCEPTED
+// recovery PlanDecision (story_reprepare / architecture_revise / scope_incomplete).
+// Only the recovery path emits those kinds, so their presence means the plan has
+// already been through a recovery cycle — and therefore already cleared the
+// ready_for_execution human gate before it. Used to distinguish a recovery-driven
+// re-review (auto-advance) from the initial R2 (await approval).
+func planHasAcceptedRecoveryDecision(plan *workflow.Plan) bool {
+	for i := range plan.PlanDecisions {
+		d := &plan.PlanDecisions[i]
+		if d.Status != workflow.PlanDecisionStatusAccepted {
+			continue
+		}
+		switch d.Kind {
+		case workflow.PlanDecisionKindStoryReprepare,
+			workflow.PlanDecisionKindArchitectureRevise,
+			workflow.PlanDecisionKindScopeIncomplete:
+			return true
+		}
+	}
+	return false
 }
 
 // handleArchitectureReviewedMutation advances the plan from
