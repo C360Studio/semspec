@@ -9,9 +9,11 @@ import (
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
-// TestPlanHasAcceptedRecoveryDecision locks the signal that distinguishes a
-// recovery-driven R2 re-review (auto-advance) from an initial R2 (await approval).
-func TestPlanHasAcceptedRecoveryDecision(t *testing.T) {
+// TestPlanHasAcceptedStoryReprepareDecision locks the signal that distinguishes a
+// SCOPED recovery re-review (auto-advance) from everything else. Only an accepted
+// story_reprepare qualifies — whole-phase architecture_revise must NOT (it keeps
+// the human gate), and a first-ever R2 has no decision.
+func TestPlanHasAcceptedStoryReprepareDecision(t *testing.T) {
 	tests := []struct {
 		name      string
 		decisions []workflow.PlanDecision
@@ -19,13 +21,13 @@ func TestPlanHasAcceptedRecoveryDecision(t *testing.T) {
 	}{
 		{"none", nil, false},
 		{"accepted story_reprepare", []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusAccepted, Kind: workflow.PlanDecisionKindStoryReprepare}}, true},
-		{"accepted architecture_revise", []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusAccepted, Kind: workflow.PlanDecisionKindArchitectureRevise}}, true},
-		{"accepted scope_incomplete", []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusAccepted, Kind: workflow.PlanDecisionKindScopeIncomplete}}, true},
+		{"accepted architecture_revise (whole-phase — must NOT auto-advance)", []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusAccepted, Kind: workflow.PlanDecisionKindArchitectureRevise}}, false},
+		{"accepted scope_incomplete (never reaches this handler)", []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusAccepted, Kind: workflow.PlanDecisionKindScopeIncomplete}}, false},
 		{"proposed (not accepted) story_reprepare", []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusProposed, Kind: workflow.PlanDecisionKindStoryReprepare}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := planHasAcceptedRecoveryDecision(&workflow.Plan{PlanDecisions: tt.decisions}); got != tt.want {
+			if got := planHasAcceptedStoryReprepareDecision(&workflow.Plan{PlanDecisions: tt.decisions}); got != tt.want {
 				t.Errorf("got %v, want %v", got, tt.want)
 			}
 		})
@@ -99,6 +101,42 @@ func TestHandleScenariosReviewedMutation_InitialR2AwaitsApproval(t *testing.T) {
 	}
 	if published {
 		t.Error("initial R2 (no recovery decision) must await approval, not auto-dispatch")
+	}
+	got, _ := c.plans.get(slug)
+	if got.Status != workflow.StatusScenariosReviewed {
+		t.Errorf("status = %q, want scenarios_reviewed (awaiting approval)", got.Status)
+	}
+}
+
+// TestHandleScenariosReviewedMutation_WholePhaseArchReviseAwaits guards the
+// product-risk boundary (review of #295): a whole-phase architecture_revise
+// regenerates the entire plan, so under auto_approve=false it must NOT bypass the
+// human gate — it keeps awaiting approval even though it is a recovery.
+func TestHandleScenariosReviewedMutation_WholePhaseArchReviseAwaits(t *testing.T) {
+	c := setupTestComponent(t)
+	slug := "scen-arch-revise"
+
+	plan := setupTestPlan(t, c, slug)
+	plan.Status = workflow.StatusReviewingScenarios
+	plan.Approved = true
+	plan.Requirements = []workflow.Requirement{{ID: "requirement.1", Title: "x"}}
+	plan.Scenarios = []workflow.Scenario{{ID: "scenario.1", RequirementID: "requirement.1"}}
+	plan.PlanDecisions = []workflow.PlanDecision{{Status: workflow.PlanDecisionStatusAccepted, Kind: workflow.PlanDecisionKindArchitectureRevise}}
+	_ = c.plans.save(context.Background(), plan)
+
+	published := false
+	c.orchestratorTriggerPublisher = func(_ context.Context, _ *payloads.ScenarioOrchestrationTrigger) error {
+		published = true
+		return nil
+	}
+
+	data, _ := json.Marshal(map[string]string{"slug": slug})
+	resp := c.handleScenariosReviewedMutation(context.Background(), data)
+	if !resp.Success {
+		t.Fatalf("mutation failed: %s", resp.Error)
+	}
+	if published {
+		t.Error("whole-phase architecture_revise must NOT auto-dispatch — a regenerated plan keeps the human gate")
 	}
 	got, _ := c.plans.get(slug)
 	if got.Status != workflow.StatusScenariosReviewed {

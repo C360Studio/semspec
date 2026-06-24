@@ -1295,21 +1295,29 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
-	// #295: a scenarios review that re-runs because a recovery (story_reprepare /
-	// architecture_revise / scope_incomplete) re-planned the stories is NOT
-	// initial human gating — the plan already cleared the ready_for_execution
-	// gate before the recovery. Awaiting a human approval here wedges any
-	// unattended run (and an attended one that's already left the approval UI):
-	// the plan sits at scenarios_reviewed forever (caught on a mavlink-hard run
-	// where a story_reprepare re-review wedged ~37min until a manual /promote).
+	// #295: a scenarios review that re-runs because a SCOPED story_reprepare
+	// recovery re-prepared the stories is NOT initial human gating — the plan's
+	// requirements + architecture are unchanged and were already approved, and
+	// the plan already cleared the ready_for_execution gate before the recovery.
+	// Awaiting a human approval here wedges any unattended run (and an attended
+	// one that's already left the approval UI): the plan sits at
+	// scenarios_reviewed forever (caught on a mavlink-hard run where a
+	// story_reprepare re-review wedged ~37min until a manual /promote).
 	// Auto-advance instead so recovery RESUMES execution rather than re-imposing
-	// the gate. The first (initial) R2 has no accepted recovery decision, so its
-	// await-for-approval behavior is unchanged.
-	if planHasAcceptedRecoveryDecision(plan) {
+	// the gate.
+	//
+	// Deliberately scoped to story_reprepare ONLY. A whole-phase
+	// architecture_revise wipes + regenerates requirements/architecture/stories/
+	// scenarios — a materially different plan that an operator who set
+	// auto_approve=false would legitimately want to re-review — so it keeps the
+	// await-for-approval behavior. scope_incomplete never reaches this handler
+	// (it advances straight to ready_for_execution). The initial R2 has no
+	// accepted recovery decision at all, so it is unchanged.
+	if planHasAcceptedStoryReprepareDecision(plan) {
 		if err := c.transitionToReadyForExecution(ctx, plan); err != nil {
 			return MutationResponse{Success: false, Error: fmt.Sprintf("auto-advance recovery re-review: %v", err)}
 		}
-		c.logger.Info("Recovery re-review: auto-advanced scenarios_reviewed → ready_for_execution (#295)", "slug", req.Slug)
+		c.logger.Info("Recovery re-review (story_reprepare): auto-advanced scenarios_reviewed → ready_for_execution (#295)", "slug", req.Slug)
 		return MutationResponse{Success: true}
 	}
 
@@ -1317,22 +1325,21 @@ func (c *Component) handleScenariosReviewedMutation(ctx context.Context, data []
 	return MutationResponse{Success: true}
 }
 
-// planHasAcceptedRecoveryDecision reports whether the plan carries an ACCEPTED
-// recovery PlanDecision (story_reprepare / architecture_revise / scope_incomplete).
-// Only the recovery path emits those kinds, so their presence means the plan has
-// already been through a recovery cycle — and therefore already cleared the
-// ready_for_execution human gate before it. Used to distinguish a recovery-driven
-// re-review (auto-advance) from the initial R2 (await approval).
-func planHasAcceptedRecoveryDecision(plan *workflow.Plan) bool {
+// planHasAcceptedStoryReprepareDecision reports whether the plan carries an
+// ACCEPTED story_reprepare PlanDecision. This kind is emitted ONLY by
+// execution-phase recovery (recovery-agent, in response to a RecoveryRequested
+// raised from an execution failure) and is SCOPED — it re-prepares stories for
+// affected requirements without regenerating requirements or architecture. The
+// invariant "an accepted story_reprepare ⟹ the plan already reached execution
+// and cleared the human gate" is enforced by where the kind is emitted (recovery
+// only fires post-implementing), NOT locally here — a first-ever R2 can never
+// carry one. Used to distinguish a scoped recovery re-review (safe to
+// auto-advance past the human gate) from the initial R2 (await approval).
+func planHasAcceptedStoryReprepareDecision(plan *workflow.Plan) bool {
 	for i := range plan.PlanDecisions {
 		d := &plan.PlanDecisions[i]
-		if d.Status != workflow.PlanDecisionStatusAccepted {
-			continue
-		}
-		switch d.Kind {
-		case workflow.PlanDecisionKindStoryReprepare,
-			workflow.PlanDecisionKindArchitectureRevise,
-			workflow.PlanDecisionKindScopeIncomplete:
+		if d.Status == workflow.PlanDecisionStatusAccepted &&
+			d.Kind == workflow.PlanDecisionKindStoryReprepare {
 			return true
 		}
 	}
