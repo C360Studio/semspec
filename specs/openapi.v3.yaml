@@ -2574,6 +2574,20 @@ components:
                                 type: object
                             type: array
                     type: object
+                pending_architecture_revision:
+                    nullable: true
+                    properties:
+                        proposal_id:
+                            type: string
+                        requirement_ids:
+                            items:
+                                type: string
+                            type: array
+                        story_ids:
+                            items:
+                                type: string
+                            type: array
+                    type: object
                 plan_decisions:
                     items:
                         properties:
@@ -2762,6 +2776,10 @@ components:
                 requirements:
                     items:
                         properties:
+                            acceptance_criteria:
+                                items:
+                                    type: string
+                                type: array
                             capability_name:
                                 type: string
                             created_at:
@@ -3490,6 +3508,20 @@ components:
                                 type: object
                             type: array
                     type: object
+                pending_architecture_revision:
+                    nullable: true
+                    properties:
+                        proposal_id:
+                            type: string
+                        requirement_ids:
+                            items:
+                                type: string
+                            type: array
+                        story_ids:
+                            items:
+                                type: string
+                            type: array
+                    type: object
                 phase_summary:
                     nullable: true
                     properties:
@@ -3810,6 +3842,10 @@ components:
                 requirements:
                     items:
                         properties:
+                            acceptance_criteria:
+                                items:
+                                    type: string
+                                type: array
                             capability_name:
                                 type: string
                             created_at:

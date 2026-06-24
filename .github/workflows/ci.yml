@@ -39,6 +39,23 @@ jobs:
             exit 1
           fi
 
+      - name: generated specs up to date
+        # specs/openapi.v3.yaml and schemas/*.v1.json are generated from Go
+        # source (cmd/openapi-generator). They drift silently when a struct or
+        # schema tag changes without regeneration — e.g. acceptance_criteria
+        # (#267) and recovery_timeout_seconds max (#287) both shipped before
+        # this gate existed. Regenerate and fail on any diff so the committed
+        # specs always match the code. Go-only by design: the TypeScript types
+        # under ui/ are generated from a sibling semstreams checkout (not the
+        # pinned module) and so are gated in the UI workspace, not here.
+        run: |
+          go run ./cmd/openapi-generator -o specs/openapi.v3.yaml -schemas ./schemas
+          if ! git diff --quiet specs/openapi.v3.yaml schemas/; then
+            echo "Generated specs are out of date — run 'task generate:openapi' and commit:"
+            git diff --stat specs/openapi.v3.yaml schemas/
+            exit 1
+          fi
+
       - name: revive
         # revive exit code is controlled by warningCode / errorCode in
         # revive.toml. warningCode=1 makes warnings fail the build.
