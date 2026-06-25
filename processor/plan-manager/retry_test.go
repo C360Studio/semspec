@@ -22,10 +22,14 @@ func newRetryTestComponent(t *testing.T) *Component {
 	if err != nil {
 		t.Fatalf("newPlanStore: %v", err)
 	}
-	return &Component{
+	c := &Component{
 		logger: slog.Default(),
 		plans:  ps,
 	}
+	// Benign no-op for the typed family reset (scope=requirements); see
+	// setupTestComponent. Tests asserting reset behavior override it. (#294)
+	c.reqFamilyResetSender = func(context.Context, string, string) (int, error) { return 0, nil }
+	return c
 }
 
 func seedPlan(t *testing.T, c *Component, slug string, status workflow.Status) *workflow.Plan {

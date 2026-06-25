@@ -34,9 +34,10 @@ func TestHandleGitHubPRFeedbackMutation_AutoStartsAffectedRequirements(t *testin
 	if err := c.plans.save(ctx, plan); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	c.execBucket = resetKVStub{keys: []string{"req." + slug + ".req.pr.1"}}
-	c.reqResetSender = func(context.Context, string) error {
-		return nil
+	// PR feedback resets scope=requirements → the typed family reset. Return a
+	// non-zero count so the handler's "no executions reset" guard passes (#294).
+	c.reqFamilyResetSender = func(context.Context, string, string) (int, error) {
+		return 1, nil
 	}
 
 	published := false

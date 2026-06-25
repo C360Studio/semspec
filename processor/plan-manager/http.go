@@ -1246,8 +1246,9 @@ func readRetryPlanRequest(r *http.Request) (retryPlanRequest, string) {
 // execMutationResponse mirrors ExecMutationResponse from execution-manager.
 // Defined locally to avoid a cross-package import.
 type execMutationResponse struct {
-	Success bool   `json:"success"`
-	Error   string `json:"error,omitempty"`
+	Success    bool   `json:"success"`
+	Error      string `json:"error,omitempty"`
+	ResetCount int    `json:"reset_count,omitempty"` // entries deleted by a typed family reset
 }
 
 // sendReqReset sends a single execution.mutation.req.reset request/reply to execution-manager.
@@ -1277,6 +1278,38 @@ func (c *Component) requestRequirementReset(ctx context.Context, key string) err
 		return c.reqResetSender(ctx, key)
 	}
 	return c.sendReqReset(ctx, key)
+}
+
+// sendReqFamilyReset sends a TYPED requirement-family reset to execution-manager:
+// it names {slug, reqID} and lets execution-manager enumerate and delete every
+// EXECUTION_STATES key family the requirement owns (the req row + its task nodes).
+// Returns the number of entries execution-manager deleted (#294).
+func (c *Component) sendReqFamilyReset(ctx context.Context, slug, reqID string) (int, error) {
+	data, err := json.Marshal(map[string]string{"slug": slug, "requirement_id": reqID})
+	if err != nil {
+		return 0, fmt.Errorf("marshal family reset request: %w", err)
+	}
+
+	respData, err := c.natsClient.RequestWithRetry(ctx, "execution.mutation.req.reset", data, 5*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		return 0, fmt.Errorf("family reset request for %s/%s: %w", slug, reqID, err)
+	}
+
+	var resp execMutationResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return 0, fmt.Errorf("unmarshal family reset response for %s/%s: %w", slug, reqID, err)
+	}
+	if !resp.Success {
+		return 0, fmt.Errorf("execution-manager rejected family reset for %s/%s: %s", slug, reqID, resp.Error)
+	}
+	return resp.ResetCount, nil
+}
+
+func (c *Component) requestRequirementFamilyReset(ctx context.Context, slug, reqID string) (int, error) {
+	if c.reqFamilyResetSender != nil {
+		return c.reqFamilyResetSender(ctx, slug, reqID)
+	}
+	return c.sendReqFamilyReset(ctx, slug, reqID)
 }
 
 // handleRetryPlan handles POST /plans/{slug}/retry.
@@ -1479,16 +1512,6 @@ func storyCoversAnyRequirement(story workflow.Story, reqSet map[string]struct{})
 	return false
 }
 
-func requirementIDSet(requirementIDs []string) map[string]struct{} {
-	idSet := make(map[string]struct{}, len(requirementIDs))
-	for _, id := range requirementIDs {
-		if id != "" {
-			idSet[id] = struct{}{}
-		}
-	}
-	return idSet
-}
-
 func uniqueSortedStrings(values []string) []string {
 	seen := make(map[string]struct{}, len(values))
 	for _, value := range values {
@@ -1504,7 +1527,11 @@ func uniqueSortedStrings(values []string) []string {
 	return out
 }
 
-func (c *Component) shouldResetExecutionEntry(ctx context.Context, bucket jetstream.KeyValue, key, reqPrefix, scope string, idSet map[string]struct{}) bool {
+// shouldResetExecutionEntry decides whether a scanned EXECUTION_STATES key is
+// reset for the whole-slug ("all") and stage-scoped ("failed") paths. The
+// requirement-scoped path no longer scans here — it names {slug, reqID} and
+// execution-manager enumerates the families (resetRequirementFamilies, #294).
+func (c *Component) shouldResetExecutionEntry(ctx context.Context, bucket jetstream.KeyValue, key, scope string) bool {
 	switch scope {
 	case "failed":
 		entry, getErr := bucket.Get(ctx, key)
@@ -1520,40 +1547,39 @@ func (c *Component) shouldResetExecutionEntry(ctx context.Context, bucket jetstr
 			return false
 		}
 		return isFailedRetryStage(execMeta.Stage)
-	case "requirements":
-		reqID := strings.TrimPrefix(key, reqPrefix)
-		if !strings.HasPrefix(key, reqPrefix) {
-			entry, getErr := bucket.Get(ctx, key)
-			if getErr != nil {
-				c.logger.Debug("Failed to get task execution entry during requirements scan", "key", key, "error", getErr)
-				return false
-			}
-			var execMeta struct {
-				RequirementID string `json:"requirement_id"`
-			}
-			if jsonErr := json.Unmarshal(entry.Value(), &execMeta); jsonErr != nil {
-				c.logger.Debug("Failed to unmarshal task execution entry during requirements scan", "key", key, "error", jsonErr)
-				return false
-			}
-			reqID = execMeta.RequirementID
-		}
-		_, ok := idSet[reqID]
-		return ok
 	default:
 		return true
 	}
 }
 
-// resetRequirementExecutions scans EXECUTION_STATES for this plan's execution
-// entries — both req.<slug>.* (requirement-level) and task.<slug>.* (per-node
-// task) keys — and resets those selected by scope. Returns the number reset.
+// resetRequirementExecutions clears this plan's EXECUTION_STATES entries —
+// both req.<slug>.* (requirement-level) and task.<slug>.* (per-node task)
+// keys — selected by scope. Returns the number of entries cleared.
 //
 // Scope semantics:
 //
-//	"failed"       — only entries currently in "failed" or "error" stage
-//	"all"          — every entry under the plan's prefix
-//	"requirements" — exactly the ids in requirementIDs, regardless of stage
+//	"requirements" — exactly the requirements in requirementIDs. TYPED path:
+//	                 plan-manager names {slug, reqID} and execution-manager
+//	                 enumerates each requirement's key families (#294).
+//	"all"          — every entry under the plan's prefix.
+//	"failed"       — only entries currently in a failed/error/escalated stage.
 func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope string, requirementIDs []string) (int, error) {
+	// Requirement-scoped resets name the requirement and let execution-manager
+	// (the EXECUTION_STATES owner) enumerate EVERY key family it owns — the
+	// req.<slug>.<id> row AND each task.<slug>.<id> node. Enumerating families by
+	// hand here is what stranded task-node rows on recovery re-dispatch and
+	// wedged the plan idle at ready_for_execution (#294 recovery-redispatch
+	// class). The typed descriptor moves enumeration to the one component that
+	// can see the task→requirement mapping, so a missed family is impossible.
+	if scope == "requirements" {
+		return c.resetRequirementFamilies(ctx, slug, requirementIDs)
+	}
+
+	// "all" / "failed" select by content/all rather than by requirement, so they
+	// still scan the bucket. Both key families are matched (req.<slug>.* AND
+	// task.<slug>.*): a full "all" reset that skipped task nodes left an
+	// escalated node stranded and blocked re-dispatch (2026-06-16 hybrid-gpt5
+	// mavlink-hard). See reset_execution_taskkeys_test.go.
 	bucket, err := c.getExecBucket(ctx)
 	if err != nil {
 		// No bucket means no executions to reset — treat as success.
@@ -1561,15 +1587,6 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 		return 0, nil
 	}
 
-	// EXECUTION_STATES holds two entry shapes for a plan, written by two
-	// different components:
-	//   req.<slug>.<reqID>     — requirement-level execution (requirement-executor)
-	//   task.<slug>.node-<...> — per-node task execution (execution-manager)
-	// A full reset must clear BOTH. The req.-only filter used previously left
-	// escalated task-node entries stranded: after an architecture_revise
-	// recovery re-planned the plan back to ready_for_execution, the orphaned
-	// task node blocked re-dispatch and the plan wedged (2026-06-16 hybrid-gpt5
-	// mavlink-hard). See reset_execution_taskkeys_test.go.
 	reqPrefix := "req." + slug + "."
 	taskPrefix := "task." + slug + "."
 	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
@@ -1580,11 +1597,6 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 		return 0, fmt.Errorf("list execution keys: %w", err)
 	}
 
-	idSet := map[string]struct{}{}
-	if scope == "requirements" {
-		idSet = requirementIDSet(requirementIDs)
-	}
-
 	var resetCount int
 	for _, key := range keys {
 		isReq := strings.HasPrefix(key, reqPrefix)
@@ -1593,7 +1605,7 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 			continue
 		}
 
-		if !c.shouldResetExecutionEntry(ctx, bucket, key, reqPrefix, scope, idSet) {
+		if !c.shouldResetExecutionEntry(ctx, bucket, key, scope) {
 			continue
 		}
 
@@ -1605,6 +1617,25 @@ func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope 
 	}
 
 	return resetCount, nil
+}
+
+// resetRequirementFamilies issues a typed family reset to execution-manager for
+// each requirement in requirementIDs and returns the total entries deleted.
+// execution-manager deletes the requirement row plus every task node it spawned
+// (it owns EXECUTION_STATES and the task→requirement mapping), so plan-manager
+// never enumerates key families itself — the #294 fix. Empty ids are skipped by
+// uniqueSortedStrings, matching the old idSet filter's "" guard.
+func (c *Component) resetRequirementFamilies(ctx context.Context, slug string, requirementIDs []string) (int, error) {
+	total := 0
+	for _, reqID := range uniqueSortedStrings(requirementIDs) {
+		n, err := c.requestRequirementFamilyReset(ctx, slug, reqID)
+		if err != nil {
+			c.logger.Warn("Failed to reset requirement family", "slug", slug, "requirement_id", reqID, "error", err)
+			return total, fmt.Errorf("reset requirement family %s/%s: %w", slug, reqID, err)
+		}
+		total += n
+	}
+	return total, nil
 }
 
 func isFailedRetryStage(stage string) bool {
