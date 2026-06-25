@@ -111,9 +111,9 @@ func (s resetKVStub) Status(context.Context) (jetstream.KeyValueStatus, error) {
 
 func TestApplyStoryReprepare_ResetFailureLeavesPlanUntouched(t *testing.T) {
 	c := setupTestComponent(t)
-	c.execBucket = resetKVStub{keys: []string{"req.demo.1"}}
-	c.reqResetSender = func(context.Context, string) error {
-		return errors.New("reset unavailable")
+	// story_reprepare resets scope=requirements → the typed family-reset path.
+	c.reqFamilyResetSender = func(context.Context, string, string) (int, error) {
+		return 0, errors.New("reset unavailable")
 	}
 
 	plan := &workflow.Plan{
@@ -143,25 +143,12 @@ func TestApplyStoryReprepare_ResetFailureLeavesPlanUntouched(t *testing.T) {
 
 func TestApplyStoryReprepare_UsesDependentClosureForResetAndScenarioRemoval(t *testing.T) {
 	c := setupTestComponent(t)
-	c.execBucket = resetKVStub{
-		keys: []string{
-			"req.demo.contract",
-			"task.demo.node-contract",
-			"req.demo.consumer",
-			"task.demo.node-consumer",
-			"req.demo.unrelated",
-			"task.demo.node-unrelated",
-		},
-		values: map[string][]byte{
-			"task.demo.node-contract":  []byte(`{"requirement_id":"contract"}`),
-			"task.demo.node-consumer":  []byte(`{"requirement_id":"consumer"}`),
-			"task.demo.node-unrelated": []byte(`{"requirement_id":"unrelated"}`),
-		},
-	}
+	// Scoped story_reprepare resets scope=requirements → the typed family reset;
+	// capture the reqIDs plan-manager named for the dependent closure (#294).
 	var reset []string
-	c.reqResetSender = func(_ context.Context, key string) error {
-		reset = append(reset, key)
-		return nil
+	c.reqFamilyResetSender = func(_ context.Context, _, reqID string) (int, error) {
+		reset = append(reset, reqID)
+		return 1, nil
 	}
 
 	plan := &workflow.Plan{
@@ -189,16 +176,9 @@ func TestApplyStoryReprepare_UsesDependentClosureForResetAndScenarioRemoval(t *t
 		t.Fatalf("applyStoryReprepare: %v", err)
 	}
 
-	assertResetKeys(t, reset, []string{
-		"req.demo.contract",
-		"task.demo.node-contract",
-		"req.demo.consumer",
-		"task.demo.node-consumer",
-	})
-	assertNoResetKeys(t, reset, []string{
-		"req.demo.unrelated",
-		"task.demo.node-unrelated",
-	})
+	// Dependent closure: contract + its dependent consumer reset, not unrelated.
+	assertResetKeys(t, reset, []string{"contract", "consumer"})
+	assertNoResetKeys(t, reset, []string{"unrelated"})
 	if plan.Status != workflow.StatusPreparingStories {
 		t.Fatalf("Status = %s, want preparing_stories", plan.Status)
 	}

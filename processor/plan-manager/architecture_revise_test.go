@@ -150,28 +150,14 @@ func TestReviseArchitectureState_FromRejectedForPostQARecovery(t *testing.T) {
 
 func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *testing.T) {
 	c := setupTestComponent(t)
-	c.execBucket = resetKVStub{
-		keys: []string{
-			"req.demo.bootstrap",
-			"task.demo.node-bootstrap",
-			"req.demo.unrelated",
-			"task.demo.node-unrelated",
-			"req.demo.contract",
-			"task.demo.node-contract",
-			"req.demo.consumer",
-			"task.demo.node-consumer",
-		},
-		values: map[string][]byte{
-			"task.demo.node-bootstrap": []byte(`{"requirement_id":"bootstrap"}`),
-			"task.demo.node-unrelated": []byte(`{"requirement_id":"unrelated"}`),
-			"task.demo.node-contract":  []byte(`{"requirement_id":"contract"}`),
-			"task.demo.node-consumer":  []byte(`{"requirement_id":"consumer"}`),
-		},
-	}
+	// Scoped architecture_revise resets scope=requirements → the typed family
+	// reset. plan-manager names the closure reqIDs; execution-manager enumerates
+	// each requirement's key families (#294). Capture the reqIDs plan-manager
+	// issued resets for.
 	var reset []string
-	c.reqResetSender = func(_ context.Context, key string) error {
-		reset = append(reset, key)
-		return nil
+	c.reqFamilyResetSender = func(_ context.Context, _, reqID string) (int, error) {
+		reset = append(reset, reqID)
+		return 1, nil
 	}
 
 	plan := &workflow.Plan{
@@ -206,18 +192,10 @@ func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *te
 		t.Fatalf("applyArchitectureRevise: %v", err)
 	}
 
-	assertResetKeys(t, reset, []string{
-		"req.demo.contract",
-		"task.demo.node-contract",
-		"req.demo.consumer",
-		"task.demo.node-consumer",
-	})
-	assertNoResetKeys(t, reset, []string{
-		"req.demo.bootstrap",
-		"task.demo.node-bootstrap",
-		"req.demo.unrelated",
-		"task.demo.node-unrelated",
-	})
+	// Typed resets issued for the dirty closure (contract + its dependent
+	// consumer), NOT the independent bootstrap/unrelated requirements.
+	assertResetKeys(t, reset, []string{"contract", "consumer"})
+	assertNoResetKeys(t, reset, []string{"bootstrap", "unrelated"})
 	if plan.Status != workflow.StatusRequirementsGenerated {
 		t.Fatalf("plan.Status = %s, want requirements_generated", plan.Status)
 	}
@@ -242,18 +220,12 @@ func TestApplyArchitectureRevise_ScopedResetUsesAffectedRequirementClosure(t *te
 
 func TestApplyArchitectureRevise_ScopedResetExpandsMNStoryCoverage(t *testing.T) {
 	c := setupTestComponent(t)
-	c.execBucket = resetKVStub{
-		keys: []string{
-			"req.demo.telemetry",
-			"req.demo.control",
-			"req.demo.async",
-			"req.demo.unrelated",
-		},
-	}
+	// Scoped architecture_revise resets scope=requirements → the typed family
+	// reset; capture the reqIDs plan-manager named (#294).
 	var reset []string
-	c.reqResetSender = func(_ context.Context, key string) error {
-		reset = append(reset, key)
-		return nil
+	c.reqFamilyResetSender = func(_ context.Context, _, reqID string) (int, error) {
+		reset = append(reset, reqID)
+		return 1, nil
 	}
 
 	plan := &workflow.Plan{
@@ -282,12 +254,10 @@ func TestApplyArchitectureRevise_ScopedResetExpandsMNStoryCoverage(t *testing.T)
 		t.Fatalf("applyArchitectureRevise: %v", err)
 	}
 
-	assertResetKeys(t, reset, []string{
-		"req.demo.telemetry",
-		"req.demo.control",
-		"req.demo.async",
-	})
-	assertNoResetKeys(t, reset, []string{"req.demo.unrelated"})
+	// M:N expansion: AffectedReqIDs=[telemetry] pulls its co-covered siblings
+	// control+async (shared story.mapper), NOT unrelated.
+	assertResetKeys(t, reset, []string{"telemetry", "control", "async"})
+	assertNoResetKeys(t, reset, []string{"unrelated"})
 	assertStringSet(t, plan.PendingArchitectureRevision.RequirementIDs, []string{"async", "control", "telemetry"})
 	assertStringSet(t, plan.PendingArchitectureRevision.StoryIDs, []string{"story.mapper"})
 }
@@ -538,25 +508,14 @@ func TestHandleScenariosMutation_ScopedArchitectureRevisionPreservesUnrelatedSce
 
 func TestApplyArchitectureRevise_PreservesUnrelatedCompletedExecutions(t *testing.T) {
 	c := setupTestComponent(t)
-	c.execBucket = resetKVStub{
-		keys: []string{
-			"req.demo.contract",
-			"task.demo.node-contract",
-			"req.demo.consumer",
-			"task.demo.node-consumer",
-			"req.demo.completed-unrelated",
-			"task.demo.node-completed-unrelated",
-		},
-		values: map[string][]byte{
-			"task.demo.node-contract":            []byte(`{"requirement_id":"contract","stage":"escalated"}`),
-			"task.demo.node-consumer":            []byte(`{"requirement_id":"consumer","stage":"pending"}`),
-			"task.demo.node-completed-unrelated": []byte(`{"requirement_id":"completed-unrelated","stage":"completed"}`),
-		},
-	}
+	// Scoped architecture_revise resets scope=requirements → the typed family
+	// reset; capture the reqIDs plan-manager named. The independent
+	// completed-unrelated requirement is outside the contract→consumer closure,
+	// so plan-manager never issues a reset for it (#294).
 	var reset []string
-	c.reqResetSender = func(_ context.Context, key string) error {
-		reset = append(reset, key)
-		return nil
+	c.reqFamilyResetSender = func(_ context.Context, _, reqID string) (int, error) {
+		reset = append(reset, reqID)
+		return 1, nil
 	}
 
 	plan := &workflow.Plan{
@@ -580,16 +539,8 @@ func TestApplyArchitectureRevise_PreservesUnrelatedCompletedExecutions(t *testin
 		t.Fatalf("applyArchitectureRevise: %v", err)
 	}
 
-	assertResetKeys(t, reset, []string{
-		"req.demo.contract",
-		"task.demo.node-contract",
-		"req.demo.consumer",
-		"task.demo.node-consumer",
-	})
-	assertNoResetKeys(t, reset, []string{
-		"req.demo.completed-unrelated",
-		"task.demo.node-completed-unrelated",
-	})
+	assertResetKeys(t, reset, []string{"contract", "consumer"})
+	assertNoResetKeys(t, reset, []string{"completed-unrelated"})
 }
 
 func testStory(id string, reqIDs []string, file string) workflow.Story {

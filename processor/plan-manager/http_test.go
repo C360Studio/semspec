@@ -24,6 +24,11 @@ func setupTestComponent(t *testing.T) *Component {
 		logger: slog.Default(),
 		plans:  ps,
 	}
+	// Default-stub the typed family reset so tests that reach a scope=requirements
+	// reset without a live execution-manager get a benign no-op (mirrors the old
+	// "no exec bucket → 0 reset" degradation). Tests asserting reset behavior
+	// override reqFamilyResetSender. (#294)
+	c.reqFamilyResetSender = func(context.Context, string, string) (int, error) { return 0, nil }
 
 	return c
 }

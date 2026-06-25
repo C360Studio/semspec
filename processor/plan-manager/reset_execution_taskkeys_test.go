@@ -70,24 +70,21 @@ func TestResetRequirementExecutions_All_ClearsTaskNodeKeys(t *testing.T) {
 	}
 }
 
-func TestResetRequirementExecutionsByID_ClearsScopedTaskNodeKeys(t *testing.T) {
+// TestResetRequirementExecutionsByID_SendsTypedFamilyReset pins the #294 typed
+// boundary: the requirement-scoped reset names {slug, reqID} per requirement and
+// lets execution-manager (the EXECUTION_STATES owner) enumerate the families. So
+// plan-manager must send a typed descriptor for EXACTLY the requested reqID (not
+// "unrelated") and return the entry count execution-manager reports. The family
+// enumeration itself — that "contract"'s task node is deleted but "unrelated"'s
+// is not — is now asserted in execution-manager's
+// TestResetRequirementFamily_DeletesBothFamiliesScoped, not here.
+func TestResetRequirementExecutionsByID_SendsTypedFamilyReset(t *testing.T) {
 	c := setupTestComponent(t)
-	c.execBucket = resetKVStub{
-		keys: []string{
-			"req.demo.contract",
-			"task.demo.node-contract",
-			"req.demo.unrelated",
-			"task.demo.node-unrelated",
-		},
-		values: map[string][]byte{
-			"task.demo.node-contract":  []byte(`{"requirement_id":"contract"}`),
-			"task.demo.node-unrelated": []byte(`{"requirement_id":"unrelated"}`),
-		},
-	}
-	var reset []string
-	c.reqResetSender = func(_ context.Context, key string) error {
-		reset = append(reset, key)
-		return nil
+
+	var sent []string // "slug/reqID" descriptors plan-manager issued
+	c.reqFamilyResetSender = func(_ context.Context, slug, reqID string) (int, error) {
+		sent = append(sent, slug+"/"+reqID)
+		return 2, nil // execution-manager deleted the req row + 1 task node
 	}
 
 	n, err := c.resetRequirementExecutionsByID(context.Background(), "demo", []string{"contract"})
@@ -95,16 +92,11 @@ func TestResetRequirementExecutionsByID_ClearsScopedTaskNodeKeys(t *testing.T) {
 		t.Fatalf("resetRequirementExecutionsByID returned error: %v", err)
 	}
 	if n != 2 {
-		t.Fatalf("reset count = %d, want 2 (req + task for contract)", n)
+		t.Fatalf("reset count = %d, want 2 (summed from execution-manager's family delete)", n)
 	}
-	assertResetKeys(t, reset, []string{
-		"req.demo.contract",
-		"task.demo.node-contract",
-	})
-	assertNoResetKeys(t, reset, []string{
-		"req.demo.unrelated",
-		"task.demo.node-unrelated",
-	})
+	if len(sent) != 1 || sent[0] != "demo/contract" {
+		t.Fatalf("typed resets sent = %v, want [demo/contract] (execution-manager owns family enumeration)", sent)
+	}
 }
 
 func TestResetRequirementExecutions_Failed_ClearsEscalatedTaskNodeKeys(t *testing.T) {

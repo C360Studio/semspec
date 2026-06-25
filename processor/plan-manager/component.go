@@ -67,7 +67,14 @@ type Component struct {
 
 	// reqResetSender is the seam tests use to force execution reset failures
 	// without a live execution-manager. Nil means "send the real NATS request."
+	// Used by the raw single-key reset path (scope=all / scope=failed).
 	reqResetSender func(ctx context.Context, key string) error
+
+	// reqFamilyResetSender is the seam for the TYPED requirement-family reset
+	// (scope=requirements): plan-manager names {slug, reqID} and execution-manager
+	// enumerates the key families. Nil means "send the real NATS request." Returns
+	// the count of EXECUTION_STATES entries execution-manager deleted (#294).
+	reqFamilyResetSender func(ctx context.Context, slug, reqID string) (int, error)
 
 	// orchestratorTriggerPublisher is the seam tests use to assert automatic
 	// execution start without requiring a live JetStream connection. Nil means

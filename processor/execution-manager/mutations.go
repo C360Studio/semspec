@@ -139,22 +139,28 @@ type ReqPhaseRequest struct {
 	ScenarioVerdicts []workflow.ScenarioVerdict `json:"scenario_verdicts,omitempty"`
 }
 
-// ReqResetRequest deletes a requirement execution entry from EXECUTION_STATES.
-// Called by plan-manager's retry handler to clear failed/error entries before re-dispatch.
+// ReqResetRequest deletes execution rows from EXECUTION_STATES. Two addressing
+// modes:
 //
-// SMELL / TRACKED (2026-06-16, not fixing now): this crosses the
-// plan-manager↔execution-manager boundary as a raw, untyped KV key string —
-// plan-manager builds the key by string concatenation, execution-manager
-// blindly deletes whatever it receives. That stringly-typed coupling is the
-// root cause of the 2026-06-16 architecture_revise re-dispatch wedge: the
-// plan-manager reset matched only the "req.<slug>." prefix and silently missed
-// the "task.<slug>.node-*" entries, which orphaned and blocked re-dispatch.
-// Two reset paths shared the blind spot (resetRequirementExecutions and
-// resetRequirementExecutionsByID). A typed descriptor — (entityKind, slug, id)
-// instead of a pre-joined key — would make a missed key family a compile error
-// rather than a silent prod wedge. Follow-up: see the tracking issue.
+//	Typed (PREFERRED) — {Slug, RequirementID}: reset EVERY key family the
+//	requirement owns: its req.<slug>.<RequirementID> row AND every
+//	task.<slug>.<id> node the requirement-executor spawned for it
+//	(TaskExecution.RequirementID == RequirementID). execution-manager owns
+//	EXECUTION_STATES, so IT — not the caller — enumerates the families. A caller
+//	that names a requirement therefore cannot strand the task-node family, which
+//	is what re-dispatch then "already exists"-rejected, leaving the plan idle at
+//	ready_for_execution (the #294 recovery-redispatch wedge class). Adding a new
+//	key family becomes one edit at this compile-visible site, not a silent miss
+//	in every caller's hand-rolled prefix filter.
+//
+//	Raw (legacy) — {Key}: delete exactly one entry by KV key
+//	(req.<slug>.<id> | task.<slug>.node-<...>). Retained for the stage-scoped
+//	"failed" retry path, which selects individual failed entries by content
+//	rather than by requirement.
 type ReqResetRequest struct {
-	Key string `json:"key"` // KV key: req.<slug>.<reqID> | task.<slug>.node-<...>
+	Key           string `json:"key,omitempty"`
+	Slug          string `json:"slug,omitempty"`
+	RequirementID string `json:"requirement_id,omitempty"`
 }
 
 // ReqResetNodeResultsRequest replaces the NodeResults slice on an
@@ -199,6 +205,9 @@ type ExecMutationResponse struct {
 	Success bool   `json:"success"`
 	Error   string `json:"error,omitempty"`
 	Key     string `json:"key,omitempty"` // returned on create
+	// ResetCount is the number of EXECUTION_STATES entries deleted by a typed
+	// requirement-family reset (req row + its task nodes). Zero for other paths.
+	ResetCount int `json:"reset_count,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -574,8 +583,15 @@ func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) Exe
 	if err := json.Unmarshal(data, &req); err != nil {
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
 	}
+
+	// Typed family reset (preferred): name the requirement and enumerate every
+	// key family it owns HERE, where the task→requirement mapping is visible.
+	if req.Slug != "" && req.RequirementID != "" {
+		return c.resetRequirementFamily(ctx, req.Slug, req.RequirementID)
+	}
+
 	if req.Key == "" {
-		return ExecMutationResponse{Success: false, Error: "key required"}
+		return ExecMutationResponse{Success: false, Error: "key or (slug, requirement_id) required"}
 	}
 
 	// Cancel any non-terminal child loops for this requirement BEFORE deleting
@@ -595,6 +611,49 @@ func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) Exe
 
 	c.logger.Info("Requirement execution reset via mutation", "key", req.Key)
 	return ExecMutationResponse{Success: true}
+}
+
+// resetRequirementFamily deletes EVERY EXECUTION_STATES entry a requirement
+// owns: its req.<slug>.<reqID> row AND each task.<slug>.<taskID> node the
+// requirement-executor spawned for it (TaskExecution.RequirementID == reqID).
+// Centralizing the family enumeration in the bucket owner is the #294 fix —
+// plan-manager hand-filtered "req."/"task." key prefixes and any scoping slip
+// stranded task-node rows that re-dispatch then "already exists"-rejected,
+// wedging the plan idle at ready_for_execution. Naming {slug, reqID} makes a
+// missed family impossible from the caller and a new family one edit here.
+//
+// Child dev/reviewer/validator loops are cancelled first so a reset never
+// orphans a burning loop (#224). The requirement row is deleted only when it
+// exists, so the returned count reflects entries actually removed.
+func (c *Component) resetRequirementFamily(ctx context.Context, slug, reqID string) ExecMutationResponse {
+	c.cancelChildrenForRequirement(ctx, slug, reqID, "requirement_reset")
+
+	deleted := 0
+	// Task-node family: every node this requirement spawned. listTasksForSlug
+	// reads cache then falls back to KV, so a TTL-expired node is still found.
+	for _, task := range c.store.listTasksForSlug(ctx, slug) {
+		if task.RequirementID != reqID {
+			continue
+		}
+		key := workflow.TaskExecutionKey(slug, task.TaskID)
+		if err := c.store.deleteReq(ctx, key); err != nil {
+			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("delete task %s: %v", key, err)}
+		}
+		deleted++
+	}
+
+	// Requirement row.
+	reqKey := workflow.RequirementExecutionKey(slug, reqID)
+	if _, ok := c.store.getReq(reqKey); ok {
+		if err := c.store.deleteReq(ctx, reqKey); err != nil {
+			return ExecMutationResponse{Success: false, Error: fmt.Sprintf("delete req %s: %v", reqKey, err)}
+		}
+		deleted++
+	}
+
+	c.logger.Info("Requirement execution family reset (typed)",
+		"slug", slug, "requirement_id", reqID, "entries_deleted", deleted)
+	return ExecMutationResponse{Success: true, ResetCount: deleted}
 }
 
 // handleReqResetNodeResultsMutation replaces the NodeResults slice on an
